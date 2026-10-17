@@ -119,7 +119,7 @@ async fn run(args: Args) -> Result<()> {
         }
     }
     let mut seen = HashSet::new();
-    media.retain(|item| seen.insert(item.url.to_string()));
+    media.retain(|item| seen.insert(item.identity()));
     if args.dump_json {
         println!("{}", serde_json::to_string_pretty(&media)?);
     } else if args.get_urls {

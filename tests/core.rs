@@ -14,6 +14,8 @@ use std::{
 fn media(url: &str) -> Media {
     Media {
         url: extract::http_url(url).unwrap(),
+        job: extract::MediaJob::DirectHttp,
+        handoff: BTreeMap::new(),
         category: "twitter".into(),
         filename: "photo.jpg".into(),
         metadata: None,
@@ -115,13 +117,123 @@ fn rejects_incomplete_or_unsupported_extraction() {
         "[[3]]",
         "[[6,\"https://x.com/child\",{}]]",
         "[[-1,{\"message\":\"login required\"}]]",
-        "[[3,\"ytdl:https://example.com/video\",{}]]",
+        "[[3,\"ytdl:file:///etc/passwd\",{}]]",
         "[[3,\"file:///etc/passwd\",{}]]",
+        "[[3,\"ytdl:synthetic\",{\"_ytdl_manifest\":\"hls\"}]]",
+        "[[3,\"https://example.com/video\",{\"_ytdl_manifest\":\"unknown\"}]]",
+        "[[3,\"https://example.com/video\",{\"_ytdl_manifest\":false}]]",
+        "[[3,\"https://example.com/video\",{\"_ytdl_manifest\":\"dash\",\"_ytdl_manifest_data\":{}}]]",
+        "[[3,\"https://example.com/video\",{\"_ytdl_manifest_data\":\"inline\"}]]",
     ] {
         assert!(
             extract::parse_messages(input.as_bytes(), "twitter").is_err(),
             "{input}"
         );
+    }
+}
+
+#[test]
+fn preserves_video_handoffs_without_exposing_private_options() {
+    let items = extract::parse_messages(
+        br##"[
+        [3,"ytdl:https://example.com/watch/1",{"_ytdl_params":{"password":"secret"}}],
+        [3,"ytdl:https://example.com/synthetic",{
+            "_ytdl_manifest":"hls", "_ytdl_manifest_data":"#EXTM3U\nsecret",
+            "_ytdl_manifest_headers":{"Authorization":"secret"},
+            "_ytdl_manifest_cookies":{"session":"secret"},
+            "_ytdl_manifest_remux":"mp4",
+            "_fallback":["https://example.com/fallback?token=secret"],
+            "_http_headers":{"Referer":"secret"}
+        }],
+        [3,"https://example.com/stream.MPD?signature=abc",{}],
+        [3,"https://example.com/inline",{"_ytdl_manifest":"dash","_ytdl_manifest_data":""}],
+        [3,"https://example.com/null",{"_ytdl_manifest":null,"_ytdl_manifest_data":null}]
+    ]"##,
+        "twitter",
+    )
+    .unwrap();
+    assert_eq!(items[0].url.as_str(), "ytdl:https://example.com/watch/1");
+    assert!(
+        matches!(&items[0].job, extract::MediaJob::VideoPage { page_url }
+        if page_url.as_str() == "https://example.com/watch/1")
+    );
+    assert!(matches!(&items[1].job, extract::MediaJob::Manifest {
+        protocol: extract::ManifestProtocol::Hls, base_url, inline_data: Some(data)
+    } if base_url.as_str() == "https://example.com/synthetic" && data == "#EXTM3U\nsecret"));
+    assert_eq!(items[1].handoff["_ytdl_manifest_remux"], "mp4");
+    assert_eq!(
+        items[1].handoff["_fallback"][0],
+        "https://example.com/fallback?token=secret"
+    );
+    assert_eq!(items[1].headers["Referer"], "secret");
+    assert!(matches!(
+        &items[2].job,
+        extract::MediaJob::Manifest {
+            protocol: extract::ManifestProtocol::Dash,
+            inline_data: None,
+            ..
+        }
+    ));
+    assert!(matches!(&items[3].job, extract::MediaJob::Manifest {
+        inline_data: Some(data), ..
+    } if data.is_empty()));
+    assert!(matches!(items[4].job, extract::MediaJob::DirectHttp));
+    let json = serde_json::to_string(&items).unwrap();
+    assert!(!json.contains("secret"));
+    assert!(!json.contains("_ytdl"));
+    assert!(!json.contains("_fallback"));
+    assert!(json.contains("\"kind\":\"manifest\""));
+}
+
+#[test]
+fn job_identity_includes_manifest_and_request_context() {
+    let items = extract::parse_messages(br#"[
+        [3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"first"}],
+        [3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"second"}],
+        [3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"first"}]
+    ]"#, "twitter").unwrap();
+    assert_ne!(items[0].identity(), items[1].identity());
+    assert_eq!(items[0].identity(), items[2].identity());
+    assert_ne!(
+        download::destination(Path::new("root"), &items[0]),
+        download::destination(Path::new("root"), &items[1])
+    );
+    let direct = media("https://example.com/a.jpg");
+    assert_eq!(direct.identity(), direct.url.as_str());
+    let mut changed = direct.clone();
+    changed.headers.insert("Authorization".into(), "one".into());
+    assert_ne!(direct.identity(), changed.identity());
+    changed = direct.clone();
+    changed.job = extract::MediaJob::VideoPage {
+        page_url: direct.url.clone(),
+    };
+    assert_ne!(direct.identity(), changed.identity());
+}
+
+#[tokio::test]
+async fn unsupported_jobs_fail_before_requests_or_filesystem_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(1)).unwrap();
+    let items = extract::parse_messages(br##"[
+        [3,"ytdl:http://127.0.0.1:1/page",{}],
+        [3,"ytdl:http://127.0.0.1:1/inline",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"#EXTM3U"}]
+    ]"##, "twitter").unwrap();
+    for item in items {
+        let error = download::download(&client, root.path(), &item, 0)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("companion yt-dlp-rs adapter"));
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        let path = download::destination(root.path(), &item);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"existing").unwrap();
+        assert!(
+            download::download(&client, root.path(), &item, 0)
+                .await
+                .is_err()
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"existing");
+        std::fs::remove_dir_all(root.path().join("twitter")).unwrap();
     }
 }
 

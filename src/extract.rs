@@ -9,12 +9,56 @@ use url::Url;
 #[derive(Clone, Debug, Serialize)]
 pub struct Media {
     pub url: Url,
+    pub job: MediaJob,
     pub category: String,
     pub filename: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<PostMetadata>,
     #[serde(skip_serializing)]
     pub headers: BTreeMap<String, String>,
+    /// Opaque compatibility options for a future adapter, never public JSON.
+    #[serde(skip_serializing)]
+    pub handoff: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MediaJob {
+    DirectHttp,
+    VideoPage {
+        page_url: Url,
+    },
+    Manifest {
+        protocol: ManifestProtocol,
+        base_url: Url,
+        #[serde(skip_serializing)]
+        inline_data: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestProtocol {
+    Hls,
+    Dash,
+}
+
+impl Media {
+    /// Include private request/manifest context so distinct jobs are not lost.
+    pub fn identity(&self) -> String {
+        // Preserve existing paths for ordinary direct links without request context.
+        if matches!(self.job, MediaJob::DirectHttp)
+            && self.headers.is_empty()
+            && self.handoff.is_empty()
+        {
+            return self.url.to_string();
+        }
+        let inline_data = match &self.job {
+            MediaJob::Manifest { inline_data, .. } => inline_data.as_deref(),
+            _ => None,
+        };
+        serde_json::json!([self.url, self.job, inline_data, self.headers, self.handoff]).to_string()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -66,20 +110,31 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
 pub fn direct(url: &Url) -> Option<Media> {
     let filename = url.path_segments()?.next_back()?;
     let (_, extension) = filename.rsplit_once('.')?;
-    if ![
-        "jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "bmp", "svg", "mp4", "webm", "mov",
-        "m4v", "mkv", "mp3", "ogg", "wav", "zip", "pdf",
-    ]
-    .contains(&extension.to_ascii_lowercase().as_str())
+    let manifest = manifest_protocol(url);
+    if manifest.is_none()
+        && ![
+            "jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "bmp", "svg", "mp4", "webm",
+            "mov", "m4v", "mkv", "mp3", "ogg", "wav", "zip", "pdf",
+        ]
+        .contains(&extension.to_ascii_lowercase().as_str())
     {
         return None;
     }
     Some(Media {
         url: url.clone(),
+        job: match manifest {
+            Some(protocol) => MediaJob::Manifest {
+                protocol,
+                base_url: url.clone(),
+                inline_data: None,
+            },
+            None => MediaJob::DirectHttp,
+        },
         category: "direct".into(),
         filename: filename.into(),
         metadata: None,
         headers: BTreeMap::new(),
+        handoff: BTreeMap::new(),
     })
 }
 
@@ -157,15 +212,58 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
             .get(1)
             .and_then(Value::as_str)
             .ok_or_else(|| error("media message has no URL"))?;
-        let url = http_url(source).map_err(|_| {
-            error(
-                "backend returned a non-HTTP media URL (stream/yt-dlp handling is not implemented)",
-            )
-        })?;
         let metadata = row
             .get(2)
             .and_then(Value::as_object)
             .ok_or_else(|| error("media message has no metadata"))?;
+        let delegated = source.strip_prefix("ytdl:");
+        let target = http_url(delegated.unwrap_or(source)).map_err(|_| {
+            error("backend media and video handoffs require an HTTP(S) target/base URL")
+        })?;
+        let url = if delegated.is_some() {
+            Url::parse(source)?
+        } else {
+            target.clone()
+        };
+        let marker = metadata.get("_ytdl_manifest").filter(|v| !v.is_null());
+        let inline_data = metadata.get("_ytdl_manifest_data").filter(|v| !v.is_null());
+        if marker.is_none() && inline_data.is_some() {
+            return Err(error("inline manifest data requires _ytdl_manifest"));
+        }
+        let job = if let Some(marker) = marker {
+            let protocol = match marker.as_str() {
+                Some("hls") => ManifestProtocol::Hls,
+                Some("dash") => ManifestProtocol::Dash,
+                _ => return Err(error("unsupported backend manifest type")),
+            };
+            let inline_data = inline_data
+                .map(|data| {
+                    data.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| error("backend inline manifest data must be a string"))
+                })
+                .transpose()?;
+            MediaJob::Manifest {
+                protocol,
+                base_url: target,
+                inline_data,
+            }
+        } else if delegated.is_some() {
+            MediaJob::VideoPage { page_url: target }
+        } else if let Some(protocol) = manifest_protocol(&target) {
+            MediaJob::Manifest {
+                protocol,
+                base_url: target,
+                inline_data: None,
+            }
+        } else {
+            MediaJob::DirectHttp
+        };
+        let handoff = metadata
+            .iter()
+            .filter(|(key, _)| key.starts_with("_ytdl_") || key.as_str() == "_fallback")
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
         let mut filename = metadata
             .get("filename")
             .and_then(Value::as_str)
@@ -185,10 +283,12 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
         }
         items.push(Media {
             url,
+            job,
             category: category.into(),
             filename,
             metadata: None,
             headers,
+            handoff,
         });
     }
     if items.is_empty() {
@@ -197,4 +297,15 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
         ));
     }
     Ok(items)
+}
+
+pub fn manifest_protocol(url: &Url) -> Option<ManifestProtocol> {
+    let path = url.path().to_ascii_lowercase();
+    if path.ends_with(".m3u8") {
+        Some(ManifestProtocol::Hls)
+    } else if path.ends_with(".mpd") {
+        Some(ManifestProtocol::Dash)
+    } else {
+        None
+    }
 }

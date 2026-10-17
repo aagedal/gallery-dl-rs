@@ -231,6 +231,8 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
             };
             Ok(Media {
                 url,
+                job: crate::extract::MediaJob::DirectHttp,
+                handoff: BTreeMap::new(),
                 category: "instagram".into(),
                 filename: format!("{post_id}_{media_id}.{extension}"),
                 metadata: Some(PostMetadata {
