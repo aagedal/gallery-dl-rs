@@ -1,0 +1,17 @@
+[package]
+name = "gallery-dl-rs"
+version = "0.1.0"
+edition = "2024"
+description = "A Rust gallery downloader with a gallery-dl social-site compatibility backend"
+license = "GPL-3.0-only"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "io-util", "fs"] }
+url = { version = "2", features = ["serde"] }
