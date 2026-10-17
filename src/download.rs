@@ -148,7 +148,11 @@ impl From<reqwest::Error> for Failure {
     fn from(error: reqwest::Error) -> Self {
         Self {
             // Redirect URLs can contain session tokens or signed query strings.
-            error: error.without_url().into(),
+            error: if error.is_timeout() {
+                crate::error("media download attempt timed out")
+            } else {
+                error.without_url().into()
+            },
             retry: true,
         }
     }

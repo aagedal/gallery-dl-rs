@@ -582,13 +582,11 @@ mod transport_tests {
         let (endpoint, server) = serve_delayed_sequence(vec![
             (
                 response("302 Found", "Location: /api/next/\r\n", b""),
-                Duration::from_millis(150),
+                Duration::from_millis(400),
             ),
-            (response("200 OK", "", PHOTO), Duration::from_millis(250)),
+            (response("200 OK", "", PHOTO), Duration::from_millis(800)),
         ]);
-        let instagram = Instagram::new(None, Duration::from_millis(300))
-            .await
-            .unwrap();
+        let instagram = Instagram::new(None, Duration::from_secs(1)).await.unwrap();
         let error = instagram
             .extract_endpoint(&endpoint, "BA")
             .await

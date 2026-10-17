@@ -439,15 +439,15 @@ async fn redirect_chain_uses_one_download_attempt_deadline() {
     let (url, handle) = delayed_server(vec![
         (
             "HTTP/1.1 302 Found\r\nLocation: /resolved.jpg\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            Duration::from_millis(150),
+            Duration::from_millis(400),
         ),
         (
             "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-            Duration::from_millis(250),
+            Duration::from_millis(800),
         ),
     ]);
     let root = tempfile::tempdir().unwrap();
-    let client = download::client(Duration::from_millis(300)).unwrap();
+    let client = download::client(Duration::from_secs(1)).unwrap();
     let item = media(&url);
     let error = download::download(&client, root.path(), &item, 0)
         .await
