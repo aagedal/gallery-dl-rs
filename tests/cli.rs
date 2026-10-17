@@ -5,6 +5,54 @@ fn binary() -> Command {
 }
 
 #[test]
+fn metadata_is_opt_in_and_conflicts_with_inspection_modes() {
+    let url = "http://127.0.0.1:1/image.jpg";
+    let item =
+        gallery_dl_rs::extract::direct(&gallery_dl_rs::extract::http_url(url).unwrap()).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let path = gallery_dl_rs::download::destination(root.path(), &item);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"existing").unwrap();
+    assert!(
+        binary()
+            .arg("-d")
+            .arg(root.path())
+            .arg(url)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert_eq!(
+        std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+        1
+    );
+    let output = binary()
+        .arg("-d")
+        .arg(root.path())
+        .args(["--write-metadata", url])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+        2
+    );
+    for mode in ["-j", "-g"] {
+        let output = binary()
+            .args(["--write-metadata", mode, url])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+    }
+}
+
+#[test]
 fn direct_url_listing_does_not_need_backend() {
     let output = binary()
         .args([
@@ -278,6 +326,7 @@ mod cancellation {
             binary()
                 .arg("-d")
                 .arg(root.path())
+                .arg("--write-metadata")
                 .arg(url)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())

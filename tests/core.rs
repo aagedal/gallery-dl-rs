@@ -23,6 +23,203 @@ fn media(url: &str) -> Media {
     }
 }
 
+fn with_metadata() -> download::DownloadOptions {
+    download::DownloadOptions {
+        retries: 0,
+        write_metadata: true,
+    }
+}
+
+fn sidecar(path: &Path) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".json");
+    name.into()
+}
+
+#[tokio::test]
+async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
+    let (url, handle) = server(vec!["HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc"]);
+    let mut item = media(&format!("{url}?token=SIGNED_SECRET"));
+    item.headers.insert("Cookie".into(), "COOKIE_SECRET".into());
+    item.handoff
+        .insert("_fallback".into(), "FALLBACK_SECRET".into());
+    item.metadata = Some(gallery_dl_rs::extract::PostMetadata {
+        post_id: "post-1".into(),
+        media_id: "media-2".into(),
+        shortcode: "example".into(),
+        username: Some("person".into()),
+        caption: Some("A caption 🐈".into()),
+        timestamp: Some(123),
+        index: 2,
+    });
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(5)).unwrap();
+    let path = download::destination(root.path(), &item);
+    assert_eq!(
+        download::download_with_options(&client, root.path(), &item, with_metadata())
+            .await
+            .unwrap(),
+        Outcome::Downloaded(path.clone())
+    );
+    handle.join().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"abc");
+    let bytes = std::fs::read(sidecar(&path)).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "schema_version": 1,
+            "category": "twitter",
+            "filename": path.file_name().unwrap().to_str().unwrap(),
+            "metadata": {
+                "post_id": "post-1", "media_id": "media-2", "shortcode": "example",
+                "username": "person", "caption": "A caption 🐈", "timestamp": 123, "index": 2
+            }
+        })
+    );
+    assert!(!String::from_utf8(bytes).unwrap().contains("SECRET"));
+    assert_eq!(
+        std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn metadata_backfills_existing_media_and_concurrent_writers_do_not_clobber() {
+    // No listener: an attempted HTTP request would fail.
+    let item = media("http://127.0.0.1:1/image.jpg");
+    let root = tempfile::tempdir().unwrap();
+    let path = download::destination(root.path(), &item);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"existing media").unwrap();
+    let client = download::client(Duration::from_secs(1)).unwrap();
+    let (first, second) = tokio::join!(
+        download::download_with_options(&client, root.path(), &item, with_metadata()),
+        download::download_with_options(&client, root.path(), &item, with_metadata()),
+    );
+    assert_eq!(first.unwrap(), Outcome::Skipped(path.clone()));
+    assert_eq!(second.unwrap(), Outcome::Skipped(path.clone()));
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(sidecar(&path)).unwrap()).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert!(json.get("metadata").is_none());
+    std::fs::write(sidecar(&path), b"user-edited sidecar").unwrap();
+    download::download_with_options(&client, root.path(), &item, with_metadata())
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(sidecar(&path)).unwrap(),
+        b"user-edited sidecar"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"existing media");
+    assert_eq!(
+        std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn metadata_failure_keeps_completed_media_and_can_be_repaired() {
+    let (url, handle) = server(vec!["HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc"]);
+    let item = media(&url);
+    let root = tempfile::tempdir().unwrap();
+    let path = download::destination(root.path(), &item);
+    std::fs::create_dir_all(sidecar(&path)).unwrap();
+    let client = download::client(Duration::from_secs(5)).unwrap();
+    let error = download::download_with_options(
+        &client,
+        root.path(),
+        &item,
+        download::DownloadOptions {
+            retries: 2,
+            write_metadata: true,
+        },
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("metadata sidecar failed"), "{error}");
+    assert_eq!(std::fs::read(&path).unwrap(), b"abc");
+    assert_eq!(handle.join().unwrap().len(), 1);
+    std::fs::remove_dir(sidecar(&path)).unwrap();
+    assert_eq!(
+        download::download_with_options(&client, root.path(), &item, with_metadata())
+            .await
+            .unwrap(),
+        Outcome::Skipped(path.clone())
+    );
+    assert!(sidecar(&path).is_file());
+}
+
+#[tokio::test]
+async fn failed_downloads_and_unsupported_jobs_never_write_metadata() {
+    for response in [
+        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc",
+    ] {
+        let (url, handle) = server(vec![response]);
+        let item = media(&url);
+        let root = tempfile::tempdir().unwrap();
+        let client = download::client(Duration::from_secs(5)).unwrap();
+        assert!(
+            download::download_with_options(&client, root.path(), &item, with_metadata())
+                .await
+                .is_err()
+        );
+        handle.join().unwrap();
+        let path = download::destination(root.path(), &item);
+        assert!(!path.exists());
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            0
+        );
+    }
+    let item =
+        extract::direct(&extract::http_url("http://127.0.0.1:1/stream.m3u8").unwrap()).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(1)).unwrap();
+    assert!(
+        download::download_with_options(&client, root.path(), &item, with_metadata())
+            .await
+            .is_err()
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn metadata_rejects_existing_and_dangling_sidecar_symlinks() {
+    for dangling in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let item = media("http://127.0.0.1:1/image.jpg");
+        let path = download::destination(root.path(), &item);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"existing media").unwrap();
+        let target = root.path().join("target.json");
+        if !dangling {
+            std::fs::write(&target, b"untouched").unwrap();
+        }
+        std::os::unix::fs::symlink(&target, sidecar(&path)).unwrap();
+        let client = download::client(Duration::from_secs(1)).unwrap();
+        let error = download::download_with_options(&client, root.path(), &item, with_metadata())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not a regular file"), "{error}");
+        assert_eq!(std::fs::read_link(sidecar(&path)).unwrap(), target);
+        assert_eq!(std::fs::read(&path).unwrap(), b"existing media");
+        if dangling {
+            assert!(!target.exists());
+        } else {
+            assert_eq!(std::fs::read(target).unwrap(), b"untouched");
+        }
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            2
+        );
+    }
+}
+
 /// Small deterministic HTTP server: no external services or account credentials.
 fn server(responses: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<String>>) {
     delayed_server(

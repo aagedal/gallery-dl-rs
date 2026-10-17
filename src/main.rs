@@ -2,7 +2,7 @@ use clap::{Parser, ValueEnum};
 use futures_util::{StreamExt, stream};
 use gallery_dl_rs::{
     Result,
-    download::{self, Outcome},
+    download::{self, DownloadOptions, Outcome},
     error,
     extract::{self, Backend},
     instagram::Instagram,
@@ -29,6 +29,9 @@ struct Args {
     /// Print extracted media as a JSON array without downloading
     #[arg(short = 'j', long)]
     dump_json: bool,
+    /// Save post metadata in a JSON sidecar beside each completed media file
+    #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
+    write_metadata: bool,
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
@@ -142,11 +145,17 @@ async fn run(args: Args) -> Result<()> {
         }
     } else {
         let client = download::client(Duration::from_secs(args.timeout))?;
-        let results = stream::iter(
-            media
-                .iter()
-                .map(|item| download::download(&client, &args.destination, item, args.retries)),
-        )
+        let results = stream::iter(media.iter().map(|item| {
+            download::download_with_options(
+                &client,
+                &args.destination,
+                item,
+                DownloadOptions {
+                    retries: args.retries,
+                    write_metadata: args.write_metadata,
+                },
+            )
+        }))
         .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
         while let Some(result) = results.next().await {
