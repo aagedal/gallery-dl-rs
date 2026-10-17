@@ -43,10 +43,10 @@ struct Args {
     /// Seconds allowed for each social URL's extraction
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
-    /// Seconds allowed for each media download attempt
+    /// Seconds allowed per media attempt and per rate-limit wait
     #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..))]
     timeout: u64,
-    /// Additional attempts on server or transport errors
+    /// Additional attempts on rate limits, server errors, or transport errors
     #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=10))]
     retries: u8,
 }
@@ -59,9 +59,22 @@ enum Extractor {
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run(Args::parse()).await {
+    let args = Args::parse();
+    // Leaving this scope drops the operation before exiting: temporary files
+    // are removed and compatibility children use kill_on_drop(true).
+    let (result, interrupted) = {
+        tokio::select! {
+            result = run(args) => (result, false),
+            signal = tokio::signal::ctrl_c() => (signal.map_err(Into::into), true),
+        }
+    };
+    if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
+    }
+    if interrupted {
+        eprintln!("cancelled");
+        std::process::exit(130);
     }
 }
 

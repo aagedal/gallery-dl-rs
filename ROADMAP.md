@@ -37,8 +37,19 @@ backend explicitly selectable until the three sites have sufficient parity.
 Native Instagram now uses domain/path/secure/expiry-scoped input cookies and
 propagates user-agent/referer without copying cookies to media hosts. Redirects
 are currently rejected; rate limits return Retry-After advice rather than retrying.
-Cookie updates, safe redirect following, shared rate-limit scheduling, and
-cancellation remain to be implemented.
+Direct media downloads now retry HTTP 429 and 5xx responses with numeric or
+HTTP-date Retry-After handling and shared per-origin cooldowns across workers.
+Cooldown waits are bounded by the download timeout; excessive delays fail with
+retry-later advice without sending an early retry. Local HTTP tests and virtual
+clock scheduler tests cover retry bounds, shared cooldowns, origin isolation,
+deadline extensions, and excessive delays. Extraction does not yet share this
+scheduler. CLI Ctrl-C cancellation now drops extraction/download futures, cleans
+temporary downloads, and stops the directly owned compatibility process, with
+exit status 130. Unix CLI tests verify partial-file cleanup and child termination;
+native requests and cooldown waits use the same cancellation scope. Cookie
+updates, safe redirect following, and shared extraction rate-limit scheduling
+remain to be implemented. A companion adapter will also need cancellation at its
+library boundary.
 
 ## 3. Large collections and reliable archives
 

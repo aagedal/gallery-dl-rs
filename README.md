@@ -79,11 +79,20 @@ Instagram session cookies are never copied to media hosts.
   a run are removed, and existing paths are skipped for direct downloads. Bare
   direct links keep their original URL-only digest; media with headers now use a
   different digest and may be downloaded again after upgrading.
-- Transport errors and HTTP 5xx responses have bounded retries. Each attempt has
-  a timeout; social extraction has a separate timeout and its own backend retries.
+- Transport errors, HTTP 429 rate limits, and HTTP 5xx responses have bounded
+  retries controlled by `--retries`. Retry-After accepts seconds or an HTTP date;
+  missing/invalid values use exponential backoff. Concurrent downloads share
+  cooldowns by origin (scheme, host, and port), including cooldowns reported on a
+  download's final attempt. Requests already in flight can finish. `--timeout`
+  bounds each media attempt and each cooldown wait; longer cooldowns fail with
+  retry-later advice. Social extraction has a separate timeout and its own backend
+  retries; native Instagram still reports rate limits without retrying.
 - Failed inputs do not prevent other inputs from being processed. Any failed
   extraction or download results in a nonzero exit code. Status goes to stderr;
   `-g` and `-j` output goes to stdout.
+- Ctrl-C cancels extraction, active downloads, and retry/cooldown waits, removes
+  temporary downloads, and stops the directly owned compatibility process. Files
+  already published are kept. Cancellation exits with status 130.
 
 ## Limitations
 
@@ -133,6 +142,7 @@ cargo clippy --locked --all-targets -- -D warnings
 
 `src/extract.rs` owns URL dispatch and the compatibility protocol.
 `src/download.rs` owns request headers, downloads, retries, and file publication.
+`src/transport.rs` owns shared download cooldowns and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.
 `src/instagram.rs` owns the experimental native Instagram extractor;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
