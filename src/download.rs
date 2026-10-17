@@ -70,7 +70,113 @@ pub enum Outcome {
     Skipped(PathBuf),
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DownloadOptions {
+    pub retries: u8,
+    /// Save versioned post metadata beside completed or already existing media.
+    pub write_metadata: bool,
+}
+
 pub async fn download(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    retries: u8,
+) -> Result<Outcome> {
+    download_with_options(
+        client,
+        root,
+        media,
+        DownloadOptions {
+            retries,
+            ..DownloadOptions::default()
+        },
+    )
+    .await
+}
+
+pub async fn download_with_options(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    options: DownloadOptions,
+) -> Result<Outcome> {
+    let outcome = download_media(client, root, media, options.retries).await?;
+    if options.write_metadata {
+        let (Outcome::Downloaded(path) | Outcome::Skipped(path)) = &outcome;
+        write_metadata(path, media).await.map_err(|e| {
+            error(format!(
+                "media is saved at {}; metadata sidecar failed: {e}",
+                path.display()
+            ))
+        })?;
+    }
+    Ok(outcome)
+}
+
+/// Deliberately exclude URLs and private transport/adapter options, including
+/// signed media URLs. This schema is independent of inspection JSON.
+#[derive(serde::Serialize)]
+struct MetadataSidecar<'a> {
+    schema_version: u8,
+    category: &'a str,
+    filename: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<&'a crate::extract::PostMetadata>,
+}
+
+async fn write_metadata(path: &Path, media: &Media) -> Result<()> {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".json");
+    let sidecar = PathBuf::from(name);
+    if metadata_exists(&sidecar)? {
+        return Ok(());
+    }
+    let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| error("invalid media filename"))?;
+    let mut bytes = serde_json::to_vec_pretty(&MetadataSidecar {
+        schema_version: 1,
+        category: &media.category,
+        filename,
+        metadata: media.metadata.as_ref(),
+    })?;
+    bytes.push(b'\n');
+    let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&temporary)
+        .await?;
+    file.write_all(&bytes).await?;
+    file.flush().await?;
+    file.sync_all().await?;
+    drop(file);
+    match temporary.persist_noclobber(&sidecar) {
+        Ok(_) => Ok(()),
+        Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if metadata_exists(&sidecar)? {
+                Ok(())
+            } else {
+                Err(e.error.into())
+            }
+        }
+        Err(e) => Err(e.error.into()),
+    }
+}
+
+fn metadata_exists(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => Err(error("metadata sidecar path is not a regular file")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn download_media(
     client: &DownloadClient,
     root: &Path,
     media: &Media,

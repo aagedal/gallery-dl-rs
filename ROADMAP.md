@@ -79,6 +79,14 @@ Stream extraction into a bounded work queue; add pagination, stable site/post/me
 identifiers, a SQLite download archive, media metadata sidecars, and resumable
 downloads with range validation. URLs alone are not stable archive identifiers.
 
+**Implemented:** opt-in `--write-metadata` sidecars use a versioned allowlist of
+saved filename/category and available native post metadata, excluding URLs and
+private request/adapter options. They publish atomically without overwriting,
+backfill missing sidecars for skipped media, and preserve completed media on
+metadata errors. Local tests cover schema/content, private option exclusion,
+concurrent publication, repair, failed media, and CLI behavior. Compatibility
+post metadata, streaming extraction, pagination, archives, and range resume remain.
+
 ## 4. Broader compatibility
 
 Add native configuration and filename templates, then prioritize additional sites.

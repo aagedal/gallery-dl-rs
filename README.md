@@ -31,6 +31,9 @@ cargo build --release --locked
 # Native direct media downloads need no Python or gallery-dl installation
 ./target/release/gallery-dl-rs --jobs 4 -d downloads 'https://example.com/photo.jpg'
 
+# Save available post metadata beside downloaded media
+./target/release/gallery-dl-rs --write-metadata -C cookies.txt --extractor native 'https://www.instagram.com/p/SHORTCODE/'
+
 # Inspect extracted media jobs as JSON; private request options are omitted
 ./target/release/gallery-dl-rs -j 'https://x.com/USERNAME/status/POST_ID'
 
@@ -87,6 +90,17 @@ Instagram session cookies are never copied to media hosts.
   implemented in this milestone.
 - Media bodies stream to disk with bounded download concurrency. Each completed
   file is published from a temporary file without overwriting an existing file.
+- `--write-metadata` saves `<media filename>.json` beside completed media, including
+  files skipped because they already exist. Sidecars have `schema_version: 1`,
+  `category`, the saved `filename`, and optional `metadata` (post/media IDs,
+  shortcode, username, caption, timestamp, and carousel index). Post metadata is
+  currently provided only by native Instagram; other extractors save just the
+  envelope. URLs, request headers, cookies, and private adapter options are excluded.
+  Existing sidecars are never overwritten. Sidecar publication is atomic but is
+  separate from media publication: a sidecar failure returns a nonzero status and
+  keeps the media; rerunning backfills missing sidecars without downloading again.
+  Cancellation between the two publications can also leave a missing sidecar.
+  This flag conflicts with `-g` and `-j`; inspection JSON retains its existing format.
 - Filenames use a SHA-256 digest of the media URL and job/request context plus a
   sanitized filename, under `destination/category/`. Exact duplicate jobs within
   a run are removed, and existing paths are skipped for direct downloads. Bare
