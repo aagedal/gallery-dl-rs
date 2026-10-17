@@ -80,6 +80,21 @@ integration.
   and cleanup/no-overwrite behavior. Keep unsupported handoffs explicit until the
   companion implements the required capability.
 
+**Implemented preparation:** media now carries typed direct HTTP, video-page, or
+HLS/DASH manifest jobs. Compatibility parsing retains the original `ytdl:` source,
+an HTTP(S) manifest base URL, optional inline data, all `_ytdl_*` options, fallback
+URLs, and request headers. Private options/inline data are excluded from inspection
+JSON. Deduplication and destination hashes distinguish job/request context;
+ordinary direct links without that context retain their existing paths. Local
+tests cover parsing, malformed handoffs, private JSON fields, distinct inline jobs,
+and rejection of unsupported jobs before requests or filesystem changes. Synthetic
+non-HTTP identifiers are rejected because no usable base URL can be established.
+
+**Remaining integration:** select a stable companion release and implement the
+library adapter contract, scoped segment authentication, cancellation/progress,
+format selection, completed-path publication, and the segmented-download/merge
+fixture suite. Retained fallback URLs and opaque options are not executed yet.
+
 The inspected local yt-dlp-rs prototype exposes `YoutubeDl`, `VideoInfo`,
 `VideoFormat`, and an `Extractor` interface for direct media and limited HTML5
 pages. It does not yet implement HLS/DASH, cookies, or FFmpeg postprocessing.

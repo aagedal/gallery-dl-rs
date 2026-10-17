@@ -126,6 +126,53 @@ fn native_mode_still_lists_direct_links_without_backend() {
     );
 }
 
+#[test]
+fn manifests_are_inspectable_but_not_downloaded() {
+    let url = "http://127.0.0.1:1/stream.M3U8?token=example";
+    let output = binary().args(["-j", url]).output().unwrap();
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json[0]["job"]["kind"], "manifest");
+    assert_eq!(json[0]["job"]["protocol"], "hls");
+    let root = tempfile::tempdir().unwrap();
+    let output = binary()
+        .arg("-d")
+        .arg(root.path())
+        .arg(url)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("companion yt-dlp-rs adapter")
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn backend_listing_preserves_distinct_inline_handoffs_and_exact_duplicates() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("backend");
+    std::fs::write(&script, r##"#!/bin/sh
+printf '%s\n' '[[3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"first"}],[3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"second"}],[3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"first"}]]'
+"##).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let output = binary()
+        .arg("--extractor-command")
+        .arg(script)
+        .args(["-g", "https://x.com/person/status/1"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "ytdl:https://example.com/synthetic\nytdl:https://example.com/synthetic\n"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn social_backend_is_invoked_without_a_shell() {

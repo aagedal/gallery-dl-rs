@@ -1,4 +1,7 @@
-use crate::{Result, error, extract::Media};
+use crate::{
+    Result, error,
+    extract::{Media, MediaJob},
+};
 use futures_util::StreamExt;
 use reqwest::{
     Client,
@@ -42,9 +45,9 @@ pub fn safe_component(value: &str) -> String {
 }
 
 pub fn destination(root: &Path, media: &Media) -> PathBuf {
-    // Include a full URL digest so unrelated posts with identical filenames cannot
-    // overwrite each other. Signed URL changes currently create a new filename.
-    let digest = format!("{:x}", Sha256::digest(media.url.as_str().as_bytes()));
+    // Hash URL and job/request context so different manifests or authenticated
+    // representations cannot share a path. This is not a stable archive identity.
+    let digest = format!("{:x}", Sha256::digest(media.identity().as_bytes()));
     root.join(safe_component(&media.category))
         .join(format!("{digest}_{}", safe_component(&media.filename)))
 }
@@ -56,6 +59,21 @@ pub enum Outcome {
 }
 
 pub async fn download(client: &Client, root: &Path, media: &Media, retries: u8) -> Result<Outcome> {
+    match &media.job {
+        MediaJob::DirectHttp => {
+            crate::extract::http_url(media.url.as_str())?;
+        }
+        MediaJob::VideoPage { .. } => {
+            return Err(error(
+                "video-page downloads require the companion yt-dlp-rs adapter, which is not implemented",
+            ));
+        }
+        MediaJob::Manifest { .. } => {
+            return Err(error(
+                "HLS/DASH downloads require the companion yt-dlp-rs adapter, which is not implemented",
+            ));
+        }
+    }
     let path = destination(root, media);
     if path.try_exists()? {
         return Ok(Outcome::Skipped(path));
@@ -143,8 +161,7 @@ async fn attempt_download(
             | "application/dash+xml"
             | "application/vnd.apple.mpegurl"
             | "application/x-mpegurl"
-    ) || media.url.path().ends_with(".m3u8")
-        || media.url.path().ends_with(".mpd")
+    ) || crate::extract::manifest_protocol(&media.url).is_some()
     {
         return Err(Failure {
             error: error(

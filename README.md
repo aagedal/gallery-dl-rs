@@ -31,7 +31,7 @@ cargo build --release --locked
 # Native direct media downloads need no Python or gallery-dl installation
 ./target/release/gallery-dl-rs --jobs 4 -d downloads 'https://example.com/photo.jpg'
 
-# Inspect extracted media as JSON; request headers are omitted
+# Inspect extracted media jobs as JSON; private request options are omitted
 ./target/release/gallery-dl-rs -j 'https://x.com/USERNAME/status/POST_ID'
 
 # Experimental Instagram extraction in Rust, without gallery-dl
@@ -74,9 +74,11 @@ Instagram session cookies are never copied to media hosts.
   implemented in this milestone.
 - Media bodies stream to disk with bounded download concurrency. Each completed
   file is published from a temporary file without overwriting an existing file.
-- Filenames use a SHA-256 digest of the complete media URL plus a sanitized
-  filename, under `destination/category/`. Duplicate media URLs within a run are
-  removed, and existing paths are skipped.
+- Filenames use a SHA-256 digest of the media URL and job/request context plus a
+  sanitized filename, under `destination/category/`. Exact duplicate jobs within
+  a run are removed, and existing paths are skipped for direct downloads. Bare
+  direct links keep their original URL-only digest; media with headers now use a
+  different digest and may be downloaded again after upgrading.
 - Transport errors and HTTP 5xx responses have bounded retries. Each attempt has
   a timeout; social extraction has a separate timeout and its own backend retries.
 - Failed inputs do not prevent other inputs from being processed. Any failed
@@ -92,8 +94,25 @@ transport behavior, not current live coverage. Tests exercise all three routing 
 with a fixture backend and HTTP downloads with a local server. Facebook coverage
 in particular must be checked against the installed backend before relying on it.
 
-Only direct HTTP(S) media is downloaded. HLS/DASH manifests, `ytdl:` URLs, video
-merging, fallback URL handling, browser cookie import, archive databases, profile
+Only direct HTTP(S) media is downloaded. Extraction retains typed direct HTTP,
+video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
+source; `-j` includes the job kind and manifest protocol/base URL. Inline manifest
+data, headers, cookies, and other private handoff options are omitted from JSON.
+The JSON output is for inspection, not a lossless job export. Different inline
+manifests with the same source can therefore look identical in inspection output.
+
+Manifest links (`.m3u8`/`.mpd`, case insensitive) can be inspected directly.
+Compatibility extraction retains `_ytdl_*` and `_fallback` options for a future
+adapter, including inline manifests and manifest-specific headers. Handoffs
+require an HTTP(S) target/base URL, including synthetic `ytdl:https://…` URLs;
+synthetic non-HTTP identifiers and unknown manifest types fail extraction.
+Video-page and manifest downloads fail explicitly before any request or file
+creation, even if a destination file exists. No companion dependency or video
+adapter is enabled yet. The parser follows the
+[upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
+
+HLS/DASH downloads, video merging, fallback URL handling, browser cookie import,
+archive databases, profile
 pagination in Rust, and gallery-dl filename/config compatibility are not implemented.
 Media redirects are rejected. The Rust downloader forwards per-item
 `_http_headers`, but does not import the backend's session cookie jar or TLS/browser
