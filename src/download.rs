@@ -1,7 +1,7 @@
 use crate::{
     Result, error,
     extract::{Media, MediaJob},
-    transport::{RateLimits, retry_after},
+    transport::{RateLimits, Redirects, retry_after},
 };
 use futures_util::StreamExt;
 use reqwest::{
@@ -28,8 +28,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         http: Client::builder()
             .user_agent(concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")))
             .timeout(timeout)
-            // Media URLs should already be resolved. Avoid forwarding extracted secrets
-            // to an unexpected host via redirect.
+            // Redirects are validated manually before forwarding request headers.
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
         rate_limits: RateLimits::default(),
@@ -111,11 +110,18 @@ pub async fn download(
         headers.insert(name, HeaderValue::from_str(value)?);
     }
     for attempt in 0..=retries {
-        client
-            .rate_limits
-            .wait(&media.url, client.wait_limit)
-            .await?;
-        match attempt_download(client, media, &headers, parent, &path).await {
+        let result = tokio::time::timeout(
+            client.wait_limit,
+            attempt_download(client, media, &headers, parent, &path),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(Failure {
+                error: error("media download attempt timed out"),
+                retry: true,
+            })
+        });
+        match result {
             Ok(outcome) => return Ok(outcome),
             Err(failure) if failure.retry && attempt < retries => {
                 tokio::time::sleep(Duration::from_millis(250 * (1u64 << attempt.min(6)))).await;
@@ -141,7 +147,12 @@ impl From<std::io::Error> for Failure {
 impl From<reqwest::Error> for Failure {
     fn from(error: reqwest::Error) -> Self {
         Self {
-            error: error.into(),
+            // Redirect URLs can contain session tokens or signed query strings.
+            error: if error.is_timeout() {
+                crate::error("media download attempt timed out")
+            } else {
+                error.without_url().into()
+            },
             retry: true,
         }
     }
@@ -154,12 +165,33 @@ async fn attempt_download(
     parent: &Path,
     path: &Path,
 ) -> std::result::Result<Outcome, Failure> {
-    let response = client
-        .http
-        .get(media.url.clone())
-        .headers(headers.clone())
-        .send()
-        .await?;
+    let mut target = media.url.clone();
+    let mut redirects = Redirects::new(&target);
+    let response = loop {
+        client
+            .rate_limits
+            .wait(&target, client.wait_limit)
+            .await
+            .map_err(|error| Failure {
+                error,
+                retry: false,
+            })?;
+        let response = client
+            .http
+            .get(target.clone())
+            .headers(headers.clone())
+            .send()
+            .await?;
+        match redirects
+            .next(response.url(), response.status(), response.headers())
+            .map_err(|error| Failure {
+                error,
+                retry: false,
+            })? {
+            Some(next) => target = next,
+            None => break response,
+        }
+    };
     if !response.status().is_success() {
         let retry = response.status().is_server_error()
             || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
@@ -190,7 +222,7 @@ async fn attempt_download(
             | "application/dash+xml"
             | "application/vnd.apple.mpegurl"
             | "application/x-mpegurl"
-    ) || crate::extract::manifest_protocol(&media.url).is_some()
+    ) || crate::extract::manifest_protocol(response.url()).is_some()
     {
         return Err(Failure {
             error: error(

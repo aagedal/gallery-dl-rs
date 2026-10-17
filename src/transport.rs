@@ -1,4 +1,4 @@
-//! Shared, per-origin cooldown scheduling for HTTP operations.
+//! Shared redirect validation and per-origin cooldown scheduling.
 use crate::{Result, error};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use std::{
@@ -8,6 +8,65 @@ use std::{
 };
 use tokio::time::Instant;
 use url::Url;
+
+/// Manual redirects keep request credentials under the caller's control.
+/// Never include a Location value in diagnostics: it can contain credentials.
+pub(crate) struct Redirects {
+    visited: Vec<Url>,
+}
+
+impl Redirects {
+    pub(crate) fn new(url: &Url) -> Self {
+        let mut url = url.clone();
+        url.set_fragment(None);
+        Self { visited: vec![url] }
+    }
+
+    pub(crate) fn next(
+        &mut self,
+        current: &Url,
+        status: reqwest::StatusCode,
+        headers: &HeaderMap,
+    ) -> Result<Option<Url>> {
+        if !status.is_redirection() {
+            return Ok(None);
+        }
+        if !matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
+            return Err(error("unsupported HTTP redirect status"));
+        }
+        if self.visited.len() > 5 {
+            return Err(error("HTTP redirect limit exceeded (5 hops)"));
+        }
+        let locations = headers.get_all(reqwest::header::LOCATION);
+        let mut locations = locations.iter();
+        let location = locations
+            .next()
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| error("HTTP redirect has missing or invalid Location"))?;
+        if locations.next().is_some() {
+            return Err(error("HTTP redirect has multiple Location headers"));
+        }
+        let mut target = current
+            .join(location)
+            .map_err(|_| error("HTTP redirect has invalid Location"))?;
+        if !matches!(target.scheme(), "http" | "https")
+            || !target.username().is_empty()
+            || target.password().is_some()
+            || target.origin() != self.visited[0].origin()
+        {
+            return Err(error(
+                "HTTP redirect requires the same origin and no URL credentials",
+            ));
+        }
+        target.set_fragment(None);
+        if self.visited.contains(&target) {
+            return Err(error("HTTP redirect loop detected"));
+        }
+        self.visited.push(target.clone());
+        Ok(Some(target))
+    }
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct RateLimits {
@@ -77,6 +136,90 @@ pub(crate) fn retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Durati
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirects_resolve_relative_urls_and_bound_loops_and_hops() {
+        let origin = Url::parse("https://example.com/start").unwrap();
+        for status in [301, 302, 303, 307, 308] {
+            let mut redirects = Redirects::new(&origin);
+            let mut current = origin.clone();
+            for hop in 1..=6 {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    reqwest::header::LOCATION,
+                    format!("next{hop}#fragment").parse().unwrap(),
+                );
+                let result = redirects.next(
+                    &current,
+                    reqwest::StatusCode::from_u16(status).unwrap(),
+                    &headers,
+                );
+                if hop == 6 {
+                    assert!(result.unwrap_err().to_string().contains("limit"));
+                } else {
+                    current = result.unwrap().unwrap();
+                    assert_eq!(current.as_str(), format!("https://example.com/next{hop}"));
+                }
+            }
+        }
+        for location in ["#fragment", "/start", "https://example.com:443/start"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(reqwest::header::LOCATION, location.parse().unwrap());
+            assert!(
+                Redirects::new(&origin)
+                    .next(&origin, reqwest::StatusCode::FOUND, &headers)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("loop")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unsafe_redirects_without_disclosing_locations() {
+        let origin = Url::parse("https://example.com/start").unwrap();
+        for location in [
+            "http://example.com/secret",
+            "https://example.com:444/secret",
+            "https://sub.example.com/secret",
+            "//evil.test/secret",
+            "https://user:secret@example.com/",
+            "file:///secret",
+            "http://[secret",
+            "",
+            "/start#secret",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(reqwest::header::LOCATION, location.parse().unwrap());
+            let diagnostic = Redirects::new(&origin)
+                .next(&origin, reqwest::StatusCode::FOUND, &headers)
+                .unwrap_err()
+                .to_string();
+            assert!(!diagnostic.contains("secret"));
+        }
+        let mut headers = HeaderMap::new();
+        assert!(
+            Redirects::new(&origin)
+                .next(&origin, reqwest::StatusCode::FOUND, &headers)
+                .is_err()
+        );
+        headers.append(reqwest::header::LOCATION, "/one".parse().unwrap());
+        headers.append(reqwest::header::LOCATION, "/two".parse().unwrap());
+        assert!(
+            Redirects::new(&origin)
+                .next(&origin, reqwest::StatusCode::FOUND, &headers)
+                .is_err()
+        );
+        assert!(
+            Redirects::new(&origin)
+                .next(
+                    &origin,
+                    reqwest::StatusCode::NOT_MODIFIED,
+                    &HeaderMap::new()
+                )
+                .is_err()
+        );
+    }
 
     #[tokio::test(start_paused = true)]
     async fn shares_cooldowns_by_origin_and_rechecks_extensions() {

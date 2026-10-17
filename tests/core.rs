@@ -25,12 +25,23 @@ fn media(url: &str) -> Media {
 
 /// Small deterministic HTTP server: no external services or account credentials.
 fn server(responses: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<String>>) {
+    delayed_server(
+        responses
+            .into_iter()
+            .map(|response| (response, Duration::ZERO))
+            .collect(),
+    )
+}
+
+fn delayed_server(
+    responses: Vec<(&'static str, Duration)>,
+) -> (String, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     listener.set_nonblocking(true).unwrap();
     let handle = thread::spawn(move || {
         let mut requests = Vec::new();
-        for response in responses {
+        for (response, delay) in responses {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             let mut socket = loop {
                 match listener.accept() {
@@ -55,7 +66,8 @@ fn server(responses: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<Strin
                 request.extend_from_slice(&buffer[..count]);
             }
             requests.push(String::from_utf8(request).unwrap());
-            socket.write_all(response.as_bytes()).unwrap();
+            thread::sleep(delay);
+            let _ = socket.write_all(response.as_bytes());
         }
         requests
     });
@@ -318,6 +330,132 @@ async fn incomplete_downloads_leave_no_file() {
         0
     );
     handle.join().unwrap();
+}
+
+#[tokio::test]
+async fn follows_same_origin_redirects_with_headers_and_preserves_destination() {
+    let (url, handle) = server(vec![
+        "HTTP/1.1 302 Found\r\nLocation: /resolved.jpg\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 308 Permanent Redirect\r\nLocation: /resolved.jpg\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+    ]);
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(3)).unwrap();
+    let mut item = media(&url);
+    item.headers
+        .insert("Authorization".into(), "Bearer local-secret".into());
+    let path = download::destination(root.path(), &item);
+    assert_eq!(
+        download::download(&client, root.path(), &item, 1)
+            .await
+            .unwrap(),
+        Outcome::Downloaded(path.clone())
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"ok");
+    assert_eq!(
+        download::download(&client, root.path(), &item, 0)
+            .await
+            .unwrap(),
+        Outcome::Skipped(path)
+    );
+    for (index, request) in handle.join().unwrap().iter().enumerate() {
+        let expected = if index % 2 == 0 {
+            "/image.jpg"
+        } else {
+            "/resolved.jpg"
+        };
+        assert!(request.starts_with(&format!("GET {expected} HTTP/1.1\r\n")));
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer local-secret\r\n")
+        );
+    }
+}
+
+#[tokio::test]
+async fn redirected_body_failures_redact_signed_urls_and_clean_temporary_files() {
+    let (url, handle) = server(vec![
+        "HTTP/1.1 302 Found\r\nLocation: /resolved.jpg?token=private-session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial",
+    ]);
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let item = media(&url);
+    let error = download::download(&client, root.path(), &item, 0)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(!error.contains("private-session"));
+    assert!(!error.contains("resolved.jpg"));
+    assert!(!download::destination(root.path(), &item).exists());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("twitter"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(handle.join().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn redirect_loops_are_terminal_and_redirected_manifests_are_rejected() {
+    for responses in [
+        vec![
+            "HTTP/1.1 302 Found\r\nLocation: /image.jpg#fragment\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        ],
+        vec![
+            "HTTP/1.1 302 Found\r\nLocation: /playlist.M3U8\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n#EXTM3U",
+        ],
+    ] {
+        let count = responses.len();
+        let (url, handle) = server(responses);
+        let root = tempfile::tempdir().unwrap();
+        let client = download::client(Duration::from_secs(2)).unwrap();
+        let item = media(&url);
+        let error = download::download(&client, root.path(), &item, 2)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(if count == 1 { "loop" } else { "manifest" }),
+            "{error}"
+        );
+        assert!(!download::destination(root.path(), &item).exists());
+        assert_eq!(
+            std::fs::read_dir(root.path().join("twitter"))
+                .unwrap()
+                .count(),
+            0
+        );
+        assert_eq!(handle.join().unwrap().len(), count);
+    }
+}
+
+#[tokio::test]
+async fn redirect_chain_uses_one_download_attempt_deadline() {
+    let (url, handle) = delayed_server(vec![
+        (
+            "HTTP/1.1 302 Found\r\nLocation: /resolved.jpg\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            Duration::from_millis(400),
+        ),
+        (
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            Duration::from_millis(800),
+        ),
+    ]);
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(1)).unwrap();
+    let item = media(&url);
+    let error = download::download(&client, root.path(), &item, 0)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("timed out"), "{error}");
+    assert!(!download::destination(root.path(), &item).exists());
+    assert_eq!(handle.join().unwrap().len(), 2);
 }
 
 #[tokio::test]

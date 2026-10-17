@@ -35,27 +35,36 @@ compatibility extractor independently as native coverage is verified. Keep the
 backend explicitly selectable until the three sites have sufficient parity.
 
 Native Instagram now uses domain/path/secure/expiry-scoped input cookies and
-propagates user-agent/referer without copying cookies to media hosts. Redirects
-are currently rejected. `--retries` controls additional attempts for direct media
+propagates user-agent/referer without copying cookies to media hosts. Native API
+and media requests now follow up to five same-origin redirects (same scheme,
+host, and effective port), reject loops/unsafe targets, and keep the entire chain
+within the operation deadline. Instagram rebuilds cookies and CSRF headers for
+each URL and rejects redirects outside `/api/`, including login/challenge pages.
+Media redirects retain the original job identity and destination, reject redirected
+manifest responses, and preserve request headers only within that origin. Local
+tests cover scoped credentials, retry restart, redirect limits/loops, unsafe
+locations, deadline bounds, and publication behavior. Cross-origin redirects
+remain unsupported. `--retries` controls additional attempts for direct media
 downloads and native Instagram HTTP 429, HTTP 5xx, and send/read transport
 failures; the compatibility backend retains its own retries. Retry-After accepts
 seconds or an HTTP date, with exponential backoff for missing/invalid values.
 Native extraction reuses the download transport's per-origin cooldown scheduler
 across calls on an Instagram instance, recording cooldowns even on a final
 attempt. `Instagram::new` retains zero retries unless `with_retries` is used.
-Authentication, missing-post, redirect, and parser errors are not retried,
-including rate-limit payloads returned with HTTP 200. Download cooldown waits
-are bounded by the download timeout; excessive delays fail with retry-later
-advice without sending an early retry. The native per-input extraction timeout
-bounds the entire operation, including requests, backoff, and cooldown waits.
+Authentication, missing-post, rejected-redirect, and parser errors are not retried,
+including rate-limit payloads returned with HTTP 200. Each download attempt,
+including redirects and cooldown waits, is bounded by the download timeout;
+excessive delays fail with retry-later advice without sending an early retry. The
+native per-input extraction timeout bounds the entire operation, including requests,
+backoff, and cooldown waits.
 Local HTTP tests and virtual clock scheduler tests cover retry bounds, shared
 cooldowns, origin isolation, deadline extensions, and excessive delays.
 CLI Ctrl-C cancellation now drops extraction/download futures, cleans
 temporary downloads, and stops the directly owned compatibility process, with
 exit status 130. Unix CLI tests verify partial-file cleanup and child termination;
-native requests and cooldown waits use the same cancellation scope. Cookie
-updates and safe redirect following remain to be implemented. A companion adapter
-will also need cancellation at its library boundary.
+native requests, redirects, and cooldown waits use the same cancellation scope.
+Cookie updates remain to be implemented. A companion adapter will also need
+cancellation at its library boundary.
 
 ## 3. Large collections and reliable archives
 

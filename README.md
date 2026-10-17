@@ -53,13 +53,15 @@ fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 
 The native extractor reads Netscape cookies scoped to the API URL's domain, path,
 HTTPS requirement, and expiry. It does not log in, refresh cookies, or import
-browser sessions. It rejects redirects and reports authentication/session failures
-and missing posts. `--retries` controls additional attempts for native HTTP 429,
+browser sessions. It follows up to five redirects within the same origin and
+`/api/` paths, reselecting cookies and the CSRF token for each URL. Redirects to
+login/challenge pages fail explicitly, as do authentication/session failures and
+missing posts. `--retries` controls additional attempts for native HTTP 429,
 HTTP 5xx, and send/read transport failures as well as downloads. Authentication,
-missing-post, redirect, and parser errors are not retried; this includes rate-limit
-payloads returned with HTTP 200. `--extraction-timeout` bounds the entire native
-operation, including backoff and cooldown waits, with a 16 MiB response limit per
-attempt. Library callers retain zero retries with `Instagram::new` and can opt in
+missing-post, rejected-redirect, and parser errors are not retried; this includes
+rate-limit payloads returned with HTTP 200. `--extraction-timeout` bounds the entire
+native operation, including backoff and cooldown waits, with a 16 MiB response
+limit per attempt. Library callers retain zero retries with `Instagram::new` and can opt in
 with `with_retries`.
 
 Native responses include all carousel children in order and select the largest
@@ -90,7 +92,8 @@ Instagram session cookies are never copied to media hosts.
   final attempt. Native Instagram reuses the same scheduler, sharing cooldowns
   across calls on an extractor instance and recording them even on a final
   attempt. Requests already in flight can finish. `--timeout` bounds each media
-  attempt and each cooldown wait; longer cooldowns fail with retry-later advice.
+  attempt, including its redirect chain and cooldown waits; longer cooldowns fail
+  with retry-later advice.
   Native extraction uses its overall `--extraction-timeout` deadline. The
   compatibility backend retains its own retries and separate extraction timeout.
 - Failed inputs do not prevent other inputs from being processed. Any failed
@@ -129,9 +132,13 @@ adapter is enabled yet. The parser follows the
 HLS/DASH downloads, video merging, fallback URL handling, browser cookie import,
 archive databases, profile
 pagination in Rust, and gallery-dl filename/config compatibility are not implemented.
-Media redirects are rejected. The Rust downloader forwards per-item
-`_http_headers`, but does not import the backend's session cookie jar or TLS/browser
-impersonation. Media requiring those features may fail even when extraction succeeds.
+Media downloads follow up to five redirects within the same origin (scheme,
+host, and effective port), retaining the original destination name and request
+headers. Cross-origin redirects, HTTPS downgrades, URL credentials, malformed
+redirects, and loops fail without requesting the target. The Rust downloader
+forwards per-item `_http_headers`, but does not import the backend's session cookie
+jar or TLS/browser impersonation. Media requiring those features may fail even
+when extraction succeeds.
 
 Extraction results are currently buffered before downloads begin. Very large
 profiles can exhaust memory or hit `--extraction-timeout`; start with individual
@@ -148,8 +155,8 @@ cargo clippy --locked --all-targets -- -D warnings
 
 `src/extract.rs` owns URL dispatch and the compatibility protocol.
 `src/download.rs` owns request headers, downloads, retries, and file publication.
-`src/transport.rs` owns per-origin cooldowns for downloads and native extraction,
-and Retry-After parsing.
+`src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
+and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.
 `src/instagram.rs` owns the experimental native Instagram extractor;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
