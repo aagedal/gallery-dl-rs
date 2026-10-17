@@ -59,9 +59,22 @@ enum Extractor {
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run(Args::parse()).await {
+    let args = Args::parse();
+    // Leaving this scope drops the operation before exiting: temporary files
+    // are removed and compatibility children use kill_on_drop(true).
+    let (result, interrupted) = {
+        tokio::select! {
+            result = run(args) => (result, false),
+            signal = tokio::signal::ctrl_c() => (signal.map_err(Into::into), true),
+        }
+    };
+    if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
+    }
+    if interrupted {
+        eprintln!("cancelled");
+        std::process::exit(130);
     }
 }
 

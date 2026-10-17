@@ -43,8 +43,13 @@ Cooldown waits are bounded by the download timeout; excessive delays fail with
 retry-later advice without sending an early retry. Local HTTP tests and virtual
 clock scheduler tests cover retry bounds, shared cooldowns, origin isolation,
 deadline extensions, and excessive delays. Extraction does not yet share this
-scheduler. Cookie updates, safe redirect following, shared extraction rate-limit
-scheduling, and cancellation remain to be implemented.
+scheduler. CLI Ctrl-C cancellation now drops extraction/download futures, cleans
+temporary downloads, and stops the directly owned compatibility process, with
+exit status 130. Unix CLI tests verify partial-file cleanup and child termination;
+native requests and cooldown waits use the same cancellation scope. Cookie
+updates, safe redirect following, and shared extraction rate-limit scheduling
+remain to be implemented. A companion adapter will also need cancellation at its
+library boundary.
 
 ## 3. Large collections and reliable archives
 

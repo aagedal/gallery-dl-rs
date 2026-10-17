@@ -90,6 +90,9 @@ Instagram session cookies are never copied to media hosts.
 - Failed inputs do not prevent other inputs from being processed. Any failed
   extraction or download results in a nonzero exit code. Status goes to stderr;
   `-g` and `-j` output goes to stdout.
+- Ctrl-C cancels extraction, active downloads, and retry/cooldown waits, removes
+  temporary downloads, and stops the directly owned compatibility process. Files
+  already published are kept. Cancellation exits with status 130.
 
 ## Limitations
 
