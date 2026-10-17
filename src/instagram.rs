@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::{
     collections::BTreeMap,
     path::Path,
+    sync::Mutex,
     time::{Duration, SystemTime},
 };
 use url::Url;
@@ -20,7 +21,7 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
 pub struct Instagram {
     client: Client,
-    cookies: CookieJar,
+    cookies: Mutex<CookieJar>,
     timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
@@ -38,7 +39,7 @@ impl Instagram {
                 .timeout(timeout)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
-            cookies,
+            cookies: Mutex::new(cookies),
             timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
@@ -101,7 +102,7 @@ impl Instagram {
                 .header("X-IG-App-ID", "936619743392459")
                 .header("X-Requested-With", "XMLHttpRequest")
                 .header("X-IG-WWW-Claim", "0");
-            if let Some(cookies) = self.cookies.header(&target) {
+            if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
                 if let Some(token) = cookies
                     .split("; ")
                     .find_map(|s| s.strip_prefix("csrftoken="))
@@ -113,6 +114,10 @@ impl Instagram {
             let response = request.send().await.map_err(|_| {
                 Failure::transient("Instagram request failed; check network access")
             })?;
+            self.cookies
+                .lock()
+                .unwrap()
+                .store_response(response.url(), response.headers());
             match redirects.next(response.url(), response.status(), response.headers())? {
                 Some(next) => {
                     // API normalization is allowed; login/challenge pages are terminal.
@@ -504,6 +509,117 @@ mod transport_tests {
     }
 
     #[tokio::test]
+    async fn rotates_cookies_on_redirect_retry_and_subsequent_posts_without_modifying_file() {
+        let (endpoint, server) = serve_sequence(vec![
+            response(
+                "302 Found",
+                concat!(
+                    "Location: /api/other/info/\r\n",
+                    "Set-Cookie: csrftoken=redirected; Path=/\r\n",
+                    "Set-Cookie: sessionid=rotated; HttpOnly; Path=/\r\n",
+                    "Set-Cookie: local=path-only; Path=/api/other/\r\n",
+                    "Set-Cookie: foreign=excluded; Domain=evil.test; Path=/\r\n",
+                ),
+                b"",
+            ),
+            response(
+                "503 Service Unavailable",
+                "Retry-After: 0\r\nSet-Cookie: csrftoken=retried; Path=/\r\n",
+                b"",
+            ),
+            response(
+                "200 OK",
+                "Set-Cookie: csrftoken=next-post; Path=/\r\n",
+                PHOTO,
+            ),
+            response("200 OK", "", PHOTO),
+        ]);
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let original = concat!(
+            "127.0.0.1\tFALSE\t/\tFALSE\t0\tcsrftoken\toriginal\n",
+            "127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\tinitial\n",
+        );
+        std::fs::write(file.path(), original).unwrap();
+        let instagram = Instagram::new(Some(file.path()), Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_retries(1);
+        for _ in 0..2 {
+            let media = instagram.extract_endpoint(&endpoint, "BA").await.unwrap();
+            assert_eq!(media.len(), 1);
+            assert!(
+                !media[0]
+                    .headers
+                    .keys()
+                    .any(|key| key.eq_ignore_ascii_case("cookie")
+                        || key.eq_ignore_ascii_case("x-csrftoken"))
+            );
+            let json = serde_json::to_string(&media).unwrap();
+            for private in ["initial", "rotated", "next-post", "path-only"] {
+                assert!(!json.contains(private));
+            }
+        }
+        let arrivals = server.join().unwrap();
+        for (index, token) in ["original", "redirected", "retried", "next-post"]
+            .iter()
+            .enumerate()
+        {
+            let request = arrivals[index].2.to_ascii_lowercase();
+            assert!(request.contains(&format!("x-csrftoken: {token}\r\n")));
+            assert!(request.contains(&format!("csrftoken={token}")));
+            assert!(request.contains(if index == 0 {
+                "sessionid=initial"
+            } else {
+                "sessionid=rotated"
+            }));
+            assert_eq!(request.contains("local=path-only"), index == 1);
+            assert!(!request.contains("excluded"));
+        }
+        assert_eq!(std::fs::read_to_string(file.path()).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn applies_cookie_deletions_on_authentication_failure_before_next_post() {
+        let (endpoint, server) = serve_sequence(vec![
+            response(
+                "401 Unauthorized",
+                "Set-Cookie: sessionid=; Path=/; Max-Age=0\r\nSet-Cookie: csrftoken=; Path=/; Max-Age=0\r\n",
+                b"",
+            ),
+            response("200 OK", "", PHOTO),
+        ]);
+        let mut instagram = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_retries(1);
+        instagram.cookies = CookieJar::parse(concat!(
+            "127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\tinitial\n",
+            "127.0.0.1\tFALSE\t/\tFALSE\t0\tcsrftoken\tinitial\n",
+        ))
+        .unwrap()
+        .into();
+        assert!(
+            instagram
+                .extract_endpoint(&endpoint, "BA")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("authentication")
+        );
+        instagram.extract_endpoint(&endpoint, "BA").await.unwrap();
+        let arrivals = server.join().unwrap();
+        assert!(
+            arrivals[0]
+                .2
+                .to_ascii_lowercase()
+                .contains("sessionid=initial")
+        );
+        let request = arrivals[1].2.to_ascii_lowercase();
+        assert!(!request.contains("cookie:"));
+        assert!(!request.contains("x-csrftoken:"));
+    }
+
+    #[tokio::test]
     async fn redirects_reselect_cookie_and_csrf_scope_and_retry_from_original_url() {
         let (endpoint, server) = serve_sequence(vec![
             response("302 Found", "Location: /api/other/info/\r\n", b""),
@@ -524,7 +640,8 @@ mod transport_tests {
             "127.0.0.1\tFALSE\t/api/other/\tFALSE\t0\tcsrftoken\tredirect-token\n",
             "127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\tlocal-session\n",
         ))
-        .unwrap();
+        .unwrap()
+        .into();
         assert_eq!(
             instagram
                 .extract_endpoint(&endpoint, "BA")
@@ -795,7 +912,8 @@ mod transport_tests {
             "127.0.0.1\tFALSE\t/\tTRUE\t0\tsecure\texcluded\n",
             ".instagram.com\tTRUE\t/\tFALSE\t0\tforeign\texcluded\n",
         ))
-        .unwrap();
+        .unwrap()
+        .into();
 
         let media = instagram.extract_endpoint(&endpoint, "BA").await.unwrap();
         assert_eq!(media.len(), 1);
@@ -836,8 +954,9 @@ mod transport_tests {
         );
         let (endpoint, server) = serve_once("302 Found", &location, b"", Duration::ZERO);
         let mut instagram = Instagram::new(None, Duration::from_secs(2)).await.unwrap();
-        instagram.cookies =
-            CookieJar::parse("127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\tsecret\n").unwrap();
+        instagram.cookies = CookieJar::parse("127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\tsecret\n")
+            .unwrap()
+            .into();
         let error = instagram
             .extract_endpoint(&endpoint, "BA")
             .await
