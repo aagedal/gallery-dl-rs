@@ -4,7 +4,7 @@ use crate::{
     cookies::CookieJar,
     error,
     extract::{Media, PostMetadata, http_url},
-    transport::{RateLimits, retry_after},
+    transport::{RateLimits, Redirects, retry_after},
 };
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
@@ -64,7 +64,6 @@ impl Instagram {
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
-                self.rate_limits.wait(endpoint, self.timeout).await?;
                 match self.attempt(endpoint, code, attempt).await {
                     Ok(media) => return Ok(media),
                     Err(failure) if failure.retry && attempt < self.retries => {
@@ -87,30 +86,44 @@ impl Instagram {
         code: &str,
         attempt: u8,
     ) -> std::result::Result<Vec<Media>, Failure> {
-        let mut request = self
-            .client
-            .get(endpoint.clone())
-            .header(header::ACCEPT, "application/json")
-            .header(
-                header::REFERER,
-                format!("https://www.instagram.com/p/{code}/"),
-            )
-            .header("X-IG-App-ID", "936619743392459")
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header("X-IG-WWW-Claim", "0");
-        if let Some(cookies) = self.cookies.header(endpoint) {
-            if let Some(token) = cookies
-                .split("; ")
-                .find_map(|s| s.strip_prefix("csrftoken="))
-            {
-                request = request.header("X-CSRFToken", token);
+        let mut target = endpoint.clone();
+        let mut redirects = Redirects::new(endpoint);
+        let mut response = loop {
+            self.rate_limits.wait(&target, self.timeout).await?;
+            let mut request = self
+                .client
+                .get(target.clone())
+                .header(header::ACCEPT, "application/json")
+                .header(
+                    header::REFERER,
+                    format!("https://www.instagram.com/p/{code}/"),
+                )
+                .header("X-IG-App-ID", "936619743392459")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("X-IG-WWW-Claim", "0");
+            if let Some(cookies) = self.cookies.header(&target) {
+                if let Some(token) = cookies
+                    .split("; ")
+                    .find_map(|s| s.strip_prefix("csrftoken="))
+                {
+                    request = request.header("X-CSRFToken", token);
+                }
+                request = request.header(header::COOKIE, cookies);
             }
-            request = request.header(header::COOKIE, cookies);
-        }
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| Failure::transient("Instagram request failed; check network access"))?;
+            let response = request.send().await.map_err(|_| {
+                Failure::transient("Instagram request failed; check network access")
+            })?;
+            match redirects.next(response.url(), response.status(), response.headers())? {
+                Some(next) => {
+                    // API normalization is allowed; login/challenge pages are terminal.
+                    if !next.path().starts_with("/api/") {
+                        return Err(error("Instagram redirected outside the API; login or a session challenge may be required").into());
+                    }
+                    target = next;
+                }
+                None => break response,
+            }
+        };
         let status = response.status();
         if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
             let delay = retry_after(response.headers(), SystemTime::now());
@@ -130,9 +143,6 @@ impl Instagram {
                     format!("Instagram returned HTTP {status}")
                 },
             ));
-        }
-        if status.is_redirection() {
-            return Err(error("Instagram redirected the request; login or a session challenge may be required (redirects are not followed)").into());
         }
         if matches!(status.as_u16(), 401 | 403) {
             return Err(error(
@@ -428,9 +438,18 @@ mod transport_tests {
     }
 
     // Raw responses also allow exercising connection loss and truncated bodies.
-    fn serve_sequence(
-        responses: Vec<Vec<u8>>,
-    ) -> (Url, JoinHandle<Vec<(std::time::Instant, SystemTime)>>) {
+    type Arrivals = Vec<(std::time::Instant, SystemTime, String)>;
+
+    fn serve_sequence(responses: Vec<Vec<u8>>) -> (Url, JoinHandle<Arrivals>) {
+        serve_delayed_sequence(
+            responses
+                .into_iter()
+                .map(|body| (body, Duration::ZERO))
+                .collect(),
+        )
+    }
+
+    fn serve_delayed_sequence(responses: Vec<(Vec<u8>, Duration)>) -> (Url, JoinHandle<Arrivals>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let endpoint = Url::parse(&format!(
@@ -440,7 +459,7 @@ mod transport_tests {
         .unwrap();
         let task = thread::spawn(move || {
             let mut arrivals = Vec::new();
-            for response in responses {
+            for (response, delay) in responses {
                 let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 let mut stream = loop {
                     match listener.accept() {
@@ -452,7 +471,7 @@ mod transport_tests {
                         Err(e) => panic!("{e}"),
                     }
                 };
-                arrivals.push((std::time::Instant::now(), SystemTime::now()));
+                let arrival = (std::time::Instant::now(), SystemTime::now());
                 stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
@@ -465,6 +484,8 @@ mod transport_tests {
                     request.extend_from_slice(&buffer[..count]);
                     assert!(request.len() < 64 * 1024);
                 }
+                arrivals.push((arrival.0, arrival.1, String::from_utf8(request).unwrap()));
+                thread::sleep(delay);
                 let _ = stream.write_all(&response);
             }
             arrivals
@@ -480,6 +501,101 @@ mod transport_tests {
         .into_bytes();
         response.extend_from_slice(body);
         response
+    }
+
+    #[tokio::test]
+    async fn redirects_reselect_cookie_and_csrf_scope_and_retry_from_original_url() {
+        let (endpoint, server) = serve_sequence(vec![
+            response("302 Found", "Location: /api/other/info/\r\n", b""),
+            response("503 Service Unavailable", "Retry-After: 0\r\n", b""),
+            response(
+                "307 Temporary Redirect",
+                "Location: /api/other/info/\r\n",
+                b"",
+            ),
+            response("200 OK", "", PHOTO),
+        ]);
+        let mut instagram = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_retries(1);
+        instagram.cookies = CookieJar::parse(concat!(
+            "127.0.0.1\tFALSE\t/api/v1/\tFALSE\t0\tcsrftoken\toriginal-token\n",
+            "127.0.0.1\tFALSE\t/api/other/\tFALSE\t0\tcsrftoken\tredirect-token\n",
+            "127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\tlocal-session\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            instagram
+                .extract_endpoint(&endpoint, "BA")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let requests = server.join().unwrap();
+        for (index, (_, _, request)) in requests.iter().enumerate() {
+            let (path, token, excluded) = if index % 2 == 0 {
+                ("/api/v1/media/64/info/", "original-token", "redirect-token")
+            } else {
+                ("/api/other/info/", "redirect-token", "original-token")
+            };
+            let request = request.to_ascii_lowercase();
+            assert!(request.starts_with(&format!("get {path} http/1.1\r\n")));
+            assert!(request.contains(&format!("x-csrftoken: {token}\r\n")));
+            assert!(request.contains(&format!(
+                "cookie: csrftoken={token}; sessionid=local-session\r\n"
+            )));
+            assert!(!request.contains(excluded));
+        }
+    }
+
+    #[tokio::test]
+    async fn login_redirects_and_loops_are_terminal_even_with_retries() {
+        for (location, diagnostic) in [
+            ("/accounts/login/?secret=hidden", "login"),
+            ("/challenge/secret", "challenge"),
+            ("/api/v1/media/64/info/#secret", "loop"),
+        ] {
+            let (endpoint, server) = serve_sequence(vec![response(
+                "302 Found",
+                &format!("Location: {location}\r\n"),
+                b"",
+            )]);
+            let instagram = Instagram::new(None, Duration::from_secs(2))
+                .await
+                .unwrap()
+                .with_retries(2);
+            let error = instagram
+                .extract_endpoint(&endpoint, "BA")
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(diagnostic), "{error}");
+            assert!(!error.contains("secret"));
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn redirect_chain_uses_one_extraction_deadline() {
+        let (endpoint, server) = serve_delayed_sequence(vec![
+            (
+                response("302 Found", "Location: /api/next/\r\n", b""),
+                Duration::from_millis(150),
+            ),
+            (response("200 OK", "", PHOTO), Duration::from_millis(250)),
+        ]);
+        let instagram = Instagram::new(None, Duration::from_millis(300))
+            .await
+            .unwrap();
+        let error = instagram
+            .extract_endpoint(&endpoint, "BA")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("timed out"), "{error}");
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     #[tokio::test]
@@ -729,7 +845,7 @@ mod transport_tests {
             .await
             .unwrap_err()
             .to_string();
-        assert!(error.contains("redirects are not followed"));
+        assert!(error.contains("same origin"));
         assert!(!error.contains("secret"));
         assert!(server.join().unwrap().contains("sessionid=secret"));
         assert_eq!(
