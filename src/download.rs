@@ -1,6 +1,7 @@
 use crate::{
     Result, error,
     extract::{Media, MediaJob},
+    transport::{RateLimits, retry_after},
 };
 use futures_util::StreamExt;
 use reqwest::{
@@ -10,18 +11,30 @@ use reqwest::{
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::io::AsyncWriteExt;
 
-pub fn client(timeout: Duration) -> Result<Client> {
-    Ok(Client::builder()
-        .user_agent(concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")))
-        .timeout(timeout)
-        // Media URLs should already be resolved. Avoid forwarding extracted secrets
-        // to an unexpected host via redirect.
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?)
+/// Clones share the HTTP connection pool and per-origin rate-limit cooldowns.
+#[derive(Clone)]
+pub struct DownloadClient {
+    http: Client,
+    rate_limits: RateLimits,
+    wait_limit: Duration,
+}
+
+pub fn client(timeout: Duration) -> Result<DownloadClient> {
+    Ok(DownloadClient {
+        http: Client::builder()
+            .user_agent(concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")))
+            .timeout(timeout)
+            // Media URLs should already be resolved. Avoid forwarding extracted secrets
+            // to an unexpected host via redirect.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?,
+        rate_limits: RateLimits::default(),
+        wait_limit: timeout,
+    })
 }
 
 pub fn safe_component(value: &str) -> String {
@@ -58,7 +71,12 @@ pub enum Outcome {
     Skipped(PathBuf),
 }
 
-pub async fn download(client: &Client, root: &Path, media: &Media, retries: u8) -> Result<Outcome> {
+pub async fn download(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    retries: u8,
+) -> Result<Outcome> {
     match &media.job {
         MediaJob::DirectHttp => {
             crate::extract::http_url(media.url.as_str())?;
@@ -93,6 +111,10 @@ pub async fn download(client: &Client, root: &Path, media: &Media, retries: u8) 
         headers.insert(name, HeaderValue::from_str(value)?);
     }
     for attempt in 0..=retries {
+        client
+            .rate_limits
+            .wait(&media.url, client.wait_limit)
+            .await?;
         match attempt_download(client, media, &headers, parent, &path).await {
             Ok(outcome) => return Ok(outcome),
             Err(failure) if failure.retry && attempt < retries => {
@@ -126,21 +148,28 @@ impl From<reqwest::Error> for Failure {
 }
 
 async fn attempt_download(
-    client: &Client,
+    client: &DownloadClient,
     media: &Media,
     headers: &HeaderMap,
     parent: &Path,
     path: &Path,
 ) -> std::result::Result<Outcome, Failure> {
     let response = client
+        .http
         .get(media.url.clone())
         .headers(headers.clone())
         .send()
         .await?;
     if !response.status().is_success() {
+        let retry = response.status().is_server_error()
+            || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
+        if retry && let Some(delay) = retry_after(response.headers(), SystemTime::now()) {
+            // Record even on the final attempt so other workers honor the server.
+            client.rate_limits.defer(&media.url, delay);
+        }
         return Err(Failure {
             error: error(format!("media server returned HTTP {}", response.status())),
-            retry: response.status().is_server_error(),
+            retry,
         });
     }
     let expected = response.content_length();

@@ -334,3 +334,90 @@ async fn refuses_redirects_instead_of_forwarding_secrets() {
     );
     handle.join().unwrap();
 }
+
+#[tokio::test]
+async fn honors_retry_after_before_retrying_rate_limits_and_service_failures() {
+    for status in ["429 Too Many Requests", "503 Service Unavailable"] {
+        let response = if status.starts_with("429") {
+            "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        } else {
+            "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        };
+        let (url, handle) = server(vec![
+            response,
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let client = download::client(Duration::from_secs(3)).unwrap();
+        let start = std::time::Instant::now();
+        let outcome = download::download(&client, root.path(), &media(&url), 1)
+            .await
+            .unwrap();
+        assert!(start.elapsed() >= Duration::from_secs(1));
+        let Outcome::Downloaded(path) = outcome else {
+            panic!("expected download")
+        };
+        assert_eq!(std::fs::read(path).unwrap(), b"ok");
+        assert_eq!(handle.join().unwrap().len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn final_rate_limit_response_defers_other_downloads_on_cloned_client() {
+    let (url, handle) = server(vec![
+        "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+    ]);
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(3)).unwrap();
+    assert!(
+        download::download(&client, root.path(), &media(&url), 0)
+            .await
+            .is_err()
+    );
+    let start = std::time::Instant::now();
+    let next = media(&format!("{url}?second"));
+    download::download(&client.clone(), root.path(), &next, 0)
+        .await
+        .unwrap();
+    // The cooldown began just before the first call returned.
+    assert!(start.elapsed() >= Duration::from_millis(900));
+    assert_eq!(handle.join().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn excessive_retry_after_fails_without_early_retry_or_partial_files() {
+    let (url, handle) = server(vec![
+        "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 999999999999999999999999\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    ]);
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(1)).unwrap();
+    let start = std::time::Instant::now();
+    let failure = download::download(&client, root.path(), &media(&url), 2)
+        .await
+        .unwrap_err();
+    assert!(failure.to_string().contains("retry later"));
+    assert!(start.elapsed() < Duration::from_secs(1));
+    assert_eq!(
+        std::fs::read_dir(root.path().join("twitter"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(handle.join().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn invalid_retry_after_uses_backoff_and_rate_limit_retries_are_bounded() {
+    let response = "HTTP/1.1 429 Too Many Requests\r\nRetry-After: invalid\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    let (url, handle) = server(vec![response, response]);
+    let root = tempfile::tempdir().unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let start = std::time::Instant::now();
+    let failure = download::download(&client, root.path(), &media(&url), 1)
+        .await
+        .unwrap_err();
+    assert!(failure.to_string().contains("429"));
+    assert!(start.elapsed() >= Duration::from_millis(250));
+    assert_eq!(handle.join().unwrap().len(), 2);
+}
