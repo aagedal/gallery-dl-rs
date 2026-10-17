@@ -84,8 +84,18 @@ saved filename/category and available native post metadata, excluding URLs and
 private request/adapter options. They publish atomically without overwriting,
 backfill missing sidecars for skipped media, and preserve completed media on
 metadata errors. Local tests cover schema/content, private option exclusion,
-concurrent publication, repair, failed media, and CLI behavior. Compatibility
-post metadata, streaming extraction, pagination, archives, and range resume remain.
+concurrent publication, repair, failed media, and CLI behavior.
+
+**Implemented pipeline step:** download mode now pulls one input at a time into
+a pipeline capped by `--jobs`. A full pipeline pauses later extraction, and active
+downloads continue during pending extraction. It retains at most the current
+input’s pending media and active jobs, plus fixed-size identity digests for global
+deduplication. URL listing emits results incrementally in input order; JSON
+inspection still buffers one array. CLI regressions cover publication during
+blocked extraction, backpressure at capacity, deduplication/order, failure
+continuation, and simultaneous extraction/download cancellation. Each social
+input still buffers its complete result; true per-item extraction streaming,
+compatibility post metadata, pagination, archives, and range resume remain.
 
 ## 4. Broader compatibility
 
