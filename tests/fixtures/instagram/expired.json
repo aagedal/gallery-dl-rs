@@ -1,0 +1,7 @@
+{
+  "status": "fail",
+  "message": "challenge_required",
+  "challenge": {
+    "url": "https://www.instagram.com/challenge/"
+  }
+}

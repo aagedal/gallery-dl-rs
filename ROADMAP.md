@@ -11,6 +11,12 @@ shared extraction interface that emits media, post metadata, and child URLs.
 - Instagram: photo posts and full carousels first, then direct reel/video media.
   Support logged-in sessions, redirects to login, expired sessions, and unavailable
   posts explicitly.
+  **Implemented experimentally:** opt-in REST single-post extraction for photos,
+  full mixed carousels, and direct video variants; scoped cookie loading, metadata,
+  bounded requests, and explicit error handling. Synthetic parser fixtures and
+  local HTTP transport checks are included. **Still required:** sanitized real
+  response fixtures and a documented successful live authenticated manual check.
+  Compatibility remains the default until those checks are complete.
 - Facebook: photo permalinks and albums first, then video posts. Establish tested
   URL coverage and distinguish login pages from successful extraction.
 - Twitter/X: single-post photos and direct video variants, including mixed-media
@@ -27,6 +33,12 @@ Add domain/path-scoped Netscape cookies, user-agent/referer propagation, safe
 redirect handling, Retry-After-aware rate limits, and cancellation. Replace each
 compatibility extractor independently as native coverage is verified. Keep the
 backend explicitly selectable until the three sites have sufficient parity.
+
+Native Instagram now uses domain/path/secure/expiry-scoped input cookies and
+propagates user-agent/referer without copying cookies to media hosts. Redirects
+are currently rejected; rate limits return Retry-After advice rather than retrying.
+Cookie updates, safe redirect following, shared rate-limit scheduling, and
+cancellation remain to be implemented.
 
 ## 3. Large collections and reliable archives
 

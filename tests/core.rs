@@ -16,6 +16,7 @@ fn media(url: &str) -> Media {
         url: extract::http_url(url).unwrap(),
         category: "twitter".into(),
         filename: "photo.jpg".into(),
+        metadata: None,
         headers: BTreeMap::new(),
     }
 }

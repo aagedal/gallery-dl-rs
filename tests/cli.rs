@@ -71,6 +71,61 @@ fn zero_concurrency_is_rejected() {
     );
 }
 
+#[test]
+fn native_selection_rejects_unsupported_inputs_without_running_backend() {
+    for url in [
+        "https://x.com/person/status/1",
+        "https://facebook.com/photo/?fbid=1",
+        "https://instagram.com/person/",
+    ] {
+        let output = binary()
+            .args([
+                "--extractor",
+                "native",
+                "--extractor-command",
+                "/missing/backend",
+                "-g",
+                url,
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("--extractor compatibility"), "{stderr}");
+        assert!(!stderr.contains("could not run"));
+    }
+    let output = binary()
+        .args([
+            "--extractor",
+            "native",
+            "--config",
+            "settings.json",
+            "-g",
+            "https://example.com/a.jpg",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("--config is only supported")
+    );
+}
+
+#[test]
+fn native_mode_still_lists_direct_links_without_backend() {
+    let output = binary()
+        .args(["--extractor", "native", "-g", "https://example.com/a.jpg"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "https://example.com/a.jpg\n"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn social_backend_is_invoked_without_a_shell() {

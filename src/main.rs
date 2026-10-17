@@ -1,17 +1,18 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use futures_util::{StreamExt, stream};
 use gallery_dl_rs::{
     Result,
     download::{self, Outcome},
     error,
     extract::{self, Backend},
+    instagram::Instagram,
 };
 use std::{collections::HashSet, path::PathBuf, time::Duration};
 
 #[derive(Parser)]
 #[command(
     version,
-    about = "Rust gallery downloader (social extraction currently requires gallery-dl)"
+    about = "Rust gallery downloader with an optional native Instagram extractor"
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
@@ -28,9 +29,12 @@ struct Args {
     /// Print extracted media as a JSON array without downloading
     #[arg(short = 'j', long)]
     dump_json: bool,
-    /// Netscape cookie file passed to the social extraction backend
+    /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
+    /// Social extractor; native currently supports Instagram single posts only
+    #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
+    extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
     #[arg(short, long)]
     config: Option<PathBuf>,
@@ -47,6 +51,12 @@ struct Args {
     retries: u8,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum Extractor {
+    Compatibility,
+    Native,
+}
+
 #[tokio::main]
 async fn main() {
     if let Err(e) = run(Args::parse()).await {
@@ -56,6 +66,22 @@ async fn main() {
 }
 
 async fn run(args: Args) -> Result<()> {
+    if matches!(args.extractor, Extractor::Native) && args.config.is_some() {
+        return Err(error(
+            "--config is only supported with --extractor compatibility",
+        ));
+    }
+    let native = if matches!(args.extractor, Extractor::Native) {
+        Some(
+            Instagram::new(
+                args.cookies.as_deref(),
+                Duration::from_secs(args.extraction_timeout),
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     let backend = Backend {
         executable: args.extractor_command,
         cookies: args.cookies,
@@ -70,7 +96,11 @@ async fn run(args: Args) -> Result<()> {
             // Social pages always go through their extractor, even if their path
             // happens to end with a media extension.
             if extract::social_site(&url).is_some() {
-                backend.extract(&url).await
+                match &native {
+                    Some(native) if extract::social_site(&url) == Some("instagram") => native.extract(&url).await,
+                    Some(_) => Err(error("native extraction currently supports Instagram single posts only; use --extractor compatibility")),
+                    None => backend.extract(&url).await,
+                }
             } else if let Some(item) = extract::direct(&url) {
                 Ok(vec![item])
             } else {
