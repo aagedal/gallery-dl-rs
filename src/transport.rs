@@ -1,4 +1,4 @@
-//! Shared, per-origin cooldowns for direct media downloads.
+//! Shared, per-origin cooldown scheduling for HTTP operations.
 use crate::{Result, error};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use std::{
@@ -46,7 +46,7 @@ impl RateLimits {
                 Some(Some(until)) => until.saturating_duration_since(Instant::now()),
                 Some(None) => {
                     return Err(error(
-                        "server Retry-After exceeds download wait limit; retry later",
+                        "server Retry-After exceeds operation wait limit; retry later",
                     ));
                 }
             };
@@ -55,7 +55,7 @@ impl RateLimits {
             }
             if delay > budget.saturating_sub(start.elapsed()) {
                 return Err(error(
-                    "server Retry-After exceeds download wait limit; retry later",
+                    "server Retry-After exceeds operation wait limit; retry later",
                 ));
             }
             // Recheck after sleeping: another response can extend the cooldown.

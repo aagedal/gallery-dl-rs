@@ -36,20 +36,26 @@ backend explicitly selectable until the three sites have sufficient parity.
 
 Native Instagram now uses domain/path/secure/expiry-scoped input cookies and
 propagates user-agent/referer without copying cookies to media hosts. Redirects
-are currently rejected; rate limits return Retry-After advice rather than retrying.
-Direct media downloads now retry HTTP 429 and 5xx responses with numeric or
-HTTP-date Retry-After handling and shared per-origin cooldowns across workers.
-Cooldown waits are bounded by the download timeout; excessive delays fail with
-retry-later advice without sending an early retry. Local HTTP tests and virtual
-clock scheduler tests cover retry bounds, shared cooldowns, origin isolation,
-deadline extensions, and excessive delays. Extraction does not yet share this
-scheduler. CLI Ctrl-C cancellation now drops extraction/download futures, cleans
+are currently rejected. `--retries` controls additional attempts for direct media
+downloads and native Instagram HTTP 429, HTTP 5xx, and send/read transport
+failures; the compatibility backend retains its own retries. Retry-After accepts
+seconds or an HTTP date, with exponential backoff for missing/invalid values.
+Native extraction reuses the download transport's per-origin cooldown scheduler
+across calls on an Instagram instance, recording cooldowns even on a final
+attempt. `Instagram::new` retains zero retries unless `with_retries` is used.
+Authentication, missing-post, redirect, and parser errors are not retried,
+including rate-limit payloads returned with HTTP 200. Download cooldown waits
+are bounded by the download timeout; excessive delays fail with retry-later
+advice without sending an early retry. The native per-input extraction timeout
+bounds the entire operation, including requests, backoff, and cooldown waits.
+Local HTTP tests and virtual clock scheduler tests cover retry bounds, shared
+cooldowns, origin isolation, deadline extensions, and excessive delays.
+CLI Ctrl-C cancellation now drops extraction/download futures, cleans
 temporary downloads, and stops the directly owned compatibility process, with
 exit status 130. Unix CLI tests verify partial-file cleanup and child termination;
 native requests and cooldown waits use the same cancellation scope. Cookie
-updates, safe redirect following, and shared extraction rate-limit scheduling
-remain to be implemented. A companion adapter will also need cancellation at its
-library boundary.
+updates and safe redirect following remain to be implemented. A companion adapter
+will also need cancellation at its library boundary.
 
 ## 3. Large collections and reliable archives
 
