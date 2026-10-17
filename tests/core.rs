@@ -16,6 +16,7 @@ fn media(url: &str) -> Media {
         url: extract::http_url(url).unwrap(),
         category: "twitter".into(),
         filename: "photo.jpg".into(),
+        metadata: None,
         headers: BTreeMap::new(),
     }
 }
@@ -39,6 +40,8 @@ fn server(responses: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<Strin
                     Err(e) => panic!("{e}"),
                 }
             };
+            // Windows can inherit the listener's nonblocking mode.
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

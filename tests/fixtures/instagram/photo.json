@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "items": [
+    {
+      "pk": "64",
+      "code": "BA",
+      "user": {
+        "username": "fixture_user"
+      },
+      "caption": {
+        "text": "Synthetic public post"
+      },
+      "taken_at": 1700000000,
+      "media_type": 1,
+      "image_versions2": {
+        "candidates": [
+          {
+            "url": "https://cdn.example/64-small.jpg",
+            "width": 320,
+            "height": 320
+          },
+          {
+            "url": "https://cdn.example/64.jpg",
+            "width": 1080,
+            "height": 1080
+          }
+        ]
+      }
+    }
+  ]
+}

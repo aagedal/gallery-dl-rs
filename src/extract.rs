@@ -11,8 +11,21 @@ pub struct Media {
     pub url: Url,
     pub category: String,
     pub filename: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<PostMetadata>,
     #[serde(skip_serializing)]
     pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PostMetadata {
+    pub post_id: String,
+    pub media_id: String,
+    pub shortcode: String,
+    pub username: Option<String>,
+    pub caption: Option<String>,
+    pub timestamp: Option<i64>,
+    pub index: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +78,7 @@ pub fn direct(url: &Url) -> Option<Media> {
         url: url.clone(),
         category: "direct".into(),
         filename: filename.into(),
+        metadata: None,
         headers: BTreeMap::new(),
     })
 }
@@ -173,6 +187,7 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
             url,
             category: category.into(),
             filename,
+            metadata: None,
             headers,
         });
     }

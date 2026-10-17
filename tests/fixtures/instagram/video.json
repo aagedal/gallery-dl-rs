@@ -1,0 +1,36 @@
+{
+  "status": "ok",
+  "items": [
+    {
+      "pk": "64",
+      "code": "BA",
+      "user": {
+        "username": "fixture_user"
+      },
+      "caption": {
+        "text": "Synthetic public post"
+      },
+      "taken_at": 1700000000,
+      "media_type": 2,
+      "image_versions2": {
+        "candidates": [
+          {
+            "url": "https://cdn.example/thumbnail.jpg"
+          }
+        ]
+      },
+      "video_versions": [
+        {
+          "url": "https://cdn.example/64-small.mp4",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "url": "https://cdn.example/64.mp4",
+          "width": 1920,
+          "height": 1080
+        }
+      ]
+    }
+  ]
+}
