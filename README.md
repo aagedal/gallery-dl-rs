@@ -52,8 +52,15 @@ stories, and albums still need the compatibility backend. There is no automatic
 fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 
 The native extractor reads Netscape cookies scoped to the API URL's domain, path,
-HTTPS requirement, and expiry. It does not log in, refresh cookies, or import
-browser sessions. It follows up to five redirects within the same origin and
+HTTPS requirement, and expiry. Response `Set-Cookie` updates, including session
+and CSRF rotation and deletions, are retained in memory across redirects, retries,
+and later posts on the same extractor instance. Updates validate domain scope
+against a compiled public-suffix list, honor path/expiry rules, and protect secure
+cookies from insecure replacement. Server cookies are limited to 4 KiB each;
+new identities are accepted while the jar has fewer than 256 entries (larger
+input files are still loaded). The input file is never rewritten. This does not
+log in, renew an expired session, or import browser sessions.
+It follows up to five redirects within the same origin and
 `/api/` paths, reselecting cookies and the CSRF token for each URL. Redirects to
 login/challenge pages fail explicitly, as do authentication/session failures and
 missing posts. `--retries` controls additional attempts for native HTTP 429,

@@ -63,8 +63,15 @@ CLI Ctrl-C cancellation now drops extraction/download futures, cleans
 temporary downloads, and stops the directly owned compatibility process, with
 exit status 130. Unix CLI tests verify partial-file cleanup and child termination;
 native requests, redirects, and cooldown waits use the same cancellation scope.
-Cookie updates remain to be implemented. A companion adapter will also need
-cancellation at its library boundary.
+Native API response cookies now update the in-memory jar before redirect/status
+handling, so session and CSRF changes and deletions apply to redirects, retries,
+and subsequent posts on the same instance. Domain/public-suffix validation,
+default paths, expiry and Max-Age precedence, secure-cookie protection, cookie
+prefix rules, and bounded server-controlled storage are covered by unit tests.
+Local HTTP tests cover rotation through redirects/retries, deletion on an
+authentication failure, credential isolation from media jobs, and preservation of
+the input cookie file. Updates are not persisted and cannot renew an expired
+session. A companion adapter will also need cancellation at its library boundary.
 
 ## 3. Large collections and reliable archives
 
