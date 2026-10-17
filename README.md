@@ -53,10 +53,14 @@ fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 
 The native extractor reads Netscape cookies scoped to the API URL's domain, path,
 HTTPS requirement, and expiry. It does not log in, refresh cookies, or import
-browser sessions. It rejects redirects and reports authentication/session failures,
-missing posts, and rate limits (including numeric `Retry-After` advice). It makes
-one request per input, bounded by `--extraction-timeout` and a 16 MiB response
-limit. `--retries` applies to downloads, not native extraction.
+browser sessions. It rejects redirects and reports authentication/session failures
+and missing posts. `--retries` controls additional attempts for native HTTP 429,
+HTTP 5xx, and send/read transport failures as well as downloads. Authentication,
+missing-post, redirect, and parser errors are not retried; this includes rate-limit
+payloads returned with HTTP 200. `--extraction-timeout` bounds the entire native
+operation, including backoff and cooldown waits, with a 16 MiB response limit per
+attempt. Library callers retain zero retries with `Instagram::new` and can opt in
+with `with_retries`.
 
 Native responses include all carousel children in order and select the largest
 available photo or direct video variant by pixel area. Missing children or video
@@ -83,10 +87,12 @@ Instagram session cookies are never copied to media hosts.
   retries controlled by `--retries`. Retry-After accepts seconds or an HTTP date;
   missing/invalid values use exponential backoff. Concurrent downloads share
   cooldowns by origin (scheme, host, and port), including cooldowns reported on a
-  download's final attempt. Requests already in flight can finish. `--timeout`
-  bounds each media attempt and each cooldown wait; longer cooldowns fail with
-  retry-later advice. Social extraction has a separate timeout and its own backend
-  retries; native Instagram still reports rate limits without retrying.
+  final attempt. Native Instagram reuses the same scheduler, sharing cooldowns
+  across calls on an extractor instance and recording them even on a final
+  attempt. Requests already in flight can finish. `--timeout` bounds each media
+  attempt and each cooldown wait; longer cooldowns fail with retry-later advice.
+  Native extraction uses its overall `--extraction-timeout` deadline. The
+  compatibility backend retains its own retries and separate extraction timeout.
 - Failed inputs do not prevent other inputs from being processed. Any failed
   extraction or download results in a nonzero exit code. Status goes to stderr;
   `-g` and `-j` output goes to stdout.
@@ -142,7 +148,8 @@ cargo clippy --locked --all-targets -- -D warnings
 
 `src/extract.rs` owns URL dispatch and the compatibility protocol.
 `src/download.rs` owns request headers, downloads, retries, and file publication.
-`src/transport.rs` owns shared download cooldowns and Retry-After parsing.
+`src/transport.rs` owns per-origin cooldowns for downloads and native extraction,
+and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.
 `src/instagram.rs` owns the experimental native Instagram extractor;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the

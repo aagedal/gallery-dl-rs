@@ -4,10 +4,15 @@ use crate::{
     cookies::CookieJar,
     error,
     extract::{Media, PostMetadata, http_url},
+    transport::{RateLimits, retry_after},
 };
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
-use std::{collections::BTreeMap, path::Path, time::Duration};
+use std::{
+    collections::BTreeMap,
+    path::Path,
+    time::{Duration, SystemTime},
+};
 use url::Url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -17,6 +22,8 @@ pub struct Instagram {
     client: Client,
     cookies: CookieJar,
     timeout: Duration,
+    retries: u8,
+    rate_limits: RateLimits,
 }
 
 impl Instagram {
@@ -33,7 +40,16 @@ impl Instagram {
                 .build()?,
             cookies,
             timeout,
+            retries: 0,
+            rate_limits: RateLimits::default(),
         })
+    }
+
+    /// Configure additional attempts for HTTP 429/5xx and transport failures.
+    /// The extraction timeout covers all attempts and waits. Defaults to zero.
+    pub fn with_retries(mut self, retries: u8) -> Self {
+        self.retries = retries;
+        self
     }
 
     pub async fn extract(&self, post: &Url) -> Result<Vec<Media>> {
@@ -47,51 +63,128 @@ impl Instagram {
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
         tokio::time::timeout(self.timeout, async {
-            let mut request = self.client.get(endpoint.clone())
-                .header(header::ACCEPT, "application/json")
-                .header(header::REFERER, format!("https://www.instagram.com/p/{code}/"))
-                .header("X-IG-App-ID", "936619743392459")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .header("X-IG-WWW-Claim", "0");
-            if let Some(cookies) = self.cookies.header(endpoint) {
-                if let Some(token) = cookies.split("; ").find_map(|s| s.strip_prefix("csrftoken=")) {
-                    request = request.header("X-CSRFToken", token);
+            for attempt in 0..=self.retries {
+                self.rate_limits.wait(endpoint, self.timeout).await?;
+                match self.attempt(endpoint, code, attempt).await {
+                    Ok(media) => return Ok(media),
+                    Err(failure) if failure.retry && attempt < self.retries => {
+                        // Transport failures have no response to establish a cooldown.
+                        // Also yield between attempts when Retry-After is zero.
+                        tokio::time::sleep(backoff(attempt)).await;
+                    }
+                    Err(failure) => return Err(failure.error),
                 }
-                request = request.header(header::COOKIE, cookies);
             }
-            let mut response = request.send().await
-                .map_err(|_| error("Instagram request failed; check network access"))?;
-            let status = response.status();
-            if status == StatusCode::TOO_MANY_REQUESTS {
-                let retry = response.headers().get(header::RETRY_AFTER)
-                    .and_then(|s| s.to_str().ok()).and_then(|s| s.parse::<u64>().ok());
-                return Err(error(match retry {
-                    Some(seconds) => format!("Instagram rate limit; retry after {seconds} seconds"),
-                    None => "Instagram rate limit; retry later".into(),
-                }));
+            unreachable!()
+        })
+        .await
+        .map_err(|_| error("native Instagram extraction timed out"))?
+    }
+
+    async fn attempt(
+        &self,
+        endpoint: &Url,
+        code: &str,
+        attempt: u8,
+    ) -> std::result::Result<Vec<Media>, Failure> {
+        let mut request = self
+            .client
+            .get(endpoint.clone())
+            .header(header::ACCEPT, "application/json")
+            .header(
+                header::REFERER,
+                format!("https://www.instagram.com/p/{code}/"),
+            )
+            .header("X-IG-App-ID", "936619743392459")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("X-IG-WWW-Claim", "0");
+        if let Some(cookies) = self.cookies.header(endpoint) {
+            if let Some(token) = cookies
+                .split("; ")
+                .find_map(|s| s.strip_prefix("csrftoken="))
+            {
+                request = request.header("X-CSRFToken", token);
             }
-            if status.is_redirection() {
-                return Err(error("Instagram redirected the request; login or a session challenge may be required (redirects are not followed)"));
+            request = request.header(header::COOKIE, cookies);
+        }
+        let mut response = request
+            .send()
+            .await
+            .map_err(|_| Failure::transient("Instagram request failed; check network access"))?;
+        let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            let delay = retry_after(response.headers(), SystemTime::now());
+            // Keep final-attempt cooldowns for subsequent posts on this instance.
+            self.rate_limits
+                .defer(endpoint, delay.unwrap_or_else(|| backoff(attempt)));
+            return Err(Failure::transient(
+                if status == StatusCode::TOO_MANY_REQUESTS {
+                    match delay {
+                        Some(delay) => format!(
+                            "Instagram rate limit; retry after {} seconds",
+                            delay.as_secs()
+                        ),
+                        None => "Instagram rate limit; retry later".into(),
+                    }
+                } else {
+                    format!("Instagram returned HTTP {status}")
+                },
+            ));
+        }
+        if status.is_redirection() {
+            return Err(error("Instagram redirected the request; login or a session challenge may be required (redirects are not followed)").into());
+        }
+        if matches!(status.as_u16(), 401 | 403) {
+            return Err(error(
+                "Instagram authentication required or session expired; refresh --cookies",
+            )
+            .into());
+        }
+        if matches!(status.as_u16(), 404 | 410) {
+            return Err(error("Instagram post unavailable or inaccessible to this session").into());
+        }
+        if !status.is_success() {
+            return Err(error(format!("Instagram returned HTTP {status}")).into());
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| Failure::transient("could not read Instagram response"))?
+        {
+            if body.len() + chunk.len() > MAX_RESPONSE {
+                return Err(error("Instagram response exceeded 16 MiB").into());
             }
-            if matches!(status.as_u16(), 401 | 403) {
-                return Err(error("Instagram authentication required or session expired; refresh --cookies"));
-            }
-            if matches!(status.as_u16(), 404 | 410) {
-                return Err(error("Instagram post unavailable or inaccessible to this session"));
-            }
-            if !status.is_success() {
-                return Err(error(format!("Instagram returned HTTP {status}")));
-            }
-            let mut body = Vec::new();
-            while let Some(chunk) = response.chunk().await
-                .map_err(|_| error("could not read Instagram response"))? {
-                if body.len() + chunk.len() > MAX_RESPONSE {
-                    return Err(error("Instagram response exceeded 16 MiB"));
-                }
-                body.extend_from_slice(&chunk);
-            }
-            parse_response(&body, code)
-        }).await.map_err(|_| error("native Instagram extraction timed out"))?
+            body.extend_from_slice(&chunk);
+        }
+        parse_response(&body, code).map_err(Into::into)
+    }
+}
+
+fn backoff(attempt: u8) -> Duration {
+    Duration::from_millis(250 * (1u64 << attempt.min(6)))
+}
+
+struct Failure {
+    error: crate::Error,
+    retry: bool,
+}
+
+impl Failure {
+    fn transient(message: impl Into<String>) -> Self {
+        Self {
+            error: error(message),
+            retry: true,
+        }
+    }
+}
+
+impl From<crate::Error> for Failure {
+    fn from(error: crate::Error) -> Self {
+        Self {
+            error,
+            retry: false,
+        }
     }
 }
 
@@ -332,6 +425,249 @@ mod transport_tests {
             String::from_utf8(request).unwrap()
         });
         (endpoint, task)
+    }
+
+    // Raw responses also allow exercising connection loss and truncated bodies.
+    fn serve_sequence(
+        responses: Vec<Vec<u8>>,
+    ) -> (Url, JoinHandle<Vec<(std::time::Instant, SystemTime)>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = Url::parse(&format!(
+            "http://{}/api/v1/media/64/info/",
+            listener.local_addr().unwrap()
+        ))
+        .unwrap();
+        let task = thread::spawn(move || {
+            let mut arrivals = Vec::new();
+            for response in responses {
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(std::time::Instant::now() < deadline, "server timed out");
+                            thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(e) => panic!("{e}"),
+                    }
+                };
+                arrivals.push((std::time::Instant::now(), SystemTime::now()));
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert_ne!(count, 0);
+                    request.extend_from_slice(&buffer[..count]);
+                    assert!(request.len() < 64 * 1024);
+                }
+                let _ = stream.write_all(&response);
+            }
+            arrivals
+        });
+        (endpoint, task)
+    }
+
+    fn response(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
+        let mut response = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(body);
+        response
+    }
+
+    #[tokio::test]
+    async fn retries_transient_statuses_and_transport_failures() {
+        for transient in [
+            response("429 Too Many Requests", "Retry-After: 0\r\n", b""),
+            response("503 Service Unavailable", "Retry-After: invalid\r\n", b""),
+            Vec::new(), // Connection closed before response headers.
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{".to_vec(),
+        ] {
+            let (endpoint, server) = serve_sequence(vec![transient, response("200 OK", "", PHOTO)]);
+            let instagram = Instagram::new(None, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .with_retries(1);
+            assert_eq!(
+                instagram
+                    .extract_endpoint(&endpoint, "BA")
+                    .await
+                    .unwrap()
+                    .len(),
+                1
+            );
+            let arrivals = server.join().unwrap();
+            assert!(arrivals[1].0.duration_since(arrivals[0].0) >= Duration::from_millis(250));
+        }
+    }
+
+    #[tokio::test]
+    async fn honors_numeric_and_http_date_cooldowns() {
+        for use_date in [false, true] {
+            let value = if use_date {
+                httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(2))
+            } else {
+                "1".to_owned()
+            };
+            let (endpoint, server) = serve_sequence(vec![
+                response(
+                    "429 Too Many Requests",
+                    &format!("Retry-After: {value}\r\n"),
+                    b"",
+                ),
+                response("200 OK", "", PHOTO),
+            ]);
+            let instagram = Instagram::new(None, Duration::from_secs(4))
+                .await
+                .unwrap()
+                .with_retries(1);
+            instagram.extract_endpoint(&endpoint, "BA").await.unwrap();
+            let arrivals = server.join().unwrap();
+            if use_date {
+                assert!(arrivals[1].1 >= httpdate::parse_http_date(&value).unwrap());
+            } else {
+                assert!(arrivals[1].0.duration_since(arrivals[0].0) >= Duration::from_secs(1));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn retains_final_attempt_cooldown_for_the_next_post() {
+        let (endpoint, server) = serve_sequence(vec![
+            response("429 Too Many Requests", "Retry-After: 1\r\n", b""),
+            response("200 OK", "", PHOTO),
+        ]);
+        let instagram = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+        assert!(
+            instagram
+                .extract_endpoint(&endpoint, "BA")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("rate limit")
+        );
+        let mut next = endpoint.clone();
+        next.set_path("/api/v1/media/65/info/");
+        instagram.extract_endpoint(&next, "BA").await.unwrap();
+        let arrivals = server.join().unwrap();
+        assert!(arrivals[1].0.duration_since(arrivals[0].0) >= Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn bounds_retries_and_does_not_retry_terminal_errors() {
+        let (endpoint, server) =
+            serve_sequence(vec![response("503 Service Unavailable", "", b""); 2]);
+        let instagram = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_retries(1);
+        assert!(
+            instagram
+                .extract_endpoint(&endpoint, "BA")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("503")
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
+        for (status, body, expected) in [
+            ("401 Unauthorized", b"".as_slice(), "authentication"),
+            ("403 Forbidden", b"".as_slice(), "authentication"),
+            ("404 Not Found", b"".as_slice(), "unavailable"),
+            ("410 Gone", b"".as_slice(), "unavailable"),
+            ("302 Found", b"".as_slice(), "redirect"),
+            ("400 Bad Request", b"".as_slice(), "400"),
+            ("200 OK", b"<html>login</html>".as_slice(), "invalid JSON"),
+            (
+                "200 OK",
+                include_bytes!("../tests/fixtures/instagram/rate-limit.json").as_slice(),
+                "rate limit",
+            ),
+        ] {
+            let (endpoint, server) = serve_sequence(vec![response(status, "", body)]);
+            let instagram = Instagram::new(None, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .with_retries(2);
+            assert!(
+                instagram
+                    .extract_endpoint(&endpoint, "BA")
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains(expected)
+            );
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn bounds_total_retry_time_and_rejects_excessive_cooldowns() {
+        let (endpoint, server) =
+            serve_sequence(vec![response("503 Service Unavailable", "", b""); 3]);
+        let instagram = Instagram::new(None, Duration::from_millis(1500))
+            .await
+            .unwrap()
+            .with_retries(10);
+        let start = std::time::Instant::now();
+        let error = instagram
+            .extract_endpoint(&endpoint, "BA")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("timed out"), "{error}");
+        assert!(start.elapsed() < Duration::from_secs(3));
+        assert_eq!(server.join().unwrap().len(), 3);
+
+        let (endpoint, server) = serve_sequence(vec![response(
+            "429 Too Many Requests",
+            "Retry-After: 999999999999999999999999\r\n",
+            b"",
+        )]);
+        let instagram = Instagram::new(None, Duration::from_secs(1))
+            .await
+            .unwrap()
+            .with_retries(1);
+        let error = instagram
+            .extract_endpoint(&endpoint, "BA")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("retry later"), "{error}");
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_cooldown_wait_without_losing_the_deadline() {
+        let (endpoint, server) = serve_sequence(vec![
+            response("429 Too Many Requests", "Retry-After: 1\r\n", b""),
+            response("200 OK", "", PHOTO),
+        ]);
+        let instagram = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_retries(1);
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(400),
+                instagram.extract_endpoint(&endpoint, "BA")
+            )
+            .await
+            .is_err()
+        );
+        // Dropping the previous future must not leave a worker making retries,
+        // and a new call must still honor the previously observed cooldown.
+        instagram.extract_endpoint(&endpoint, "BA").await.unwrap();
+        let arrivals = server.join().unwrap();
+        assert_eq!(arrivals.len(), 2);
+        assert!(arrivals[1].0.duration_since(arrivals[0].0) >= Duration::from_secs(1));
     }
 
     #[tokio::test]

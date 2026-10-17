@@ -40,13 +40,13 @@ struct Args {
     config: Option<PathBuf>,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
-    /// Seconds allowed for each social URL's extraction
+    /// Total seconds allowed for each social URL's extraction
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
     /// Seconds allowed per media attempt and per rate-limit wait
     #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..))]
     timeout: u64,
-    /// Additional attempts on rate limits, server errors, or transport errors
+    /// Additional download/native extraction attempts on rate limits, server or transport errors
     #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=10))]
     retries: u8,
 }
@@ -90,7 +90,8 @@ async fn run(args: Args) -> Result<()> {
                 args.cookies.as_deref(),
                 Duration::from_secs(args.extraction_timeout),
             )
-            .await?,
+            .await?
+            .with_retries(args.retries),
         )
     } else {
         None
