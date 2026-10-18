@@ -38,6 +38,7 @@ pub mod sleep;
 mod transport;
 pub mod tumblr;
 pub mod twitter;
+pub mod wallhaven;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;

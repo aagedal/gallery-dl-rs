@@ -414,6 +414,7 @@ async fn run(args: Args) -> Result<()> {
                     | "pixiv"
                     | "deviantart"
                     | "flickr"
+                    | "wallhaven"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -595,6 +596,7 @@ struct Extractors {
     pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
     deviantart: OnceCell<Result<gallery_dl_rs::deviantart::DeviantArt>>,
     flickr: OnceCell<Result<gallery_dl_rs::flickr::Flickr>>,
+    wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
 }
 
 impl Extractors {
@@ -847,6 +849,27 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Flickr initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "wallhaven" => {
+                    let native = extractors
+                        .wallhaven
+                        .get_or_init(|| async {
+                            gallery_dl_rs::wallhaven::Wallhaven::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_api_key(options.api_key.as_deref())
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Wallhaven initialization failed: {e}"))
+                        })?;
                     native.events(&url)
                 }
                 Extractor::Native if category == "deviantart" => {
@@ -1129,6 +1152,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "pixiv",
         "deviantart",
         "flickr",
+        "wallhaven",
         "direct",
     ] {
         let options = defaults

@@ -1829,8 +1829,12 @@ fn conditional_templates_preserve_order_and_replace_whole_settings() {
 #[test]
 fn api_key_is_tumblr_and_flickr_only_and_never_echoed() {
     let config =
-        parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"},"flickr":{"api-key":"f00d"}}}"#)
+        parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"},"flickr":{"api-key":"f00d"},"wallhaven":{"api-key":"beef"}}}"#)
             .unwrap();
+    assert_eq!(
+        config.resolve("wallhaven").unwrap().api_key.as_deref(),
+        Some("beef")
+    );
     assert_eq!(
         config.resolve("flickr").unwrap().api_key.as_deref(),
         Some("f00d")

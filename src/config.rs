@@ -85,7 +85,7 @@ pub struct Options {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
-    /// Tumblr or Flickr API key; only accepted in the `tumblr` and `flickr` categories.
+    /// Tumblr, Flickr or Wallhaven API key; only accepted in those categories.
     pub api_key: Option<String>,
     /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
     pub refresh_token: Option<String>,
@@ -357,6 +357,7 @@ struct RawExtractor {
     pixiv: Box<RawOptions>,
     deviantart: Box<RawOptions>,
     flickr: Box<RawOptions>,
+    wallhaven: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
 
@@ -492,6 +493,7 @@ impl Config {
                 "pixiv",
                 "deviantart",
                 "flickr",
+                "wallhaven",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -622,11 +624,12 @@ impl Config {
             ("pixiv", extractor.pixiv),
             ("deviantart", extractor.deviantart),
             ("flickr", extractor.flickr),
+            ("wallhaven", extractor.wallhaven),
             ("direct", extractor.direct),
         ] {
-            if !matches!(name, "tumblr" | "flickr") && settings.api_key.0.is_some() {
+            if !matches!(name, "tumblr" | "flickr" | "wallhaven") && settings.api_key.0.is_some() {
                 return Err(error(
-                    "native configuration api-key is only supported for tumblr and flickr",
+                    "native configuration api-key is only supported for tumblr, flickr and wallhaven",
                 ));
             }
             if name != "pixiv" && settings.refresh_token.0.is_some() {
@@ -675,6 +678,7 @@ impl Config {
                 | "pixiv"
                 | "deviantart"
                 | "flickr"
+                | "wallhaven"
                 | "direct"
         ) {
             return Err(error("unsupported native configuration category"));
