@@ -106,6 +106,9 @@ struct Args {
     /// Seconds to wait before each download, as SECONDS or MIN-MAX
     #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
     sleep: Option<gallery_dl_rs::sleep::SleepRange>,
+    /// Stop all inputs after N consecutive skipped (existing or archived) files
+    #[arg(short = 'T', long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+    terminate: Option<u64>,
     /// SQLite history of completed media (gallery-dl-rs format)
     #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
     download_archive: Option<PathBuf>,
@@ -400,7 +403,20 @@ async fn run(args: Args) -> Result<()> {
             })
             .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
+        let mut skipped = 0u64;
         while let Some(result) = results.next().await {
+            if matches!(
+                result,
+                Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
+                    | ArchiveOutcome::AlreadyArchived)
+            ) {
+                skipped += 1;
+            } else if matches!(
+                result,
+                Ok(ArchiveOutcome::Completed(Outcome::Downloaded(_)))
+            ) {
+                skipped = 0;
+            }
             match result {
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
                     eprintln!("downloaded {}", path.display())
@@ -416,6 +432,11 @@ async fn run(args: Args) -> Result<()> {
                     eprintln!("download failed: {e}");
                     failed.set(failed.get() + 1);
                 }
+            }
+            if args.terminate.is_some_and(|limit| skipped >= limit) {
+                // Dropping the stream cancels pending extraction and downloads.
+                eprintln!("stopping after {skipped} consecutive skipped files");
+                break;
             }
         }
     }
