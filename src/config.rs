@@ -7,6 +7,7 @@
 use crate::{
     Result, error,
     naming::{DirectoryTemplate, FilenameTemplate},
+    selection::RangeSelection,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -25,6 +26,8 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 pub struct Options {
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
+    /// One-based media position ranges, applied separately to each input.
+    pub file_range: Option<String>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
@@ -44,6 +47,10 @@ impl Options {
                 .clone()
                 .or_else(|| self.base_directory.clone()),
             filename: overrides.filename.clone().or_else(|| self.filename.clone()),
+            file_range: overrides
+                .file_range
+                .clone()
+                .or_else(|| self.file_range.clone()),
             directory: overrides
                 .directory
                 .clone()
@@ -70,6 +77,7 @@ pub struct Config {
 struct RawRoot {
     base_directory: Field,
     filename: Field,
+    file_range: Field,
     directory: Field,
     cookies: Field,
     archive: Field,
@@ -83,6 +91,7 @@ struct RawRoot {
 struct RawExtractor {
     base_directory: Field,
     filename: Field,
+    file_range: Field,
     directory: Field,
     cookies: Field,
     archive: Field,
@@ -99,6 +108,7 @@ struct RawExtractor {
 struct RawOptions {
     base_directory: Field,
     filename: Field,
+    file_range: Field,
     directory: Field,
     cookies: Field,
     archive: Field,
@@ -178,6 +188,7 @@ impl Config {
         let global = RawOptions {
             base_directory: root.base_directory,
             filename: root.filename,
+            file_range: root.file_range,
             directory: root.directory,
             cookies: root.cookies,
             archive: root.archive,
@@ -189,6 +200,7 @@ impl Config {
         let defaults = RawOptions {
             base_directory: extractor.base_directory,
             filename: extractor.filename,
+            file_range: extractor.file_range,
             directory: extractor.directory,
             cookies: extractor.cookies,
             archive: extractor.archive,
@@ -226,6 +238,29 @@ impl Config {
 
 impl RawOptions {
     fn resolve(self, directory: &Path) -> Result<Options> {
+        let file_range = match self.file_range.0 {
+            None => None,
+            Some(value) => {
+                let invalid = || {
+                    error(
+                        "native configuration file-range must be a supported range string or list of strings",
+                    )
+                };
+                let spec = match value {
+                    Value::String(spec) if spec.is_empty() => ":".into(),
+                    Value::String(spec) => spec,
+                    Value::Array(values) if values.is_empty() => ":".into(),
+                    Value::Array(values) if !values.is_empty() && values.len() <= 256 => values
+                        .iter()
+                        .map(|v| v.as_str().ok_or_else(invalid))
+                        .collect::<Result<Vec<_>>>()?
+                        .join(","),
+                    _ => return Err(invalid()),
+                };
+                RangeSelection::parse(&spec).map_err(|_| invalid())?;
+                Some(spec)
+            }
+        };
         let filename = match self.filename.0 {
             None => None,
             Some(Value::String(value)) => {
@@ -290,6 +325,7 @@ impl RawOptions {
             cookies: path(self.cookies, directory, "cookies")?,
             archive: path(self.archive, directory, "archive")?,
             filename,
+            file_range,
             directory: templates,
             retries,
             timeout,

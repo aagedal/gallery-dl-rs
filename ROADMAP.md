@@ -138,6 +138,17 @@ requests. Local fixtures exercise order, backpressure, cursor encoding/errors,
 private/foreign profiles, and deadlines. Authenticated live profile pagination
 and real response fixtures remain unverified; other native collections remain.
 
+**Implemented file selection:** `--range` and scoped native `file-range` strings
+or lists select one-based media positions using comma unions, inclusive hyphen
+ranges, and exclusive-stop signed slices. Membership and final indices use
+bounded arithmetic rather than expanding ranges. Selection runs per input before
+global deduplication and archive checks, applies to inspection and downloading,
+and drops upstream immediately at the last matching index. Empty selections do
+not start extraction or open archives. Cooperative skips preserve cancellation.
+Parser, CLI, process-lifecycle, native-pagination, sidecar, and archive tests cover
+selection behavior. Site-specific offset skipping, counters at flattened child
+boundaries, post/child ranges, and metadata filters remain.
+
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and
 compatibility Instagram, Twitter/X, and Facebook survive signed URL/header
@@ -185,7 +196,7 @@ documented subset, not full gallery-dl formatting compatibility; conditional tem
 **Implemented configuration step:** `--native-config` accepts an explicit strict
 subset of gallery-dl's JSON scopes: extractor defaults, category settings, and
 root overrides, followed by explicit CLI flags. Supported settings include
-base-directory, filename, cookies, archive, retries, and fractional-second timeout.
+base-directory, directory, filename, file-range, cookies, archive, retries, and fractional-second timeout.
 Paths are anchored to the configuration directory, and unknown/unsupported values
 fail without echoing private input. The same settings drive Rust media downloads,
 per-category compatibility cookie arguments, and native Instagram credentials,

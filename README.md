@@ -142,6 +142,38 @@ overall extraction deadline as the native pipeline. Parser/reference/local HTTP
 tests and the [Twitter fixture notes](tests/fixtures/twitter/README.md) describe
 what is verified and the remaining real-response/manual authenticated gates.
 
+## Media selection
+
+`--range '2-5,8,10:20:3'` selects media positions separately for each input URL.
+Positions start at one. Hyphen endpoints are inclusive (`2-5` selects 2 through
+5); slices exclude their stop (`10:20:3` selects 10, 13, 16, 19). Comma groups
+form a union and output retains extraction order. Omitted endpoints default to
+one or the signed 64-bit maximum; `5-`, `5:`, and `5::` start at item five.
+Signed slice steps are supported as mathematical index sets; negative arguments
+are not relative to collection length and do not reverse the output order.
+
+The same selection applies to downloads, `-g`, and `-j`. Native configuration
+accepts `"file-range": "2-5"` or `"file-range": ["2-5", "8"]` in the normal
+scopes; an explicit CLI range overrides it. Empty configuration strings/lists
+restore all files; `0` or an empty mathematical range selects none. Specifications
+are limited to 4096 bytes, 256 groups, and signed 64-bit integer arguments;
+malformed values fail explicitly.
+
+Selection counts emitted media before global deduplication and archive checks;
+duplicates and archived media therefore occupy positions. Extraction errors are
+reported without occupying a media position. At the last requested position the
+upstream stream is dropped, cancelling pending work and the owned compatibility
+process. No later pages or rows are consumed. Earlier selected downloads finish
+normally. An empty selection starts no extraction or media requests and opens no
+archive. The selector scans earlier media rather than using site-specific skip
+optimizations; native extractors still parse a whole response page or post.
+
+Compatibility positions count the resolved media stream for an entire input,
+including flattened child extractors; counters do not yet reset at nested child
+boundaries. The separate compatibility configuration can apply its own selection
+before Rust receives media. Post/child ranges and metadata expressions remain
+unimplemented.
+
 ## Native configuration
 
 `--native-config settings.json` loads an explicit, strict subset of
@@ -169,7 +201,7 @@ Neither configuration file is loaded automatically.
 }
 ```
 
-Supported settings are `base-directory`, `directory`, `filename`, `cookies`, `archive`,
+Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
@@ -385,6 +417,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/config.rs` owns native configuration parsing, validation, and precedence.
 `src/resume.rs` owns locked partial files and durable checkpoints;
 `src/range.rs` validates resumable HTTP representations and ranges.
+`src/selection.rs` parses file-index ranges and filters streams with early cancellation.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

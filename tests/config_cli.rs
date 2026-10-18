@@ -523,3 +523,17 @@ async fn exact_directory_rejects_ambiguous_cli_layout_flags() {
         assert_eq!(result.status.code(), Some(2));
     }
 }
+
+#[tokio::test]
+async fn empty_media_selection_opens_no_archive_or_destination() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({
+            "file-range":"0", "base-directory":"output", "archive":"missing-parent/archive.sqlite"
+        }),
+    );
+    success(&output(binary(root.path(), &cfg).arg("http://127.0.0.1:1/photo.jpg")).await);
+    assert!(!root.path().join("output").exists());
+    assert!(!root.path().join("missing-parent").exists());
+}

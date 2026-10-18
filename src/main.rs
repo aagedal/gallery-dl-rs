@@ -13,6 +13,7 @@ use gallery_dl_rs::{
     facebook::Facebook,
     instagram::Instagram,
     naming::{DirectoryTemplate, FilenameTemplate},
+    selection::RangeSelection,
     twitter::Twitter,
 };
 use sha2::{Digest, Sha256};
@@ -41,6 +42,9 @@ struct Args {
     /// Maximum simultaneous downloads
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=32))]
     jobs: u8,
+    /// Select one-based file positions per input (e.g. 5, 8-20, or 1:24:3)
+    #[arg(long = "range", allow_hyphen_values = true)]
+    file_range: Option<String>,
     /// Print media URLs without downloading (still performs extraction)
     #[arg(short = 'g', long, conflicts_with = "dump_json")]
     get_urls: bool,
@@ -203,7 +207,7 @@ async fn run(args: Args) -> Result<()> {
     let media = stream::iter(args.urls.iter().enumerate())
         .flat_map(|(index, source)| {
             let failed = &failed;
-            extract_input(
+            let input = extract_input(
                 source,
                 native.as_ref(),
                 twitter.as_ref(),
@@ -211,8 +215,17 @@ async fn run(args: Args) -> Result<()> {
                 &backend,
                 args.extractor,
                 &settings,
-            )
-            .filter_map(move |result| {
+            );
+            let selection = extract::http_url(source).ok().and_then(|url| {
+                settings[extract::social_site(&url).unwrap_or("direct")]
+                    .selection
+                    .as_ref()
+            });
+            let input = match selection {
+                Some(selection) => selection.apply(input),
+                None => input,
+            };
+            input.filter_map(move |result| {
                 std::future::ready(match result {
                     Ok(item) => Some(item),
                     Err(e) => {
@@ -375,6 +388,7 @@ struct Settings {
     options: ConfigOptions,
     filename: Option<FilenameTemplate>,
     directory: Option<DirectoryTemplate>,
+    selection: Option<RangeSelection>,
     archive: Option<Archive>,
 }
 
@@ -395,6 +409,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .clone()
             .or_else(|| args.destination.clone()),
         filename: args.filename.clone(),
+        file_range: args.file_range.clone(),
         directory: if args.exact_directory.is_some() {
             Some(Vec::new())
         } else {
@@ -420,12 +435,18 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .as_deref()
             .map(DirectoryTemplate::parse)
             .transpose()?;
+        let selection = options
+            .file_range
+            .as_deref()
+            .map(RangeSelection::parse)
+            .transpose()?;
         settings.insert(
             category,
             Settings {
                 options,
                 filename,
                 directory,
+                selection,
                 archive: None,
             },
         );
@@ -440,6 +461,13 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             };
             let category = extract::social_site(&url).unwrap_or("direct");
             let settings = settings.get_mut(category).unwrap();
+            if settings
+                .selection
+                .as_ref()
+                .is_some_and(|selection| selection.last_index().is_none())
+            {
+                continue;
+            }
             if let Some(path) = &settings.options.archive {
                 let archive = match archives.get(path) {
                     Some(archive) => Archive::clone(archive),

@@ -258,3 +258,67 @@ fn directory_templates_reject_invalid_types_paths_and_unknown_fields_privately()
         assert!(parse(json).is_err());
     }
 }
+
+#[test]
+fn media_ranges_follow_scopes_and_explicit_overrides() {
+    let config =
+        parse(r#"{"extractor":{"file-range":"1-3","twitter":{"file-range":["5","8-10"]}}}"#)
+            .unwrap();
+    assert_eq!(
+        config.resolve("instagram").unwrap().file_range.as_deref(),
+        Some("1-3")
+    );
+    assert_eq!(
+        config.resolve("twitter").unwrap().file_range.as_deref(),
+        Some("5,8-10")
+    );
+    let global = parse(r#"{"file-range":"4:","extractor":{"file-range":"1"}}"#).unwrap();
+    let settings = global.resolve("direct").unwrap();
+    assert_eq!(settings.file_range.as_deref(), Some("4:"));
+    assert_eq!(
+        settings
+            .overlay(&Options {
+                file_range: Some("1".into()),
+                ..Default::default()
+            })
+            .file_range
+            .as_deref(),
+        Some("1")
+    );
+    for value in [serde_json::json!([]), serde_json::json!("")] {
+        let config = parse(
+            &serde_json::json!({"file-range":value,"extractor":{"file-range":"0"}}).to_string(),
+        )
+        .unwrap();
+        let spec = config.resolve("direct").unwrap().file_range.unwrap();
+        assert!(
+            gallery_dl_rs::selection::RangeSelection::parse(&spec)
+                .unwrap()
+                .contains(1)
+        );
+    }
+}
+
+#[test]
+fn media_range_validation_never_quotes_private_specs() {
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!(42),
+        serde_json::json!({"secret":"secret"}),
+        serde_json::json!([42]),
+        serde_json::json!("secret"),
+        serde_json::json!("1::0"),
+        serde_json::json!("1".repeat(4097)),
+    ] {
+        for doc in [
+            serde_json::json!({"file-range":value}),
+            serde_json::json!({"extractor":{"file-range":value}}),
+            serde_json::json!({"extractor":{"twitter":{"file-range":value}}}),
+        ] {
+            let message = parse(&doc.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("secret"));
+        }
+    }
+    assert!(parse(r#"{"file-range":"1","file-range":"2"}"#).is_err());
+}

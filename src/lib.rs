@@ -10,6 +10,7 @@ mod messages;
 pub mod naming;
 mod range;
 mod resume;
+pub mod selection;
 mod transport;
 pub mod twitter;
 

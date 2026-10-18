@@ -386,3 +386,35 @@ async fn dropping_pending_profile_request_does_not_start_feed() {
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert_eq!(server.count(), 1);
 }
+
+#[tokio::test]
+async fn file_range_stops_native_collection_without_requesting_later_pages() {
+    let server = Server::new(vec![
+        profile(),
+        page(vec![post("64", "BA"), post("65", "BB")], Some("next")),
+    ]);
+    let instagram = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+    let mut selected = crate::selection::RangeSelection::parse("1")
+        .unwrap()
+        .apply(instagram.profile_stream("fixture_user".into(), server.base.clone()));
+    assert_eq!(
+        selected
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "64"
+    );
+    assert!(selected.next().await.is_none());
+    assert_eq!(server.count(), 2);
+
+    let server = Server::new(vec![profile()]);
+    let mut empty = crate::selection::RangeSelection::parse("0")
+        .unwrap()
+        .apply(instagram.profile_stream("fixture_user".into(), server.base.clone()));
+    assert!(empty.next().await.is_none());
+    assert_eq!(server.count(), 0);
+}
