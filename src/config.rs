@@ -30,6 +30,9 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 pub struct Options {
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
+    /// Ordered `(filter, template)` pairs from an object-valued `filename`;
+    /// `filename` then holds the optional `""` default. Overlaid together.
+    pub filename_conditions: Option<Vec<(String, String)>>,
     /// One-based media position ranges, applied separately to each input.
     pub file_range: Option<String>,
     /// AND-combined media filters, with an empty list clearing inherited clauses.
@@ -84,6 +87,8 @@ pub struct Options {
     pub search_stop: Option<u8>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
+    /// Ordered `(filter, components)` pairs from an object-valued `directory`.
+    pub directory_conditions: Option<Vec<(String, Vec<String>)>>,
     pub cookies: Option<PathBuf>,
     /// Explicit Firefox profile selected by an upstream-style `cookies` array.
     /// Mutually exclusive with the cookie file during scope resolution.
@@ -113,7 +118,18 @@ impl Options {
                 .base_directory
                 .clone()
                 .or_else(|| self.base_directory.clone()),
-            filename: overrides.filename.clone().or_else(|| self.filename.clone()),
+            filename: if overrides.filename_conditions.is_some() {
+                overrides.filename.clone()
+            } else {
+                overrides.filename.clone().or_else(|| self.filename.clone())
+            },
+            filename_conditions: if overrides.filename.is_some()
+                || overrides.filename_conditions.is_some()
+            {
+                overrides.filename_conditions.clone()
+            } else {
+                self.filename_conditions.clone()
+            },
             file_range: overrides
                 .file_range
                 .clone()
@@ -158,10 +174,21 @@ impl Options {
             limit: overrides.limit.or(self.limit),
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
-            directory: overrides
-                .directory
-                .clone()
-                .or_else(|| self.directory.clone()),
+            directory: if overrides.directory_conditions.is_some() {
+                overrides.directory.clone()
+            } else {
+                overrides
+                    .directory
+                    .clone()
+                    .or_else(|| self.directory.clone())
+            },
+            directory_conditions: if overrides.directory.is_some()
+                || overrides.directory_conditions.is_some()
+            {
+                overrides.directory_conditions.clone()
+            } else {
+                self.directory_conditions.clone()
+            },
             cookies: if overrides.browser_cookies.is_some() {
                 None
             } else {
@@ -758,12 +785,31 @@ impl RawOptions {
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
         let file_range = range_spec(self.file_range, "file-range")?;
-        let filename = match self.filename.0 {
-            None => None,
+        let (filename, filename_conditions) = match self.filename.0 {
+            None => (None, None),
             Some(Value::String(value)) => {
                 FilenameTemplate::parse(&value)
                     .map_err(|_| error("unsupported native configuration filename template"))?;
-                Some(value)
+                (Some(value), None)
+            }
+            Some(Value::Object(entries)) => {
+                let mut default = None;
+                let mut conditions = Vec::new();
+                for (filter, template) in entries {
+                    let template = template.as_str().map(str::to_owned).ok_or_else(|| {
+                        error(
+                            "native configuration filename conditions must map to string templates",
+                        )
+                    })?;
+                    if filter.is_empty() {
+                        default = Some(template);
+                    } else {
+                        conditions.push((filter, template));
+                    }
+                }
+                FilenameTemplate::parse_conditional(&conditions, default.as_deref())
+                    .map_err(|_| error("unsupported native configuration filename template"))?;
+                (default, Some(conditions))
             }
             Some(_) => {
                 return Err(error(
@@ -771,25 +817,39 @@ impl RawOptions {
                 ));
             }
         };
-        let templates = match self.directory.0 {
-            None => None,
-            Some(Value::Array(values)) => {
-                let components: Vec<String> = values
-                    .into_iter()
-                    .map(|value| {
-                        value.as_str().map(str::to_owned).ok_or_else(|| {
-                            error("native configuration directory must be an array of string templates")
-                        })
-                    })
-                    .collect::<Result<_>>()?;
-                DirectoryTemplate::parse(&components)
+        let components = |value: Value| -> Result<Vec<String>> {
+            let invalid =
+                || error("native configuration directory must be an array of string templates");
+            let Value::Array(values) = value else {
+                return Err(invalid());
+            };
+            values
+                .into_iter()
+                .map(|value| value.as_str().map(str::to_owned).ok_or_else(invalid))
+                .collect()
+        };
+        let (templates, directory_conditions) = match self.directory.0 {
+            None => (None, None),
+            Some(Value::Object(entries)) => {
+                let mut default = None;
+                let mut conditions = Vec::new();
+                for (filter, value) in entries {
+                    let value = components(value)?;
+                    if filter.is_empty() {
+                        default = Some(value);
+                    } else {
+                        conditions.push((filter, value));
+                    }
+                }
+                DirectoryTemplate::parse_conditional(&conditions, default.as_deref())
                     .map_err(|_| error("unsupported native configuration directory template"))?;
-                Some(components)
+                (default, Some(conditions))
             }
-            Some(_) => {
-                return Err(error(
-                    "native configuration directory must be an array of string templates",
-                ));
+            Some(value) => {
+                let value = components(value)?;
+                DirectoryTemplate::parse(&value)
+                    .map_err(|_| error("unsupported native configuration directory template"))?;
+                (Some(value), None)
             }
         };
         let retries = match self.retries.0 {
@@ -829,6 +889,7 @@ impl RawOptions {
             browser_cookies,
             archive: path(self.archive, directory, "archive")?,
             filename,
+            filename_conditions,
             file_range,
             file_filter,
             post_range,
@@ -859,6 +920,7 @@ impl RawOptions {
             search_limit,
             search_stop,
             directory: templates,
+            directory_conditions,
             filesize_min: size(self.filesize_min)?,
             filesize_max: size(self.filesize_max)?,
             retries,

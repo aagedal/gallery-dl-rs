@@ -175,7 +175,8 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"pixiv":{"cookies":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
-        r#"{"extractor":{"filename":{"secret-value":"{filename}"}}}"#,
+        r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
+        r#"{"extractor":{"filename":{"1":["secret-value"]}}}"#,
         r#"{"extractor":{"filename":"{secret-value}"}}"#,
         r#"{"extractor":{"filename":"secret-value/{filename}"}}"#,
         r#"{"extractor":{"postprocessors":[{"name":"exec","command":"secret-value"}]}}"#,
@@ -1780,5 +1781,47 @@ fn text_tweet_configuration_rejects_private_types_and_duplicate_keys() {
         r#"{"extractor":{"twitter":{"text-tweets":false,"text-tweets":true}}}"#,
     ] {
         assert!(parse(document).is_err());
+    }
+}
+
+#[test]
+fn conditional_templates_preserve_order_and_replace_whole_settings() {
+    let config = parse(
+        r#"{"extractor":{"filename":{"index > 1":"b.{extension}","index > 0":"a.{extension}","":"{filename}"},"directory":{"username == 'x'":["x"],"":["{category}"]},"twitter":{"filename":"t.{extension}","directory":["t"]}}}"#,
+    )
+    .unwrap();
+    let direct = config.resolve("direct").unwrap();
+    assert_eq!(direct.filename.as_deref(), Some("{filename}"));
+    assert_eq!(
+        direct.filename_conditions,
+        Some(vec![
+            ("index > 1".to_string(), "b.{extension}".to_string()),
+            ("index > 0".to_string(), "a.{extension}".to_string()),
+        ])
+    );
+    assert_eq!(direct.directory, Some(vec!["{category}".to_string()]));
+    assert_eq!(
+        direct.directory_conditions,
+        Some(vec![("username == 'x'".to_string(), vec!["x".to_string()])])
+    );
+    // A plain category value replaces inherited conditional settings.
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.filename.as_deref(), Some("t.{extension}"));
+    assert_eq!(twitter.filename_conditions, None);
+    assert_eq!(twitter.directory_conditions, None);
+    // An explicit CLI filename replaces the inherited conditions, too.
+    let cli = direct.overlay(&Options {
+        filename: Some("{name}".into()),
+        ..Options::default()
+    });
+    assert_eq!(cli.filename_conditions, None);
+    for bad in [
+        r#"{"filename":{"index ==":"x"}}"#,
+        r#"{"filename":{"1":"a/b"}}"#,
+        r#"{"filename":{"1":1}}"#,
+        r#"{"directory":{"1":"x"}}"#,
+        r#"{"directory":{"1":["../x"]}}"#,
+    ] {
+        assert!(parse(bad).is_err(), "{bad}");
     }
 }

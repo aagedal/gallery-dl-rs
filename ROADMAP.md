@@ -573,6 +573,13 @@ unsafe metadata, limits, missing-field side effects, and resumed archived media
 with sidecars in nested folders. Conditional templates and the full upstream
 format language remain.
 
+**Implemented conditional templates:** object-valued `filename` and `directory`
+settings map filter expressions to templates in configuration order (JSON key
+order is preserved), with `""` as the default and the normal name or category
+folder as the final fallback. Conditions share the `--filter` evaluator and fail
+the file on evaluation errors. Plain values in narrower scopes or CLI flags
+replace inherited conditional settings as a whole.
+
 Native Instagram, Facebook, and Twitter session initialization failures now remain local to
 their inputs, allowing unrelated direct links and other inputs to proceed.
 

@@ -663,6 +663,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .clone()
             .or_else(|| args.destination.clone()),
         filename: args.filename.clone(),
+        filename_conditions: None,
         file_range: args.file_range.clone(),
         file_filter: (!args.file_filter.is_empty()).then(|| args.file_filter.clone()),
         post_range: args.post_range.clone(),
@@ -674,6 +675,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         } else {
             (!args.directory.is_empty()).then(|| args.directory.clone())
         },
+        directory_conditions: None,
         cookies: args.cookies.clone(),
         browser_cookies: None,
         retweets: None,
@@ -732,16 +734,28 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         } else {
             None
         };
-        let filename = options
-            .filename
-            .as_deref()
-            .map(FilenameTemplate::parse)
-            .transpose()?;
-        let directory = options
-            .directory
-            .as_deref()
-            .map(DirectoryTemplate::parse)
-            .transpose()?;
+        let filename = match &options.filename_conditions {
+            Some(conditions) => Some(FilenameTemplate::parse_conditional(
+                conditions,
+                options.filename.as_deref(),
+            )?),
+            None => options
+                .filename
+                .as_deref()
+                .map(FilenameTemplate::parse)
+                .transpose()?,
+        };
+        let directory = match &options.directory_conditions {
+            Some(conditions) => Some(DirectoryTemplate::parse_conditional(
+                conditions,
+                options.directory.as_deref(),
+            )?),
+            None => options
+                .directory
+                .as_deref()
+                .map(DirectoryTemplate::parse)
+                .transpose()?,
+        };
         let selection = options
             .file_range
             .as_deref()

@@ -946,10 +946,19 @@ timeouts outside the monotonic clock's range or precision are rejected.
 
 Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, null settings
 (except the optional browser-array placeholders described above),
-unsupported types, hooks, environment expansion, and conditional values fail
+unsupported types, hooks, environment expansion, and other conditional values fail
 explicitly. Filenames use the native template subset described below; archive
-files use the Rust archive format. Full gallery-dl configuration compatibility,
-conditional directory templates, automatic discovery, and postprocessors remain unimplemented.
+files use the Rust archive format.
+
+Like upstream, `filename` may be an object mapping filter expressions to
+templates and `directory` an object mapping them to component lists, e.g.
+`{"filename": {"media_type == 'video'": "{post_id}.{extension}", "": "{filename}"}}`.
+Conditions are tried in file order with the `--filter` evaluator; the first match
+wins, then the `""` entry, then the default name or category folder. Condition
+errors (such as missing keys) fail that file. A plain value or CLI flag in a
+narrower scope replaces an inherited object entirely. Full gallery-dl
+configuration compatibility, automatic discovery, and postprocessors remain
+unimplemented.
 
 ## Current behavior
 

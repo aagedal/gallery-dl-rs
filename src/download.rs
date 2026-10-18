@@ -125,9 +125,10 @@ pub fn destination_with_template(
     media: &Media,
     template: &FilenameTemplate,
 ) -> Result<PathBuf> {
-    Ok(root
-        .join(safe_component(&media.category))
-        .join(template.render(media)?))
+    Ok(match template.render_optional(media)? {
+        Some(name) => root.join(safe_component(&media.category)).join(name),
+        None => destination(root, media),
+    })
 }
 
 /// Render a complete destination. An explicit directory replaces the default
@@ -142,9 +143,9 @@ pub fn destination_with_templates(
         Some(template) => destination_with_template(root, media, template)?,
         None => destination(root, media),
     };
-    match directory {
+    match directory.map(|d| d.render(media)).transpose()?.flatten() {
         None => Ok(default),
-        Some(directory) => Ok(root.join(directory.render(media)?).join(
+        Some(directory) => Ok(root.join(directory).join(
             default
                 .file_name()
                 .ok_or_else(|| error("invalid media filename"))?,
