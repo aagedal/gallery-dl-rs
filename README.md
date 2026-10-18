@@ -321,8 +321,9 @@ files. `true` (or `--text-tweets`; `--no-text-tweets` overrides configuration)
 emits those posts as file-less post events carrying their IDs, caption, author,
 timestamp, community, and attribution metadata, matching upstream's metadata-only
 output. They can satisfy post filters (with `count == 0`) and occupy post-range
-positions, but create no media or archive entries. Per-post metadata sidecars
-for these posts (upstream's post-event metadata output) are not yet written. It also selects
+positions, but create no media, archive entries, or sidecars, like upstream's
+default file-event `--write-metadata`; post-event metadata output is not
+implemented. It also selects
 `CommunityTweetsTimeline` instead of `CommunityMediaTimeline` for community
 feeds. Explicit values forward to compatibility mode for X.
 
