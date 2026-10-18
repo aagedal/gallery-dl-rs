@@ -328,6 +328,24 @@ summary (or caption with HTML stripped), with timestamp and width/height.
 Default filenames are `{post_id}_{index}.{extension}`; archive identity is
 (blog, post, media ID). Plain media links stay direct downloads.
 
+Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
+requires `extractor.pixiv.refresh-token` (accepted only in the `pixiv`
+category, never echoed); without it Pixiv URLs fail before any network access.
+The token is exchanged via upstream's iOS App OAuth refresh grant and the
+access token cached in memory (refreshed once on `invalid_grant`). Supported:
+`www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
+`illust/detail`) and `users/ID` (illustrations then manga),
+`users/ID/illustrations`, `users/ID/manga` (`user/illusts`, `next_url` paging
+capped at 200 pages per type). Media are original `i.pximg.net` files
+(`meta_single_page`/`meta_pages`) downloaded with
+`Referer: https://app-api.pixiv.net/` (same-origin redirects only). Ugoira
+animations fail for single works and are skipped in listings. `post_id`/`id` is
+the illustration ID, `media_id` `ID_pN`, `username` the account, caption the
+title plus HTML-stripped caption, with `create_date` timestamp and page-0
+width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
+is (illustration, page). Plain `i.pximg.net` links stay direct downloads and
+usually fail without the Referer.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.
