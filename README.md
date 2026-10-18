@@ -1010,6 +1010,10 @@ unimplemented.
   `Last-Modified`; `--no-mtime` disables this. `--mtime [NAME]` (default `date`)
   instead uses a numeric metadata timestamp, falling back to `Last-Modified` when
   absent. Times are applied before atomic publication; existing files are untouched.
+- `--exec CMD` runs a shell command (`sh -c`, or `cmd /C` on Windows) after
+  each newly downloaded file, replacing `{}` with the shell-quoted path;
+  `--exec-after CMD` runs once at the end. Both are repeatable; failures count
+  as failed operations. Upstream's metadata fields in commands are not supported.
 - `-r RATE`/`--limit-rate RATE` (e.g. `500k`, `2.5M`) caps each download's body
   rate. Throttling pauses extend that attempt's `--timeout` deadline, so slow
   limits do not cause timeouts.

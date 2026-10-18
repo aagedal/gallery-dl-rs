@@ -103,6 +103,12 @@ struct Args {
     /// Set new files' modification times from a metadata date field, e.g. date
     #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "date")]
     mtime: Option<String>,
+    /// Run a shell command after each downloaded file; {} is the quoted path
+    #[arg(long, value_name = "CMD", conflicts_with_all = ["get_urls", "dump_json"])]
+    exec: Vec<String>,
+    /// Run a shell command once after all downloads finish
+    #[arg(long, value_name = "CMD", conflicts_with_all = ["get_urls", "dump_json"])]
+    exec_after: Vec<String>,
     /// Maximum download rate in bytes per second, e.g. 500k or 2.5M
     #[arg(short = 'r', long, value_parser = parse_size)]
     limit_rate: Option<u64>,
@@ -483,7 +489,13 @@ async fn run(args: Args) -> Result<()> {
             }
             match result {
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
-                    eprintln!("downloaded {}", path.display())
+                    eprintln!("downloaded {}", path.display());
+                    for command in &args.exec {
+                        if let Err(e) = gallery_dl_rs::exec::run(command, Some(&path)).await {
+                            eprintln!("postprocessing failed for {}: {e}", path.display());
+                            failed.set(failed.get() + 1);
+                        }
+                    }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
                     eprintln!("skipped {}", path.display())
@@ -502,6 +514,12 @@ async fn run(args: Args) -> Result<()> {
                 eprintln!("stopping after {skipped} consecutive skipped files");
                 break;
             }
+        }
+    }
+    for command in &args.exec_after {
+        if let Err(e) = gallery_dl_rs::exec::run(command, None).await {
+            eprintln!("postprocessing failed: {e}");
+            failed.set(failed.get() + 1);
         }
     }
     let failed = failed.get();

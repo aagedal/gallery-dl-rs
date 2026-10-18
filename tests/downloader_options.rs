@@ -183,3 +183,38 @@ async fn rate_limits_slow_bodies_without_tripping_the_attempt_timeout() {
     };
     assert_eq!(std::fs::read(path).unwrap(), body);
 }
+
+#[cfg(not(windows))]
+#[test]
+fn exec_runs_after_downloaded_files_and_once_after_all() {
+    let root = tempfile::tempdir().unwrap();
+    let log = root.path().join("log.txt");
+    let (url, handle) = server();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .arg("-d")
+        .arg(root.path().join("out"))
+        .arg("--exec")
+        .arg(format!("wc -c < {{}} >> '{}'", log.display()))
+        .arg("--exec-after")
+        .arg(format!("echo done >> '{}'", log.display()))
+        .arg(&url)
+        .output()
+        .unwrap();
+    handle.join().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log_text = std::fs::read_to_string(&log).unwrap();
+    let lines: Vec<_> = log_text.lines().map(str::trim).collect();
+    assert_eq!(lines, ["4", "done"]);
+    // A failing command fails the run.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .arg("--exec-after")
+        .arg("exit 3")
+        .args(["-d", root.path().join("empty").to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}

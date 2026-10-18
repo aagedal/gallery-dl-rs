@@ -6,6 +6,7 @@ pub mod cookies;
 pub mod date;
 pub mod download;
 pub mod event;
+pub mod exec;
 pub mod extract;
 pub mod facebook;
 mod facebook_album;
