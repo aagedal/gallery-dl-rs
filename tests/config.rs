@@ -172,7 +172,7 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"secret-key":"secret-value"}}"#,
         r#"{"extractor":{"instagram":{"secret-key":"secret-value"}}}"#,
         r#"{"extractor":{"instagram":{"post":{"cookies":"secret-value"}}}}"#,
-        r#"{"extractor":{"flickr":{"cookies":"secret-value"}}}"#,
+        r#"{"extractor":{"weibo":{"cookies":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
@@ -1827,8 +1827,14 @@ fn conditional_templates_preserve_order_and_replace_whole_settings() {
 }
 
 #[test]
-fn api_key_is_tumblr_only_and_never_echoed() {
-    let config = parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"}}}"#).unwrap();
+fn api_key_is_tumblr_and_flickr_only_and_never_echoed() {
+    let config =
+        parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"},"flickr":{"api-key":"f00d"}}}"#)
+            .unwrap();
+    assert_eq!(
+        config.resolve("flickr").unwrap().api_key.as_deref(),
+        Some("f00d")
+    );
     assert_eq!(
         config.resolve("tumblr").unwrap().api_key.as_deref(),
         Some("abc123")
@@ -1840,6 +1846,7 @@ fn api_key_is_tumblr_only_and_never_echoed() {
         r#"{"extractor":{"reddit":{"api-key":"abc123"}}}"#,
         r#"{"extractor":{"tumblr":{"api-key":"abc 123!"}}}"#,
         r#"{"extractor":{"tumblr":{"api-key":7}}}"#,
+        r#"{"extractor":{"flickr":{"api-key":"abc-123"}}}"#,
     ] {
         let error = parse(json).err().unwrap().to_string();
         assert!(!error.contains("abc"), "{error}");

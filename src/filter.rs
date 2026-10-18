@@ -361,7 +361,7 @@ fn context_parts(
         }
         if matches!(
             category,
-            "facebook" | "mastodon" | "kemono" | "coomer" | "pixiv" | "deviantart"
+            "facebook" | "mastodon" | "kemono" | "coomer" | "pixiv" | "deviantart" | "flickr"
         ) || crate::booru::Site::from_category(category).is_some()
         {
             values.insert("id".into(), identifier(&post.post_id));

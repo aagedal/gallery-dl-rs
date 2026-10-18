@@ -342,6 +342,16 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.deviantart.com/", None),
         ("https://images-wixmp-x.wixmp.com/f/a.jpg", None),
         ("https://www.deviantart.com.evil.example/alice", None),
+        ("https://www.flickr.com/photos/alice/123", Some("flickr")),
+        (
+            "https://www.flickr.com/photos/alice/albums/5",
+            Some("flickr"),
+        ),
+        ("https://www.flickr.com/photos/alice", Some("flickr")),
+        ("https://flic.kr/p/FPVo9U", Some("flickr")),
+        ("https://www.flickr.com/", None),
+        ("https://live.staticflickr.com/65535/1_a_o.jpg", None),
+        ("https://www.flickr.com.evil.example/photos/alice", None),
         ("https://www.pixiv.net/artworks/1", Some("pixiv")),
         ("https://www.pixiv.net/en/artworks/1", Some("pixiv")),
         (
