@@ -109,7 +109,6 @@ impl Process {
         loop {
             let bytes = self.stdout.fill_buf().await?;
             if bytes.is_empty() {
-                self.decoder.finish()?;
                 let status = self.child.wait().await?;
                 let diagnostic = self.stderr.finish().await?;
                 if !status.success() {
@@ -120,6 +119,7 @@ impl Process {
                         String::from_utf8_lossy(&diagnostic).trim()
                     )));
                 }
+                self.decoder.finish()?;
                 if !self.had_media {
                     return Err(error(
                         "no downloadable media found; the post may require login or be unsupported",

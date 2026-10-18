@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use gallery_dl_rs::extract::Backend;
 use std::{os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration};
 use tokio::time::{Instant, sleep, timeout};
@@ -247,17 +247,35 @@ async fn extraction_budget_is_cumulative_and_excludes_consumer_pause() {
     let backend = fixture(
         root.path(),
         &format!(
-            "printf '%s' \"$$\" > \"$0.pid\"\nprintf '%s' '[{ROW}'\nwhile [ ! -f \"$0.release\" ]; do sleep 0.02; done\nsleep 0.35\nprintf '%s' ',{ROW}'\nsleep 0.35\nprintf '%s' ',{ROW}]'"
+            "printf '%s' \"$$\" > \"$0.pid\"\nprintf '%s' '[{ROW}'\nwhile [ ! -f \"$0.release\" ]; do sleep 0.02; done\nprintf '%s' ',{ROW}'\nwhile [ ! -f \"$0.third\" ]; do sleep 0.02; done\nprintf '%s' ',{ROW}]'"
         ),
-        Duration::from_millis(600),
+        Duration::from_secs(10),
     );
     let mut stream = backend.stream(&social_url());
     stream.next().await.unwrap().unwrap();
-    // This exceeds the whole extraction budget but is downstream idle time.
-    sleep(Duration::from_millis(800)).await;
+    // Move virtual time only while no process future is being awaited. This
+    // avoids relying on shell startup or sleep precision under parallel tests.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    tokio::time::resume();
+    let mut second = Box::pin(stream.next());
+    assert!(second.as_mut().now_or_never().is_none());
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(6)).await;
+    tokio::time::resume();
     std::fs::write(root.path().join("backend.release"), b"").unwrap();
-    assert!(stream.next().await.unwrap().is_ok());
-    let failure = timeout(Duration::from_secs(2), stream.next())
+    timeout(Duration::from_secs(2), &mut second)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop(second);
+    let mut third = Box::pin(stream.next());
+    assert!(third.as_mut().now_or_never().is_none());
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(5)).await;
+    tokio::time::resume();
+    let failure = timeout(Duration::from_secs(2), third)
         .await
         .unwrap()
         .unwrap()
@@ -306,4 +324,21 @@ async fn oversized_row_has_explicit_error_without_private_payload() {
     assert!(failure.contains("size limit"), "{failure}");
     assert!(!failure.contains("PRIVATE-PAYLOAD"));
     assert!(failure.len() < 256);
+}
+
+#[tokio::test]
+async fn failed_backend_without_json_preserves_its_failure_diagnostic() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(
+        root.path(),
+        "printf '%s' 'login failed' >&2\nexit 1",
+        Duration::from_secs(5),
+    );
+    let mut items = backend.stream(&social_url());
+    let message = items.next().await.unwrap().unwrap_err().to_string();
+    assert!(
+        message.contains("extraction failed") && message.contains("login failed"),
+        "{message}"
+    );
+    assert!(items.next().await.is_none());
 }
