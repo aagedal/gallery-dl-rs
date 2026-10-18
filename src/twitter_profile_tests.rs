@@ -3732,3 +3732,274 @@ async fn expanded_detail_original_retweet_reuses_same_page_target_for_conversati
     assert_eq!(variables(&urls[0])["focalTweetId"], "100");
     assert_eq!(variables(&urls[1])["focalTweetId"], "80");
 }
+
+fn video_post(id: &str) -> Value {
+    let fixture: Value =
+        serde_json::from_str(include_str!("../tests/fixtures/twitter/video.json")).unwrap();
+    let mut post = tweet(id);
+    post["legacy"]["extended_entities"]["media"] =
+        fixture["data"]["tweetResult"]["result"]["legacy"]["extended_entities"]["media"].clone();
+    post
+}
+
+#[tokio::test]
+async fn media_previews_number_mixed_siblings_consecutively_and_deduplicate_whole_batches() {
+    let mut post = tweet("100");
+    let photo = post["legacy"]["extended_entities"]["media"][0].clone();
+    let video = video_post("100")["legacy"]["extended_entities"]["media"][0].clone();
+    post["legacy"]["extended_entities"]["media"] = json!([photo.clone(), video, photo]);
+    let server = Server::new(vec![
+        Response::json(page(vec![post.clone()], Some("next"))),
+        Response::json(page(vec![post], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_media_options(MediaOptions {
+            videos: VideoMode::Files,
+            previews: true,
+        });
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "100", "100", "100"]);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.metadata.as_ref().unwrap().index)
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 4]
+    );
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.filename.as_str())
+            .collect::<Vec<_>>(),
+        ["100_1.jpg", "100_2.mp4", "100_3.jpg", "100_4.jpg"]
+    );
+    assert_eq!(
+        items[1].url.as_str(),
+        "https://video.example/high.mp4?tag=1"
+    );
+    assert!(items[2].url.as_str().contains("thumbnail.jpg"));
+    let keys: std::collections::HashSet<_> = items
+        .iter()
+        .map(|item| item.archive_key().unwrap())
+        .collect();
+    assert_eq!(keys.len(), 4);
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn skipped_video_preview_range_stops_before_fetching_missing_quote() {
+    let mut post = video_post("100");
+    post["legacy"]["quoted_status_id_str"] = json!("101");
+    post["legacy"]["extended_entities"]["media"][0]["video_info"] =
+        json!({"variants":"private-invalid-variants"});
+    let server = Server::new(vec![
+        Response::json(post_response(post)),
+        Response::json(post_response(video_post("101"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_media_options(MediaOptions {
+            videos: VideoMode::Skip,
+            previews: true,
+        })
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let items: Vec<_> = native
+        .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        .take(1)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(items[0].filename, "100_1.jpg");
+    assert!(items[0].url.as_str().contains("thumbnail.jpg"));
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn original_and_repost_expansion_apply_video_preview_options_and_keep_archive_context() {
+    for mode in [RetweetMode::Original, RetweetMode::Repost] {
+        let original = video_post("101");
+        let mut outer = tweet("100");
+        outer["legacy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("extended_entities");
+        outer["legacy"]["retweeted_status_id_str"] = json!("101");
+        outer["retweeted_status_result"] = json!({"result":original.clone()});
+        let server = Server::new(vec![Response::json(post_response(outer))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_media_options(MediaOptions {
+                videos: VideoMode::Files,
+                previews: true,
+            })
+            .with_expansion(expansion_options(mode));
+        let items: Vec<_> = native
+            .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        let expected = if mode == RetweetMode::Original {
+            "101"
+        } else {
+            "100"
+        };
+        assert_eq!(post_ids(&items), [expected, expected]);
+        assert!(items[0].filename.ends_with("_1.mp4"));
+        assert!(items[1].filename.ends_with("_2.jpg"));
+        assert_ne!(items[0].archive_key(), items[1].archive_key());
+        assert_eq!(server.count(), 1);
+        let direct_server = Server::new(vec![Response::json(post_response(original))]);
+        let direct: Vec<_> = native
+            .post_stream_at(local_post_endpoint(&direct_server, "101"), "101".into())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            items[0].archive_key() == direct[0].archive_key(),
+            mode == RetweetMode::Original
+        );
+        assert_eq!(
+            items[1].archive_key() == direct[1].archive_key(),
+            mode == RetweetMode::Original
+        );
+    }
+}
+
+#[tokio::test]
+async fn ytdl_video_jobs_apply_to_quotes_and_expanded_threads_without_parsing_variants() {
+    for expanded in [false, true] {
+        let mut video = video_post("101");
+        video["legacy"]["extended_entities"]["media"][0]["video_info"] =
+            json!({"variants":"private-invalid-variants"});
+        let responses = if expanded {
+            vec![
+                Response::json(page(vec![in_thread(tweet("100"), json!("90"))], None)),
+                Response::json(detail_page(vec![video], Some("child-next"))),
+                Response::json(detail_page(vec![tweet("102")], None)),
+            ]
+        } else {
+            vec![
+                Response::json(post_response(quoted_tweet("100", "101"))),
+                Response::json(post_response(video)),
+            ]
+        };
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_media_options(MediaOptions {
+                videos: VideoMode::Ytdl,
+                previews: false,
+            })
+            .with_expansion(expansion_options(RetweetMode::Skip))
+            .with_thread_options(ThreadOptions {
+                expand: expanded,
+                unique: true,
+            });
+        let stream = if expanded {
+            native.media_stream(input("id:42"), server.base.clone())
+        } else {
+            native.post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        };
+        let items: Vec<_> = stream
+            .take(if expanded { 1 } else { 2 })
+            .try_collect()
+            .await
+            .unwrap();
+        let item = items.last().unwrap();
+        assert_eq!(item.metadata.as_ref().unwrap().post_id, "101");
+        assert_eq!(item.url.as_str(), "ytdl:https://x.com/i/web/status/101");
+        match &item.job {
+            crate::extract::MediaJob::VideoPage { page_url } => {
+                assert_eq!(page_url.as_str(), "https://x.com/i/web/status/101")
+            }
+            _ => panic!("video mode must produce an adapter job"),
+        }
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn invalid_video_poster_is_ignored_when_disabled_and_errors_privately_when_enabled() {
+    for previews in [false, true] {
+        let mut post = video_post("100");
+        post["legacy"]["extended_entities"]["media"][0]["media_url_https"] =
+            json!({"private-poster-marker":true});
+        let server = Server::new(vec![Response::json(post_response(post))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_media_options(MediaOptions {
+                videos: VideoMode::Files,
+                previews,
+            });
+        let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+        if previews {
+            let error = stream.next().await.unwrap().unwrap_err().to_string();
+            assert!(!error.contains("private-poster-marker"));
+        } else {
+            let item = stream.next().await.unwrap().unwrap();
+            assert_eq!(item.filename, "100_1.mp4");
+        }
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn ytdl_repost_delegate_uses_output_post_identity_and_preserves_quote_parent_context() {
+    for mode in [RetweetMode::Original, RetweetMode::Repost] {
+        let mut original = video_post("101");
+        original["legacy"]["quoted_status_id_str"] = json!("102");
+        original["quoted_status_result"] = json!({"result":video_post("102")});
+        let mut outer = tweet("100");
+        outer["legacy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("extended_entities");
+        outer["legacy"]["retweeted_status_id_str"] = json!("101");
+        outer["retweeted_status_result"] = json!({"result":original});
+        let server = Server::new(vec![Response::json(post_response(outer))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_media_options(MediaOptions {
+                videos: VideoMode::Ytdl,
+                previews: false,
+            })
+            .with_expansion(expansion_options(mode));
+        let items: Vec<_> = native
+            .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        let parent = if mode == RetweetMode::Original {
+            "101"
+        } else {
+            "100"
+        };
+        assert_eq!(post_ids(&items), [parent, "102"]);
+        for (item, expected) in items.iter().zip([parent, "102"]) {
+            assert_eq!(
+                item.url.as_str(),
+                format!("ytdl:https://x.com/i/web/status/{expected}")
+            );
+            match &item.job {
+                crate::extract::MediaJob::VideoPage { page_url } => assert_eq!(
+                    page_url.as_str(),
+                    format!("https://x.com/i/web/status/{expected}")
+                ),
+                _ => panic!("Ytdl mode must keep its typed adapter job"),
+            }
+            assert_eq!(item.filename, format!("{expected}_1.mp4"));
+        }
+        assert_eq!(
+            items[1].metadata.as_ref().unwrap().quoted_by_id.as_deref(),
+            Some(parent)
+        );
+        assert_eq!(server.count(), 1);
+    }
+}

@@ -203,6 +203,8 @@ pub struct BackendOptions {
     pub quoted: Option<bool>,
     pub expand: Option<bool>,
     pub unique: Option<bool>,
+    pub videos: Option<crate::twitter::VideoMode>,
+    pub previews: Option<bool>,
     pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
     pub conversations: Option<crate::twitter::ConversationMode>,
     pub pinned: Option<bool>,
@@ -291,6 +293,17 @@ impl Backend {
         }
         if let Some(unique) = options.unique {
             command.arg("--option").arg(format!("unique={unique}"));
+        }
+        if let Some(videos) = options.videos {
+            let value = match videos {
+                crate::twitter::VideoMode::Files => "true",
+                crate::twitter::VideoMode::Skip => "false",
+                crate::twitter::VideoMode::Ytdl => "ytdl",
+            };
+            command.arg("--option").arg(format!("videos={value}"));
+        }
+        if let Some(previews) = options.previews {
+            command.arg("--option").arg(format!("previews={previews}"));
         }
         if let Some(endpoint) = options.tweet_endpoint {
             let value = match endpoint {

@@ -139,6 +139,17 @@ shared extraction interface that emits media, post metadata, and child URLs.
   expansion stays independent. Native runtime, strict configuration,
   compatibility forwarding, and CLI tests cover these options. Authenticated live
   verification and sanitized real thread fixtures remain required.
+  **Implemented experimental video/preview selection:** scoped `videos` and
+  `previews` select direct MP4 files, poster images, both, or neither for videos
+  and animated GIFs. File numbering follows selection, with previews immediately
+  after their video. Shared parsing applies across statuses, retweets, quotes,
+  and expanded thread/collection streams; disabled fields are not parsed, and
+  enabled malformed media still fails atomically. Parser, local HTTP, strict
+  configuration, and compatibility-forwarding tests cover selection, private
+  errors, identities, archive positions, deduplication, and cancellation. The
+  `ytdl` video setting emits typed fixed-first-party video-page jobs for inspection;
+  downloading those jobs still requires the unimplemented companion adapter.
+  Authenticated live verification and real response captures remain required.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and

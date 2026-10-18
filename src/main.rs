@@ -21,8 +21,8 @@ use gallery_dl_rs::{
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
     twitter::{
-        ConversationMode, ExpansionOptions, ProfileOptions, StatusOptions, ThreadOptions,
-        TimelineOptions, Twitter,
+        ConversationMode, ExpansionOptions, MediaOptions, ProfileOptions, StatusOptions,
+        ThreadOptions, TimelineOptions, Twitter,
     },
 };
 use sha2::{Digest, Sha256};
@@ -440,6 +440,10 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_media_options(MediaOptions {
+                                        videos: options.videos.unwrap_or_default(),
+                                        previews: options.previews.unwrap_or(false),
+                                    })
                                     .with_thread_options(ThreadOptions {
                                         expand: options.expand.unwrap_or(false),
                                         unique: options.unique.unwrap_or(true),
@@ -514,6 +518,10 @@ fn extract_input<'a>(
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
                             expand: (category == "twitter").then_some(options.expand).flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
+                            videos: (category == "twitter").then_some(options.videos).flatten(),
+                            previews: (category == "twitter")
+                                .then_some(options.previews)
+                                .flatten(),
                             tweet_endpoint: (category == "twitter")
                                 .then_some(options.tweet_endpoint)
                                 .flatten(),
@@ -599,6 +607,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         quoted: None,
         expand: None,
         unique: None,
+        videos: None,
+        previews: None,
         tweet_endpoint: None,
         conversations: None,
         pinned: None,

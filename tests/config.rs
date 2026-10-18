@@ -1071,3 +1071,92 @@ fn twitter_thread_settings_reject_types_and_duplicates_privately_in_every_scope(
         }
     }
 }
+
+#[test]
+fn twitter_media_settings_resolve_scopes_and_preserve_false_overlays() {
+    use gallery_dl_rs::twitter::VideoMode;
+    let config = parse(r#"{"extractor":{"videos":true,"previews":true,"twitter":{"videos":"ytdl","previews":false},"instagram":{"videos":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(
+        (twitter.videos, twitter.previews),
+        (Some(VideoMode::Ytdl), Some(false))
+    );
+    let inherited = config.resolve("facebook").unwrap();
+    assert_eq!(
+        (inherited.videos, inherited.previews),
+        (Some(VideoMode::Files), Some(true))
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().videos,
+        Some(VideoMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = twitter.overlay(&Options {
+        videos: Some(VideoMode::Skip),
+        previews: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(
+        (disabled.videos, disabled.previews),
+        (Some(VideoMode::Skip), Some(false))
+    );
+    let root = parse(r#"{"videos":false,"previews":false,"extractor":{"videos":true,"previews":true,"twitter":{"videos":"ytdl","previews":true}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!(
+            (options.videos, options.previews),
+            (Some(VideoMode::Skip), Some(false))
+        );
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!((absent.videos, absent.previews), (None, None));
+}
+
+#[test]
+fn twitter_media_settings_reject_malformed_and_duplicate_values_privately() {
+    use serde_json::json;
+    for field in ["videos", "previews"] {
+        let mut values = vec![
+            json!(null),
+            json!(0),
+            json!(1),
+            json!("false"),
+            json!("true"),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+        ];
+        values.push(if field == "videos" {
+            json!("Ytdl")
+        } else {
+            json!("ytdl")
+        });
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}

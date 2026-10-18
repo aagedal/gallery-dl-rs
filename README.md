@@ -278,6 +278,22 @@ apply when downloading. Both options forward to compatibility mode when explicit
 Synthetic and local HTTP tests cover these settings; authenticated live thread
 expansion remains unverified.
 
+Scoped X `"videos": true` (default) selects direct MP4 video and animated-GIF
+files. `false` skips them. `"previews": true` additionally selects their poster
+images; combine it with `"videos": false` for posters only. Previews default to
+false. A requested preview follows its video in source order, and files are
+numbered consecutively after selection. Changing these settings can therefore
+change filename and archive positions. Disabled video variants and previews are
+not parsed; an invalid enabled video still fails instead of silently returning
+its poster. Statuses, quotes, retweets, conversations, and collection streams use
+the same selection. Explicit settings forward only for X in compatibility mode.
+
+`"videos": "ytdl"` emits a typed video-page job targeting the validated first-party
+post, optionally followed by its preview. Inspection output supports these jobs;
+downloading them still fails explicitly because the companion video adapter is
+not implemented. Direct MP4 downloads do not need that adapter. Library callers
+can use `Twitter::with_media_options` and `parse_response_with_media_options`.
+
 Experimental X profile timelines use `Twitter::stream` and the native CLI at
 `/USERNAME/media`, `/USERNAME/tweets`, `/USERNAME/with_replies`, and
 `/USERNAME/highlights`, with equivalent `/id:USER_ID/TAB` forms on X/Twitter hosts.

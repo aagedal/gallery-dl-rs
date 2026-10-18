@@ -1168,3 +1168,90 @@ printf '%s\n' '[[3,"https://cdn.example/first.jpg",{"filename":"first","extensio
         assert!(!log.exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn twitter_media_options_forward_explicit_scopes_and_validate_before_extraction() {
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$MEDIA_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, expected) in [
+        (json!({}), vec![]),
+        (
+            json!({"extractor":{"twitter":{"videos":"ytdl","previews":true}}}),
+            vec!["videos=ytdl", "previews=true"],
+        ),
+        (
+            json!({"extractor":{"videos":true,"previews":true,"twitter":{"videos":false,"previews":false}}}),
+            vec!["videos=false", "previews=false"],
+        ),
+        (
+            json!({"videos":true,"previews":true,"extractor":{"videos":false,"previews":false,"twitter":{"videos":"ytdl","previews":false}}}),
+            vec!["videos=true", "previews=true"],
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/person/status/1", true),
+            ("https://instagram.com/p/example/", false),
+            ("https://facebook.com/photo/?fbid=1", false),
+        ] {
+            let output = binary()
+                .env("MEDIA_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("videos=") || value.starts_with("previews="))
+                .collect();
+            assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    for settings in [
+        json!({"videos":"PRIVATE-MEDIA-VALUE"}),
+        json!({"extractor":{"twitter":{"previews":"PRIVATE-MEDIA-VALUE"}}}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let output = binary()
+            .env("MEDIA_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&backend)
+            .args(["-g", "https://x.com/person/status/1"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-MEDIA-VALUE"));
+        assert!(!log.exists());
+    }
+}

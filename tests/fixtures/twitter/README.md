@@ -28,6 +28,17 @@ coverage there. Likes, bookmarks, lists, and home feeds have separate
 [detail protocol notes](detail_README.md). Cards/articles, playlists, and other
 collections remain unsupported natively. Compatibility remains the default.
 
+`tests/twitter_media.rs` and local HTTP cases in `src/twitter_profile_tests.rs`
+cover scoped `videos`/`previews` selection using synthetic mixed-media derivatives.
+These verify direct video, skipped video, poster-only and video-plus-poster
+ordering, consecutive file/archive positions, animated GIFs, disabled malformed
+fields, atomic/private enabled-field failures, quote/retweet/thread propagation,
+deduplication, and range/drop cancellation. Poster URLs preserve non-size query
+parameters and use original size. `videos: "ytdl"` emits the existing typed
+video-page job for the validated post; no response-provided delegation URL is
+trusted. The Rust downloader still rejects these jobs pending the companion
+adapter. Parser/HTTP success is not evidence of a live authenticated download.
+
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol
 seconds 1000, mask 164, and the specified API path. Its animation and token were

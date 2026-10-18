@@ -11,7 +11,12 @@ use crate::{
 };
 #[path = "twitter_expansion.rs"]
 mod expansion;
-pub use expansion::{ExpansionOptions, RetweetMode, parse_response_with_options};
+pub use expansion::{
+    ExpansionOptions, RetweetMode, parse_response_with_media_options, parse_response_with_options,
+};
+#[path = "twitter_media.rs"]
+mod media;
+pub use media::{MediaOptions, VideoMode};
 #[path = "twitter_threads.rs"]
 mod threads;
 pub use threads::ThreadOptions;
@@ -75,6 +80,7 @@ pub struct Twitter {
     timeline_options: TimelineOptions,
     status_options: StatusOptions,
     thread_options: ThreadOptions,
+    media_options: MediaOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -108,6 +114,7 @@ impl Twitter {
             timeline_options: TimelineOptions::default(),
             status_options: StatusOptions::default(),
             thread_options: ThreadOptions::default(),
+            media_options: MediaOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -142,6 +149,11 @@ impl Twitter {
 
     pub fn with_thread_options(mut self, options: ThreadOptions) -> Self {
         self.thread_options = options;
+        self
+    }
+
+    pub fn with_media_options(mut self, options: MediaOptions) -> Self {
+        self.media_options = options;
         self
     }
 
@@ -559,76 +571,6 @@ fn check_errors(data: &Value) -> Result<()> {
 /// Parse the requested root with upstream-default expansion settings.
 pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media>> {
     parse_response_with_options(bytes, requested_post_id, ExpansionOptions::default())
-}
-
-fn parse_tweet_media(
-    tweet: &Value,
-    requested_post_id: &str,
-    allow_empty: bool,
-) -> Result<Vec<Media>> {
-    let legacy = &tweet["legacy"];
-    let items = match legacy.get("extended_entities") {
-        Some(extended) => extended
-            .get("media")
-            .and_then(Value::as_array)
-            .ok_or_else(|| error("Twitter post media fields malformed"))?,
-        None => {
-            if legacy
-                .pointer("/entities/media")
-                .is_some_and(|v| !v.as_array().is_some_and(Vec::is_empty))
-            {
-                return Err(error("Twitter post extended media missing"));
-            }
-            if allow_empty {
-                return Ok(Vec::new());
-            }
-            return Err(error("Twitter post has no downloadable media"));
-        }
-    };
-    if items.is_empty() && !allow_empty {
-        return Err(error("Twitter post has no downloadable media"));
-    }
-    let username = tweet
-        .pointer("/core/user_results/result/core/screen_name")
-        .or_else(|| tweet.pointer("/core/user_results/result/legacy/screen_name"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let caption = tweet
-        .pointer("/note_tweet/note_tweet_results/result/text")
-        .or_else(|| legacy.get("full_text"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let timestamp = legacy
-        .get("created_at")
-        .and_then(Value::as_str)
-        .and_then(timestamp);
-    items.iter().enumerate().map(|(i,item)| {
-        if item.pointer("/ext_media_availability/status").and_then(Value::as_str) == Some("Unavailable") { return Err(error("Twitter media is unavailable")); }
-        let kind = item.get("type").and_then(Value::as_str).unwrap_or("");
-        let (url, extension) = if matches!(kind,"video"|"animated_gif") {
-            let (url, _) = item.pointer("/video_info/variants").and_then(Value::as_array).into_iter().flatten()
-                .filter(|v| v.get("content_type").and_then(Value::as_str) == Some("video/mp4"))
-                .filter_map(|v| {
-                    let url = v.get("url").and_then(Value::as_str).and_then(|s| http_url(s).ok())?;
-                    if !url.path().ends_with(".mp4") { return None; }
-                    Some((url, v.get("bitrate").and_then(Value::as_u64).unwrap_or(0)))
-                }).max_by_key(|(_,rate)| *rate).ok_or_else(|| error("Twitter video has no direct MP4 variant; thumbnail fallback is disabled"))?;
-            (url,"mp4".to_string())
-        } else if kind == "photo" {
-            let mut url = item.get("media_url_https").or_else(|| item.get("media_url")).and_then(Value::as_str).ok_or_else(|| error("Twitter photo URL missing")).and_then(http_url).map_err(|_| error("Twitter photo URL invalid"))?;
-            let extension = url.path().rsplit_once('.').map(|(_,ext)| ext).filter(|ext| matches!(*ext,"jpg"|"jpeg"|"png"|"webp"|"avif")).map(str::to_owned)
-                .or_else(|| url.query_pairs().find(|(k,v)| k=="format" && matches!(v.as_ref(),"jpg"|"jpeg"|"png"|"webp"|"avif")).map(|(_,v)|v.into_owned()))
-                .ok_or_else(|| error("Twitter photo has unsupported extension"))?;
-            // Preserve signed/other query parameters, replacing only the size.
-            let pairs: Vec<_> = url.query_pairs().filter(|(k,_)| k != "name").map(|(k,v)|(k.into_owned(),v.into_owned())).collect();
-            url.set_query(None);
-            url.query_pairs_mut().extend_pairs(pairs).append_pair("name","orig");
-            (url,extension)
-        } else { return Err(error("unsupported Twitter media type")); };
-        Ok(Media { url, job: crate::extract::MediaJob::DirectHttp, handoff: BTreeMap::new(), category: "twitter".into(), filename: format!("{requested_post_id}_{}.{extension}",i+1),
-            metadata: Some(PostMetadata {retweet_id:None,quoted_by_id:None,reposted_by_id:None,post_id:requested_post_id.into(),media_id:(i+1).to_string(),shortcode:String::new(),username:username.clone(),caption:caption.clone(),timestamp,index:i+1}),
-            headers: BTreeMap::from([("User-Agent".into(),USER_AGENT.into()),("Referer".into(),"https://x.com/".into())]) })
-    }).collect()
 }
 
 // Twitter dates use a fixed English month and UTC offset; httpdate does not

@@ -21,8 +21,19 @@ pub fn parse_response_with_options(
     requested_id: &str,
     options: ExpansionOptions,
 ) -> Result<Vec<Media>> {
+    parse_response_with_media_options(bytes, requested_id, options, MediaOptions::default())
+}
+
+/// Parse explicit linked posts with video and preview selection.
+pub fn parse_response_with_media_options(
+    bytes: &[u8],
+    requested_id: &str,
+    options: ExpansionOptions,
+    media_options: MediaOptions,
+) -> Result<Vec<Media>> {
     let value = response_root(bytes, requested_id)?;
-    let mut engine = Engine::new(value, requested_id.into(), options, false);
+    let mut engine =
+        Engine::new(value, requested_id.into(), options, false).with_media_options(media_options);
     let mut result = Vec::new();
     loop {
         match engine.next()? {
@@ -153,6 +164,7 @@ pub(super) struct Engine {
     jobs: VecDeque<Job>,
     options: ExpansionOptions,
     allow_empty: bool,
+    media_options: MediaOptions,
     replies: ReplyMode,
     profile_owner: Option<String>,
 }
@@ -177,9 +189,15 @@ impl Engine {
             }]),
             options,
             allow_empty,
+            media_options: MediaOptions::default(),
             replies: ReplyMode::All,
             profile_owner: None,
         }
+    }
+
+    pub(super) fn with_media_options(mut self, options: MediaOptions) -> Self {
+        self.media_options = options;
+        self
     }
 
     pub(super) fn with_replies(mut self, replies: ReplyMode, owner: Option<String>) -> Self {
@@ -303,7 +321,17 @@ impl Engine {
             )? {
                 return Ok(Action::Media(Vec::new()));
             }
-            let mut media = parse_tweet_media(tweet, &job.id, self.allow_empty || has_quote)?;
+            let output_id = job
+                .repost
+                .as_ref()
+                .and_then(|outer| outer["rest_id"].as_str())
+                .unwrap_or(&job.id);
+            let mut media = media::parse_tweet_media(
+                tweet,
+                output_id,
+                self.allow_empty || has_quote,
+                self.media_options,
+            )?;
             for item in &mut media {
                 let metadata = item.metadata.as_mut().unwrap();
                 metadata.quoted_by_id = job.quoted_by.clone();
