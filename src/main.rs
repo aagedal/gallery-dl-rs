@@ -142,6 +142,9 @@ struct Args {
     /// Explicit native JSON settings (separate from compatibility backend config)
     #[arg(long)]
     native_config: Option<PathBuf>,
+    /// Do not load the discovered default native configuration file
+    #[arg(long, conflicts_with = "native_config")]
+    native_config_ignore: bool,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
     /// Seconds for native extraction or active compatibility reading (excludes backpressure)
@@ -167,6 +170,31 @@ fn parse_date_arg(value: &str) -> std::result::Result<i64, String> {
 
 fn parse_size(value: &str) -> std::result::Result<u64, String> {
     parse_bytes(value).map_err(|e| e.to_string())
+}
+
+/// The first existing default native configuration, like upstream's search
+/// of user configuration directories. Upstream gallery-dl files are not read:
+/// the native schema is a strict subset and would reject their settings.
+fn default_native_config() -> Option<PathBuf> {
+    let var = |name| {
+        std::env::var_os(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    let mut candidates = Vec::new();
+    if let Some(path) = var("GALLERY_DL_RS_CONFIG") {
+        candidates.push(path);
+    }
+    if cfg!(windows) {
+        candidates.extend(var("APPDATA").map(|dir| dir.join("gallery-dl-rs").join("config.json")));
+        candidates.extend(var("USERPROFILE").map(|dir| dir.join("gallery-dl-rs.conf")));
+    } else {
+        let config =
+            var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|home| home.join(".config")));
+        candidates.extend(config.map(|dir| dir.join("gallery-dl-rs").join("config.json")));
+        candidates.extend(var("HOME").map(|home| home.join(".gallery-dl-rs.conf")));
+    }
+    candidates.into_iter().find(|path| path.is_file())
 }
 
 fn parse_sleep(value: &str) -> std::result::Result<gallery_dl_rs::sleep::SleepRange, String> {
@@ -685,7 +713,12 @@ struct Settings {
 }
 
 async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
-    let config = match &args.native_config {
+    let discovered = if args.native_config.is_none() && !args.native_config_ignore {
+        default_native_config()
+    } else {
+        None
+    };
+    let config = match args.native_config.as_ref().or(discovered.as_ref()) {
         Some(path) => Config::load(path).await?,
         None => Config::default(),
     };

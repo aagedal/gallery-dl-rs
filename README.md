@@ -956,8 +956,14 @@ templates and `directory` an object mapping them to component lists, e.g.
 Conditions are tried in file order with the `--filter` evaluator; the first match
 wins, then the `""` entry, then the default name or category folder. Condition
 errors (such as missing keys) fail that file. A plain value or CLI flag in a
-narrower scope replaces an inherited object entirely. Full gallery-dl
-configuration compatibility, automatic discovery, and postprocessors remain
+narrower scope replaces an inherited object entirely.
+
+Without `--native-config`, the first existing file among `$GALLERY_DL_RS_CONFIG`,
+`$XDG_CONFIG_HOME/gallery-dl-rs/config.json` (or `~/.config/...`), and
+`~/.gallery-dl-rs.conf` is loaded (`%APPDATA%\gallery-dl-rs\config.json` and
+`%USERPROFILE%\gallery-dl-rs.conf` on Windows). `--native-config-ignore` skips
+discovery. Upstream gallery-dl configuration files are never read natively. Full gallery-dl
+configuration compatibility and postprocessors remain
 unimplemented.
 
 ## Current behavior
