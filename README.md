@@ -68,7 +68,8 @@ stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fb
 `/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
 `/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
 `/USER/videos/ID` videos, and Twitter/X single-status plus `/USER/media`, `/USER/tweets`, `/USER/with_replies`,
-and `/USER/highlights` URLs, root profiles, search, and hashtags.
+and `/USER/highlights` URLs, root profiles, search, hashtags, likes, bookmarks,
+lists, and home feeds.
 Other profiles, threads, and album listings still need the
 compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
@@ -301,9 +302,34 @@ queries fail explicitly, and query text is limited to 8 KiB. Scoped settings are
 A single valid `from:USER` query resolves that profile when `replies: "self"`
 needs its owner context. Search/profile date filtering preserves source order.
 All new settings forward to compatibility extraction when explicitly configured.
-Likes, cards/articles, arbitrary root-profile dispatch selection, cursor-resume
-configuration, configurable duplicate handling, text-only output, and other
-collection routes remain unfinished.
+Native likes use `/USER/likes` or `/id:USER_ID/likes`. The response must identify
+the requested profile, while liked posts may have different authors. The current
+session must have access to that likes feed. Bookmarks use `/i/bookmarks`, list
+posts use `/i/lists/LIST_ID`, and home feeds use `/home` or `/home/following` for
+the latest feed and `/home/foryou` (`for-you`, `for_you`, and encoded `for you` also
+accepted) for the
+ranked feed. These routes use their own exact timeline envelopes, accept mixed
+authors with consistent identity fields, and share post expansion, original
+archive identities, first-page pin opt-in, duplicate suppression, and active-time
+budgets. Present decimal list identifiers must match the requested list; opaque
+GraphQL node IDs are not treated as decimal aliases.
+
+Scoped `"limit"` sets the page size for profile and collection requests (integer
+1–100, default 50), independently of `search-limit`, and forwards to compatibility
+mode only when explicit. Bookmarks tolerate 128 consecutive empty continuations;
+likes, lists, and home feeds stop at their first empty response unless the API
+explicitly says to continue. All still stop on an explicit terminal response,
+reject cursor loops, and defer later requests until current jobs drain. Collection
+date filtering preserves source order because bookmark, like, list, and ranked
+feed order need not match original post dates. No collection request credentials
+are copied to media requests.
+
+Cards/articles, communities, list membership/follow relations, arbitrary
+root-profile dispatch selection, cursor-resume configuration, configurable
+duplicate handling, text-only output, and other collection routes remain
+unfinished. New collection behavior has synthetic/local coverage; successful
+live authenticated traversal remains unverified. See the
+[collection protocol notes](tests/fixtures/twitter/collections_README.md).
 
 Scoped native configuration supports `"retweets": false` (default), `true`, or
 `"original"`, and `"quoted": false` (default) or `true`. For example:
@@ -594,7 +620,7 @@ Neither configuration file is loaded automatically.
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `retweets`, `quoted`, `pinned`, `replies`, `strategy`, `search-pagination`,
-`search-results`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
@@ -824,6 +850,7 @@ and native extraction, and Retry-After parsing.
 `src/twitter.rs` owns experimental native Twitter/X and transaction bootstrap;
 `src/twitter_expansion.rs` validates explicit retweet/quote links and media identity;
 `src/twitter_search.rs` handles search routing, options, and pagination progress;
+`src/twitter_collections.rs` validates collection routes and response envelopes;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
 [fixture and manual-check notes](tests/fixtures/instagram/README.md) before
 promoting native extraction to the default.

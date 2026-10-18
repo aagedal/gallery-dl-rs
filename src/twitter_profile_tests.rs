@@ -1935,3 +1935,645 @@ async fn search_explicit_continue_empty_response_ignores_zero_empty_page_limit()
     assert_eq!(server.count(), 2);
     assert_eq!(variables(&server.urls()[1])["cursor"], "continue-empty");
 }
+
+fn feed_page(kind: &collections::Collection, tweets: Vec<Value>, cursor: Option<&str>) -> Value {
+    let source = page(tweets, cursor);
+    let instructions =
+        source["data"]["user"]["result"]["timeline"]["timeline"]["instructions"].clone();
+    match kind {
+        collections::Collection::Bookmarks => {
+            json!({"data":{"bookmark_timeline_v2":{"timeline":{"instructions":instructions}}}})
+        }
+        collections::Collection::List(_) => {
+            json!({"data":{"list":{"tweets_timeline":{"timeline":{"instructions":instructions}}}}})
+        }
+        collections::Collection::Home | collections::Collection::HomeLatest => {
+            json!({"data":{"home":{"home_timeline_urt":{"instructions":instructions}}}})
+        }
+    }
+}
+fn other_author(mut post: Value) -> Value {
+    post["legacy"]["user_id_str"] = "99".into();
+    post["core"]["user_results"]["result"]["rest_id"] = "99".into();
+    post
+}
+
+#[tokio::test]
+async fn feed_operations_are_lazy_cursor_bound_and_keep_original_media_identity() {
+    use collections::Collection;
+    for (kind, operation) in [
+        (Collection::Bookmarks, "/pLtjrO4ubNh996M_Cubwsg/Bookmarks"),
+        (
+            Collection::List("55".into()),
+            "/06JtmwM8k_1cthpFZITVVA/ListLatestTweetsTimeline",
+        ),
+        (
+            Collection::HomeLatest,
+            "/SFxmNKWfN9ySJcXG_tjX8g/HomeLatestTimeline",
+        ),
+        (Collection::Home, "/DXmgQYmIft1oLP6vMkJixw/HomeTimeline"),
+    ] {
+        let server = Server::new(vec![
+            Response::json(feed_page(
+                &kind,
+                vec![tweet("100"), other_author(tweet("101"))],
+                Some("opaque+/=?"),
+            )),
+            Response::json(feed_page(&kind, vec![tweet("101"), tweet("102")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_timeline_options(TimelineOptions {
+                limit: 7,
+                ..Default::default()
+            });
+        let mut stream = native.feed_stream(kind.clone(), server.base.clone());
+        assert_eq!(server.count(), 0);
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first.metadata.as_ref().unwrap().post_id, "100");
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert_eq!(server.count(), 1);
+        assert_eq!(
+            stream
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+                .unwrap()
+                .post_id,
+            "101"
+        );
+        assert_eq!(server.count(), 1);
+        let rest: Vec<_> = stream.try_collect().await.unwrap();
+        assert_eq!(post_ids(&rest), ["102"]);
+        let direct = parse_response(
+            &serde_json::to_vec(&post_response(tweet("100"))).unwrap(),
+            "100",
+        )
+        .unwrap();
+        assert_eq!(first.archive_key(), direct[0].archive_key());
+        let urls = server.urls();
+        assert_eq!(urls.len(), 2);
+        assert!(urls.iter().all(|url| url.path().ends_with(operation)));
+        let mut expected = match kind {
+            Collection::Bookmarks => json!({"count":7,"includePromotedContent":false}),
+            Collection::List(_) => json!({"listId":"55","count":7}),
+            Collection::HomeLatest => {
+                json!({"count":7,"includePromotedContent":false,"latestControlAvailable":true})
+            }
+            Collection::Home => {
+                json!({"count":7,"includePromotedContent":false,"latestControlAvailable":true,"withCommunity":true})
+            }
+        };
+        assert_eq!(variables(&urls[0]), expected);
+        expected["cursor"] = "opaque+/=?".into();
+        assert_eq!(variables(&urls[1]), expected);
+        assert!(
+            urls.iter()
+                .all(|url| !url.query_pairs().any(|(key, _)| key == "fieldToggles"))
+        );
+        assert_scoped_expansion_requests(&server, &native);
+    }
+}
+
+#[tokio::test]
+async fn likes_resolves_only_named_owner_accepts_other_authors_and_binds_requested_root() {
+    for named in [false, true] {
+        let mut responses = Vec::new();
+        if named {
+            responses.push(Response::json(user()));
+        }
+        responses.push(Response::json(page(
+            vec![other_author(tweet("100")), tweet("101")],
+            None,
+        )));
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_timeline_options(TimelineOptions {
+                limit: 13,
+                ..Default::default()
+            });
+        let items: Vec<_> = native
+            .profile_stream(
+                input(if named { "fixture" } else { "id:42" }),
+                timeline::ProfileTab::Likes,
+                server.base.clone(),
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), ["100", "101"]);
+        let urls = server.urls();
+        assert_eq!(urls.len(), if named { 2 } else { 1 });
+        let url = urls.last().unwrap();
+        assert!(url.path().ends_with("/TGEKkJG_meudeaFcqaxM-Q/Likes"));
+        assert_eq!(
+            variables(url),
+            json!({"userId":"42","count":13,"includePromotedContent":false,"withClientEventToken":false,"withBirdwatchNotes":false,"withVoice":true})
+        );
+        let toggles: Value = serde_json::from_str(
+            &url.query_pairs()
+                .find(|(key, _)| key == "fieldToggles")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        assert_eq!(toggles, json!({"withArticlePlainText":false}));
+    }
+    let mut wrong = page(vec![other_author(tweet("100"))], None);
+    wrong["data"]["user"]["result"]["rest_id"] = "99".into();
+    let server = Server::new(vec![Response::json(wrong)]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let mut stream = native.profile_stream(
+        input("id:42"),
+        timeline::ProfileTab::Likes,
+        server.base.clone(),
+    );
+    assert!(stream.next().await.unwrap().is_err());
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+async fn collection_range_and_drop_prevent_followup_quotes_and_pages() {
+    use collections::Collection;
+    let server = Server::new(vec![
+        Response::json(feed_page(
+            &Collection::Bookmarks,
+            vec![quoted_tweet("100", "101")],
+            Some("next"),
+        )),
+        Response::json(post_response(tweet("101"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut selected = crate::selection::RangeSelection::parse("1")
+        .unwrap()
+        .apply(native.feed_stream(Collection::Bookmarks, server.base.clone()));
+    assert!(selected.next().await.unwrap().is_ok());
+    assert!(selected.next().await.is_none());
+    assert_eq!(server.count(), 1);
+    let server = Server::new(vec![
+        Response::json(feed_page(
+            &Collection::HomeLatest,
+            vec![tweet("100")],
+            Some("next"),
+        ))
+        .delayed(250),
+        Response::json(feed_page(&Collection::HomeLatest, vec![tweet("101")], None)),
+    ]);
+    let mut stream = native.feed_stream(Collection::HomeLatest, server.base.clone());
+    {
+        let pending = stream.next();
+        tokio::pin!(pending);
+        tokio::select! { result = &mut pending => panic!("unexpected completion: {result:?}"), () = server.wait_for(1) => {} }
+    }
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(15)).await;
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn collection_late_auth_identity_and_cursor_errors_are_terminal_and_private() {
+    use collections::Collection;
+    let mut contradictory = tweet("101");
+    contradictory["legacy"]["user_id_str"] = "99".into();
+    let mut auth =
+        Response::json(json!({"errors":[{"code":32,"message":"private collection token"}]}));
+    auth.status = 401;
+    for response in [
+        auth,
+        Response::json(feed_page(&Collection::Bookmarks, vec![contradictory], None)),
+        Response::json(feed_page(
+            &Collection::Bookmarks,
+            vec![tweet("101")],
+            Some("a"),
+        )),
+    ] {
+        let server = Server::new(vec![
+            Response::json(feed_page(
+                &Collection::Bookmarks,
+                vec![tweet("100")],
+                Some("a"),
+            )),
+            response,
+        ]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let mut stream = native.feed_stream(Collection::Bookmarks, server.base.clone());
+        assert_eq!(
+            stream
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+                .unwrap()
+                .post_id,
+            "100"
+        );
+        let error = stream.next().await.unwrap().unwrap_err().to_string();
+        assert!(!error.contains("private collection token"));
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn bookmark_empty_continuations_are_bounded_while_other_feeds_stop_on_empty() {
+    use collections::Collection;
+    let mut responses: Vec<_> = (0..129)
+        .map(|i| {
+            Response::json(feed_page(
+                &Collection::Bookmarks,
+                vec![],
+                Some(&format!("cursor-{i}")),
+            ))
+        })
+        .collect();
+    responses.push(Response::json(feed_page(
+        &Collection::Bookmarks,
+        vec![tweet("100")],
+        None,
+    )));
+    let server = Server::new(responses);
+    let native = extractor(Duration::from_secs(5)).await;
+    let items: Vec<_> = native
+        .feed_stream(Collection::Bookmarks, server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(server.count(), 129);
+    for kind in [
+        Collection::List("55".into()),
+        Collection::HomeLatest,
+        Collection::Home,
+    ] {
+        let server = Server::new(vec![
+            Response::json(feed_page(&kind, vec![], Some("next"))),
+            Response::json(feed_page(&kind, vec![tweet("100")], None)),
+        ]);
+        let items: Vec<_> = native
+            .feed_stream(kind, server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(items.is_empty());
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn collection_explicit_continue_empty_hint_and_explicit_termination_are_honored() {
+    use collections::Collection;
+    let kind = Collection::HomeLatest;
+    let mut empty = feed_page(&kind, vec![], Some("a"));
+    empty["data"]["home"]["home_timeline_urt"]["instructions"][0]["entries"][0]["content"]["stopOnEmptyResponse"] =
+        false.into();
+    let mut final_page = feed_page(&kind, vec![tweet("100")], Some("a"));
+    final_page["data"]["home"]["home_timeline_urt"]["instructions"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type":"TimelineTerminateTimeline","direction":"Bottom"}));
+    let server = Server::new(vec![Response::json(empty), Response::json(final_page)]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .feed_stream(kind, server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn collection_active_budget_excludes_pause_but_accumulates_pages_and_quotes() {
+    use collections::Collection;
+    let native = extractor(Duration::from_millis(250))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let server = Server::new(vec![
+        Response::json(feed_page(
+            &Collection::Bookmarks,
+            vec![tweet("100")],
+            Some("next"),
+        ))
+        .delayed(20),
+        Response::json(feed_page(&Collection::Bookmarks, vec![tweet("101")], None)).delayed(20),
+    ]);
+    let mut stream = native.feed_stream(Collection::Bookmarks, server.base.clone());
+    assert!(stream.next().await.unwrap().is_ok());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(stream.next().await.is_none());
+    let server = Server::new(vec![
+        Response::json(feed_page(
+            &Collection::Bookmarks,
+            vec![quoted_tweet("100", "101")],
+            Some("next"),
+        ))
+        .delayed(150),
+        Response::json(post_response(tweet("101"))).delayed(180),
+        Response::json(feed_page(&Collection::Bookmarks, vec![tweet("102")], None)),
+    ]);
+    let mut stream = native.feed_stream(Collection::Bookmarks, server.base.clone());
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("timed out")
+    );
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn collection_cookie_rotation_uses_actual_operation_paths_and_never_leaks_to_media() {
+    use collections::Collection;
+    let mut first = Response::json(feed_page(
+        &Collection::Bookmarks,
+        vec![quoted_tweet("100", "101")],
+        Some("next"),
+    ));
+    first.headers =
+        "Set-Cookie: ct0=feedrotated; Path=/\r\nSet-Cookie: auth_token=feedsession; Path=/\r\n"
+            .into();
+    let server = Server::new(vec![
+        first,
+        Response::json(post_response(tweet("101"))),
+        Response::json(feed_page(&Collection::Bookmarks, vec![tweet("102")], None)),
+    ]);
+    let network = NetworkOptions::new(None, Some("gallery-dl-feed-test/1".into())).unwrap();
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_network(&network)
+        .unwrap()
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let items: Vec<_> = native
+        .feed_stream(Collection::Bookmarks, server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "101", "102"]);
+    let urls = server.urls();
+    assert!(urls[0].path().ends_with("/Bookmarks"));
+    assert!(urls[1].path().ends_with("/TweetResultByRestId"));
+    assert!(urls[2].path().ends_with("/Bookmarks"));
+    let requests = server.requests.lock().unwrap();
+    for (index, request) in requests.iter().enumerate() {
+        let lower = request.to_ascii_lowercase();
+        assert!(lower.contains("user-agent: gallery-dl-feed-test/1\r\n"));
+        if index == 0 {
+            assert!(lower.contains("x-csrf-token: csrf\r\n"));
+        } else {
+            assert!(lower.contains("x-csrf-token: feedrotated\r\n"));
+            assert!(lower.contains("auth_token=feedsession"));
+            assert!(!lower.contains("auth_token=session;"));
+        }
+        let encoded = request
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("x-client-transaction-id")
+                    .then(|| value.trim())
+            })
+            .unwrap();
+        let bytes = STANDARD_NO_PAD.decode(encoded).unwrap();
+        let transaction = native.transaction.lock().unwrap();
+        let transaction = transaction.as_ref().unwrap();
+        let mask = bytes[0];
+        let offset = 1 + transaction.key.len();
+        let seconds = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .iter()
+                .map(|byte| byte ^ mask)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        );
+        let path = request
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .split('?')
+            .next()
+            .unwrap();
+        assert_eq!(
+            encoded,
+            transaction.generate_at("GET", path, u64::from(seconds), mask)
+        );
+    }
+    for media in items {
+        assert_eq!(
+            media.headers.get("User-Agent").map(String::as_str),
+            Some("gallery-dl-feed-test/1")
+        );
+        assert!(!media.headers.keys().any(|name| {
+            [
+                "cookie",
+                "authorization",
+                "x-csrf-token",
+                "x-client-transaction-id",
+            ]
+            .iter()
+            .any(|secret| name.eq_ignore_ascii_case(secret))
+        }));
+        assert!(
+            !media
+                .headers
+                .values()
+                .any(|value| value.contains("feedsession") || value.contains("feedrotated"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn collection_pins_are_opt_in_first_page_only_and_share_deduplication() {
+    use collections::Collection;
+    for pinned in [false, true] {
+        let mut first = feed_page(&Collection::HomeLatest, vec![tweet("101")], Some("next"));
+        first["data"]["home"]["home_timeline_urt"]["instructions"]
+            .as_array_mut()
+            .unwrap()
+            .insert(
+                0,
+                json!({"type":"TimelinePinEntry","entry":entry(tweet("100"))}),
+            );
+        let mut second = feed_page(
+            &Collection::HomeLatest,
+            vec![tweet("100"), tweet("102")],
+            None,
+        );
+        second["data"]["home"]["home_timeline_urt"]["instructions"]
+            .as_array_mut()
+            .unwrap()
+            .insert(
+                0,
+                json!({"type":"TimelinePinEntry","entry":entry(tweet("103"))}),
+            );
+        let server = Server::new(vec![Response::json(first), Response::json(second)]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_profile_options(ProfileOptions {
+                pinned,
+                replies: ReplyMode::All,
+            });
+        let items: Vec<_> = native
+            .feed_stream(Collection::HomeLatest, server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            post_ids(&items),
+            if pinned {
+                vec!["100", "101", "102"]
+            } else {
+                vec!["101", "100", "102"]
+            }
+        );
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn collection_retweet_modes_and_quote_expansion_preserve_underlying_archive_keys() {
+    use collections::Collection;
+    for mode in [
+        RetweetMode::Skip,
+        RetweetMode::Repost,
+        RetweetMode::Original,
+    ] {
+        let mut retweet = other_author(tweet("100"));
+        retweet["legacy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("extended_entities");
+        retweet["legacy"]["retweeted_status_id_str"] = "101".into();
+        retweet["retweeted_status_result"] = json!({"result":tweet("101")});
+        let server = Server::new(vec![
+            Response::json(feed_page(
+                &Collection::Bookmarks,
+                vec![retweet, quoted_tweet("102", "103")],
+                None,
+            )),
+            Response::json(post_response(other_author(tweet("103")))),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_expansion(expansion_options(mode));
+        let items: Vec<_> = native
+            .feed_stream(Collection::Bookmarks, server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        let expected = match mode {
+            RetweetMode::Skip => vec!["102", "103"],
+            RetweetMode::Repost => vec!["100", "102", "103"],
+            RetweetMode::Original => vec!["101", "102", "103"],
+        };
+        assert_eq!(post_ids(&items), expected);
+        for item in &items {
+            let id = &item.metadata.as_ref().unwrap().post_id;
+            let direct =
+                parse_response(&serde_json::to_vec(&post_response(tweet(id))).unwrap(), id)
+                    .unwrap();
+            assert_eq!(item.archive_key(), direct[0].archive_key());
+        }
+        assert_eq!(
+            items
+                .last()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .quoted_by_id
+                .as_deref(),
+            Some("102")
+        );
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn search_pins_are_opt_in_and_only_apply_to_the_first_page() {
+    for pinned in [false, true] {
+        let mut first = search_page(vec![tweet("103")], Some("next"));
+        first["data"]["search_by_raw_query"]["search_timeline"]["timeline"]["instructions"]
+            .as_array_mut()
+            .unwrap()
+            .insert(
+                0,
+                json!({"type":"TimelinePinEntry","entry":entry(tweet("104"))}),
+            );
+        let mut second = search_page(vec![tweet("100")], None);
+        second["data"]["search_by_raw_query"]["search_timeline"]["timeline"]["instructions"]
+            .as_array_mut()
+            .unwrap()
+            .insert(
+                0,
+                json!({"type":"TimelinePinEntry","entry":entry(tweet("101"))}),
+            );
+        let server = Server::new(vec![Response::json(first), Response::json(second)]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_profile_options(ProfileOptions {
+                pinned,
+                replies: ReplyMode::All,
+            })
+            .with_timeline_options(TimelineOptions {
+                search_pagination: SearchPagination::Cursor,
+                ..Default::default()
+            });
+        let items: Vec<_> = native
+            .search_stream("fixture".into(), server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            post_ids(&items),
+            if pinned {
+                vec!["104", "103", "100"]
+            } else {
+                vec!["103", "100"]
+            }
+        );
+        assert_eq!(server.count(), 2);
+        assert_eq!(variables(&server.urls()[1])["cursor"], "next");
+    }
+}
+
+#[tokio::test]
+async fn likes_empty_pages_stop_unless_cursor_explicitly_permits_continuation() {
+    for continue_empty in [false, true] {
+        let mut empty = page(vec![], Some("next"));
+        if continue_empty {
+            empty["data"]["user"]["result"]["timeline"]["timeline"]["instructions"][0]["entries"]
+                [0]["content"]["stopOnEmptyResponse"] = false.into();
+        }
+        let server = Server::new(vec![
+            Response::json(empty),
+            Response::json(page(vec![other_author(tweet("100"))], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let items: Vec<_> = native
+            .profile_stream(
+                input("id:42"),
+                timeline::ProfileTab::Likes,
+                server.base.clone(),
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            post_ids(&items),
+            if continue_empty { vec!["100"] } else { vec![] }
+        );
+        assert_eq!(server.count(), if continue_empty { 2 } else { 1 });
+    }
+}

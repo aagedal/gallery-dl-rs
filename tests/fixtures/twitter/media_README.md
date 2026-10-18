@@ -63,8 +63,8 @@ configured user agents, cookie/CSRF rotation, and API credential isolation from
 media. Transaction tests regenerate each request's token using its actual API
 path, decoded timestamp, and mask rather than checking only header presence.
 
-Likes and other collection routes, configurable uniqueness, arbitrary root
-profile dispatch, resume cursors, text-only output, cards/articles,
+Other collection routes, configurable uniqueness, arbitrary root profile
+dispatch, resume cursors, text-only output, cards/articles,
 unknown timeline variants, dynamic operation-ID refresh, and real authenticated
 verification remain unfinished. Compatibility remains the default.
 
@@ -92,3 +92,8 @@ no raw post results widens to an unfiltered search. Range/drop/deadline tests
 verify no prefetch, preservation of earlier output on failures, shared active
 time excluding consumer pauses, cross-stage dedup, and unchanged archive keys.
 All responses remain synthetic, including direct/quoted/retweet search results.
+
+Likes, bookmarks, list posts, and home feeds now have separate synthetic/local
+coverage described in [the collection protocol notes](collections_README.md).
+Search pin instructions now respect the default disabled setting and explicit
+first-page opt-in, including across root fallback stages.

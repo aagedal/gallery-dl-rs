@@ -826,6 +826,7 @@ fn twitter_search_configuration_rejects_invalid_and_duplicate_values_privately()
         "strategy",
         "search-pagination",
         "search-results",
+        "limit",
         "search-limit",
         "search-stop",
     ] {
@@ -840,7 +841,7 @@ fn twitter_search_configuration_rejects_invalid_and_duplicate_values_privately()
             invalid.extend([json!(0), json!(1)]);
         } else {
             invalid.extend([json!(-1), json!(1.5), json!("20"), json!(129), json!(1000)]);
-            if field == "search-limit" {
+            if matches!(field, "limit" | "search-limit") {
                 invalid.extend([json!(0), json!(101), json!("auto")]);
             }
         }
@@ -875,6 +876,43 @@ fn twitter_search_configuration_rejects_invalid_and_duplicate_values_privately()
     for document in [
         r#"{"strategy":"Auto"}"#,
         r#"{"search-pagination":"MAX_ID"}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}
+
+#[test]
+fn twitter_collection_limit_is_sparse_scoped_and_independent_from_search_limit() {
+    let scoped =
+        parse(r#"{"extractor":{"limit":1,"search-limit":20,"twitter":{"limit":100}}}"#).unwrap();
+    let twitter = scoped.resolve("twitter").unwrap();
+    assert_eq!(twitter.limit, Some(100));
+    assert_eq!(twitter.search_limit, Some(20));
+    assert_eq!(scoped.resolve("instagram").unwrap().limit, Some(1));
+    let global = parse(r#"{"limit":50,"extractor":{"limit":1,"twitter":{"limit":100}}}"#).unwrap();
+    assert_eq!(global.resolve("twitter").unwrap().limit, Some(50));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                limit: Some(1),
+                ..Default::default()
+            })
+            .limit,
+        Some(1)
+    );
+    assert_eq!(parse("{}").unwrap().resolve("twitter").unwrap().limit, None);
+}
+
+#[test]
+fn twitter_collection_limit_rejects_duplicate_valid_values_in_every_scope() {
+    for document in [
+        r#"{"limit":1,"limit":100}"#,
+        r#"{"extractor":{"limit":1,"limit":100}}"#,
+        r#"{"extractor":{"twitter":{"limit":1,"limit":100}}}"#,
+        r#"{"extractor":{"instagram":{"limit":1,"limit":100}}}"#,
+        r#"{"extractor":{"facebook":{"limit":1,"limit":100}}}"#,
+        r#"{"extractor":{"direct":{"limit":1,"limit":100}}}"#,
     ] {
         assert!(parse(document).is_err());
     }

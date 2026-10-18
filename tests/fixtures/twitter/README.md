@@ -23,8 +23,9 @@ These check original/repost identities, lazy missing-target requests, alias/root
 validation, bounds/cycles, scoped credentials, ranges, dates, and cancellation.
 Posts/replies/highlights tabs have synthetic/local coverage described in
 [the profile timeline notes](media_README.md). Root-profile search fallback and standalone search/hashtags also have synthetic
-coverage there. Threads, cards/articles, playlists, and other collections remain
-unsupported natively. Compatibility remains the default.
+coverage there. Likes, bookmarks, lists, and home feeds have separate
+[collection protocol notes](collections_README.md). Threads, cards/articles,
+playlists, and other collections remain unsupported natively. Compatibility remains the default.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol

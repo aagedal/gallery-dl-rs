@@ -87,8 +87,8 @@ shared extraction interface that emits media, post metadata, and child URLs.
   media siblings while suppressing overlapping pages/pins/quotes. Backpressure,
   source-order date/range selection, active budgets, cancellation, credential
   scoping, and compatibility forwarding are tested. Authenticated live traversal,
-  real response fixtures, likes/other collection routes, configurable uniqueness,
-  and dynamic operation refresh remain unfinished.
+  real response fixtures, configurable uniqueness, and dynamic operation refresh
+  remain unfinished.
   **Implemented experimental search and root timelines:** ordinary/numeric profile
   roots and `/timeline` share an initial strategy-selected feed, a search for
   older links, and an unfiltered search only if the link search has no post
@@ -103,6 +103,18 @@ shared extraction interface that emits media, post metadata, and child URLs.
   these behaviors; live authenticated search and real response fixtures remain
   unverified. Resume cursors, arbitrary root dispatch, text-only output, and
   other collection routes remain unfinished.
+  **Implemented experimental account collections:** Likes profile tabs, bookmarks,
+  numeric list timelines, and latest/ranked home feeds share the native pipeline.
+  Exact response envelopes and present list ID aliases validate before output;
+  mixed authors retain underlying post/archive identities. Scoped `limit` sets
+  profile/collection page size independently of search-limit and forwards only
+  explicit values to compatibility mode. First-page pins are opt-in, including a
+  corrected search-pin default. Synthetic parser/local HTTP/CLI tests cover
+  operation variables, owner/alias validation, cookie rotation, signed paths,
+  bounded empty pages, cursor loops, expansion/dedup, dates/ranges, late errors,
+  consumer pauses, and cancellation. Authenticated live collection traversal,
+  real fixtures, bookmark-specific metadata, communities, membership/follow
+  traversal, text-only output, and other routes/options remain unfinished.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and

@@ -203,6 +203,7 @@ async fn run(args: Args) -> Result<()> {
                             || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || gallery_dl_rs::twitter::is_search_url(&url)
+                            || gallery_dl_rs::twitter::is_collection_url(&url)
                             || (extract::social_site(&url) == Some("twitter")
                                 && settings["twitter"].options.quoted == Some(true))
                     });
@@ -425,6 +426,7 @@ fn extract_input<'a>(
                                         quoted: options.quoted.unwrap_or(false),
                                     })
                                     .with_timeline_options(TimelineOptions {
+                                        limit: options.limit.unwrap_or(50),
                                         strategy: options.strategy.unwrap_or_default(),
                                         search_pagination: options
                                             .search_pagination
@@ -498,6 +500,7 @@ fn extract_input<'a>(
                             search_results: (category == "twitter")
                                 .then_some(options.search_results)
                                 .flatten(),
+                            limit: (category == "twitter").then_some(options.limit).flatten(),
                             search_limit: (category == "twitter")
                                 .then_some(options.search_limit)
                                 .flatten(),
@@ -568,6 +571,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         strategy: None,
         search_pagination: None,
         search_results: None,
+        limit: None,
         search_limit: None,
         search_stop: None,
         proxy: args.proxy.clone(),

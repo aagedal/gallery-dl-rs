@@ -46,6 +46,8 @@ pub struct Options {
     pub strategy: Option<crate::twitter::TimelineStrategy>,
     pub search_pagination: Option<crate::twitter::SearchPagination>,
     pub search_results: Option<crate::twitter::SearchProduct>,
+    /// Number of posts requested per account or collection page.
+    pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
     /// Relative directory components; an empty list selects the base directory.
@@ -93,6 +95,7 @@ impl Options {
             strategy: overrides.strategy.or(self.strategy),
             search_pagination: overrides.search_pagination.or(self.search_pagination),
             search_results: overrides.search_results.or(self.search_results),
+            limit: overrides.limit.or(self.limit),
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
             directory: overrides
@@ -149,6 +152,7 @@ struct RawRoot {
     strategy: Field,
     search_pagination: Field,
     search_results: Field,
+    limit: Field,
     search_limit: Field,
     search_stop: Field,
     directory: Field,
@@ -178,6 +182,7 @@ struct RawExtractor {
     strategy: Field,
     search_pagination: Field,
     search_results: Field,
+    limit: Field,
     search_limit: Field,
     search_stop: Field,
     directory: Field,
@@ -210,6 +215,7 @@ struct RawOptions {
     strategy: Field,
     search_pagination: Field,
     search_results: Field,
+    limit: Field,
     search_limit: Field,
     search_stop: Field,
     directory: Field,
@@ -305,6 +311,7 @@ impl Config {
             strategy: root.strategy,
             search_pagination: root.search_pagination,
             search_results: root.search_results,
+            limit: root.limit,
             search_limit: root.search_limit,
             search_stop: root.search_stop,
             directory: root.directory,
@@ -332,6 +339,7 @@ impl Config {
             strategy: extractor.strategy,
             search_pagination: extractor.search_pagination,
             search_results: extractor.search_results,
+            limit: extractor.limit,
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
             directory: extractor.directory,
@@ -452,6 +460,7 @@ impl RawOptions {
                 ));
             }
         };
+        let limit = bounded_integer(self.limit, 1, 100, "limit")?;
         let search_limit = bounded_integer(self.search_limit, 1, 100, "search-limit")?;
         let search_stop = match self.search_stop.0 {
             Some(Value::String(value)) if value == "auto" => Some(3),
@@ -561,6 +570,7 @@ impl RawOptions {
             strategy,
             search_pagination,
             search_results,
+            limit,
             search_limit,
             search_stop,
             directory: templates,

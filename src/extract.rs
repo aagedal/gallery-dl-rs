@@ -206,6 +206,7 @@ pub struct BackendOptions {
     pub strategy: Option<crate::twitter::TimelineStrategy>,
     pub search_pagination: Option<crate::twitter::SearchPagination>,
     pub search_results: Option<crate::twitter::SearchProduct>,
+    pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
 }
@@ -322,6 +323,9 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("search-results=\"{value}\""));
+        }
+        if let Some(limit) = options.limit {
+            command.arg("--option").arg(format!("limit={limit}"));
         }
         if let Some(limit) = options.search_limit {
             command.arg("--option").arg(format!("search-limit={limit}"));

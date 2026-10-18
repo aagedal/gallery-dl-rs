@@ -14,6 +14,7 @@ pub(super) enum ProfileTab {
     Tweets,
     Replies,
     Highlights,
+    Likes,
     Timeline,
 }
 
@@ -87,6 +88,7 @@ pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
                 "tweets" => ProfileTab::Tweets,
                 "with_replies" => ProfileTab::Replies,
                 "highlights" => ProfileTab::Highlights,
+                "likes" => ProfileTab::Likes,
                 "timeline" => ProfileTab::Timeline,
                 _ => return Err(invalid()),
             },
@@ -141,7 +143,7 @@ fn reserved_name(name: &str) -> bool {
     )
 }
 
-fn document(bytes: &[u8]) -> Result<Value> {
+pub(super) fn document(bytes: &[u8]) -> Result<Value> {
     if bytes.len() > MAX_RESPONSE {
         return Err(error("Twitter response exceeded 16 MiB"));
     }
@@ -335,16 +337,21 @@ pub(super) fn parse_profile_posts_with_pin(
     parse_instructions(instructions, Some(owner_id), tab, pinned, inferred_pin)
 }
 
+#[cfg(test)]
 pub(super) fn parse_search_posts(bytes: &[u8]) -> Result<Page> {
+    parse_search_posts_with_pin(bytes, true)
+}
+
+pub(super) fn parse_search_posts_with_pin(bytes: &[u8], pinned: bool) -> Result<Page> {
     let data = document(bytes)?;
     let instructions = data
         .pointer("/data/search_by_raw_query/search_timeline/timeline/instructions")
         .and_then(Value::as_array)
         .ok_or_else(|| error("Twitter search timeline instructions missing or invalid"))?;
-    parse_instructions(instructions, None, ProfileTab::Timeline, true, None)
+    parse_instructions(instructions, None, ProfileTab::Timeline, pinned, None)
 }
 
-fn parse_instructions(
+pub(super) fn parse_instructions(
     instructions: &[Value],
     owner_id: Option<&str>,
     tab: ProfileTab,
@@ -650,6 +657,7 @@ mod tests {
             ("tweets", ProfileTab::Tweets),
             ("with_replies", ProfileTab::Replies),
             ("highlights", ProfileTab::Highlights),
+            ("likes", ProfileTab::Likes),
         ] {
             for user in ["User_123", "id:42"] {
                 let url = Url::parse(&format!(
@@ -663,7 +671,7 @@ mod tests {
             }
         }
         for url in [
-            "https://x.com/user/likes",
+            "https://x.com/user/followers",
             "https://x.com/user/tweets/extra",
             "https://x.com/user/with-replies",
             "https://x.com/id:0/tweets",

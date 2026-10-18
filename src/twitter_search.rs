@@ -43,6 +43,7 @@ pub struct TimelineOptions {
     pub strategy: TimelineStrategy,
     pub search_pagination: SearchPagination,
     pub search_product: SearchProduct,
+    pub limit: u8,
     pub search_limit: u8,
     pub search_stop: u8,
 }
@@ -52,6 +53,7 @@ impl Default for TimelineOptions {
             strategy: TimelineStrategy::Auto,
             search_pagination: SearchPagination::MaxId,
             search_product: SearchProduct::Latest,
+            limit: 50,
             search_limit: 20,
             search_stop: 3,
         }

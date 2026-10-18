@@ -12,6 +12,9 @@ use crate::{
 #[path = "twitter_expansion.rs"]
 mod expansion;
 pub use expansion::{ExpansionOptions, RetweetMode, parse_response_with_options};
+#[path = "twitter_collections.rs"]
+mod collections;
+pub use collections::is_collection_url;
 #[path = "twitter_search.rs"]
 mod search;
 pub use search::{

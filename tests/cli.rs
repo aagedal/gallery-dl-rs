@@ -772,6 +772,15 @@ fn native_twitter_reports_authentication_without_launching_backend_and_continues
         "https://x.com/person/tweets",
         "https://x.com/person/with_replies",
         "https://x.com/person/highlights",
+        "https://x.com/person/likes",
+        "https://x.com/id:42/likes",
+        "https://x.com/i/bookmarks",
+        "https://x.com/i/lists/42",
+        "https://x.com/home",
+        "https://x.com/home/following",
+        "https://x.com/home/foryou",
+        "https://x.com/home/for-you",
+        "https://x.com/home/for_you",
         "https://x.com/id:42/tweets",
         "https://x.com/id:42/with_replies",
         "https://x.com/id:42/highlights",
@@ -815,6 +824,15 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
         "https://x.com/person/tweets",
         "https://x.com/person/with_replies",
         "https://x.com/person/highlights",
+        "https://x.com/person/likes",
+        "https://x.com/id:42/likes",
+        "https://x.com/i/bookmarks",
+        "https://x.com/i/lists/42",
+        "https://x.com/home",
+        "https://x.com/home/following",
+        "https://x.com/home/foryou",
+        "https://x.com/home/for-you",
+        "https://x.com/home/for_you",
         "https://instagram.com/p/BA/",
         "https://instagram.com/person/",
         "https://facebook.com/photo/?fbid=1",
@@ -860,11 +878,12 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
     for (settings, expected) in [
         (serde_json::json!({}), vec![]),
         (
-            serde_json::json!({"extractor":{"twitter":{"strategy":"tweets","search-pagination":"dt","search-results":"live","search-limit":100,"search-stop":0}}}),
+            serde_json::json!({"extractor":{"twitter":{"strategy":"tweets","search-pagination":"dt","search-results":"live","limit":75,"search-limit":100,"search-stop":0}}}),
             vec![
                 "strategy=\"tweets\"",
                 "search-pagination=\"date\"",
                 "search-results=\"Latest\"",
+                "limit=75",
                 "search-limit=100",
                 "search-stop=0",
             ],
@@ -914,7 +933,11 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .windows(2)
                 .filter(|pair| pair[0] == "--option")
                 .map(|pair| pair[1])
-                .filter(|value| value.starts_with("strategy=") || value.starts_with("search-"))
+                .filter(|value| {
+                    value.starts_with("strategy=")
+                        || value.starts_with("search-")
+                        || value.starts_with("limit=")
+                })
                 .collect();
             assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
             assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
@@ -925,6 +948,8 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         serde_json::json!({"strategy":"PRIVATE-STRATEGY"}),
         serde_json::json!({"extractor":{"twitter":{"search-pagination":"PRIVATE-PAGINATION"}}}),
         serde_json::json!({"search-results":{"PRIVATE-KEY":"PRIVATE-VALUE"}}),
+        serde_json::json!({"limit":0}),
+        serde_json::json!({"limit":101}),
         serde_json::json!({"search-limit":0}),
         serde_json::json!({"search-stop":129}),
     ] {
