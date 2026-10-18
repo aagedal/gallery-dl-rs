@@ -526,6 +526,9 @@ mod tests {
         let secret = "https://example.test/private?token=secret&Authorization=credential";
         let mut partial = Partial::open(&destination, secret).await.unwrap();
         partial.reset(Some(checkpoint())).await.unwrap();
+        // Windows locks are mandatory, so release the checkpoint before reading
+        // its lock file; the part and state files persist after release.
+        drop(partial);
         for entry in fs::read_dir(directory.path().join(".gallery-dl-rs")).unwrap() {
             let entry = entry.unwrap();
             let name = entry.file_name().to_string_lossy().into_owned();
