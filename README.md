@@ -34,6 +34,9 @@ cargo build --release --locked
 # Save available post metadata beside downloaded media
 ./target/release/gallery-dl-rs --write-metadata -C cookies.txt --extractor native 'https://www.instagram.com/p/SHORTCODE/'
 
+# Keep completed-media history across runs, including refreshed social media URLs
+./target/release/gallery-dl-rs --download-archive history.sqlite3 -C cookies.txt 'https://x.com/USERNAME/status/POST_ID'
+
 # Inspect extracted media jobs as JSON; private request options are omitted
 ./target/release/gallery-dl-rs -j 'https://x.com/USERNAME/status/POST_ID'
 
@@ -98,13 +101,35 @@ Instagram session cookies are never copied to media hosts.
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,
   shortcode, username, caption, timestamp, and carousel index). Post metadata is
-  currently provided only by native Instagram; other extractors save just the
-  envelope. URLs, request headers, cookies, and private adapter options are excluded.
+  provided by native Instagram and allowlisted compatibility Instagram,
+  Twitter/X, and Facebook fields when available. Compatibility timestamps are
+  retained only when numeric; formatted backend dates are omitted. Instagram
+  uses site post/media IDs, Twitter uses tweet ID and file number, and Facebook
+  uses `id.extension` as media ID to distinguish audio and video. Non-Instagram
+  shortcodes are empty; unavailable fields stay empty/null. URLs, request headers,
+  cookies, and private adapter options are excluded.
   Existing sidecars are never overwritten. Sidecar publication is atomic but is
   separate from media publication: a sidecar failure returns a nonzero status and
   keeps the media; rerunning backfills missing sidecars without downloading again.
   Cancellation between the two publications can also leave a missing sidecar.
   This flag conflicts with `-g` and `-j`; inspection JSON retains its existing format.
+- `--download-archive FILE` (alias `--archive`) keeps completed-media history in
+  SQLite. Social identities use stable, site-specific post/media identifiers,
+  independent of signed URLs or headers. Missing or ambiguous social IDs are
+  downloaded normally without an archive entry. Direct links use a hash of the
+  full URL and request context, so changed direct URLs remain distinct. Entries
+  store only namespaced hashes and completion times, without URLs or credentials.
+  Archive mode serializes downloads of the same stable identity within the run:
+  completed items are skipped, while a failed URL leaves later alternatives usable. Files skipped
+  because they already exist are recorded after any requested metadata repair;
+  failed downloads or sidecars are never recorded. A database write failure keeps
+  completed media and returns a nonzero exit status; rerunning can record it.
+  Archive hits skip without checking the filesystem, even if files were removed
+  or `--write-metadata` was enabled later. Omit the archive to backfill sidecars.
+  Extraction still runs to discover media identities. Separate simultaneous runs
+  can both download an archive miss; inserts are idempotent. The parent directory
+  must exist, and this archive format is separate from Python gallery-dl archives.
+  This flag conflicts with `-g` and `-j`.
 - Filenames use a SHA-256 digest of the media URL and job/request context plus a
   sanitized filename, under `destination/category/`. Exact duplicate jobs within
   a run are removed, and existing paths are skipped for direct downloads. Bare
@@ -155,7 +180,7 @@ adapter is enabled yet. The parser follows the
 [upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
 
 HLS/DASH downloads, video merging, fallback URL handling, browser cookie import,
-archive databases, profile
+profile
 pagination in Rust, and gallery-dl filename/config compatibility are not implemented.
 Media downloads follow up to five redirects within the same origin (scheme,
 host, and effective port), retaining the original destination name and request
@@ -171,8 +196,8 @@ to the download pipeline. Very large profiles can exhaust memory or hit
 one input’s pending media plus active jobs, while the deduplication set keeps a
 fixed-size SHA-256 digest per unique job across all inputs. `-j` additionally buffers
 all unique media for its JSON array. True per-item extraction streaming and native
-pagination remain planned. Signed URL changes produce new filenames, so skipping
-existing files is not a permanent archive. Existing files are assumed complete,
+pagination remain planned. Signed URL changes produce new filenames; use the
+download archive to skip previously saved social media by stable IDs. Existing files are assumed complete,
 without revalidation.
 
 ## Development
@@ -185,6 +210,7 @@ cargo clippy --locked --all-targets -- -D warnings
 
 `src/extract.rs` owns URL dispatch and the compatibility protocol.
 `src/download.rs` owns request headers, downloads, retries, and file publication.
+`src/archive.rs` owns SQLite completed-media history and archive-aware downloads.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

@@ -1,0 +1,421 @@
+use gallery_dl_rs::{
+    archive::{Archive, ArchiveOutcome},
+    download::{self, DownloadOptions, Outcome},
+    extract::{self, Media, PostMetadata},
+};
+use rusqlite::Connection;
+use std::{
+    io::{Read, Write},
+    net::TcpListener,
+    path::Path,
+    process::Command,
+    thread,
+    time::{Duration, Instant},
+};
+
+fn item(url: &str) -> Media {
+    let mut media = extract::direct(&extract::http_url(url).unwrap()).unwrap();
+    media.category = "instagram".into();
+    media.metadata = Some(PostMetadata {
+        post_id: "100".into(),
+        media_id: "101".into(),
+        shortcode: "Example".into(),
+        username: None,
+        caption: None,
+        timestamp: None,
+        index: 1,
+    });
+    media
+}
+
+fn server(response: &'static [u8]) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let handle = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "request never arrived");
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("{e}"),
+            }
+        };
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let read = socket.read(&mut bytes).unwrap();
+            assert!(read > 0 && request.len() < 65536);
+            request.extend_from_slice(&bytes[..read]);
+        }
+        socket.write_all(response).unwrap();
+    });
+    (format!("http://{address}/image.jpg"), handle)
+}
+
+fn records(path: &Path) -> i64 {
+    Connection::open(path)
+        .unwrap()
+        .query_row("SELECT count(*) FROM completed_media", [], |row| row.get(0))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn archive_persists_and_concurrent_connections_record_idempotently() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let (a, b) = tokio::join!(Archive::open(&path), Archive::open(&path));
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert!(!a.contains("first").await.unwrap());
+    let (one, two, three) = tokio::join!(a.record("first"), b.record("first"), a.record("second"));
+    one.unwrap();
+    two.unwrap();
+    three.unwrap();
+    assert_eq!(records(&path), 2);
+    drop((a, b));
+    let reopened = Archive::open(&path).await.unwrap();
+    assert!(reopened.contains("first").await.unwrap());
+    assert!(reopened.contains("second").await.unwrap());
+    // Keys are bound parameters, never interpreted as SQL.
+    reopened
+        .record("'); DROP TABLE completed_media;--")
+        .await
+        .unwrap();
+    assert_eq!(records(&path), 3);
+}
+
+#[tokio::test]
+async fn incompatible_archives_are_rejected_without_altering_their_contents() {
+    let root = tempfile::tempdir().unwrap();
+    let foreign = root.path().join("python.sqlite3");
+    let connection = Connection::open(&foreign).unwrap();
+    connection.execute_batch("CREATE TABLE archive (entry TEXT PRIMARY KEY); INSERT INTO archive VALUES ('existing');").unwrap();
+    assert!(
+        Archive::open(&foreign)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("not interchangeable")
+    );
+    let value: String = connection
+        .query_row("SELECT entry FROM archive", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(value, "existing");
+    let app: i64 = connection
+        .query_row("PRAGMA application_id", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(app, 0);
+    let future = root.path().join("future.sqlite3");
+    drop(Archive::open(&future).await.unwrap());
+    Connection::open(&future)
+        .unwrap()
+        .execute_batch("PRAGMA user_version = 999")
+        .unwrap();
+    assert!(Archive::open(&future).await.is_err());
+    let invalid = root.path().join("invalid.sqlite3");
+    std::fs::write(&invalid, b"this is not SQLite").unwrap();
+    assert!(Archive::open(&invalid).await.is_err());
+    assert_eq!(std::fs::read(&invalid).unwrap(), b"this is not SQLite");
+}
+
+#[tokio::test]
+async fn refreshed_social_urls_skip_without_requests_even_after_saved_media_is_removed() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let media = item(&format!("{url}?token=PRIVATE_TOKEN"));
+    let saved = download::destination(root.path(), &media);
+    let result = archive
+        .download(&client, root.path(), &media, DownloadOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        result,
+        ArchiveOutcome::Completed(Outcome::Downloaded(saved.clone()))
+    );
+    handle.join().unwrap();
+    std::fs::remove_file(saved).unwrap();
+    let refreshed = item("http://127.0.0.1:1/refreshed.jpg?token=NEW_PRIVATE_TOKEN");
+    assert_eq!(
+        archive
+            .download(&client, root.path(), &refreshed, DownloadOptions::default())
+            .await
+            .unwrap(),
+        ArchiveOutcome::AlreadyArchived
+    );
+    assert_eq!(records(&path), 1);
+    let db = std::fs::read(&path).unwrap();
+    assert!(!String::from_utf8_lossy(&db).contains("PRIVATE_TOKEN"));
+}
+
+#[tokio::test]
+async fn failures_and_missing_identities_do_not_enter_the_archive() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    for response in [
+        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc".as_slice(),
+    ] {
+        let (url, handle) = server(response);
+        assert!(
+            archive
+                .download(
+                    &client,
+                    root.path(),
+                    &item(&url),
+                    DownloadOptions::default()
+                )
+                .await
+                .is_err()
+        );
+        handle.join().unwrap();
+        assert_eq!(records(&path), 0);
+    }
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let mut unknown = item(&url);
+    unknown.metadata = None;
+    assert!(matches!(
+        archive
+            .download(&client, root.path(), &unknown, DownloadOptions::default())
+            .await
+            .unwrap(),
+        ArchiveOutcome::Completed(Outcome::Downloaded(_))
+    ));
+    handle.join().unwrap();
+    assert_eq!(records(&path), 0);
+    let manifest =
+        extract::direct(&extract::http_url("http://127.0.0.1:1/media.m3u8").unwrap()).unwrap();
+    assert!(
+        archive
+            .download(&client, root.path(), &manifest, DownloadOptions::default())
+            .await
+            .is_err()
+    );
+    assert_eq!(records(&path), 0);
+}
+
+#[tokio::test]
+async fn metadata_errors_remain_repairable_before_archiving_existing_media() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let media = item("http://127.0.0.1:1/image.jpg");
+    let saved = download::destination(root.path(), &media);
+    std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+    std::fs::write(&saved, b"existing").unwrap();
+    let sidecar = saved.with_file_name(format!(
+        "{}.json",
+        saved.file_name().unwrap().to_str().unwrap()
+    ));
+    std::fs::create_dir(&sidecar).unwrap();
+    let options = DownloadOptions {
+        write_metadata: true,
+        ..Default::default()
+    };
+    assert!(
+        archive
+            .download(&client, root.path(), &media, options)
+            .await
+            .is_err()
+    );
+    assert_eq!(records(&path), 0);
+    std::fs::remove_dir(&sidecar).unwrap();
+    assert_eq!(
+        archive
+            .download(&client, root.path(), &media, options)
+            .await
+            .unwrap(),
+        ArchiveOutcome::Completed(Outcome::Skipped(saved))
+    );
+    assert!(sidecar.is_file());
+    assert_eq!(records(&path), 1);
+}
+
+#[tokio::test]
+async fn archive_write_errors_report_saved_media_without_removing_it() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch("CREATE TRIGGER fail_writes BEFORE INSERT ON completed_media BEGIN SELECT RAISE(FAIL, 'test write failure'); END;").unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let media = item(&url);
+    let error = archive
+        .download(&client, root.path(), &media, DownloadOptions::default())
+        .await
+        .unwrap_err()
+        .to_string();
+    handle.join().unwrap();
+    assert!(error.contains("download archive update failed"), "{error}");
+    assert_eq!(
+        std::fs::read(download::destination(root.path(), &media)).unwrap(),
+        b"abc"
+    );
+    assert_eq!(records(&path), 0);
+    connection
+        .execute_batch("DROP TRIGGER fail_writes")
+        .unwrap();
+    assert!(matches!(
+        archive
+            .download(&client, root.path(), &media, DownloadOptions::default())
+            .await
+            .unwrap(),
+        ArchiveOutcome::Completed(Outcome::Skipped(_))
+    ));
+    assert_eq!(records(&path), 1);
+}
+
+#[tokio::test]
+async fn destination_directories_are_not_recorded_as_completed_files() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let media = item("http://127.0.0.1:1/image.jpg");
+    let saved = download::destination(root.path(), &media);
+    std::fs::create_dir_all(&saved).unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    assert!(
+        archive
+            .download(&client, root.path(), &media, DownloadOptions::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("not a regular file")
+    );
+    assert_eq!(records(&path), 0);
+}
+
+#[test]
+fn cli_archive_is_opt_in_persistent_and_conflicts_with_inspection() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let url = "http://127.0.0.1:1/image.jpg";
+    let media = extract::direct(&extract::http_url(url).unwrap()).unwrap();
+    let saved = download::destination(root.path(), &media);
+    std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+    std::fs::write(&saved, b"existing").unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .arg("--download-archive")
+            .arg(&path)
+            .arg("-d")
+            .arg(root.path())
+            .arg(url)
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(records(&path), 1);
+    std::fs::remove_file(saved).unwrap();
+    let second = run();
+    assert!(second.status.success());
+    assert!(String::from_utf8_lossy(&second.stderr).contains("skipped archived media"));
+    for mode in ["-j", "-g"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .arg("--download-archive")
+            .arg(root.path().join("must-not-exist.sqlite3"))
+            .args([mode, url])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!root.path().join("must-not-exist.sqlite3").exists());
+    }
+}
+
+#[tokio::test]
+async fn concurrent_refreshed_urls_wait_for_successful_publication_before_skipping() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let first = item(&url);
+    // This URL must never be requested after the first download succeeds.
+    let refreshed = item("http://127.0.0.1:1/refreshed.jpg");
+    let (first, second) = tokio::join!(
+        archive.download(&client, root.path(), &first, DownloadOptions::default()),
+        archive.download(&client, root.path(), &refreshed, DownloadOptions::default()),
+    );
+    handle.join().unwrap();
+    assert!(matches!(
+        first.unwrap(),
+        ArchiveOutcome::Completed(Outcome::Downloaded(_))
+    ));
+    assert_eq!(second.unwrap(), ArchiveOutcome::AlreadyArchived);
+    assert_eq!(records(&path), 1);
+}
+
+#[tokio::test]
+async fn failed_handoff_does_not_suppress_a_later_direct_representation() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let mut manifest = item("http://127.0.0.1:1/thumbnail.jpg");
+    manifest.job = extract::MediaJob::VideoPage {
+        page_url: manifest.url.clone(),
+    };
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let direct = item(&url);
+    let (failed, successful) = tokio::join!(
+        archive.download(&client, root.path(), &manifest, DownloadOptions::default()),
+        archive.download(&client, root.path(), &direct, DownloadOptions::default()),
+    );
+    handle.join().unwrap();
+    assert!(failed.is_err());
+    assert!(matches!(
+        successful.unwrap(),
+        ArchiveOutcome::Completed(Outcome::Downloaded(_))
+    ));
+    assert_eq!(records(&path), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let messages = serde_json::json!([
+        [3, "ytdl:https://example.com/video", {"tweet_id": 123, "num": 1, "filename": "media", "extension": "mp4"}],
+        [3, url, {"tweet_id": 123, "num": 1, "filename": "media", "extension": "mp4"}]
+    ]);
+    let fixture = root.path().join("messages.json");
+    std::fs::write(&fixture, serde_json::to_vec(&messages).unwrap()).unwrap();
+    let script = root.path().join("backend");
+    std::fs::write(&script, format!("#!/bin/sh\ncat '{}'\n", fixture.display())).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .arg("--download-archive")
+        .arg(&path)
+        .arg("--extractor-command")
+        .arg(&script)
+        .arg("-d")
+        .arg(root.path())
+        .args(["--jobs", "2", "https://x.com/user/status/123"])
+        .output()
+        .unwrap();
+    handle.join().unwrap();
+    assert_eq!(output.status.code(), Some(1)); // first job still reports its error
+    assert!(String::from_utf8_lossy(&output.stderr).contains("downloaded"));
+    assert_eq!(records(&path), 1);
+}

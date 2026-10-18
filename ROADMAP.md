@@ -95,7 +95,23 @@ inspection still buffers one array. CLI regressions cover publication during
 blocked extraction, backpressure at capacity, deduplication/order, failure
 continuation, and simultaneous extraction/download cancellation. Each social
 input still buffers its complete result; true per-item extraction streaming,
-compatibility post metadata, pagination, archives, and range resume remain.
+pagination and range resume remain.
+
+**Implemented archive step:** `--download-archive` tracks completed media in a
+versioned SQLite database. Stable namespaced identities for native and
+compatibility Instagram, Twitter/X, and Facebook survive signed URL/header
+rotation and distinguish carousel files and Facebook audio/video. Compatibility
+post metadata now preserves allowlisted site fields. Unknown social identities
+are left unarchived; direct links explicitly use full-request identity hashes.
+Archive checks run before download requests, and entries publish only after
+successful media and optional sidecar publication (including existing files).
+Failed database updates keep media and can be repaired on rerun. Archive hits
+intentionally ignore missing local files and later sidecar requests. Concurrent
+processes can download the same initial miss; writes are idempotent and do not
+reserve jobs. The format is separate from Python gallery-dl archives. Tests cover
+rotation, identity separation, privacy, persistence, concurrent writes, foreign
+databases, failure recovery, and CLI behavior. Full extraction still occurs before
+archive filtering; native collection pagination and range resume remain.
 
 ## 4. Broader compatibility
 

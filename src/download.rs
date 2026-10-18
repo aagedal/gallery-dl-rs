@@ -198,8 +198,11 @@ async fn download_media(
         }
     }
     let path = destination(root, media);
-    if path.try_exists()? {
-        return Ok(Outcome::Skipped(path));
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => return Ok(Outcome::Skipped(path)),
+        Ok(_) => return Err(error("media destination is not a regular file")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
     let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
     tokio::fs::create_dir_all(parent).await?;
@@ -364,7 +367,14 @@ async fn attempt_download(
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
         Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
-            Ok(Outcome::Skipped(path.into()))
+            if std::fs::symlink_metadata(path)?.is_file() {
+                Ok(Outcome::Skipped(path.into()))
+            } else {
+                Err(Failure {
+                    error: error("media destination is not a regular file"),
+                    retry: false,
+                })
+            }
         }
         Err(e) => Err(e.error.into()),
     }

@@ -2,6 +2,7 @@ use clap::{Parser, ValueEnum};
 use futures_util::{StreamExt, stream};
 use gallery_dl_rs::{
     Result,
+    archive::{Archive, ArchiveOutcome},
     download::{self, DownloadOptions, Outcome},
     error,
     extract::{self, Backend},
@@ -33,6 +34,9 @@ struct Args {
     /// Save post metadata in a JSON sidecar beside each completed media file
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
     write_metadata: bool,
+    /// SQLite history of completed media (gallery-dl-rs format)
+    #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
+    download_archive: Option<PathBuf>,
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
@@ -88,6 +92,10 @@ async fn run(args: Args) -> Result<()> {
             "--config is only supported with --extractor compatibility",
         ));
     }
+    let archive = match &args.download_archive {
+        Some(path) => Some(Archive::open(path).await?),
+        None => None,
+    };
     let native = if matches!(args.extractor, Extractor::Native) {
         Some(
             Instagram::new(
@@ -143,25 +151,39 @@ async fn run(args: Args) -> Result<()> {
         }
     } else {
         let client = download::client(Duration::from_secs(args.timeout))?;
-        let results =
-            media
-                .map(|item| {
-                    let client = &client;
-                    let destination = &args.destination;
-                    let options = DownloadOptions {
-                        retries: args.retries,
-                        write_metadata: args.write_metadata,
-                    };
-                    async move {
-                        download::download_with_options(client, destination, &item, options).await
+        let results = media
+            .map(|item| {
+                let client = &client;
+                let destination = &args.destination;
+                let archive = &archive;
+                let options = DownloadOptions {
+                    retries: args.retries,
+                    write_metadata: args.write_metadata,
+                };
+                async move {
+                    match archive {
+                        Some(archive) => {
+                            archive.download(client, destination, &item, options).await
+                        }
+                        None => {
+                            download::download_with_options(client, destination, &item, options)
+                                .await
+                                .map(ArchiveOutcome::Completed)
+                        }
                     }
-                })
-                .buffer_unordered(args.jobs as usize);
+                }
+            })
+            .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
         while let Some(result) = results.next().await {
             match result {
-                Ok(Outcome::Downloaded(path)) => eprintln!("downloaded {}", path.display()),
-                Ok(Outcome::Skipped(path)) => eprintln!("skipped {}", path.display()),
+                Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
+                    eprintln!("downloaded {}", path.display())
+                }
+                Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
+                    eprintln!("skipped {}", path.display())
+                }
+                Ok(ArchiveOutcome::AlreadyArchived) => eprintln!("skipped archived media"),
                 Err(e) => {
                     eprintln!("download failed: {e}");
                     failed.set(failed.get() + 1);

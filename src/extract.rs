@@ -2,6 +2,7 @@
 use crate::{Result, error};
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::PathBuf, process::Stdio, time::Duration};
 use tokio::process::Command;
 use url::Url;
@@ -44,6 +45,50 @@ pub enum ManifestProtocol {
 }
 
 impl Media {
+    /// A durable archive identity, separate from request-level deduplication.
+    /// Social IDs never derive from signed URLs or private transport options.
+    /// Direct links explicitly use the full request identity, hashed for privacy.
+    pub fn archive_key(&self) -> Option<String> {
+        let (namespace, identity) = match self.category.as_str() {
+            "direct" => ("url", self.identity()),
+            category @ ("instagram" | "twitter" | "facebook") => {
+                let post = self.metadata.as_ref()?;
+                if !decimal_id(&post.post_id) {
+                    return None;
+                }
+                let valid_media = match category {
+                    "instagram" => {
+                        decimal_id(post.media_id.strip_suffix('p').unwrap_or(&post.media_id))
+                    }
+                    "twitter" => {
+                        decimal_id(&post.media_id)
+                            && post.index > 0
+                            && post.media_id == post.index.to_string()
+                    }
+                    "facebook" => post
+                        .media_id
+                        .split_once('.')
+                        .is_some_and(|(id, extension)| {
+                            id == post.post_id && valid_extension(extension)
+                        }),
+                    _ => unreachable!(),
+                };
+                if !valid_media {
+                    return None;
+                }
+                (
+                    category,
+                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                )
+            }
+            _ => return None,
+        };
+        Some(format!(
+            "{namespace}:v1:{:x}",
+            Sha256::digest(identity.as_bytes())
+        ))
+    }
+
     /// Include private request/manifest context so distinct jobs are not lost.
     pub fn identity(&self) -> String {
         // Preserve existing paths for ordinary direct links without request context.
@@ -64,7 +109,10 @@ impl Media {
 #[derive(Clone, Debug, Serialize)]
 pub struct PostMetadata {
     pub post_id: String,
+    /// Site media ID; Twitter uses the upstream file number and Facebook uses
+    /// `id.extension` because separate audio and video files share an ID.
     pub media_id: String,
+    /// Instagram post shortcode; empty for sites without Instagram shortcodes.
     pub shortcode: String,
     pub username: Option<String>,
     pub caption: Option<String>,
@@ -286,7 +334,7 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
             job,
             category: category.into(),
             filename,
-            metadata: None,
+            metadata: compatibility_metadata(metadata, category),
             headers,
             handoff,
         });
@@ -308,4 +356,85 @@ pub fn manifest_protocol(url: &Url) -> Option<ManifestProtocol> {
     } else {
         None
     }
+}
+
+fn decimal_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.bytes().any(|byte| byte != b'0')
+}
+
+fn valid_extension(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 10 && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+/// Allowlist the public fields emitted by upstream gallery-dl extractors.
+/// See gallery_dl/extractor/{instagram,twitter,facebook}.py: Instagram uses
+/// post_id/media_id, Twitter tweet_id/num, Facebook id/extension (including
+/// separate audio and video files with the same id). Missing IDs stay empty;
+/// they never acquire an inferred identity from a URL, filename or row number.
+fn compatibility_metadata(
+    data: &serde_json::Map<String, Value>,
+    category: &str,
+) -> Option<PostMetadata> {
+    let string = |key: &str| data.get(key).and_then(Value::as_str).map(str::to_owned);
+    let id = |key: &str| match data.get(key) {
+        Some(Value::String(value)) => value.clone(),
+        Some(Value::Number(value)) if value.is_u64() => value.to_string(),
+        _ => String::new(),
+    };
+    let index = data
+        .get("num")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0);
+    let (post_id, media_id, shortcode, username, caption) = match category {
+        "instagram" => (
+            id("post_id"),
+            id("media_id"),
+            string("post_shortcode").unwrap_or_default(),
+            string("username"),
+            string("description"),
+        ),
+        "twitter" => (
+            id("tweet_id"),
+            if index > 0 {
+                index.to_string()
+            } else {
+                String::new()
+            },
+            String::new(),
+            data.get("author")
+                .and_then(|author| author.get("name"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            string("content"),
+        ),
+        "facebook" => {
+            let post_id = id("id");
+            let media_id = match string("extension").filter(|extension| valid_extension(extension))
+            {
+                Some(extension) if !post_id.is_empty() => format!("{post_id}.{extension}"),
+                _ => String::new(),
+            };
+            (
+                post_id,
+                media_id,
+                String::new(),
+                string("username"),
+                string("caption"),
+            )
+        }
+        _ => return None,
+    };
+    Some(PostMetadata {
+        post_id,
+        media_id,
+        shortcode,
+        username,
+        caption,
+        // Upstream formatted datetimes are intentionally not treated as epochs.
+        timestamp: data.get("date").and_then(Value::as_i64),
+        index,
+    })
 }
