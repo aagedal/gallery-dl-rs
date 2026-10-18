@@ -12,7 +12,7 @@ use gallery_dl_rs::{
     extract::{self, Backend},
     facebook::Facebook,
     instagram::Instagram,
-    naming::FilenameTemplate,
+    naming::{DirectoryTemplate, FilenameTemplate},
     twitter::Twitter,
 };
 use sha2::{Digest, Sha256};
@@ -35,6 +35,9 @@ struct Args {
     /// Output root (default: downloads)
     #[arg(short, long)]
     destination: Option<PathBuf>,
+    /// Exact download directory, overriding configured folder components
+    #[arg(short = 'D', long = "directory", conflicts_with_all = ["destination", "directory"])]
+    exact_directory: Option<PathBuf>,
     /// Maximum simultaneous downloads
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=32))]
     jobs: u8,
@@ -53,13 +56,16 @@ struct Args {
     /// Native filename template, e.g. '{post_id}_{index:03}.{extension}'
     #[arg(short = 'f', long, conflicts_with_all = ["get_urls", "dump_json"])]
     filename: Option<String>,
+    /// Folder component template; repeat for nested folders (replaces category)
+    #[arg(long = "directory-template", allow_hyphen_values = true)]
+    directory: Vec<String>,
     /// Retain validated partial HTTP media for retries and later invocations
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
     resume: bool,
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
-    /// Social extractor; native supports experimental Instagram and Twitter/X single posts
+    /// Social extractor; native supports experimental Instagram feeds/posts, Facebook photos, and X posts
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
@@ -244,6 +250,7 @@ async fn run(args: Args) -> Result<()> {
                 let options = DownloadOptions {
                     retries: settings.options.retries.unwrap(),
                     write_metadata: args.write_metadata,
+                    directory: settings.directory.as_ref(),
                 };
                 async move {
                     match archive {
@@ -367,6 +374,7 @@ fn extract_input<'a>(
 struct Settings {
     options: ConfigOptions,
     filename: Option<FilenameTemplate>,
+    directory: Option<DirectoryTemplate>,
     archive: Option<Archive>,
 }
 
@@ -382,8 +390,16 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         ..ConfigOptions::default()
     };
     let overrides = ConfigOptions {
-        base_directory: args.destination.clone(),
+        base_directory: args
+            .exact_directory
+            .clone()
+            .or_else(|| args.destination.clone()),
         filename: args.filename.clone(),
+        directory: if args.exact_directory.is_some() {
+            Some(Vec::new())
+        } else {
+            (!args.directory.is_empty()).then(|| args.directory.clone())
+        },
         cookies: args.cookies.clone(),
         archive: args.download_archive.clone(),
         retries: args.retries,
@@ -399,11 +415,17 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .as_deref()
             .map(FilenameTemplate::parse)
             .transpose()?;
+        let directory = options
+            .directory
+            .as_deref()
+            .map(DirectoryTemplate::parse)
+            .transpose()?;
         settings.insert(
             category,
             Settings {
                 options,
                 filename,
+                directory,
                 archive: None,
             },
         );

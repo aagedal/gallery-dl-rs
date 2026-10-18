@@ -1,6 +1,6 @@
 use gallery_dl_rs::{
     extract::{Media, MediaJob, PostMetadata},
-    naming::FilenameTemplate,
+    naming::{DirectoryTemplate, FilenameTemplate},
 };
 use std::collections::BTreeMap;
 
@@ -239,5 +239,52 @@ fn dotfiles_have_no_extension_and_trailing_dots_are_trimmed() {
             .render(&item)
             .unwrap(),
         "photo.jpg"
+    );
+}
+
+#[test]
+fn directory_components_replace_category_and_cannot_add_paths() {
+    let mut item = media();
+    item.metadata.as_mut().unwrap().username = Some("../../A:/\\B".into());
+    let template =
+        DirectoryTemplate::parse(&["{category}".into(), "{username}".into(), "{post_id}".into()])
+            .unwrap();
+    assert_eq!(
+        template.render(&item).unwrap(),
+        std::path::PathBuf::from("instagram/_.._A___B/123")
+    );
+    assert_eq!(
+        DirectoryTemplate::parse(&[])
+            .unwrap()
+            .render(&item)
+            .unwrap(),
+        std::path::PathBuf::new()
+    );
+    for bad in [
+        "",
+        ".",
+        "..",
+        "../escape",
+        "C:\\folder",
+        "/absolute",
+        "x\0",
+        "{missing}",
+    ] {
+        assert!(DirectoryTemplate::parse(&[bad.into()]).is_err(), "{bad:?}");
+    }
+    item.metadata = None;
+    assert!(template.render(&item).is_err());
+}
+
+#[test]
+fn directory_limits_and_reserved_names_apply_to_each_component() {
+    assert!(DirectoryTemplate::parse(&vec!["a".into(); 33]).is_err());
+    assert!(DirectoryTemplate::parse(&["a".repeat(8193)]).is_err());
+    let long = DirectoryTemplate::parse(&vec!["a".repeat(240); 13]).unwrap();
+    assert!(long.render(&media()).is_err());
+    let reserved = DirectoryTemplate::parse(&["CON".into(), "LPT1.jpg".into()]).unwrap();
+    assert_eq!(
+        reserved.render(&media()).unwrap(),
+        std::path::PathBuf::from("_CON/_LPT1.jpg")
     );
 }

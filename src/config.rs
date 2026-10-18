@@ -4,7 +4,10 @@
 //! are overridden by category settings, then by top-level global settings.
 //! Paths are literal, relative to the configuration directory; expansion,
 //! conditions, hooks, subcategories, and unsupported options are rejected.
-use crate::{Result, error, naming::FilenameTemplate};
+use crate::{
+    Result, error,
+    naming::{DirectoryTemplate, FilenameTemplate},
+};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::{
@@ -22,6 +25,8 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 pub struct Options {
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
+    /// Relative directory components; an empty list selects the base directory.
+    pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
     /// Uses gallery-dl-rs's archive identities, not upstream database IDs.
     pub archive: Option<PathBuf>,
@@ -39,6 +44,10 @@ impl Options {
                 .clone()
                 .or_else(|| self.base_directory.clone()),
             filename: overrides.filename.clone().or_else(|| self.filename.clone()),
+            directory: overrides
+                .directory
+                .clone()
+                .or_else(|| self.directory.clone()),
             cookies: overrides.cookies.clone().or_else(|| self.cookies.clone()),
             archive: overrides.archive.clone().or_else(|| self.archive.clone()),
             retries: overrides.retries.or(self.retries),
@@ -61,6 +70,7 @@ pub struct Config {
 struct RawRoot {
     base_directory: Field,
     filename: Field,
+    directory: Field,
     cookies: Field,
     archive: Field,
     retries: Field,
@@ -73,6 +83,7 @@ struct RawRoot {
 struct RawExtractor {
     base_directory: Field,
     filename: Field,
+    directory: Field,
     cookies: Field,
     archive: Field,
     retries: Field,
@@ -88,6 +99,7 @@ struct RawExtractor {
 struct RawOptions {
     base_directory: Field,
     filename: Field,
+    directory: Field,
     cookies: Field,
     archive: Field,
     retries: Field,
@@ -166,6 +178,7 @@ impl Config {
         let global = RawOptions {
             base_directory: root.base_directory,
             filename: root.filename,
+            directory: root.directory,
             cookies: root.cookies,
             archive: root.archive,
             retries: root.retries,
@@ -176,6 +189,7 @@ impl Config {
         let defaults = RawOptions {
             base_directory: extractor.base_directory,
             filename: extractor.filename,
+            directory: extractor.directory,
             cookies: extractor.cookies,
             archive: extractor.archive,
             retries: extractor.retries,
@@ -225,6 +239,27 @@ impl RawOptions {
                 ));
             }
         };
+        let templates = match self.directory.0 {
+            None => None,
+            Some(Value::Array(values)) => {
+                let components: Vec<String> = values
+                    .into_iter()
+                    .map(|value| {
+                        value.as_str().map(str::to_owned).ok_or_else(|| {
+                            error("native configuration directory must be an array of string templates")
+                        })
+                    })
+                    .collect::<Result<_>>()?;
+                DirectoryTemplate::parse(&components)
+                    .map_err(|_| error("unsupported native configuration directory template"))?;
+                Some(components)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration directory must be an array of string templates",
+                ));
+            }
+        };
         let retries = match self.retries.0 {
             None => None,
             Some(value) => Some(value.as_u64().filter(|value| *value <= 10).ok_or_else(|| {
@@ -255,6 +290,7 @@ impl RawOptions {
             cookies: path(self.cookies, directory, "cookies")?,
             archive: path(self.archive, directory, "archive")?,
             filename,
+            directory: templates,
             retries,
             timeout,
         })

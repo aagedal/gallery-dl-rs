@@ -590,7 +590,14 @@ async fn resumed_custom_filename_records_archive_only_after_publication() {
     let key = item.archive_key().unwrap();
     let template = FilenameTemplate::parse("custom.{extension}").unwrap();
     let client = client();
-    let options = DownloadOptions::default();
+    let directory =
+        gallery_dl_rs::naming::DirectoryTemplate::parse(&["nested".into(), "{category}".into()])
+            .unwrap();
+    let options = DownloadOptions {
+        directory: Some(&directory),
+        write_metadata: true,
+        ..Default::default()
+    };
     assert!(
         archive
             .download_with_template(&client, root.path(), &item, options, Some(&template))
@@ -598,7 +605,9 @@ async fn resumed_custom_filename_records_archive_only_after_publication() {
             .is_err()
     );
     assert!(!archive.contains(&key).await.unwrap());
-    let path = download::destination_with_template(root.path(), &item, &template).unwrap();
+    let path =
+        download::destination_with_templates(root.path(), &item, Some(&template), Some(&directory))
+            .unwrap();
     assert_eq!(
         archive
             .download_with_template(&client, root.path(), &item, options, Some(&template))
@@ -606,7 +615,9 @@ async fn resumed_custom_filename_records_archive_only_after_publication() {
             .unwrap(),
         ArchiveOutcome::Completed(Outcome::Downloaded(path.clone()))
     );
-    assert_eq!(std::fs::read(path).unwrap(), complete());
+    assert_eq!(std::fs::read(&path).unwrap(), complete());
+    assert!(path.parent().unwrap().ends_with("nested/direct"));
+    assert!(path.with_file_name("custom.dat.json").is_file());
     assert!(archive.contains(&key).await.unwrap());
     assert_eq!(
         archive

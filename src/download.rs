@@ -1,7 +1,7 @@
 use crate::{
     Result, error,
     extract::{Media, MediaJob},
-    naming::FilenameTemplate,
+    naming::{DirectoryTemplate, FilenameTemplate},
     transport::{RateLimits, Redirects, retry_after},
 };
 use futures_util::StreamExt;
@@ -92,6 +92,28 @@ pub fn destination_with_template(
         .join(template.render(media)?))
 }
 
+/// Render a complete destination. An explicit directory replaces the default
+/// category component while the basename follows the normal filename policy.
+pub fn destination_with_templates(
+    root: &Path,
+    media: &Media,
+    filename: Option<&FilenameTemplate>,
+    directory: Option<&DirectoryTemplate>,
+) -> Result<PathBuf> {
+    let default = match filename {
+        Some(template) => destination_with_template(root, media, template)?,
+        None => destination(root, media),
+    };
+    match directory {
+        None => Ok(default),
+        Some(directory) => Ok(root.join(directory.render(media)?).join(
+            default
+                .file_name()
+                .ok_or_else(|| error("invalid media filename"))?,
+        )),
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Downloaded(PathBuf),
@@ -99,8 +121,10 @@ pub enum Outcome {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DownloadOptions {
+pub struct DownloadOptions<'a> {
     pub retries: u8,
+    /// Override category folders with per-media directory components.
+    pub directory: Option<&'a DirectoryTemplate>,
     /// Save versioned post metadata beside completed or already existing media.
     pub write_metadata: bool,
 }
@@ -127,7 +151,7 @@ pub async fn download_with_options(
     client: &DownloadClient,
     root: &Path,
     media: &Media,
-    options: DownloadOptions,
+    options: DownloadOptions<'_>,
 ) -> Result<Outcome> {
     download_with_template(client, root, media, options, None).await
 }
@@ -136,10 +160,18 @@ pub async fn download_with_template(
     client: &DownloadClient,
     root: &Path,
     media: &Media,
-    options: DownloadOptions,
+    options: DownloadOptions<'_>,
     template: Option<&FilenameTemplate>,
 ) -> Result<Outcome> {
-    let outcome = download_media(client, root, media, options.retries, template).await?;
+    let outcome = download_media(
+        client,
+        root,
+        media,
+        options.retries,
+        template,
+        options.directory,
+    )
+    .await?;
     if options.write_metadata {
         let (Outcome::Downloaded(path) | Outcome::Skipped(path)) = &outcome;
         write_metadata(path, media).await.map_err(|e| {
@@ -220,6 +252,7 @@ async fn download_media(
     media: &Media,
     retries: u8,
     template: Option<&FilenameTemplate>,
+    directory: Option<&DirectoryTemplate>,
 ) -> Result<Outcome> {
     match &media.job {
         MediaJob::DirectHttp => {
@@ -236,10 +269,7 @@ async fn download_media(
             ));
         }
     }
-    let path = match template {
-        Some(template) => destination_with_template(root, media, template)?,
-        None => destination(root, media),
-    };
+    let path = destination_with_templates(root, media, template, directory)?;
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.is_file() => return Ok(Outcome::Skipped(path)),
         Ok(_) => return Err(error("media destination is not a regular file")),

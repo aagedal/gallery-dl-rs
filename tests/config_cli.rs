@@ -446,3 +446,80 @@ async fn cli_timeouts_accept_fractions_and_reject_unusable_clock_values() {
         assert_eq!(output(&mut command).await.status.code(), Some(2));
     }
 }
+
+#[tokio::test]
+async fn directory_config_cli_override_and_empty_list_choose_exact_parent() {
+    let root = tempfile::tempdir().unwrap();
+    let elsewhere = root.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    let url = "http://127.0.0.1:1/photo.jpg";
+    let cfg = config(
+        root.path(),
+        serde_json::json!({
+            "base-directory":"output", "directory":["config", "{category}"], "filename":"custom.jpg"
+        }),
+    );
+    let configured = root.path().join("output/config/direct/custom.jpg");
+    touch(&configured);
+    let result = output(binary(&elsewhere, &cfg).arg(url)).await;
+    success(&result);
+    let exact = root.path().join("exact");
+    touch(&exact.join("custom.jpg"));
+    success(&output(binary(&elsewhere, &cfg).arg("-D").arg(&exact).arg(url)).await);
+    assert!(!exact.join("direct").exists());
+    let custom = root.path().join("output/cli/direct/custom.jpg");
+    touch(&custom);
+    let result = output(binary(&elsewhere, &cfg).args([
+        "--directory-template",
+        "cli",
+        "--directory-template",
+        "{category}",
+        "--write-metadata",
+        url,
+    ]))
+    .await;
+    success(&result);
+    assert!(custom.with_file_name("custom.jpg.json").exists());
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"base-directory":"output", "directory":[], "filename":"at-base.jpg"}),
+    );
+    touch(&root.path().join("output/at-base.jpg"));
+    success(&output(binary(&elsewhere, &cfg).arg(url)).await);
+    assert!(!root.path().join("output/direct").exists());
+}
+
+#[tokio::test]
+async fn missing_directory_metadata_fails_before_requests_or_output() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"base-directory":"output", "directory":["{username}"]}),
+    );
+    let result = output(binary(root.path(), &cfg).arg("http://127.0.0.1:1/photo.jpg")).await;
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("requires post metadata"));
+    assert!(!root.path().join("output").exists());
+    let inspection =
+        output(binary(root.path(), &cfg).args(["-g", "https://example.com/photo.jpg"])).await;
+    success(&inspection);
+    assert!(!root.path().join("output").exists());
+}
+
+#[tokio::test]
+async fn exact_directory_rejects_ambiguous_cli_layout_flags() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path(), serde_json::json!({}));
+    for flags in [
+        vec!["-D", "out", "-d", "other"],
+        vec!["-D", "out", "--directory-template", "other"],
+    ] {
+        let result = output(
+            binary(root.path(), &cfg)
+                .args(flags)
+                .arg("https://example.com/photo.jpg"),
+        )
+        .await;
+        assert_eq!(result.status.code(), Some(2));
+    }
+}

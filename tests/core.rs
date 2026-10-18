@@ -23,10 +23,11 @@ fn media(url: &str) -> Media {
     }
 }
 
-fn with_metadata() -> download::DownloadOptions {
+fn with_metadata() -> download::DownloadOptions<'static> {
     download::DownloadOptions {
         retries: 0,
         write_metadata: true,
+        ..Default::default()
     }
 }
 
@@ -133,6 +134,7 @@ async fn metadata_failure_keeps_completed_media_and_can_be_repaired() {
         download::DownloadOptions {
             retries: 2,
             write_metadata: true,
+            ..Default::default()
         },
     )
     .await

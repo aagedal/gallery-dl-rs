@@ -77,7 +77,7 @@ impl Archive {
         client: &DownloadClient,
         root: &Path,
         media: &Media,
-        options: DownloadOptions,
+        options: DownloadOptions<'_>,
     ) -> Result<ArchiveOutcome> {
         self.download_with_template(client, root, media, options, None)
             .await
@@ -88,7 +88,7 @@ impl Archive {
         client: &DownloadClient,
         root: &Path,
         media: &Media,
-        options: DownloadOptions,
+        options: DownloadOptions<'_>,
         template: Option<&FilenameTemplate>,
     ) -> Result<ArchiveOutcome> {
         let identity = media.archive_key();

@@ -180,8 +180,7 @@ category directory, are sanitized to safe ASCII, and are bounded to 240 bytes
 while preserving the final extension. Unsupported syntax and unavailable values
 fail explicitly. Downloads, sidecars, archive recording, and no-overwrite behavior
 share the same rendered destination. Default names remain unchanged. This is a
-documented subset, not full gallery-dl formatting compatibility; directory
-templates, expressions, and additional sites remain.
+documented subset, not full gallery-dl formatting compatibility; conditional templates, expressions, and additional sites remain.
 
 **Implemented configuration step:** `--native-config` accepts an explicit strict
 subset of gallery-dl's JSON scopes: extractor defaults, category settings, and
@@ -194,8 +193,20 @@ retries, and per-request deadlines. The overall extraction deadline remains
 separate. Inspection opens no configured archives and creates no output paths.
 Tests cover schema, scope/CLI precedence, relative paths, credentials selection,
 fractional timeouts, retry counts, and separate compatibility configuration.
-Full configuration compatibility, discovery, directory templates, and
+Full configuration compatibility, discovery, conditional templates, and
 postprocessors remain.
+
+**Implemented directory step:** native configuration `directory` lists replace
+category folders with ordered component templates; explicit `[]` selects the
+base directory. Scopes and explicit CLI overrides share the filename precedence.
+Repeated `--directory-template` flags build nested folders, and `-D`/`--directory`
+selects an exact directory. Template substitutions are sanitized per component;
+unsafe literal paths, missing fields, excessive components, and excessive lengths
+fail explicitly. Sidecars, resume checkpoints, publication, and archives use the
+same resulting path. Tests cover configuration/CLI precedence, empty lists,
+unsafe metadata, limits, missing-field side effects, and resumed archived media
+with sidecars in nested folders. Conditional templates and the full upstream
+format language remain.
 
 Native Instagram, Facebook, and Twitter session initialization failures now remain local to
 their inputs, allowing unrelated direct links and other inputs to proceed.

@@ -1,5 +1,6 @@
 //! Small, deliberately non-executable filename templates.
 use crate::{Result, error, extract::Media};
+use std::path::PathBuf;
 
 const MAX_BYTES: usize = 240;
 
@@ -200,5 +201,45 @@ fn safe_char(c: char) -> char {
         c
     } else {
         '_'
+    }
+}
+
+/// Ordered component templates relative to the configured base directory.
+/// An empty list selects the base directory itself. Substitutions cannot add
+/// separators, absolute prefixes, or parent-directory components.
+#[derive(Clone, Debug)]
+pub struct DirectoryTemplate {
+    components: Vec<FilenameTemplate>,
+}
+
+impl DirectoryTemplate {
+    pub fn parse(components: &[String]) -> Result<Self> {
+        if components.len() > 32
+            || components
+                .iter()
+                .any(|s| s.len() > 8192 || s.chars().any(char::is_control))
+        {
+            return Err(error("directory template exceeds component limits"));
+        }
+        Ok(Self {
+            components: components
+                .iter()
+                .map(|s| FilenameTemplate::parse(s))
+                .collect::<Result<_>>()?,
+        })
+    }
+
+    pub fn render(&self, media: &Media) -> Result<PathBuf> {
+        let mut output = PathBuf::new();
+        let mut bytes = 0;
+        for component in &self.components {
+            let component = component.render(media)?;
+            bytes += component.len() + 1;
+            if bytes > 3072 {
+                return Err(error("rendered directory exceeds 3072 bytes"));
+            }
+            output.push(component);
+        }
+        Ok(output)
     }
 }

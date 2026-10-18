@@ -159,6 +159,7 @@ Neither configuration file is loaded automatically.
     "instagram": {
       "cookies": "cookies.txt",
       "archive": "instagram.sqlite3",
+      "directory": ["{category}", "{username}", "{post_id}"],
       "filename": "{post_id}_{media_id}.{extension}"
     },
     "direct": {
@@ -168,7 +169,7 @@ Neither configuration file is loaded automatically.
 }
 ```
 
-Supported settings are `base-directory`, `filename`, `cookies`, `archive`,
+Supported settings are `base-directory`, `directory`, `filename`, `cookies`, `archive`,
 `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
@@ -190,7 +191,7 @@ Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, nulls,
 unsupported types, hooks, environment expansion, and conditional values fail
 explicitly. Filenames use the native template subset described below; archive
 files use the Rust archive format. Full gallery-dl configuration compatibility,
-directory templates, automatic discovery, and postprocessors remain unimplemented.
+conditional directory templates, automatic discovery, and postprocessors remain unimplemented.
 
 ## Current behavior
 
@@ -282,8 +283,21 @@ directory templates, automatic discovery, and postprocessors remain unimplemente
   while preserving the final extension. Include enough IDs to make names unique:
   files at colliding paths are assumed complete and skipped without overwriting.
   Changing the template does not clear archive history. This is a limited native
-  syntax; gallery-dl expressions, conversions, conditionals, and directory
-  templates are not supported. This flag conflicts with `-g` and `-j`.
+  syntax; gallery-dl expressions, conversions, and conditionals are not supported.
+  This flag conflicts with `-g` and `-j`.
+- `--directory-template '{category}' --directory-template '{username}'` replaces
+  the default category folder with ordered component templates under the output
+  root. Configuration uses `"directory": ["{category}", "{username}"]`; an explicit
+  empty list saves directly in the base directory. Fields and sanitization match
+  filename templates. Components cannot contain literal paths, control characters,
+  or drive prefixes; metadata separators are sanitized. Limits are 32 components,
+  8 KiB per encoded component template, 240 bytes per rendered component, and
+  3072 bytes for the rendered relative directory. Missing fields fail before
+  requests or directory creation. `-D` / `--directory PATH` chooses an exact
+  directory, overriding configured base/directory values; it conflicts with `-d`
+  and `--directory-template`. Filename selection, sidecars, resume checkpoints,
+  no-overwrite handling, and archives all use the rendered destination. Archive
+  hits retain their existing meaning even after changing the output layout.
 - Transport errors, HTTP 429 rate limits, and HTTP 5xx responses have bounded
   retries controlled by `--retries`. Retry-After accepts seconds or an HTTP date;
   missing/invalid values use exponential backoff. Concurrent downloads share
@@ -331,7 +345,7 @@ adapter is enabled yet. The parser follows the
 [upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
 
 HLS/DASH downloads, video merging, fallback URL handling, browser cookie import,
-profile pagination in Rust, and full gallery-dl filename/config compatibility are
+broader native collection pagination, and full gallery-dl filename/config compatibility are
 not implemented.
 Media downloads follow up to five redirects within the same origin (scheme,
 host, and effective port), retaining the original destination name and request
@@ -367,7 +381,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/messages.rs` incrementally decodes individual resolved messages.
 `src/download.rs` owns request headers, downloads, retries, and file publication.
 `src/archive.rs` owns SQLite completed-media history and archive-aware downloads.
-`src/naming.rs` owns native filename template parsing and safe basename rendering.
+`src/naming.rs` owns native filename/directory template parsing and safe component rendering.
 `src/config.rs` owns native configuration parsing, validation, and precedence.
 `src/resume.rs` owns locked partial files and durable checkpoints;
 `src/range.rs` validates resumable HTTP representations and ranges.

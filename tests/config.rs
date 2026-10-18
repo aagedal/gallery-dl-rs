@@ -189,3 +189,72 @@ async fn file_loading_anchors_paths_and_enforces_size_limit() {
             .contains("secret-path")
     );
 }
+
+#[test]
+fn directory_templates_resolve_scopes_and_preserve_explicit_empty_overrides() {
+    let config = parse(
+        r#"{"extractor":{"directory":["{category}","{username}"],"instagram":{"directory":[]},"twitter":{"directory":["tweets","{post_id}"]}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        config.resolve("direct").unwrap().directory,
+        Some(vec!["{category}".into(), "{username}".into()])
+    );
+    assert_eq!(config.resolve("instagram").unwrap().directory, Some(vec![]));
+    assert_eq!(
+        config.resolve("twitter").unwrap().directory,
+        Some(vec!["tweets".into(), "{post_id}".into()])
+    );
+    let settings = config.resolve("twitter").unwrap();
+    assert_eq!(
+        settings.overlay(&Options::default()).directory,
+        settings.directory
+    );
+    assert_eq!(
+        settings
+            .overlay(&Options {
+                directory: Some(vec![]),
+                ..Options::default()
+            })
+            .directory,
+        Some(vec![])
+    );
+    let global = parse(r#"{"directory":[],"extractor":{"directory":["{category}"],"instagram":{"directory":["posts"]}}}"#).unwrap();
+    assert_eq!(global.resolve("instagram").unwrap().directory, Some(vec![]));
+}
+
+#[test]
+fn directory_templates_reject_invalid_types_paths_and_unknown_fields_privately() {
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!("secret-value"),
+        serde_json::json!({"secret-key":"secret-value"}),
+        serde_json::json!([null]),
+        serde_json::json!([42]),
+        serde_json::json!([""]),
+        serde_json::json!([".."]),
+        serde_json::json!(["/secret-value"]),
+        serde_json::json!(["secret-value/child"]),
+        serde_json::json!(["{secret-value}"]),
+        serde_json::json!(["secret-value\0"]),
+        serde_json::json!(vec!["secret-value"; 33]),
+        serde_json::json!(["secret-value".repeat(8193)]),
+    ] {
+        for json in [
+            serde_json::json!({"directory":value}),
+            serde_json::json!({"extractor":{"directory":value}}),
+            serde_json::json!({"extractor":{"instagram":{"directory":value}}}),
+        ] {
+            let message = parse(&json.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("secret-value"), "{message}");
+            assert!(!message.contains("secret-key"), "{message}");
+        }
+    }
+    for json in [
+        r#"{"directory":[],"directory":["posts"]}"#,
+        r#"{"extractor":{"directory":[],"directory":["posts"]}}"#,
+        r#"{"extractor":{"instagram":{"directory":[],"directory":["posts"]}}}"#,
+    ] {
+        assert!(parse(json).is_err());
+    }
+}
