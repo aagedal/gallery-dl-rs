@@ -315,17 +315,17 @@ struct RawExtractor {
     filesize_max: Field,
     retries: Field,
     timeout: Field,
-    instagram: RawOptions,
-    twitter: RawOptions,
-    facebook: RawOptions,
-    imgur: RawOptions,
-    bluesky: RawOptions,
-    reddit: RawOptions,
-    danbooru: RawOptions,
-    e621: RawOptions,
-    gelbooru: RawOptions,
-    safebooru: RawOptions,
-    direct: RawOptions,
+    instagram: Box<RawOptions>,
+    twitter: Box<RawOptions>,
+    facebook: Box<RawOptions>,
+    imgur: Box<RawOptions>,
+    bluesky: Box<RawOptions>,
+    reddit: Box<RawOptions>,
+    danbooru: Box<RawOptions>,
+    e621: Box<RawOptions>,
+    gelbooru: Box<RawOptions>,
+    safebooru: Box<RawOptions>,
+    direct: Box<RawOptions>,
 }
 
 #[derive(Default, Deserialize)]
@@ -558,7 +558,8 @@ impl Config {
             ("safebooru", extractor.safebooru),
             ("direct", extractor.direct),
         ] {
-            categories.insert(name.into(), settings.resolve(directory)?);
+            // Boxed: unoptimized builds overflow the stack with inline settings.
+            categories.insert(name.into(), (*settings).resolve(directory)?);
         }
         Ok(Self {
             global,
