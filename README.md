@@ -423,6 +423,28 @@ pinner, caption title/grid title/description, timestamp `created_at`, index
 1-based, with width/height. Default filenames are `{post_id}_{index}.{extension}`;
 archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
 
+Experimental native VSCO extraction (`--extractor native`, `vsco` category)
+reads the page-embedded `window.__PRELOADED_STATE__` JSON, which is
+undocumented and fragile. `vsco.co/USER/media/ID` uses `medias.byId`;
+`vsco.co/USER` and `/USER/gallery` take the site ID and anonymous `tkn` bearer
+token from that state and page `api/3.0/medias/profile` by cursor (capped at
+200 pages). Images use `responsiveUrl` with an `https://` prefix; videos are
+kept only as progressive MP4 (HLS is skipped). HTTPS on `*.vsco.co` only.
+`post_id`/`media_id` is the media ID, `username` the `permaSubdomain`, caption
+the description, timestamp `uploadDate`, with width/height. Default filenames
+are `{media_id}.{extension}`; archive identity is the media ID.
+
+Experimental native Newgrounds extraction (`--extractor native`, `newgrounds`
+category) scrapes art pages `www.newgrounds.com/art/view/USER/SLUG` (main
+image from `<div class="image">` or `og:image`, extra images from `imageData`
+/`art-images`, title from `og:title`, date from `itemprop="datePublished"`).
+`USER.newgrounds.com/art` pages `art/page/N` with `X-Requested-With:
+XMLHttpRequest` (capped at 200 pages) and fetches every listed post. Audio,
+movies and games are unsupported; there is no login, so adult-rated posts are
+skipped. HTTPS on `*.ngfiles.com` only. `post_id` is the image's numeric ID,
+`media_id` `POSTID_INDEX`, `username` the URL user, caption the title. Default
+filenames are `{post_id}_{index}.{extension}`; archive identity is `media_id`.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

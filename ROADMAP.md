@@ -573,6 +573,17 @@ board sections, secret boards, search, related pins, created/saved/all-pins
 listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
 `videos` and `domain` options.
 
+**Implemented experimental native VSCO:** single media and user galleries via
+the page preloaded state and `medias/profile` API. Remaining: HLS videos
+(upstream ytdl), collections, journals, spaces, avatars, and upstream's
+`videos` option.
+
+**Implemented experimental native Newgrounds:** art posts and user art
+listings via page scraping and XHR listing pages. Remaining: login/cookies
+(adult posts), audio, movies/games, favorites, following, search, user
+overview, upstream's `flash`, `format` and `include` options, and tags/rating/
+score metadata.
+
 **Implemented experimental native ArtStation:** projects and user portfolios
 via site JSON with browser-like headers. Remaining: Cloudflare challenges,
 video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
