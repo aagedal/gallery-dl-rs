@@ -313,6 +313,21 @@ gallery ID, `media_id` the file ID, caption the title (or file name), file
 otherwise; archive identity is (category, file ID). Plain CDN file links
 (files.catbox.moe, i.postimg.cc, images2.imgbox.com) stay direct downloads.
 
+Experimental native Tumblr extraction (`--extractor native`, `tumblr`
+category) covers blog listings (`BLOG.tumblr.com`, `/posts`,
+`www.tumblr.com/BLOG`), single posts (`/post/ID[/slug]`,
+`www.tumblr.com/BLOG/ID`) and tags (`/tagged/TAG`) via API v2
+(`/v2/blog/BLOG.tumblr.com/posts`, legacy format, reblogs included, offset
+paging capped at 200 pages). It uses upstream's public API key unless
+`extractor.tumblr.api-key` is set (accepted only in the `tumblr` category).
+Media: photo `original_size` (else the widest `alt_sizes`), `video_url`, direct
+`audio_url`, and inline `<img>` images; all must be HTTPS on
+`*.media.tumblr.com` (audio also `a.tumblr.com`). `post_id` is the post ID,
+`media_id` a hash of the media path, `username` the blog name, caption the
+summary (or caption with HTML stripped), with timestamp and width/height.
+Default filenames are `{post_id}_{index}.{extension}`; archive identity is
+(blog, post, media ID). Plain media links stay direct downloads.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

@@ -542,6 +542,13 @@ lists, albums, galleries and image pages. Remaining: Pixeldrain API keys,
 `/c/` descriptions; imgbox per-image metadata (width/height); Postimg
 JS-paginated gallery pages beyond the server-rendered listing.
 
+**Implemented experimental native Tumblr:** blog listings, single posts and
+tagged listings via API v2 with an overridable `api-key`. Remaining: OAuth and
+private/dashboard blogs, likes/search/day views, NPF posts, upstream's
+highest-resolution image rewriting (`s2048x3072`/`_1280` to original),
+external audio/video, `reblogs`/`posts`/`inline`/`external`/`original`/
+`fallback-delay` options, and custom-domain blogs.
+
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
