@@ -36,3 +36,7 @@ backpressure, late cursor failures, owner validation, private profiles, and acti
 timeouts. They are not live captures. Before claiming profile support, verify
 an accessible profile spanning multiple pages and compare post counts/order,
 including a carousel/video, an empty profile, and an authorized private profile.
+
+Stories, highlight lists/shared highlights, and the signed-in story tray now have
+separate [synthetic protocol and verification notes](stories_README.md). Their
+authenticated live verification remains pending as well.

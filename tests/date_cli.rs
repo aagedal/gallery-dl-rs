@@ -74,6 +74,43 @@ fn urls(result: &Output) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn story_dates_skip_older_entries_without_ending_ascending_or_mixed_feeds() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(
+        root.path(),
+        &[
+            row("old", json!(4)),
+            row("after-boundary", json!(5)),
+            row("ascending", json!(6)),
+            row("before-boundary", json!(10)),
+            row("too-new", json!(11)),
+            row("mixed", json!(7)),
+            row("unknown", Value::Null),
+            row("older-again", json!(1)),
+            row("later", json!(9)),
+        ],
+        &[],
+    );
+    let result = output(binary(root.path(), &backend).args([
+        "-g",
+        "--date-after=5",
+        "--date-before=10",
+        "https://instagram.com/stories/fixture/",
+    ]))
+    .await;
+    success(&result);
+    assert_eq!(
+        urls(&result),
+        [
+            "https://cdn.example/ascending.jpg",
+            "https://cdn.example/mixed.jpg",
+            "https://cdn.example/unknown.jpg",
+            "https://cdn.example/later.jpg",
+        ]
+    );
+}
+
+#[tokio::test]
 async fn strict_timestamp_boundaries_include_zero_and_negative_dates() {
     let root = tempfile::tempdir().unwrap();
     let rows: Vec<_> = (-3..=2)

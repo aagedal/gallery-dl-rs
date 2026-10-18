@@ -1,4 +1,4 @@
-//! Strict UTC date bounds and lazy, newest-first collection selection.
+//! Strict UTC date bounds and lazy collection selection.
 use crate::{Result, error, extract::Media};
 use futures_util::{StreamExt, stream::BoxStream};
 use time::{Date, Month, PrimitiveDateTime, Time, UtcOffset};
@@ -87,8 +87,7 @@ pub fn parse_date(input: &str) -> Result<i64> {
         .unix_timestamp())
 }
 
-/// Strict date bounds. `after` stops extraction at the first older/equal item,
-/// following gallery-dl's assumption that collections arrive newest first.
+/// Strict date bounds with explicit handling for collection order.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DateFilter {
     before: Option<i64>,
@@ -106,9 +105,27 @@ impl DateFilter {
         Ok(Self { before, after })
     }
 
-    /// Preserve unknown timestamps and extraction errors. Drop upstream as soon
-    /// as the lower bound is reached, without reading another item or page.
+    /// Filter a newest-first collection, preserving unknown timestamps and
+    /// extraction errors. Drop upstream as soon as the lower bound is reached,
+    /// without reading another item or page.
     pub fn apply<'a>(&self, input: BoxStream<'a, Result<Media>>) -> BoxStream<'a, Result<Media>> {
+        self.apply_ordered(input, true)
+    }
+
+    /// Preserve source order, unknown timestamps, and extraction errors while
+    /// skipping out-of-bound items. Older items do not end an unordered feed.
+    pub fn apply_unordered<'a>(
+        &self,
+        input: BoxStream<'a, Result<Media>>,
+    ) -> BoxStream<'a, Result<Media>> {
+        self.apply_ordered(input, false)
+    }
+
+    fn apply_ordered<'a>(
+        &self,
+        input: BoxStream<'a, Result<Media>>,
+        newest_first: bool,
+    ) -> BoxStream<'a, Result<Media>> {
         let filter = *self;
         futures_util::stream::unfold(Some(input), move |mut input| async move {
             let mut skipped = 0u8;
@@ -119,11 +136,12 @@ impl DateFilter {
                     Err(_) => None,
                 };
                 if let Some(timestamp) = timestamp {
-                    if filter.after.is_some_and(|after| timestamp <= after) {
+                    let too_old = filter.after.is_some_and(|after| timestamp <= after);
+                    if newest_first && too_old {
                         drop(input);
                         return None;
                     }
-                    if filter.before.is_some_and(|before| timestamp >= before) {
+                    if too_old || filter.before.is_some_and(|before| timestamp >= before) {
                         skipped += 1;
                         if skipped == 64 {
                             tokio::task::yield_now().await;
@@ -281,6 +299,109 @@ mod tests {
         fn drop(&mut self) {
             self.0.store(true, Ordering::SeqCst);
         }
+    }
+
+    #[tokio::test]
+    async fn unordered_bounds_skip_old_items_and_preserve_later_items_errors_and_unknowns() {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Guard(dropped.clone());
+        let count = polls.clone();
+        let mut unknown = media(None);
+        unknown.metadata = None;
+        let source = futures_util::stream::iter([
+            Ok(media(Some(4))),
+            Ok(media(Some(5))),
+            Ok(media(Some(6))),
+            Err(error("fixture failure")),
+            Ok(media(None)),
+            Ok(unknown),
+            Ok(media(Some(10))),
+            Ok(media(Some(11))),
+            Ok(media(Some(7))),
+            Ok(media(Some(1))),
+            Ok(media(Some(9))),
+            Ok(media(Some(8))),
+        ])
+        .inspect(move |_| {
+            let _guard = &guard;
+            count.fetch_add(1, Ordering::SeqCst);
+        })
+        .boxed();
+        let mut output = DateFilter::new(Some(10), Some(5))
+            .unwrap()
+            .apply_unordered(source);
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            output
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+                .unwrap()
+                .timestamp,
+            Some(6)
+        );
+        assert_eq!(polls.load(Ordering::SeqCst), 3);
+        assert!(output.next().await.unwrap().is_err());
+        assert_eq!(
+            output
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+                .unwrap()
+                .timestamp,
+            None
+        );
+        assert!(output.next().await.unwrap().unwrap().metadata.is_none());
+        for expected in [7, 9] {
+            assert_eq!(
+                output
+                    .next()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .metadata
+                    .unwrap()
+                    .timestamp,
+                Some(expected)
+            );
+        }
+        assert_eq!(polls.load(Ordering::SeqCst), 11);
+        assert!(!dropped.load(Ordering::SeqCst));
+        drop(output);
+        assert!(dropped.load(Ordering::SeqCst));
+        assert_eq!(polls.load(Ordering::SeqCst), 11);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn unordered_skipping_old_items_yields_and_cancels() {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Guard(dropped.clone());
+        let count = polls.clone();
+        let source = futures_util::stream::repeat_with(move || {
+            let _guard = &guard;
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok(media(Some(5)))
+        })
+        .boxed();
+        let task = tokio::spawn(async move {
+            DateFilter::new(None, Some(5))
+                .unwrap()
+                .apply_unordered(source)
+                .next()
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(polls.load(Ordering::SeqCst) >= 64);
+        assert!(!task.is_finished());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(dropped.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

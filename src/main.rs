@@ -100,7 +100,7 @@ struct Args {
     /// Override the User-Agent for extraction and media HTTP requests
     #[arg(short = 'a', long)]
     user_agent: Option<String>,
-    /// Social extractor; native supports experimental Instagram feeds/posts, Facebook media/albums, and X posts
+    /// Social extractor; native supports experimental Instagram feeds/stories/posts, Facebook media/albums, and X posts
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
@@ -198,6 +198,9 @@ async fn run(args: Args) -> Result<()> {
             let failed = &failed;
             let input = match source {
                 Ok(source) => {
+                    let unordered_dates = extract::http_url(&source)
+                        .ok()
+                        .is_some_and(|url| gallery_dl_rs::instagram::is_story_url(&url));
                     let selected_settings = extract::http_url(&source)
                         .ok()
                         .map(|url| &settings[extract::social_site(&url).unwrap_or("direct")]);
@@ -208,7 +211,11 @@ async fn run(args: Args) -> Result<()> {
                             let input = if settings.options.date_before.is_some()
                                 || settings.options.date_after.is_some()
                             {
-                                settings.dates.apply(input)
+                                if unordered_dates {
+                                    settings.dates.apply_unordered(input)
+                                } else {
+                                    settings.dates.apply(input)
+                                }
                             } else {
                                 input
                             };

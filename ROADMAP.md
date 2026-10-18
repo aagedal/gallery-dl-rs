@@ -17,6 +17,16 @@ shared extraction interface that emits media, post metadata, and child URLs.
   local HTTP transport checks are included. **Still required:** sanitized real
   response fixtures and a documented successful live authenticated manual check.
   Compatibility remains the default until those checks are complete.
+  **Implemented experimental stories/highlights:** user/ID stories, selected story
+  media, direct/shared highlights, user highlight lists, and the authenticated
+  story tray stream through REST reels endpoints. Identity/owner validation,
+  one-reel buffering, lazy ordered requests, source item indices, stable per-item
+  archive IDs, and cumulative active budgets are covered by synthetic parser and
+  local HTTP tests. Recognized story/highlight URLs use non-terminating date-after
+  filtering for both backends, preserving later newer items in source order.
+  Real response fixtures and successful authenticated extraction remain required.
+  Full upstream reel metadata, highlight titles/expiry, music/sticker audio,
+  split/order configuration, and segmented story video remain.
 - Facebook: photo permalinks and albums first, then video posts. Establish tested
   URL coverage and distinguish login pages from successful extraction.
   **Implemented experimentally:** single-photo permalink extraction from matching

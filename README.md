@@ -7,7 +7,7 @@ An early Rust implementation of a gallery downloader, inspired by
 **This is a working foundation, not a native Rust replacement for gallery-dl yet.**
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
-its JSON messages. Experimental native Instagram posts/profile feeds, Facebook
+its JSON messages. Experimental native Instagram posts/profile feeds/stories/highlights, Facebook
 photos/albums/videos, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
 extraction has not yet been verified.
 
@@ -63,11 +63,11 @@ it is invoked directly, without a shell.
 
 `--extractor compatibility` is the default. `--extractor native` experimentally
 supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
-`/USERNAME/feed/` profiles, Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
+`/USERNAME/feed/` profiles, Instagram stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
 `/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
 `/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
 `/USER/videos/ID` videos, and Twitter/X single-status URLs.
-Other profiles, stories, threads, and album listings still need the
+Other profiles, threads, and album listings still need the
 compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
@@ -109,6 +109,33 @@ cursors and inaccessible private profiles fail explicitly; results from earlier
 pages remain available after a late failure. `Instagram::stream` supports these
 collections; the collecting `extract` API remains single-post. Profile fixtures
 are synthetic; live authenticated pagination remains unverified.
+
+Experimental Instagram stories/highlights use `Instagram::stream` and the native
+CLI. Supported URLs include `/stories/USERNAME/`, `/stories/USERNAME/MEDIA_ID/`,
+`/stories/id:USER_ID/`, `/stories/highlights/HIGHLIGHT_ID/`, `/USERNAME/highlights/`,
+and `/stories/me/` (the signed-in account's story tray). Highlight share links
+`/s/BASE64_HIGHLIGHT_TOKEN/` and their `story_media_id` query selector are accepted;
+the decoded token must identify a numeric `highlight:` reel. Explicit ID forms
+skip username lookup. Session cookies still come from the configured Netscape
+file or selected Firefox profile; the downloader does not log in.
+
+Username lookup, highlight/story trays, reel identity, and owner/media identifiers
+are checked before output. Reels are requested one at a time in source order,
+without prefetch while the current reel is being consumed. Each bounded reel is
+validated atomically; a later reel failure preserves earlier results. An empty
+reel list is a valid empty collection; a selected missing story is an error.
+Selecting a story by media ID does not require unrelated items to have usable
+media variants. Private profile flags do not establish denial: the reels API
+decides whether the session may access those stories.
+
+Each item uses its own media ID, shortcode (derived from that ID when absent),
+timestamp, and source position within its reel. Its stable archive identity is
+the same when viewed through a direct story or a highlight; reel/owner IDs do not
+replace the story media ID in `post_id`. Full upstream reel metadata, highlight
+titles, expiry fields, music/sticker audio, split/order configuration, and segmented
+video remain unimplemented. Synthetic parser/local HTTP tests cover the supported
+protocol; authenticated live story/highlight extraction and sanitized real
+response fixtures remain unverified. See the [story fixture notes](tests/fixtures/instagram/stories_README.md).
 
 Native Facebook accepts only a Photo JSON object with the requested ID and its
 own `image.uri`, never a global image or Open Graph preview. It selects the largest
@@ -356,6 +383,12 @@ looking. `--date-after` stops the current input at the first post at or before i
 bound, drops the extractor, and proceeds to the next input. This assumes newest
 first ordering; an older pinned or out-of-order post can end traversal early.
 Already selected downloads finish normally.
+
+Recognized Instagram story, highlight, and story-tray URLs use source-order date
+filtering with either extractor backend: `--date-after` skips older items and
+continues scanning. This avoids dropping newer items later in an ascending or
+mixed-order reel. Library users can select the same behavior with
+`DateFilter::apply_unordered`. Date selection still runs before file ranges.
 
 Values accept signed integer Unix seconds, `YYYY-MM-DD` (midnight UTC), or
 `YYYY-MM-DDTHH:MM[:SS]` with an optional dot-separated fraction after seconds.

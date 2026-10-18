@@ -1,4 +1,6 @@
-//! Experimental native post and profile extraction using Instagram's web REST API.
+//! Experimental native post, profile, story, and highlight REST extraction.
+#[path = "instagram_stories.rs"]
+mod stories;
 use crate::{
     Result,
     cookies::CookieJar,
@@ -20,6 +22,7 @@ use std::{
     sync::Mutex,
     time::{Duration, SystemTime},
 };
+pub use stories::is_story_url;
 use url::Url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -116,7 +119,7 @@ impl Instagram {
         .map_err(|_| error("native Instagram extraction timed out"))?
     }
 
-    /// Lazily traverse posts or a profile feed. Only the current response page is
+    /// Lazily traverse posts, profile feeds, stories, or highlights. The current page is
     /// buffered; downstream pauses do not consume the active extraction budget.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
         if shortcode(url).is_ok() {
@@ -125,6 +128,12 @@ impl Instagram {
                 .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
                 .try_flatten()
                 .boxed();
+        }
+        if let Ok(input) = stories::input(url) {
+            return self.story_stream(
+                input,
+                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
+            );
         }
         match profile_username(url) {
             Ok(username) => self.profile_stream(
@@ -719,6 +728,53 @@ mod transport_tests {
                     .contains("user-agent: gallery-dl-native-test/1\r\n")
             );
         }
+    }
+
+    #[tokio::test]
+    async fn story_requests_rotate_scoped_cookies_and_apply_configured_media_agent() {
+        let profile = serde_json::to_vec(
+            &serde_json::json!({"status":"ok","data":{"user":{"id":"42","username":"fixture"}}}),
+        )
+        .unwrap();
+        let reel = serde_json::to_vec(&serde_json::json!({"status":"ok","reels_media":[{"id":"42","user":{"pk":"42","username":"fixture"},"items":[{"pk":"101","media_type":1,"image_versions2":{"candidates":[{"url":"https://cdn.example/story.jpg","width":10,"height":10}]}}]}]})).unwrap();
+        let (mut endpoint, server) = serve_sequence(vec![
+            response(
+                "200 OK",
+                "Set-Cookie: sessionid=rotated; Path=/\r\nSet-Cookie: csrftoken=rotated-csrf; Path=/\r\n",
+                &profile,
+            ),
+            response("200 OK", "", &reel),
+        ]);
+        endpoint.set_path("/api/v1/");
+        let network = NetworkOptions::new(None, Some("native-story-test/1".into())).unwrap();
+        let native = Instagram::from_cookie_jar(CookieJar::parse("127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\tinitial\n127.0.0.1\tFALSE\t/\tFALSE\t0\tcsrftoken\tinitial-csrf\n").unwrap(),Duration::from_secs(3)).unwrap().with_network(&network).unwrap();
+        let input =
+            stories::input(&Url::parse("https://instagram.com/stories/fixture/").unwrap()).unwrap();
+        let media: Vec<_> = native
+            .story_stream(input, endpoint)
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(media.len(), 1);
+        assert_eq!(
+            media[0].headers.get("User-Agent").map(String::as_str),
+            Some("native-story-test/1")
+        );
+        assert!(
+            !media[0]
+                .headers
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case("cookie"))
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[0].2.contains("sessionid=initial"));
+        assert!(requests[1].2.contains("sessionid=rotated"));
+        assert!(
+            requests[1]
+                .2
+                .to_ascii_lowercase()
+                .contains("x-csrftoken: rotated-csrf\r\n")
+        );
     }
 
     fn serve_once(
@@ -1356,3 +1412,7 @@ mod transport_tests {
 #[cfg(test)]
 #[path = "instagram_profile_tests.rs"]
 mod profile_tests;
+
+#[cfg(test)]
+#[path = "instagram_stories_tests.rs"]
+mod story_tests;
