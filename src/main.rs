@@ -364,8 +364,10 @@ async fn run(args: Args) -> Result<()> {
             }
             let mut identity = item.identity();
             // Distinct social files can share a URL and request context.
-            if matches!(item.category.as_str(), "instagram" | "twitter" | "facebook")
-                && let Some(file_key) = item.archive_key()
+            if matches!(
+                item.category.as_str(),
+                "instagram" | "twitter" | "facebook" | "imgur"
+            ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
             }
@@ -535,6 +537,7 @@ struct Extractors {
     instagram: OnceCell<Result<Instagram>>,
     twitter: OnceCell<Result<Twitter>>,
     facebook: OnceCell<Result<Facebook>>,
+    imgur: OnceCell<Result<gallery_dl_rs::imgur::Imgur>>,
 }
 
 impl Extractors {
@@ -667,6 +670,22 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Facebook initialization failed: {e}"))
                         })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "imgur" => {
+                    let native = extractors
+                        .imgur
+                        .get_or_init(|| async {
+                            gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Imgur initialization failed: {e}")))?;
                     native.events(&url)
                 }
                 Extractor::Native => {
@@ -841,7 +860,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         timeout: args.timeout,
     };
     let mut settings = BTreeMap::new();
-    for category in ["instagram", "twitter", "facebook", "direct"] {
+    for category in ["instagram", "twitter", "facebook", "imgur", "direct"] {
         let options = defaults
             .overlay(&config.resolve(category)?)
             .overlay(&overrides);

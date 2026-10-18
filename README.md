@@ -212,6 +212,21 @@ Legacy and modern progressive MP4 delivery fields provide HD/SD selection when
 there is no inline DASH manifest. Existing authenticated transport and configured
 user-agent settings apply to video requests and both emitted files.
 
+Experimental native Imgur extraction (`--extractor native`, category `imgur`)
+accepts single images (`i.imgur.com/ID.ext`, `imgur.com/ID`), albums
+(`imgur.com/a/ID`, `/a/title-ID`) and gallery posts (`/gallery/ID`,
+`/gallery/slug-ID`, `/t/TAG/ID`). It reads Imgur's public `post/v1` API with
+the anonymous web client ID used upstream; no cookies are needed. Galleries use
+the albums endpoint and fall back to the media endpoint on 404. File URLs are
+rebuilt as `https://i.imgur.com/{id}.{ext}` (`jpeg` becomes `jpg`; animated GIFs
+use the MP4 rendition, like upstream's default `mp4` option). Each post is one
+group: `post_id` is the album/gallery ID (or image ID), `media_id`/`id` the image
+ID, `index` is 1-based, `timestamp` comes from `created_at`, `username` from the
+account and `caption` from the image or post description/title. Default
+filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. User
+profiles, favorites, subreddit listings, searches and tag listings are rejected
+as unsupported. Compatibility mode sends Imgur URLs to the backend.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

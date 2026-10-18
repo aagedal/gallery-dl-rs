@@ -89,7 +89,7 @@ impl Process {
         require_media: bool,
     ) -> Result<Self> {
         let category = extract::social_site(&url).ok_or_else(|| {
-            error("unsupported URL; use an Instagram, Facebook, Twitter/X URL or direct media link")
+            error("unsupported URL; use an Instagram, Facebook, Twitter/X, Imgur URL or direct media link")
         })?;
         crate::network::NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let mut child = backend

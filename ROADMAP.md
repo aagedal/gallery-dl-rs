@@ -513,6 +513,12 @@ Add native configuration and filename templates, then prioritize additional site
 Integrate the companion **yt-dlp-rs** project for video extraction and segmented
 downloads. Document compatibility differences as features land.
 
+**Implemented experimental native Imgur:** single images, albums and gallery
+posts via the public `post/v1` API, with shared retries, timeouts, network
+options and Retry-After cooldowns. Not yet: user profiles, favorites,
+subreddits, searches, tag listings, and the upstream `mp4` option (animated GIFs
+always use MP4).
+
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook
 selections retain available file dimensions, original dimensions, seconds-based
 duration, bitrate, media type, description/alt text, sensitivity, and source

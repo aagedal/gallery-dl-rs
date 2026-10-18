@@ -286,6 +286,8 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.instagram.com/p/abc/", Some("instagram")),
         ("https://m.facebook.com/photo.php?fbid=1", Some("facebook")),
         ("https://fb.watch/abc/", Some("facebook")),
+        ("https://i.imgur.com/21yMxCS.png", Some("imgur")),
+        ("https://imgur.com.evil.example/a/TcBmP", None),
         ("https://x.com/user/status/123", Some("twitter")),
         ("https://twitter.com/user/status/123", Some("twitter")),
         ("https://notinstagram.com/p/abc", None),

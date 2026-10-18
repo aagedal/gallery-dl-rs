@@ -14,6 +14,7 @@ mod facebook_dash;
 mod facebook_video;
 pub mod file_metadata;
 pub mod filter;
+pub mod imgur;
 pub mod input;
 pub mod instagram;
 mod messages;

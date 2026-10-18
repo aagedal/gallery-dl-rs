@@ -318,6 +318,7 @@ struct RawExtractor {
     instagram: RawOptions,
     twitter: RawOptions,
     facebook: RawOptions,
+    imgur: RawOptions,
     direct: RawOptions,
 }
 
@@ -427,7 +428,7 @@ impl Config {
             let extractor = extractor
                 .as_object()
                 .ok_or_else(|| error("native configuration extractor must be a JSON object"))?;
-            for name in ["instagram", "twitter", "facebook", "direct"] {
+            for name in ["instagram", "twitter", "facebook", "imgur", "direct"] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
@@ -530,6 +531,7 @@ impl Config {
             ("instagram", extractor.instagram),
             ("twitter", extractor.twitter),
             ("facebook", extractor.facebook),
+            ("imgur", extractor.imgur),
             ("direct", extractor.direct),
         ] {
             categories.insert(name.into(), settings.resolve(directory)?);
@@ -542,7 +544,10 @@ impl Config {
     }
 
     pub fn resolve(&self, category: &str) -> Result<Options> {
-        if !matches!(category, "instagram" | "twitter" | "facebook" | "direct") {
+        if !matches!(
+            category,
+            "instagram" | "twitter" | "facebook" | "imgur" | "direct"
+        ) {
             return Err(error("unsupported native configuration category"));
         }
         let settings = self.categories.get(category).map_or_else(

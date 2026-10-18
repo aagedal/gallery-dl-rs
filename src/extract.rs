@@ -56,6 +56,15 @@ impl Media {
     pub fn archive_key(&self) -> Option<String> {
         let (namespace, identity) = match self.category.as_str() {
             "direct" => ("url", self.identity()),
+            // Imgur media IDs are global; the album or gallery is not part of it.
+            "imgur" => {
+                let post = self.metadata.as_ref()?;
+                let id = &post.media_id;
+                if !matches!(id.len(), 5 | 7) || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                    return None;
+                }
+                ("imgur", serde_json::json!([id]).to_string())
+            }
             category @ ("instagram" | "twitter" | "facebook") => {
                 let post = self.metadata.as_ref()?;
                 if !decimal_id(&post.post_id) {
@@ -200,6 +209,8 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("instagram.com", "instagram"),
         ("facebook.com", "facebook"),
         ("fb.watch", "facebook"),
+        ("imgur.com", "imgur"),
+        ("imgur.io", "imgur"),
         ("twitter.com", "twitter"),
         ("x.com", "twitter"),
     ] {
