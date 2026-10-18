@@ -12,6 +12,7 @@ use gallery_dl_rs::{
     extract::{self, Backend},
     instagram::Instagram,
     naming::FilenameTemplate,
+    twitter::Twitter,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -24,7 +25,7 @@ use std::{
 #[derive(Parser)]
 #[command(
     version,
-    about = "Rust gallery downloader with an optional native Instagram extractor"
+    about = "Rust gallery downloader with experimental native Instagram and Twitter/X extractors"
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
@@ -57,7 +58,7 @@ struct Args {
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
-    /// Social extractor; native currently supports Instagram single posts only
+    /// Social extractor; native supports experimental Instagram and Twitter/X single posts
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
@@ -123,21 +124,44 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     let settings = resolved_settings(&args).await?;
+    let needs_native = |category| {
+        matches!(args.extractor, Extractor::Native)
+            && args.urls.iter().any(|source| {
+                extract::http_url(source)
+                    .ok()
+                    .is_some_and(|url| extract::social_site(&url) == Some(category))
+            })
+    };
     let instagram_settings = &settings["instagram"];
-    let native = if matches!(args.extractor, Extractor::Native)
-        && args.urls.iter().any(|source| {
-            extract::http_url(source)
-                .ok()
-                .is_some_and(|url| extract::social_site(&url) == Some("instagram"))
-        }) {
+    let native = if needs_native("instagram") {
         Some(
             Instagram::new(
                 instagram_settings.options.cookies.as_deref(),
                 Duration::from_secs(args.extraction_timeout),
             )
-            .await?
-            .with_retries(instagram_settings.options.retries.unwrap())
-            .with_request_timeout(instagram_settings.options.timeout.unwrap()),
+            .await
+            .map(|native| {
+                native
+                    .with_retries(instagram_settings.options.retries.unwrap())
+                    .with_request_timeout(instagram_settings.options.timeout.unwrap())
+            }),
+        )
+    } else {
+        None
+    };
+    let twitter_settings = &settings["twitter"];
+    let twitter = if needs_native("twitter") {
+        Some(
+            Twitter::new(
+                twitter_settings.options.cookies.as_deref(),
+                Duration::from_secs(args.extraction_timeout),
+            )
+            .await
+            .map(|twitter| {
+                twitter
+                    .with_retries(twitter_settings.options.retries.unwrap())
+                    .with_request_timeout(twitter_settings.options.timeout.unwrap())
+            }),
         )
     } else {
         None
@@ -155,18 +179,24 @@ async fn run(args: Args) -> Result<()> {
     let media = stream::iter(args.urls.iter().enumerate())
         .flat_map(|(index, source)| {
             let failed = &failed;
-            extract_input(source, native.as_ref(), &backend, args.extractor, &settings).filter_map(
-                move |result| {
-                    std::future::ready(match result {
-                        Ok(item) => Some(item),
-                        Err(e) => {
-                            eprintln!("extraction failed for input {}: {e}", index + 1);
-                            failed.set(failed.get() + 1);
-                            None
-                        }
-                    })
-                },
+            extract_input(
+                source,
+                native.as_ref(),
+                twitter.as_ref(),
+                &backend,
+                args.extractor,
+                &settings,
             )
+            .filter_map(move |result| {
+                std::future::ready(match result {
+                    Ok(item) => Some(item),
+                    Err(e) => {
+                        eprintln!("extraction failed for input {}: {e}", index + 1);
+                        failed.set(failed.get() + 1);
+                        None
+                    }
+                })
+            })
         })
         .filter(|item| {
             // Keep fixed-size digests instead of retaining URLs, headers, or inline manifests.
@@ -249,7 +279,8 @@ async fn run(args: Args) -> Result<()> {
 
 fn extract_input<'a>(
     source: &'a str,
-    native: Option<&'a Instagram>,
+    native: Option<&'a Result<Instagram>>,
+    twitter: Option<&'a Result<Twitter>>,
     backend: &'a Backend,
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
@@ -261,14 +292,28 @@ fn extract_input<'a>(
             match extractor {
                 Extractor::Native if category == "instagram" => {
                     let native = native
-                        .ok_or_else(|| error("native Instagram extractor was not initialized"))?;
+                        .ok_or_else(|| error("native Instagram extractor was not initialized"))?
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Instagram initialization failed: {e}"))
+                        })?;
                     Ok(stream::once(async move { native.extract(&url).await })
                         .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
                         .try_flatten()
                         .boxed())
                 }
+                Extractor::Native if category == "twitter" => {
+                    let twitter = twitter
+                        .ok_or_else(|| error("native Twitter extractor was not initialized"))?
+                        .as_ref()
+                        .map_err(|e| error(format!("native Twitter initialization failed: {e}")))?;
+                    Ok(stream::once(async move { twitter.extract(&url).await })
+                        .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
+                        .try_flatten()
+                        .boxed())
+                }
                 Extractor::Native => Err(error(
-                    "native extraction currently supports Instagram single posts only; use --extractor compatibility",
+                    "native extraction currently supports Instagram and Twitter/X single posts only; use --extractor compatibility",
                 )),
                 Extractor::Compatibility => {
                     let mut backend = backend.clone();

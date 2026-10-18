@@ -21,6 +21,16 @@ shared extraction interface that emits media, post metadata, and child URLs.
   URL coverage and distinguish login pages from successful extraction.
 - Twitter/X: single-post photos and direct video variants, including mixed-media
   posts and explicit unavailable/protected-post errors.
+  **Implemented experimentally:** authenticated single-status GraphQL extraction,
+  original photos/highest-bitrate direct MP4 variants, requested-root validation,
+  ordered mixed media, metadata/archive identities, scoped cookies/CSRF rotation,
+  bounded retries/deadlines/redirects, and native web transaction generation.
+  Current public signing bootstrap was checked on 2026-10-18 and a modern module
+  shell required a first-party `/i/jf/` fallback. Reference vectors, parser fixtures,
+  and local HTTP tests cover protocol behavior. **Still required:** sanitized real
+  GraphQL photo/video/mixed responses and a successful live authenticated download.
+  Compatibility remains the default. Profiles, threads, retweet/quote expansion,
+  and cards/articles remain outside native coverage.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and
@@ -168,6 +178,9 @@ Tests cover schema, scope/CLI precedence, relative paths, credentials selection,
 fractional timeouts, retry counts, and separate compatibility configuration.
 Full configuration compatibility, discovery, directory templates, and
 postprocessors remain.
+
+Native Instagram and Twitter session initialization failures now remain local to
+their inputs, allowing unrelated direct links and other inputs to proceed.
 
 ### Companion yt-dlp-rs integration
 

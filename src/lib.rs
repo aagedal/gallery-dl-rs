@@ -10,6 +10,7 @@ pub mod naming;
 mod range;
 mod resume;
 mod transport;
+pub mod twitter;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;

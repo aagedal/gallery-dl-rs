@@ -141,7 +141,7 @@ fn zero_concurrency_is_rejected() {
 #[test]
 fn native_selection_rejects_unsupported_inputs_without_running_backend() {
     for url in [
-        "https://x.com/person/status/1",
+        "https://x.com/person/",
         "https://facebook.com/photo/?fbid=1",
         "https://instagram.com/person/",
     ] {
@@ -596,5 +596,60 @@ mod cancellation {
             let state = String::from_utf8_lossy(&state.stdout);
             state.trim().is_empty() || state.trim().starts_with('Z')
         });
+    }
+}
+
+#[test]
+fn native_twitter_reports_authentication_without_launching_backend_and_continues_inputs() {
+    let output = binary()
+        .args([
+            "--extractor",
+            "native",
+            "--extractor-command",
+            "/missing/backend",
+            "-g",
+            "https://x.com/person/status/123",
+            "https://example.com/image.jpg",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "https://example.com/image.jpg\n"
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("auth_token") && stderr.contains("ct0"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("could not run"));
+}
+
+#[test]
+fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs() {
+    let root = tempfile::tempdir().unwrap();
+    for url in [
+        "https://x.com/person/status/123",
+        "https://instagram.com/p/BA/",
+    ] {
+        let output = binary()
+            .arg("--cookies")
+            .arg(root.path().join("missing-cookies.txt"))
+            .args([
+                "--extractor",
+                "native",
+                "-g",
+                url,
+                "https://example.com/image.jpg",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "https://example.com/image.jpg\n"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("initialization failed"));
     }
 }

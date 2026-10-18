@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": 89,
+      "message": "Synthetic expired session"
+    }
+  ]
+}

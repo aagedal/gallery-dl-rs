@@ -7,9 +7,9 @@ An early Rust implementation of a gallery downloader, inspired by
 **This is a working foundation, not a native Rust replacement for gallery-dl yet.**
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
-its JSON messages. An experimental native Instagram single-post extractor is
-available with `--extractor native`; it has not yet been verified against a live
-authenticated post.
+its JSON messages. Experimental native Instagram and Twitter/X single-post
+extractors are available with `--extractor native`; authenticated live post
+extraction has not yet been verified.
 
 ## Build and run
 
@@ -49,6 +49,9 @@ cargo build --release --locked
 # Experimental Instagram extraction in Rust, without gallery-dl
 ./target/release/gallery-dl-rs --extractor native -C cookies.txt -j 'https://www.instagram.com/p/SHORTCODE/'
 
+# Experimental authenticated Twitter/X extraction in Rust
+./target/release/gallery-dl-rs --extractor native -C x-cookies.txt -j 'https://x.com/USERNAME/status/POST_ID'
+
 ./target/release/gallery-dl-rs --help
 ```
 
@@ -58,13 +61,13 @@ configuration for site-specific settings. Default gallery-dl config files are
 ignored. `--extractor-command /path/to/gallery-dl` selects another executable;
 it is invoked directly, without a shell.
 
-`--extractor compatibility` is the default. `--extractor native` supports Instagram
-`/p/`, `/reel/`, and `/tv/` single-post URLs only; Facebook, Twitter/X, profiles,
-stories, and albums still need the compatibility backend. There is no automatic
+`--extractor compatibility` is the default. `--extractor native` experimentally
+supports Instagram `/p/`, `/reel/`, and `/tv/` posts and Twitter/X single-status
+URLs. Facebook, profiles, stories, threads, and albums still need the compatibility backend. There is no automatic
 fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
-The native extractor reads Netscape cookies scoped to the API URL's domain, path,
+The native Instagram extractor reads Netscape cookies scoped to the API URL's domain, path,
 HTTPS requirement, and expiry. Response `Set-Cookie` updates, including session
 and CSRF rotation and deletions, are retained in memory across redirects, retries,
 and later posts on the same extractor instance. Updates validate domain scope
@@ -86,12 +89,36 @@ seconds), inside that overall deadline. Library callers retain zero retries with
 `Instagram::new` and can opt in with `with_retries`; `with_request_timeout` sets a
 separate request deadline.
 
-Native responses include all carousel children in order and select the largest
+Native Instagram responses include all carousel children in order and select the largest
 available photo or direct video variant by pixel area. Missing children or video
 variants fail extraction rather than silently downloading a partial post or video
 thumbnail. JSON includes post/media IDs, shortcode, username, caption, timestamp,
 and a one-based carousel index. Media requests carry user-agent/referer headers;
 Instagram session cookies are never copied to media hosts.
+
+Native Twitter/X requires current `x.com` Netscape `auth_token` and `ct0` cookies;
+it does not log in or use a guest session. It requests the exact status through
+GraphQL, selecting original-size photos and the highest-bitrate direct MP4 video
+variants in mixed-media order. IDs, username, caption, UTC timestamp, and one-based
+media indices feed metadata, filename templates, and the same stable archive keys
+as compatibility extraction. The response must match the requested root tweet;
+quoted posts and retweets are not silently substituted or expanded. Missing video
+variants fail instead of returning thumbnails. Protected, missing, expired-session,
+rate-limit, and challenge responses fail explicitly.
+
+The native X client generates transaction headers from verification/SVG data and
+the current signing asset, with a first-party `/i/jf/` bootstrap fallback for newer
+module pages. It parses signing inputs without executing downloaded JavaScript.
+Public bootstrap was checked successfully on 2026-10-18; this does **not** verify
+authenticated extraction. The GraphQL operation and web signing protocol are
+undocumented snapshots and can change. Cookies/CSRF are reselected on each API
+request/redirect, response cookies update the in-memory jar, and API redirects
+remain within the same origin and GraphQL path. Signing assets and media requests
+carry no session cookies or API authorization. Requests use the same bounded
+responses, retries, per-origin cooldowns, cancellation, per-request timeout, and
+overall extraction deadline as the native pipeline. Parser/reference/local HTTP
+tests and the [Twitter fixture notes](tests/fixtures/twitter/README.md) describe
+what is verified and the remaining real-response/manual authenticated gates.
 
 ## Native configuration
 
@@ -187,7 +214,7 @@ directory templates, automatic discovery, and postprocessors remain unimplemente
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,
   shortcode, username, caption, timestamp, and carousel index). Post metadata is
-  provided by native Instagram and allowlisted compatibility Instagram,
+  provided by native Instagram/Twitter and allowlisted compatibility Instagram,
   Twitter/X, and Facebook fields when available. Compatibility timestamps are
   retained only when numeric; formatted backend dates are omitted. Instagram
   uses site post/media IDs, Twitter uses tweet ID and file number, and Facebook
@@ -239,7 +266,7 @@ directory templates, automatic discovery, and postprocessors remain unimplemente
   retries controlled by `--retries`. Retry-After accepts seconds or an HTTP date;
   missing/invalid values use exponential backoff. Concurrent downloads share
   cooldowns by origin (scheme, host, and port), including cooldowns reported on a
-  final attempt. Native Instagram reuses the same scheduler, sharing cooldowns
+  final attempt. Native Instagram and Twitter reuse the same scheduler implementation, sharing cooldowns
   across calls on an extractor instance and recording them even on a final
   attempt. Requests already in flight can finish. `--timeout` bounds each media
   attempt, including its redirect chain and cooldown waits; longer cooldowns fail
@@ -255,9 +282,9 @@ directory templates, automatic discovery, and postprocessors remain unimplemente
 
 ## Limitations
 
-Facebook and Twitter/X extraction is **not native Rust**, and live authenticated
-social downloads have not been verified in this repository. The native Instagram
-endpoint is undocumented and may change; fixture tests establish parser and
+Facebook extraction is **not native Rust**, and live authenticated social downloads
+have not been verified in this repository. Native Instagram and Twitter/X use
+undocumented endpoints that may change; fixture tests establish parser and
 transport behavior, not current live coverage. Tests exercise all three routing paths
 with a fixture backend and HTTP downloads with a local server. Facebook coverage
 in particular must be checked against the installed backend before relying on it.
@@ -326,6 +353,7 @@ cargo clippy --locked --all-targets -- -D warnings
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.
 `src/instagram.rs` owns the experimental native Instagram extractor;
+`src/twitter.rs` owns experimental native Twitter/X and transaction bootstrap;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
 [fixture and manual-check notes](tests/fixtures/instagram/README.md) before
 promoting native extraction to the default.
