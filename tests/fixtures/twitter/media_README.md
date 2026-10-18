@@ -63,7 +63,32 @@ configured user agents, cookie/CSRF rotation, and API credential isolation from
 media. Transaction tests regenerate each request's token using its actual API
 path, decoded timestamp, and mask rather than checking only header presence.
 
-Likes and other collection routes, root-profile dispatch and `/timeline` search
-fallback, configurable uniqueness, cards/articles,
+Likes and other collection routes, configurable uniqueness, arbitrary root
+profile dispatch, resume cursors, text-only output, cards/articles,
 unknown timeline variants, dynamic operation-ID refresh, and real authenticated
 verification remain unfinished. Compatibility remains the default.
+
+Search and root timeline continuation use `4fpceYZ6-YQCx_JSl_Cn_A/SearchTimeline`
+with `rawQuery`, `count`, `querySource=typed_query`, product, and
+`withGrokTranslatedBio=false`. The exact search envelope is
+`data.search_by_raw_query.search_timeline.timeline.instructions`. No user-result
+root is required, but each emitted post and its author aliases still validate.
+Search parameters use percent encoding without double decoding. Hashtag path
+plus signs remain literal. Root/profile/search routing is covered by parser,
+CLI missing-authentication, and direct-input continuation tests.
+
+Max-ID pagination rewrites the last raw post ID minus one and clears the cursor;
+empty pages fall back to the opaque cursor. Date pagination uses the snowflake's
+full timestamp for progress and rewrites its calendar day as `until:`. Repeated
+full timestamps retain cursor navigation, while distinct timestamps can reset
+an identical day query. Request hashes include this timestamp progress to permit
+that intentional retry and still reject loops. `search-stop=3` permits three
+empty continuations and ends at a fourth empty response; an explicit Bottom
+`stopOnEmptyResponse=false` resets the count. Invalid hint aliases fail privately.
+
+Root profiles resolve canonical names, choose media/tweets/replies by strategy,
+and search older link posts after the initial feed. Only a link-search stage with
+no raw post results widens to an unfiltered search. Range/drop/deadline tests
+verify no prefetch, preservation of earlier output on failures, shared active
+time excluding consumer pauses, cross-stage dedup, and unchanged archive keys.
+All responses remain synthetic, including direct/quoted/retweet search results.

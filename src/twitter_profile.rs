@@ -4,9 +4,21 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
 use timeline::{ProfileInput, ProfileTab};
 
+enum Source {
+    Profile(ProfileTab),
+    Search(search::Paging),
+}
+enum RootStage {
+    Initial { last: Option<String> },
+    Links { base_query: String },
+    All,
+}
+
 struct State {
-    input: ProfileInput,
-    tab: ProfileTab,
+    input: Option<ProfileInput>,
+    source: Source,
+    root: Option<RootStage>,
+    screen_name: Option<String>,
     pinned_hint: Option<String>,
     pinned_pending: bool,
     base: Url,
@@ -32,7 +44,18 @@ impl Twitter {
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
         }
+        match search::input(url) {
+            Ok(Some(query)) => {
+                return self
+                    .search_stream(query, Url::parse("https://x.com/i/api/graphql/").unwrap());
+            }
+            Err(e) => return stream::once(async move { Err(e) }).boxed(),
+            Ok(None) => {}
+        }
         match timeline::profile_input(url) {
+            Ok((input, ProfileTab::Timeline)) => {
+                self.timeline_stream(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
+            }
             Ok((input, tab)) => self.profile_stream(
                 input,
                 tab,
@@ -153,16 +176,69 @@ impl Twitter {
         tab: ProfileTab,
         base: Url,
     ) -> BoxStream<'_, Result<Media>> {
-        let owner = match &input {
-            ProfileInput::Id(id) => Some(id.clone()),
-            ProfileInput::Name(_) => None,
+        if tab == ProfileTab::Timeline {
+            return self.timeline_stream(input, base);
+        }
+        self.collection_stream(Some(input), Source::Profile(tab), None, base)
+    }
+
+    pub(super) fn timeline_stream(
+        &self,
+        input: ProfileInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<Media>> {
+        let tab = match self.timeline_options.strategy {
+            TimelineStrategy::Auto if self.expansion.retweets == RetweetMode::Skip => {
+                ProfileTab::Media
+            }
+            TimelineStrategy::Auto | TimelineStrategy::Tweets => ProfileTab::Tweets,
+            TimelineStrategy::Media => ProfileTab::Media,
+            TimelineStrategy::Replies => ProfileTab::Replies,
         };
-        let lookup_pending = owner.is_none() || self.profile_options.pinned;
+        self.collection_stream(
+            Some(input),
+            Source::Profile(tab),
+            Some(RootStage::Initial { last: None }),
+            base,
+        )
+    }
+
+    pub(super) fn search_stream(&self, query: String, base: Url) -> BoxStream<'_, Result<Media>> {
+        if let Err(e) = search::validate_query(&query) {
+            return stream::once(async move { Err(e) }).boxed();
+        }
+        let input = (self.profile_options.replies == ReplyMode::SelfOnly)
+            .then(|| search::query_owner(&query))
+            .flatten();
+        self.collection_stream(
+            input,
+            Source::Search(search::Paging::new(query)),
+            None,
+            base,
+        )
+    }
+
+    fn collection_stream(
+        &self,
+        input: Option<ProfileInput>,
+        source: Source,
+        root: Option<RootStage>,
+        base: Url,
+    ) -> BoxStream<'_, Result<Media>> {
+        let owner = match &input {
+            Some(ProfileInput::Id(id)) => Some(id.clone()),
+            _ => None,
+        };
+        let profile_source = matches!(source, Source::Profile(_));
+        let lookup_pending = input.is_some()
+            && (owner.is_none() || self.profile_options.pinned && profile_source || root.is_some());
         let state = State {
             input,
-            tab,
+            source,
+            root,
+            screen_name: None,
             pinned_hint: None,
-            pinned_pending: self.profile_options.pinned,
+            pinned_pending: self.profile_options.pinned && profile_source,
             base,
             owner,
             lookup_pending,
@@ -180,7 +256,11 @@ impl Twitter {
                 if let Some(item) = state.pending.pop_front() {
                     return Some((Ok(item), state));
                 }
-                if state.done && state.posts.is_empty() && state.expansion.is_none() {
+                if state.done
+                    && state.root.is_none()
+                    && state.posts.is_empty()
+                    && state.expansion.is_none()
+                {
                     return None;
                 }
                 let started = tokio::time::Instant::now();
@@ -190,6 +270,7 @@ impl Twitter {
                     result.unwrap_or_else(|_| Err(error("native Twitter extraction timed out")));
                 if let Err(e) = result {
                     state.done = true;
+                    state.root = None;
                     state.posts.clear();
                     state.expansion = None;
                     return Some((Err(e), state));
@@ -220,11 +301,19 @@ impl Twitter {
             }
             return Ok(());
         }
+        if state.done {
+            self.advance_root(state)?;
+            return Ok(());
+        }
         if state.lookup_pending {
-            let endpoint = user_endpoint(&state.base, &state.input)?;
+            let input = state.input.as_ref().unwrap();
+            let endpoint = user_endpoint(&state.base, input)?;
             self.ensure_transaction_at("", &endpoint).await?;
             let body = self.fetch(&endpoint, "", true).await?;
-            let owner = timeline::parse_user(&body, &state.input)?;
+            let owner = timeline::parse_user(&body, input)?;
+            if state.root.is_some() {
+                state.screen_name = Some(timeline::parse_user_name(&body, &owner)?);
+            }
             if state.pinned_pending {
                 state.pinned_hint = timeline::user_pin(&body, &owner)?;
             }
@@ -232,35 +321,90 @@ impl Twitter {
             state.lookup_pending = false;
             return Ok(());
         }
-        let endpoint = profile_endpoint(
-            &state.base,
-            state.tab,
-            state.owner.as_deref().unwrap(),
-            state.cursor.as_deref(),
-        )?;
-        self.ensure_transaction_at("", &endpoint).await?;
-        let body = self.fetch(&endpoint, "", true).await?;
-        let page = timeline::parse_profile_posts_with_pin(
-            &body,
-            state.owner.as_deref().unwrap(),
-            state.tab,
-            state.pinned_pending,
-            state.pinned_hint.as_deref(),
-        )?;
-        state.pinned_pending = false;
-        if !page.done && page.cursor.is_none() {
-            return Err(error("Twitter media timeline pagination is incomplete"));
-        }
-        let cursor = if page.done { None } else { page.cursor };
-        if let Some(cursor) = &cursor {
-            let digest = <[u8; 32]>::from(Sha256::digest(cursor.as_bytes()));
-            if !state.cursors.insert(digest) {
-                return Err(error("Twitter media timeline cursor repeated"));
+        let page = match &mut state.source {
+            Source::Profile(tab) => {
+                let target = profile_endpoint(
+                    &state.base,
+                    *tab,
+                    state.owner.as_deref().unwrap(),
+                    state.cursor.as_deref(),
+                )?;
+                self.ensure_transaction_at("", &target).await?;
+                let body = self.fetch(&target, "", true).await?;
+                let page = timeline::parse_profile_posts_with_pin(
+                    &body,
+                    state.owner.as_deref().unwrap(),
+                    *tab,
+                    state.pinned_pending,
+                    state.pinned_hint.as_deref(),
+                )?;
+                state.pinned_pending = false;
+                if !page.done && page.cursor.is_none() {
+                    return Err(error("Twitter profile timeline pagination is incomplete"));
+                }
+                let cursor = if page.done { None } else { page.cursor.clone() };
+                if let Some(cursor) = &cursor {
+                    let digest = <[u8; 32]>::from(Sha256::digest(cursor.as_bytes()));
+                    if !state.cursors.insert(digest) {
+                        return Err(error("Twitter profile timeline cursor repeated"));
+                    }
+                }
+                state.cursor = cursor;
+                state.done = page.done;
+                if let Some(RootStage::Initial { last }) = &mut state.root
+                    && let Some((id, _)) = page.posts.last()
+                {
+                    *last = Some(id.clone());
+                }
+                page
             }
-        }
+            Source::Search(paging) => {
+                paging.request()?;
+                let target = search_endpoint(&state.base, paging, self.timeline_options)?;
+                self.ensure_transaction_at("", &target).await?;
+                let body = self.fetch(&target, "", true).await?;
+                let page = timeline::parse_search_posts(&body)?;
+                state.done = paging.advance(&page, self.timeline_options)?;
+                page
+            }
+        };
         state.posts = page.posts.into();
-        state.cursor = cursor;
-        state.done = page.done;
+        Ok(())
+    }
+
+    fn advance_root(&self, state: &mut State) -> Result<()> {
+        let next = match state.root.take() {
+            Some(RootStage::Initial { last: Some(id) }) => {
+                let name = state
+                    .screen_name
+                    .as_deref()
+                    .ok_or_else(|| error("Twitter profile name missing for timeline search"))?;
+                let mut base_query = format!("from:{name} max_id:{id}");
+                if self.expansion.retweets != RetweetMode::Skip {
+                    base_query.push_str(" include:retweets include:nativeretweets");
+                }
+                let query = format!("{base_query} filter:links");
+                state.root = Some(RootStage::Links { base_query });
+                Some(query)
+            }
+            Some(RootStage::Links { base_query }) => {
+                let any_posts = matches!(&state.source, Source::Search(paging) if paging.any_posts);
+                if any_posts {
+                    None
+                } else {
+                    state.root = Some(RootStage::All);
+                    Some(base_query)
+                }
+            }
+            _ => None,
+        };
+        if let Some(query) = next {
+            search::validate_query(&query)?;
+            state.source = Source::Search(search::Paging::new(query));
+            state.cursor = None;
+            state.cursors.clear();
+            state.done = false;
+        }
         Ok(())
     }
 }
@@ -315,6 +459,7 @@ fn profile_endpoint(base: &Url, tab: ProfileTab, id: &str, cursor: Option<&str>)
             "-O3QOHrVn1aOm_cF5wyTCQ/UserTweetsAndReplies"
         }
         ProfileTab::Highlights => "gmHw9geMTncZ7jeLLUUNOw/UserHighlightsTweets",
+        ProfileTab::Timeline => return Err(error("Twitter timeline strategy was not resolved")),
     };
     if let Some(cursor) = cursor {
         variables["cursor"] = cursor.into();
@@ -327,6 +472,29 @@ fn profile_endpoint(base: &Url, tab: ProfileTab, id: &str, cursor: Option<&str>)
         variables,
         features,
         serde_json::json!({"withArticlePlainText":false}),
+    )
+}
+
+fn search_endpoint(base: &Url, paging: &search::Paging, options: TimelineOptions) -> Result<Url> {
+    if !(1..=100).contains(&options.search_limit) || options.search_stop > 128 {
+        return Err(error("Twitter search options exceed their limits"));
+    }
+    let mut variables = serde_json::json!({"rawQuery":paging.query,"count":options.search_limit,
+        "querySource":"typed_query","product":options.search_product.name(),"withGrokTranslatedBio":false});
+    // Upstream resets the opaque cursor when max_id/until rewrites the query.
+    variables["cursor"] = paging
+        .cursor
+        .as_deref()
+        .map(Value::from)
+        .unwrap_or(Value::Null);
+    let mut features = tweet_features();
+    features["rweb_video_screen_enabled"] = false.into();
+    query(
+        base,
+        "4fpceYZ6-YQCx_JSl_Cn_A/SearchTimeline",
+        variables,
+        features,
+        Value::Null,
     )
 }
 

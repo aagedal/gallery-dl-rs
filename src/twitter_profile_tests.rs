@@ -1310,3 +1310,628 @@ async fn duplicate_post_batches_keep_first_media_siblings_and_skip_refreshed_ext
     assert_eq!(post_ids(&rest), ["101"]);
     assert_eq!(server.count(), 2);
 }
+
+fn search_page(tweets: Vec<Value>, cursor: Option<&str>) -> Value {
+    let profile = page(tweets, cursor);
+    json!({"data":{"search_by_raw_query":{"search_timeline":{"timeline":{
+        "instructions":profile["data"]["user"]["result"]["timeline"]["timeline"]["instructions"].clone()
+    }}}}})
+}
+
+fn text_tweet(id: &str) -> Value {
+    let mut value = tweet(id);
+    value["legacy"]
+        .as_object_mut()
+        .unwrap()
+        .remove("extended_entities");
+    value["legacy"]["entities"] = json!({});
+    value
+}
+
+#[tokio::test]
+async fn search_max_id_pagination_is_lazy_and_binds_operation_query_and_headers() {
+    let server = Server::new(vec![
+        Response::json(search_page(
+            vec![tweet("103"), tweet("101")],
+            Some("opaque-a"),
+        )),
+        Response::json(search_page(vec![tweet("99")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let mut stream = native.search_stream("from:fixture filter:images".into(), server.base.clone());
+    assert_eq!(server.count(), 0);
+    let first = stream.next().await.unwrap().unwrap();
+    assert_eq!(first.metadata.as_ref().unwrap().post_id, "103");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 1);
+    let second = stream.next().await.unwrap().unwrap();
+    assert_eq!(second.metadata.as_ref().unwrap().post_id, "101");
+    assert_eq!(server.count(), 1);
+    let third = stream.next().await.unwrap().unwrap();
+    assert_eq!(third.metadata.as_ref().unwrap().post_id, "99");
+    assert!(stream.next().await.is_none());
+    let urls = server.urls();
+    assert_eq!(urls.len(), 2);
+    assert!(urls.iter().all(|url| {
+        url.path()
+            .ends_with("/4fpceYZ6-YQCx_JSl_Cn_A/SearchTimeline")
+    }));
+    assert_eq!(
+        variables(&urls[0])["rawQuery"],
+        "from:fixture filter:images"
+    );
+    assert_eq!(
+        variables(&urls[1])["rawQuery"],
+        "from:fixture filter:images max_id:100"
+    );
+    for url in &urls {
+        let vars = variables(url);
+        assert_eq!(vars["count"], 20);
+        assert_eq!(vars["querySource"], "typed_query");
+        assert_eq!(vars["product"], "Latest");
+        assert_eq!(vars["withGrokTranslatedBio"], false);
+        assert!(vars.get("cursor").is_none_or(Value::is_null));
+        assert!(!url.query_pairs().any(|(key, _)| key == "fieldToggles"));
+    }
+    assert_scoped_expansion_requests(&server, &native);
+    assert!(
+        !first
+            .headers
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case("cookie")
+                || key.eq_ignore_ascii_case("x-client-transaction-id"))
+    );
+}
+
+#[tokio::test]
+async fn search_cursor_mode_preserves_opaque_cursor_and_selected_product() {
+    let opaque = "cursor+/=&? opaque";
+    for product in [
+        SearchProduct::Top,
+        SearchProduct::Media,
+        SearchProduct::People,
+        SearchProduct::Lists,
+    ] {
+        let server = Server::new(vec![
+            Response::json(search_page(vec![tweet("103")], Some(opaque))),
+            Response::json(search_page(vec![tweet("102")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_timeline_options(TimelineOptions {
+                search_pagination: SearchPagination::Cursor,
+                search_product: product,
+                search_limit: 7,
+                ..Default::default()
+            });
+        let items: Vec<_> = native
+            .search_stream("fixture max_id:500".into(), server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), ["103", "102"]);
+        let urls = server.urls();
+        assert_eq!(variables(&urls[1])["rawQuery"], "fixture max_id:500");
+        assert_eq!(variables(&urls[1])["cursor"], opaque);
+        assert_eq!(variables(&urls[1])["count"], 7);
+        let expected = match product {
+            SearchProduct::Top => "Top",
+            SearchProduct::Media => "Media",
+            SearchProduct::People => "People",
+            SearchProduct::Lists => "Lists",
+            SearchProduct::Latest => unreachable!(),
+        };
+        assert_eq!(variables(&urls[1])["product"], expected);
+    }
+}
+
+#[tokio::test]
+async fn search_max_id_replaces_existing_bound_and_deduplicates_posts() {
+    let server = Server::new(vec![
+        Response::json(search_page(vec![tweet("105"), tweet("103")], Some("a"))),
+        Response::json(search_page(vec![tweet("103"), tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .search_stream(
+            "fixture max_id:999 filter:links".into(),
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["105", "103", "100"]);
+    let vars = variables(&server.urls()[1]);
+    let query = vars["rawQuery"].as_str().unwrap();
+    assert!(query.contains("max_id:102"));
+    assert!(!query.contains("max_id:999"));
+    assert_eq!(query.matches("max_id:").count(), 1);
+}
+
+#[tokio::test]
+async fn empty_search_pages_advance_with_cursor_then_stop_at_configured_limit() {
+    let server = Server::new(vec![
+        Response::json(search_page(vec![], Some("a"))),
+        Response::json(search_page(vec![], Some("b"))),
+        Response::json(search_page(vec![], Some("c"))),
+        Response::json(search_page(vec![], Some("d"))),
+        Response::json(search_page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .search_stream("fixture".into(), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(server.count(), 4);
+    let urls = server.urls();
+    assert_eq!(variables(&urls[1])["cursor"], "a");
+    assert_eq!(variables(&urls[2])["cursor"], "b");
+}
+
+#[tokio::test]
+async fn search_repeated_cursor_and_auth_failures_end_privately_after_prior_media() {
+    let mut denied =
+        Response::json(json!({"errors":[{"code":32,"message":"private search token marker"}]}));
+    denied.status = 401;
+    for response in [Response::json(search_page(vec![], Some("a"))), denied] {
+        let server = Server::new(vec![
+            Response::json(search_page(vec![tweet("100")], Some("a"))),
+            response,
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_timeline_options(TimelineOptions {
+                search_pagination: SearchPagination::Cursor,
+                ..Default::default()
+            });
+        let mut stream = native.search_stream("private query marker".into(), server.base.clone());
+        assert!(stream.next().await.unwrap().is_ok());
+        let error = stream.next().await.unwrap().unwrap_err().to_string();
+        assert!(!error.contains("private search token marker"));
+        assert!(!error.contains("private query marker"));
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn search_range_cutoff_and_dropped_pending_request_do_not_follow_more_pages() {
+    let server = Server::new(vec![
+        Response::json(search_page(vec![tweet("100")], Some("a"))),
+        Response::json(search_page(vec![tweet("99")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let mut stream = crate::selection::RangeSelection::parse("1")
+        .unwrap()
+        .apply(native.search_stream("fixture".into(), server.base.clone()));
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 1);
+
+    let server = Server::new(vec![
+        Response::json(search_page(vec![tweet("100")], Some("a"))).delayed(300),
+        Response::json(search_page(vec![tweet("99")], None)),
+    ]);
+    let mut stream = native.search_stream("fixture".into(), server.base.clone());
+    {
+        let next = stream.next();
+        tokio::pin!(next);
+        tokio::select! { result = &mut next => panic!("unexpected search response: {result:?}"), () = server.wait_for(1) => {} }
+    }
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn root_timeline_auto_uses_media_and_falls_back_only_after_draining_feed() {
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("103"), tweet("101")], None)),
+        Response::json(search_page(vec![tweet("101"), tweet("99")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let mut stream = native.timeline_stream(input("fixture"), server.base.clone());
+    assert_eq!(server.count(), 0);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "103"
+    );
+    assert_eq!(server.count(), 2);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 2);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "101"
+    );
+    assert_eq!(server.count(), 2);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "99"
+    );
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 3);
+    let urls = server.urls();
+    assert!(urls[1].path().ends_with("/UserMedia"));
+    assert_eq!(
+        variables(&urls[2])["rawQuery"],
+        "from:fixture max_id:101 filter:links"
+    );
+    assert_scoped_expansion_requests(&server, &native);
+}
+
+#[tokio::test]
+async fn root_timeline_strategy_selects_explicit_feed_and_retweet_search_modifiers() {
+    for (strategy, mode, expected) in [
+        (TimelineStrategy::Auto, RetweetMode::Repost, "/UserTweets"),
+        (TimelineStrategy::Media, RetweetMode::Original, "/UserMedia"),
+        (TimelineStrategy::Tweets, RetweetMode::Skip, "/UserTweets"),
+        (
+            TimelineStrategy::Replies,
+            RetweetMode::Skip,
+            "/UserTweetsAndReplies",
+        ),
+    ] {
+        let server = Server::new(vec![
+            Response::json(user()),
+            Response::json(page(vec![tweet("100")], None)),
+            Response::json(search_page(vec![tweet("99")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_timeline_options(TimelineOptions {
+                strategy,
+                ..Default::default()
+            })
+            .with_expansion(ExpansionOptions {
+                retweets: mode,
+                quoted: false,
+            });
+        let items: Vec<_> = native
+            .timeline_stream(input("fixture"), server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), ["100", "99"]);
+        let urls = server.urls();
+        assert!(urls[1].path().ends_with(expected));
+        let vars = variables(&urls[2]);
+        let query = vars["rawQuery"].as_str().unwrap();
+        assert_eq!(
+            query.contains("include:retweets include:nativeretweets"),
+            mode != RetweetMode::Skip
+        );
+    }
+}
+
+#[tokio::test]
+async fn root_timeline_empty_feed_stops_but_empty_link_search_widens_once() {
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![], None)),
+        Response::json(search_page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .timeline_stream(input("fixture"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(server.count(), 2);
+
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100")], None)),
+        Response::json(search_page(vec![], None)),
+        Response::json(search_page(vec![tweet("99")], None)),
+    ]);
+    let items: Vec<_> = native
+        .timeline_stream(input("fixture"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "99"]);
+    let urls = server.urls();
+    assert_eq!(server.count(), 4);
+    assert_eq!(
+        variables(&urls[2])["rawQuery"],
+        "from:fixture max_id:100 filter:links"
+    );
+    assert_eq!(variables(&urls[3])["rawQuery"], "from:fixture max_id:100");
+}
+
+#[tokio::test]
+async fn root_timeline_text_posts_anchor_fallback_and_nonempty_text_search_prevents_widening() {
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("103"), text_tweet("101")], None)),
+        Response::json(search_page(vec![text_tweet("99")], None)),
+        Response::json(search_page(vec![tweet("98")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .timeline_stream(input("fixture"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["103"]);
+    assert_eq!(server.count(), 3);
+    assert_eq!(
+        variables(&server.urls()[2])["rawQuery"],
+        "from:fixture max_id:101 filter:links"
+    );
+}
+
+#[tokio::test]
+async fn root_numeric_lookup_binds_owner_and_canonical_screen_name_for_fallback() {
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100")], None)),
+        Response::json(search_page(vec![tweet("99")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .timeline_stream(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "99"]);
+    let urls = server.urls();
+    assert!(urls[0].path().ends_with("/UserByRestId"));
+    assert_eq!(variables(&urls[0])["userId"], "42");
+    assert_eq!(
+        variables(&urls[2])["rawQuery"],
+        "from:fixture max_id:100 filter:links"
+    );
+
+    let mut invalid = user();
+    invalid["data"]["user"]["result"]["core"]["screen_name"] = "foreign".into();
+    let server = Server::new(vec![
+        Response::json(invalid),
+        Response::json(page(vec![tweet("100")], None)),
+    ]);
+    let mut stream = native.timeline_stream(input("id:42"), server.base.clone());
+    assert!(stream.next().await.unwrap().is_err());
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn root_timeline_range_cutoff_prevents_fallback_request() {
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100")], None)),
+        Response::json(search_page(vec![tweet("99")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let mut selected = crate::selection::RangeSelection::parse("1")
+        .unwrap()
+        .apply(native.timeline_stream(input("fixture"), server.base.clone()));
+    assert!(selected.next().await.unwrap().is_ok());
+    assert!(selected.next().await.is_none());
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn search_date_pagination_uses_snowflake_timestamp_and_cursor_when_timestamp_repeats() {
+    // Snowflakes encode milliseconds since Twitter's documented 2010 epoch.
+    let snowflake = |milliseconds: u64| ((milliseconds - 1_288_834_974_657) << 22).to_string();
+    let first = snowflake(1_704_196_800_000); // 2024-01-02 12:00 UTC.
+    let second = snowflake(1_704_193_200_000); // Same UTC day.
+    let third = snowflake(1_704_110_400_000); // 2024-01-01 12:00 UTC.
+    let server = Server::new(vec![
+        Response::json(search_page(vec![tweet(&first)], Some("day-a"))),
+        Response::json(search_page(vec![tweet(&second)], Some("day-b"))),
+        Response::json(search_page(vec![tweet(&second)], Some("day-c"))),
+        Response::json(search_page(vec![tweet(&third)], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_timeline_options(TimelineOptions {
+            search_pagination: SearchPagination::Date,
+            ..Default::default()
+        });
+    let items: Vec<_> = native
+        .search_stream("fixture".into(), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        post_ids(&items),
+        [first.as_str(), second.as_str(), third.as_str()]
+    );
+    let urls = server.urls();
+    assert_eq!(variables(&urls[1])["rawQuery"], "fixture until:2024-01-02");
+    assert!(variables(&urls[1]).get("cursor").is_none_or(Value::is_null));
+    assert_eq!(variables(&urls[2])["rawQuery"], "fixture until:2024-01-02");
+    assert!(variables(&urls[2]).get("cursor").is_none_or(Value::is_null));
+    assert_eq!(variables(&urls[3])["rawQuery"], "fixture until:2024-01-02");
+    assert_eq!(variables(&urls[3])["cursor"], "day-c");
+    assert_eq!(urls.len(), 4);
+}
+
+#[tokio::test]
+async fn root_timeline_filtered_reply_still_anchors_search_to_last_raw_post() {
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("103"), reply("101", "42", "99")], None)),
+        Response::json(search_page(vec![tweet("99")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_profile_options(ProfileOptions {
+            replies: ReplyMode::Skip,
+            pinned: false,
+        })
+        .with_timeline_options(TimelineOptions {
+            strategy: TimelineStrategy::Replies,
+            ..Default::default()
+        });
+    let items: Vec<_> = native
+        .timeline_stream(input("fixture"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["103", "99"]);
+    assert_eq!(
+        variables(&server.urls()[2])["rawQuery"],
+        "from:fixture max_id:101 filter:links"
+    );
+}
+
+#[tokio::test]
+async fn root_fallback_shares_active_budget_while_excluding_consumer_pause() {
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100")], None)).delayed(20),
+        Response::json(search_page(vec![tweet("99")], None)).delayed(20),
+    ]);
+    let native = extractor(Duration::from_millis(250)).await;
+    let mut stream = native.timeline_stream(input("fixture"), server.base.clone());
+    assert!(stream.next().await.unwrap().is_ok());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(stream.next().await.is_none());
+
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100")], None)).delayed(150),
+        Response::json(search_page(vec![tweet("99")], None)).delayed(180),
+    ]);
+    let mut stream = native.timeline_stream(input("fixture"), server.base.clone());
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("timed out")
+    );
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 3);
+}
+
+#[tokio::test]
+async fn standalone_self_only_search_resolves_from_profile_and_reuses_rotated_cookies() {
+    let mut lookup = Response::json(user());
+    lookup.headers =
+        "Set-Cookie: ct0=searchrotated; Path=/\r\nSet-Cookie: auth_token=searchsession; Path=/\r\n"
+            .into();
+    let server = Server::new(vec![
+        lookup,
+        Response::json(search_page(
+            vec![reply("103", "42", "99"), reply("102", "99", "42")],
+            Some("next"),
+        )),
+        Response::json(search_page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_profile_options(ProfileOptions {
+            pinned: false,
+            replies: ReplyMode::SelfOnly,
+        });
+    let items: Vec<_> = native
+        .search_stream("from:fixture".into(), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["103", "100"]);
+    let urls = server.urls();
+    assert_eq!(urls.len(), 3);
+    assert!(urls[0].path().ends_with("/UserByScreenName"));
+    assert!(
+        urls[1..]
+            .iter()
+            .all(|url| url.path().ends_with("/SearchTimeline"))
+    );
+    assert_eq!(variables(&urls[2])["rawQuery"], "from:fixture max_id:101");
+    let requests = server.requests.lock().unwrap();
+    for request in &requests[1..] {
+        let lower = request.to_ascii_lowercase();
+        assert!(lower.contains("x-csrf-token: searchrotated\r\n"));
+        assert!(lower.contains("auth_token=searchsession"));
+        assert!(!lower.contains("auth_token=session;"));
+    }
+    for item in items {
+        assert!(
+            !item
+                .headers
+                .values()
+                .any(|value| value.contains("searchrotated") || value.contains("searchsession"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn standalone_self_only_search_rejects_foreign_from_profile_lookup() {
+    let mut lookup = user();
+    lookup["data"]["user"]["result"]["legacy"]["screen_name"] = "foreign".into();
+    let server = Server::new(vec![
+        Response::json(lookup),
+        Response::json(search_page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_profile_options(ProfileOptions {
+            pinned: false,
+            replies: ReplyMode::SelfOnly,
+        });
+    let mut stream = native.search_stream("from:fixture".into(), server.base.clone());
+    let error = stream.next().await.unwrap().unwrap_err().to_string();
+    assert!(!error.contains("foreign"));
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn search_explicit_continue_empty_response_ignores_zero_empty_page_limit() {
+    let mut empty = search_page(vec![], Some("continue-empty"));
+    empty["data"]["search_by_raw_query"]["search_timeline"]["timeline"]["instructions"][0]["entries"]
+        [0]["content"]["stopOnEmptyResponse"] = false.into();
+    let server = Server::new(vec![
+        Response::json(empty),
+        Response::json(search_page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_timeline_options(TimelineOptions {
+            search_stop: 0,
+            ..Default::default()
+        });
+    let items: Vec<_> = native
+        .search_stream("fixture".into(), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(server.count(), 2);
+    assert_eq!(variables(&server.urls()[1])["cursor"], "continue-empty");
+}

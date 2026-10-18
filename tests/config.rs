@@ -743,3 +743,139 @@ fn twitter_profile_configuration_rejects_duplicate_keys() {
         }
     }
 }
+
+#[test]
+fn twitter_search_configuration_preserves_scopes_aliases_and_explicit_zero() {
+    use gallery_dl_rs::twitter::{SearchPagination, SearchProduct, TimelineStrategy};
+    let config = parse(r#"{"extractor":{"strategy":"media","search-pagination":"cursor","search-results":"top","search-limit":50,"search-stop":8,"twitter":{"strategy":"with_replies","search-pagination":"dt","search-results":"LiVe","search-limit":1,"search-stop":0}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.strategy, Some(TimelineStrategy::Replies));
+    assert_eq!(twitter.search_pagination, Some(SearchPagination::Date));
+    assert_eq!(twitter.search_results, Some(SearchProduct::Latest));
+    assert_eq!(twitter.search_limit, Some(1));
+    assert_eq!(twitter.search_stop, Some(0));
+    let generic = config.resolve("instagram").unwrap();
+    assert_eq!(generic.strategy, Some(TimelineStrategy::Media));
+    assert_eq!(generic.search_pagination, Some(SearchPagination::Cursor));
+    assert_eq!(generic.search_results, Some(SearchProduct::Top));
+    assert_eq!(generic.search_limit, Some(50));
+    assert_eq!(generic.search_stop, Some(8));
+    let global = parse(r#"{"strategy":"auto","search-pagination":"maxid","search-results":"user","search-limit":100,"search-stop":"auto","extractor":{"twitter":{"strategy":"tweets","search-pagination":"cursor","search-results":"media","search-limit":1,"search-stop":0}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let settings = global.resolve(category).unwrap();
+        assert_eq!(settings.strategy, Some(TimelineStrategy::Auto));
+        assert_eq!(settings.search_pagination, Some(SearchPagination::MaxId));
+        assert_eq!(settings.search_results, Some(SearchProduct::People));
+        assert_eq!(settings.search_limit, Some(100));
+        assert_eq!(settings.search_stop, Some(3));
+    }
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let overrides = Options {
+        strategy: Some(TimelineStrategy::Tweets),
+        search_pagination: Some(SearchPagination::MaxId),
+        search_results: Some(SearchProduct::Lists),
+        search_limit: Some(20),
+        search_stop: Some(0),
+        ..Default::default()
+    };
+    let overlaid = twitter.overlay(&overrides);
+    assert_eq!(overlaid.strategy, overrides.strategy);
+    assert_eq!(overlaid.search_pagination, overrides.search_pagination);
+    assert_eq!(overlaid.search_results, overrides.search_results);
+    assert_eq!(overlaid.search_limit, overrides.search_limit);
+    assert_eq!(overlaid.search_stop, overrides.search_stop);
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.strategy, None);
+    assert_eq!(absent.search_pagination, None);
+    assert_eq!(absent.search_results, None);
+    assert_eq!(absent.search_limit, None);
+    assert_eq!(absent.search_stop, None);
+    for (field, aliases) in [
+        ("strategy", vec!["auto", "media", "tweets", "with_replies"]),
+        (
+            "search-pagination",
+            vec![
+                "max_id", "maxid", "id", "cursor", "until", "date", "datetime", "dt",
+            ],
+        ),
+        (
+            "search-results",
+            vec![
+                "Latest", "live", "Top", "Media", "People", "user", "Lists", "list",
+            ],
+        ),
+    ] {
+        for alias in aliases {
+            assert!(parse(&serde_json::json!({(field):alias}).to_string()).is_ok());
+        }
+    }
+    assert_eq!(
+        parse(r#"{"search-stop":128}"#)
+            .unwrap()
+            .resolve("twitter")
+            .unwrap()
+            .search_stop,
+        Some(128)
+    );
+}
+
+#[test]
+fn twitter_search_configuration_rejects_invalid_and_duplicate_values_privately() {
+    use serde_json::json;
+    for field in [
+        "strategy",
+        "search-pagination",
+        "search-results",
+        "search-limit",
+        "search-stop",
+    ] {
+        let mut invalid = vec![
+            json!(null),
+            json!(true),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+        ];
+        if matches!(field, "strategy" | "search-pagination" | "search-results") {
+            invalid.extend([json!(0), json!(1)]);
+        } else {
+            invalid.extend([json!(-1), json!(1.5), json!("20"), json!(129), json!(1000)]);
+            if field == "search-limit" {
+                invalid.extend([json!(0), json!(101), json!("auto")]);
+            }
+        }
+        for value in invalid {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let duplicate = format!(r#""{field}":null,"{field}":null"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+    for document in [
+        r#"{"strategy":"Auto"}"#,
+        r#"{"search-pagination":"MAX_ID"}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}

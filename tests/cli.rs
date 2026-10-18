@@ -141,7 +141,7 @@ fn zero_concurrency_is_rejected() {
 #[test]
 fn native_selection_rejects_unsupported_inputs_without_running_backend() {
     for url in [
-        "https://x.com/person/",
+        "https://x.com/person/lists",
         "https://facebook.com/person/videos/",
         "https://instagram.com/person/stories/",
     ] {
@@ -763,6 +763,10 @@ mod cancellation {
 fn native_twitter_reports_authentication_without_launching_backend_and_continues_inputs() {
     for source in [
         "https://x.com/person/status/123",
+        "https://x.com/person",
+        "https://x.com/id:42",
+        "https://x.com/search?q=rust&f=live",
+        "https://x.com/hashtag/rust",
         "https://x.com/person/media",
         "https://x.com/id:42/media",
         "https://x.com/person/tweets",
@@ -803,6 +807,10 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
     let root = tempfile::tempdir().unwrap();
     for url in [
         "https://x.com/person/status/123",
+        "https://x.com/person",
+        "https://x.com/id:42",
+        "https://x.com/search?q=rust&f=live",
+        "https://x.com/hashtag/rust",
         "https://x.com/person/media",
         "https://x.com/person/tweets",
         "https://x.com/person/with_replies",
@@ -829,5 +837,110 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
             "https://example.com/image.jpg\n"
         );
         assert!(String::from_utf8_lossy(&output.stderr).contains("initialization failed"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn twitter_search_settings_are_forwarded_sparsely_with_resolved_scope() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &script,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$SEARCH_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, expected) in [
+        (serde_json::json!({}), vec![]),
+        (
+            serde_json::json!({"extractor":{"twitter":{"strategy":"tweets","search-pagination":"dt","search-results":"live","search-limit":100,"search-stop":0}}}),
+            vec![
+                "strategy=\"tweets\"",
+                "search-pagination=\"date\"",
+                "search-results=\"Latest\"",
+                "search-limit=100",
+                "search-stop=0",
+            ],
+        ),
+        (
+            serde_json::json!({"extractor":{"strategy":"media","search-limit":1,"twitter":{"strategy":"with_replies","search-limit":20,"search-stop":"auto"}}}),
+            vec![
+                "strategy=\"with_replies\"",
+                "search-limit=20",
+                "search-stop=3",
+            ],
+        ),
+        (
+            serde_json::json!({"strategy":"auto","search-pagination":"cursor","search-results":"list","search-stop":128,"extractor":{"twitter":{"strategy":"media","search-stop":0}}}),
+            vec![
+                "strategy=\"auto\"",
+                "search-pagination=\"cursor\"",
+                "search-results=\"Lists\"",
+                "search-stop=128",
+            ],
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/user", true),
+            ("https://x.com/search?q=rust", true),
+            ("https://x.com/hashtag/rust", true),
+            ("https://instagram.com/p/example/", false),
+        ] {
+            let output = binary()
+                .env("SEARCH_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&script)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("strategy=") || value.starts_with("search-"))
+                .collect();
+            assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    for settings in [
+        serde_json::json!({"strategy":"PRIVATE-STRATEGY"}),
+        serde_json::json!({"extractor":{"twitter":{"search-pagination":"PRIVATE-PAGINATION"}}}),
+        serde_json::json!({"search-results":{"PRIVATE-KEY":"PRIVATE-VALUE"}}),
+        serde_json::json!({"search-limit":0}),
+        serde_json::json!({"search-stop":129}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let output = binary()
+            .env("SEARCH_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&script)
+            .args(["-g", "https://x.com/search?q=rust"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-"));
+        assert!(!log.exists());
     }
 }

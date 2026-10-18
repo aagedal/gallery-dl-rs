@@ -14,6 +14,7 @@ pub(super) enum ProfileTab {
     Tweets,
     Replies,
     Highlights,
+    Timeline,
 }
 
 pub fn is_media_timeline_url(url: &Url) -> bool {
@@ -35,7 +36,7 @@ pub(super) fn input(url: &Url) -> Result<ProfileInput> {
 pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
     let invalid = || {
         error(
-            "native Twitter profile timelines require a first-party /USER/media, /USER/tweets, /USER/with_replies, or /USER/highlights URL; use --extractor compatibility for other URLs",
+            "native Twitter profile timelines require a supported first-party profile URL; use --extractor compatibility for other URLs",
         )
     };
     if !matches!(url.scheme(), "http" | "https")
@@ -58,14 +59,38 @@ pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
     }
     let path = url.path().strip_suffix('/').unwrap_or(url.path());
     let parts: Vec<_> = path.split('/').collect();
-    let ["", user, tab] = parts.as_slice() else {
-        return Err(invalid());
-    };
-    let tab = match *tab {
-        "media" => ProfileTab::Media,
-        "tweets" => ProfileTab::Tweets,
-        "with_replies" => ProfileTab::Replies,
-        "highlights" => ProfileTab::Highlights,
+    if let ["", "intent", "user"] = parts.as_slice() {
+        let ids: Vec<_> = url
+            .query_pairs()
+            .filter(|(key, _)| key == "user_id")
+            .collect();
+        let [(_, id)] = ids.as_slice() else {
+            return Err(invalid());
+        };
+        if !valid_id(id) {
+            return Err(invalid());
+        }
+        return Ok((ProfileInput::Id(id.to_string()), ProfileTab::Timeline));
+    }
+    if let ["", "i", "user", id] = parts.as_slice() {
+        if !valid_id(id) {
+            return Err(invalid());
+        }
+        return Ok((ProfileInput::Id((*id).into()), ProfileTab::Timeline));
+    }
+    let (user, tab) = match parts.as_slice() {
+        ["", user] => (*user, ProfileTab::Timeline),
+        ["", user, tab] => (
+            *user,
+            match *tab {
+                "media" => ProfileTab::Media,
+                "tweets" => ProfileTab::Tweets,
+                "with_replies" => ProfileTab::Replies,
+                "highlights" => ProfileTab::Highlights,
+                "timeline" => ProfileTab::Timeline,
+                _ => return Err(invalid()),
+            },
+        ),
         _ => return Err(invalid()),
     };
     let user = if let Some(id) = user.strip_prefix("id:") {
@@ -73,8 +98,8 @@ pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
             return Err(invalid());
         }
         ProfileInput::Id(id.into())
-    } else if valid_name(user) {
-        ProfileInput::Name((*user).into())
+    } else if valid_name(user) && !reserved_name(user) {
+        ProfileInput::Name(user.into())
     } else {
         return Err(invalid());
     };
@@ -85,6 +110,35 @@ fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 15
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+fn reserved_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "home"
+            | "search"
+            | "explore"
+            | "settings"
+            | "i"
+            | "notifications"
+            | "messages"
+            | "hashtag"
+            | "intent"
+            | "login"
+            | "logout"
+            | "signup"
+            | "compose"
+            | "account"
+            | "tos"
+            | "privacy"
+            | "help"
+            | "about"
+            | "jobs"
+            | "download"
+            | "share"
+            | "widgets"
+            | "oauth"
+    )
 }
 
 fn document(bytes: &[u8]) -> Result<Value> {
@@ -138,6 +192,39 @@ pub(super) fn parse_user(bytes: &[u8], input: &ProfileInput) -> Result<String> {
     Ok(id.into())
 }
 
+pub(super) fn parse_user_name(bytes: &[u8], owner: &str) -> Result<String> {
+    if !valid_id(owner) {
+        return Err(error("invalid Twitter user identifier"));
+    }
+    let data = document(bytes)?;
+    let user = data
+        .pointer("/data/user/result")
+        .ok_or_else(|| error("Twitter user result missing"))?;
+    if user["__typename"] != "User" || user["rest_id"].as_str() != Some(owner) {
+        return Err(error("Twitter response does not match the requested user"));
+    }
+    let names: Vec<_> = [
+        user.pointer("/core/screen_name"),
+        user.pointer("/legacy/screen_name"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let name = names
+        .first()
+        .and_then(|v| v.as_str())
+        .filter(|name| valid_name(name))
+        .ok_or_else(|| error("Twitter user screen name missing or invalid"))?;
+    if names.iter().any(|value| {
+        !value
+            .as_str()
+            .is_some_and(|other| valid_name(other) && other.eq_ignore_ascii_case(name))
+    }) {
+        return Err(error("Twitter user screen names conflict"));
+    }
+    Ok(name.into())
+}
+
 pub(super) fn user_pin(bytes: &[u8], owner_id: &str) -> Result<Option<String>> {
     let data = document(bytes)?;
     let user = data
@@ -172,6 +259,7 @@ pub(super) struct Page {
     pub(super) posts: Vec<(String, Value)>,
     pub(super) cursor: Option<String>,
     pub(super) done: bool,
+    pub(super) continue_empty: bool,
     tab: ProfileTab,
 }
 
@@ -235,12 +323,41 @@ pub(super) fn parse_profile_posts_with_pin(
     }
     .as_array()
     .ok_or_else(|| error("Twitter media timeline instructions are invalid"))?;
+    let inferred_pin = if pinned
+        && !instructions
+            .iter()
+            .any(|instruction| instruction["type"] == "TimelinePinEntry")
+    {
+        pinned_id(user)?.or_else(|| pinned_hint.map(str::to_owned))
+    } else {
+        None
+    };
+    parse_instructions(instructions, Some(owner_id), tab, pinned, inferred_pin)
+}
+
+pub(super) fn parse_search_posts(bytes: &[u8]) -> Result<Page> {
+    let data = document(bytes)?;
+    let instructions = data
+        .pointer("/data/search_by_raw_query/search_timeline/timeline/instructions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| error("Twitter search timeline instructions missing or invalid"))?;
+    parse_instructions(instructions, None, ProfileTab::Timeline, true, None)
+}
+
+fn parse_instructions(
+    instructions: &[Value],
+    owner_id: Option<&str>,
+    tab: ProfileTab,
+    pinned: bool,
+    inferred_pin: Option<String>,
+) -> Result<Page> {
     let mut page = Page {
         #[cfg(test)]
         media: Vec::new(),
         posts: Vec::new(),
         cursor: None,
         done: false,
+        continue_empty: false,
         tab,
     };
     let mut pinned_entry = None;
@@ -310,11 +427,6 @@ pub(super) fn parse_profile_posts_with_pin(
             _ => return Err(error("unsupported Twitter media timeline instruction")),
         }
     }
-    let inferred_pin = if pinned && pinned_entry.is_none() {
-        pinned_id(user)?.or_else(|| pinned_hint.map(str::to_owned))
-    } else {
-        None
-    };
     if let Some(entry) = pinned_entry {
         let ordinary = std::mem::take(&mut page.posts);
         parse_entry(entry, owner_id, &mut page)?;
@@ -373,6 +485,14 @@ fn parse_cursor(content: &Value, page: &mut Page) -> Result<()> {
                     "Twitter media timeline has conflicting Bottom cursors",
                 ));
             }
+            let stop_on_empty = field("stopOnEmptyResponse")?
+                .map(|value| {
+                    value.as_bool().ok_or_else(|| {
+                        error("Twitter timeline cursor stop-on-empty setting is invalid")
+                    })
+                })
+                .transpose()?;
+            page.continue_empty |= stop_on_empty == Some(false);
             page.cursor = Some(value.into());
             Ok(())
         }
@@ -382,7 +502,7 @@ fn parse_cursor(content: &Value, page: &mut Page) -> Result<()> {
     }
 }
 
-fn parse_entry(entry: &Value, owner_id: &str, page: &mut Page) -> Result<()> {
+fn parse_entry(entry: &Value, owner_id: Option<&str>, page: &mut Page) -> Result<()> {
     let content = entry
         .get("content")
         .ok_or_else(|| error("Twitter media timeline entry content missing"))?;
@@ -414,7 +534,7 @@ fn parse_entry(entry: &Value, owner_id: &str, page: &mut Page) -> Result<()> {
     }
 }
 
-fn parse_module_item(item: &Value, owner_id: &str, page: &mut Page) -> Result<()> {
+fn parse_module_item(item: &Value, owner_id: Option<&str>, page: &mut Page) -> Result<()> {
     if promoted(item) || item.get("item").is_some_and(promoted) {
         return Ok(());
     }
@@ -424,7 +544,7 @@ fn parse_module_item(item: &Value, owner_id: &str, page: &mut Page) -> Result<()
     parse_item(content, owner_id, page)
 }
 
-fn parse_item(item: &Value, owner_id: &str, page: &mut Page) -> Result<()> {
+fn parse_item(item: &Value, owner_id: Option<&str>, page: &mut Page) -> Result<()> {
     if promoted(item) {
         return Ok(());
     }
@@ -479,7 +599,7 @@ fn parse_item(item: &Value, owner_id: &str, page: &mut Page) -> Result<()> {
     }
     // Conversation modules on posts/replies/highlights can include other authors.
     // The enclosing user result binds membership; each post still proves its own ID.
-    if page.tab == ProfileTab::Media && author != owner_id {
+    if page.tab == ProfileTab::Media && owner_id != Some(author) {
         return Err(error(
             "Twitter timeline post does not match the requested user",
         ));
@@ -543,8 +663,6 @@ mod tests {
             }
         }
         for url in [
-            "https://x.com/user",
-            "https://x.com/user/timeline",
             "https://x.com/user/likes",
             "https://x.com/user/tweets/extra",
             "https://x.com/user/with-replies",
@@ -557,6 +675,244 @@ mod tests {
             "https://x.com:444/a/tweets",
         ] {
             assert!(!is_profile_timeline_url(&Url::parse(url).unwrap()), "{url}");
+        }
+    }
+
+    #[test]
+    fn timeline_routes_include_numeric_profiles_and_reject_reserved_routes() {
+        for route in ["Fixture_User", "Fixture_User/timeline"] {
+            assert_eq!(
+                profile_input(&Url::parse(&format!("https://x.com/{route}")).unwrap()).unwrap(),
+                (
+                    ProfileInput::Name("Fixture_User".into()),
+                    ProfileTab::Timeline
+                )
+            );
+        }
+        for route in [
+            "id:42",
+            "id:42/timeline",
+            "i/user/42",
+            "intent/user?user_id=42",
+            "intent/user/?s=20&user_id=42",
+        ] {
+            assert_eq!(
+                profile_input(&Url::parse(&format!("https://x.com/{route}")).unwrap()).unwrap(),
+                (ProfileInput::Id("42".into()), ProfileTab::Timeline)
+            );
+        }
+        for route in [
+            "home",
+            "HOME",
+            "search",
+            "search/media",
+            "explore",
+            "settings",
+            "i",
+            "notifications",
+            "messages",
+            "hashtag",
+            "intent",
+            "i/user/0",
+            "i/user/042",
+            "i/user/18446744073709551616",
+            "i/user/42/extra",
+            "intent/user",
+            "intent/user?user_id=42&user_id=42",
+            "intent/user?user_id=42&user_id=43",
+            "intent/user?user_id=042",
+            "intent/user?user_id=",
+            "intent/user?USER_ID=42",
+        ] {
+            assert!(
+                profile_input(&Url::parse(&format!("https://x.com/{route}")).unwrap()).is_err(),
+                "{route}"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_lookup_name_is_typed_bound_and_alias_consistent() {
+        let user =
+            |value: Value| serde_json::to_vec(&json!({"data":{"user":{"result":value}}})).unwrap();
+        let good = json!({"__typename":"User","rest_id":"42","core":{"screen_name":"Fixture_User"},"legacy":{"screen_name":"fixture_USER"}});
+        assert_eq!(
+            parse_user_name(&user(good.clone()), "42").unwrap(),
+            "Fixture_User"
+        );
+        assert!(parse_user_name(&user(good.clone()), "43").is_err());
+        assert!(parse_user_name(&user(good), "042").is_err());
+        for bad in [
+            json!({"__typename":"UserUnavailable","rest_id":"42","core":{"screen_name":"PRIVATE"}}),
+            json!({"__typename":"User","rest_id":"42"}),
+            json!({"__typename":"User","rest_id":"42","core":{"screen_name":"a/b"}}),
+            json!({"__typename":"User","rest_id":"42","core":{"screen_name":"valid"},"legacy":{"screen_name":"PRIVATE"}}),
+            json!({"__typename":"User","rest_id":"42","core":{"screen_name":"valid"},"legacy":{"screen_name":null}}),
+        ] {
+            let message = parse_user_name(&user(bad), "42").unwrap_err().to_string();
+            assert!(!message.contains("PRIVATE"));
+        }
+    }
+
+    fn search(instructions: Value) -> Vec<u8> {
+        serde_json::to_vec(&json!({"data":{"search_by_raw_query":{"search_timeline":{"timeline":{"instructions":instructions}}}}})).unwrap()
+    }
+
+    #[test]
+    fn search_posts_keep_structured_order_and_allow_different_authors() {
+        let mut other = tweet("12");
+        other["legacy"]["user_id_str"] = "43".into();
+        other["core"]["user_results"]["result"]["rest_id"] = "43".into();
+        let bytes = search(json!([
+            {"type":"TimelineAddEntries","entries":[entry(tweet("11")), {"content":{"entryType":"TimelineTimelineModule","items":[{"item":{"itemContent":item(other)}}]}}, cursor("next")]},
+            {"type":"TimelineAddToModule","moduleItems":[{"item":{"itemContent":item(tweet("13"))}}]}
+        ]));
+        let parsed = parse_search_posts(&bytes).unwrap();
+        assert_eq!(
+            parsed
+                .posts
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            ["11", "12", "13"]
+        );
+        assert_eq!(parsed.cursor.as_deref(), Some("next"));
+        assert!(!parsed.done);
+        let empty =
+            parse_search_posts(&search(json!([{"type":"TimelineAddEntries","entries":[]}])))
+                .unwrap();
+        assert!(empty.posts.is_empty());
+        assert!(empty.done);
+        let advancing = parse_search_posts(&search(
+            json!([{"type":"TimelineAddEntries","entries":[cursor("next")]}]),
+        ))
+        .unwrap();
+        assert!(advancing.posts.is_empty());
+        assert!(!advancing.done);
+        let terminated = parse_search_posts(&search(json!([{"type":"TimelineAddEntries","entries":[cursor("next")]},{"type":"TimelineTerminateTimeline","direction":"Bottom"}]))).unwrap();
+        assert!(terminated.done);
+    }
+
+    #[test]
+    fn search_posts_validate_only_owned_bounded_post_results() {
+        let mut wrapped = tweet("11");
+        for _ in 0..4 {
+            wrapped = json!({"__typename":"TweetWithVisibilityResults","tweet":wrapped});
+        }
+        assert_eq!(
+            parse_search_posts(&search(
+                json!([{"type":"TimelineAddEntries","entries":[entry(wrapped.clone())]}])
+            ))
+            .unwrap()
+            .posts
+            .len(),
+            1
+        );
+        let mut conflict = tweet("12");
+        conflict["legacy"]["id_str"] = "13".into();
+        let mut owner_conflict = tweet("12");
+        owner_conflict["legacy"]["user_id_str"] = "PRIVATE".into();
+        let mut missing_owner = tweet("12");
+        missing_owner["legacy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("user_id_str");
+        missing_owner["core"]["user_results"]["result"]
+            .as_object_mut()
+            .unwrap()
+            .remove("rest_id");
+        for bad in [
+            conflict,
+            owner_conflict,
+            missing_owner,
+            json!({"__typename":"TweetWithVisibilityResults","tweet":wrapped}),
+            json!({"__typename":"TweetUnavailable","reason":"PRIVATE","nested":tweet("11")}),
+        ] {
+            let message = parse_search_posts(&search(
+                json!([{"type":"TimelineAddEntries","entries":[entry(bad)]}]),
+            ))
+            .err()
+            .unwrap()
+            .to_string();
+            assert!(!message.contains("PRIVATE"));
+        }
+        let mut recommended = entry(tweet("12"));
+        recommended["content"]["itemContent"] =
+            json!({"itemType":"TimelineUser","nested":tweet("99")});
+        let parsed = parse_search_posts(&search(
+            json!([{"type":"TimelineAddEntries","entries":[recommended]}]),
+        ))
+        .unwrap();
+        assert!(parsed.posts.is_empty());
+    }
+
+    #[test]
+    fn only_explicit_boolean_bottom_cursor_setting_keeps_empty_pages_going() {
+        for (fields, expected) in [
+            (json!({}), false),
+            (json!({"stopOnEmptyResponse":true}), false),
+            (json!({"stopOnEmptyResponse":false}), true),
+            (json!({"itemContent":{"stopOnEmptyResponse":false}}), true),
+            (
+                json!({"stopOnEmptyResponse":false,"itemContent":{"stopOnEmptyResponse":false}}),
+                true,
+            ),
+        ] {
+            let mut bottom = cursor("next");
+            bottom["content"]
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let parsed = parse_search_posts(&search(
+                json!([{"type":"TimelineAddEntries","entries":[bottom]}]),
+            ))
+            .unwrap();
+            assert_eq!(parsed.continue_empty, expected);
+            assert!(!parsed.done);
+            assert!(parsed.posts.is_empty());
+        }
+        for fields in [
+            json!({"stopOnEmptyResponse":null}),
+            json!({"stopOnEmptyResponse":"PRIVATE"}),
+            json!({"stopOnEmptyResponse":0}),
+            json!({"itemContent":{"stopOnEmptyResponse":[]}}),
+            json!({"stopOnEmptyResponse":false,"itemContent":{"stopOnEmptyResponse":true}}),
+        ] {
+            let mut bottom = cursor("next");
+            bottom["content"]
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let message = parse_search_posts(&search(
+                json!([{"type":"TimelineAddEntries","entries":[bottom]}]),
+            ))
+            .err()
+            .unwrap()
+            .to_string();
+            assert!(!message.contains("PRIVATE"));
+        }
+        for kind in ["Top", "ShowMore", "ShowMoreThreads"] {
+            let parsed = parse_search_posts(&search(json!([{"type":"TimelineAddEntries","entries":[{"content":{"entryType":"TimelineTimelineCursor","cursorType":kind,"value":"ignored","stopOnEmptyResponse":false}}]}]))).unwrap();
+            assert!(!parsed.continue_empty);
+            assert!(parsed.done);
+        }
+    }
+
+    #[test]
+    fn search_envelopes_unknown_instructions_and_private_errors_fail_closed() {
+        for bytes in [
+            entries(json!([entry(tweet("11"))])),
+            search(json!([{"type":"PRIVATE","nested":entry(tweet("11"))}])),
+            search(
+                json!([{"type":"TimelineAddEntries","entries":[{"content":{"entryType":"PRIVATE","nested":tweet("11")}}]}]),
+            ),
+            search(json!([{"type":"TimelineAddEntries","entries":[cursor("a"),cursor("b")]}])),
+            search(json!([])),
+            br#"{"errors":[{"code":89,"message":"PRIVATE"}]}"#.to_vec(),
+            vec![b' '; MAX_RESPONSE + 1],
+        ] {
+            let message = parse_search_posts(&bytes).err().unwrap().to_string();
+            assert!(!message.contains("PRIVATE"));
         }
     }
 

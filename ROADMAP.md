@@ -87,9 +87,22 @@ shared extraction interface that emits media, post metadata, and child URLs.
   media siblings while suppressing overlapping pages/pins/quotes. Backpressure,
   source-order date/range selection, active budgets, cancellation, credential
   scoping, and compatibility forwarding are tested. Authenticated live traversal,
-  real response fixtures, root-profile dispatch and `/timeline` search fallback,
-  likes/other collection routes, configurable uniqueness, and dynamic operation
-  refresh remain unfinished.
+  real response fixtures, likes/other collection routes, configurable uniqueness,
+  and dynamic operation refresh remain unfinished.
+  **Implemented experimental search and root timelines:** ordinary/numeric profile
+  roots and `/timeline` share an initial strategy-selected feed, a search for
+  older links, and an unfiltered search only if the link search has no post
+  results. Numeric roots resolve a canonical username before constructing the
+  query. Standalone search/hashtag routes use the same strict search envelope,
+  structured entries, and identity validation. Scoped strategy, result product,
+  page size, empty-response tolerance, and max-ID/cursor/date pagination forward
+  to compatibility mode when explicit. Raw post boundaries survive reply/text
+  filtering; timestamp-aware date pagination and API keep-going hints preserve
+  continuation. One cumulative active budget, deduplication set, lazy request
+  scope, and range/date pipeline span all stages. Synthetic/local tests cover
+  these behaviors; live authenticated search and real response fixtures remain
+  unverified. Resume cursors, arbitrary root dispatch, text-only output, and
+  other collection routes remain unfinished.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and

@@ -42,6 +42,12 @@ pub struct Options {
     pub pinned: Option<bool>,
     /// Which reply posts to include in account timelines.
     pub replies: Option<crate::twitter::ReplyMode>,
+    /// Root profile timeline strategy and search pagination settings.
+    pub strategy: Option<crate::twitter::TimelineStrategy>,
+    pub search_pagination: Option<crate::twitter::SearchPagination>,
+    pub search_results: Option<crate::twitter::SearchProduct>,
+    pub search_limit: Option<u8>,
+    pub search_stop: Option<u8>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
@@ -84,6 +90,11 @@ impl Options {
             quoted: overrides.quoted.or(self.quoted),
             pinned: overrides.pinned.or(self.pinned),
             replies: overrides.replies.or(self.replies),
+            strategy: overrides.strategy.or(self.strategy),
+            search_pagination: overrides.search_pagination.or(self.search_pagination),
+            search_results: overrides.search_results.or(self.search_results),
+            search_limit: overrides.search_limit.or(self.search_limit),
+            search_stop: overrides.search_stop.or(self.search_stop),
             directory: overrides
                 .directory
                 .clone()
@@ -135,6 +146,11 @@ struct RawRoot {
     quoted: Field,
     pinned: Field,
     replies: Field,
+    strategy: Field,
+    search_pagination: Field,
+    search_results: Field,
+    search_limit: Field,
+    search_stop: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -159,6 +175,11 @@ struct RawExtractor {
     quoted: Field,
     pinned: Field,
     replies: Field,
+    strategy: Field,
+    search_pagination: Field,
+    search_results: Field,
+    search_limit: Field,
+    search_stop: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -186,6 +207,11 @@ struct RawOptions {
     quoted: Field,
     pinned: Field,
     replies: Field,
+    strategy: Field,
+    search_pagination: Field,
+    search_results: Field,
+    search_limit: Field,
+    search_stop: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -276,6 +302,11 @@ impl Config {
             quoted: root.quoted,
             pinned: root.pinned,
             replies: root.replies,
+            strategy: root.strategy,
+            search_pagination: root.search_pagination,
+            search_results: root.search_results,
+            search_limit: root.search_limit,
+            search_stop: root.search_stop,
             directory: root.directory,
             cookies: root.cookies,
             proxy: root.proxy,
@@ -298,6 +329,11 @@ impl Config {
             quoted: extractor.quoted,
             pinned: extractor.pinned,
             replies: extractor.replies,
+            strategy: extractor.strategy,
+            search_pagination: extractor.search_pagination,
+            search_results: extractor.search_results,
+            search_limit: extractor.search_limit,
+            search_stop: extractor.search_stop,
             directory: extractor.directory,
             cookies: extractor.cookies,
             proxy: extractor.proxy,
@@ -374,6 +410,52 @@ impl RawOptions {
                     "native configuration replies must be a boolean or self",
                 ));
             }
+        };
+        let strategy = match self.strategy.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "auto" => crate::twitter::TimelineStrategy::Auto,
+                "media" => crate::twitter::TimelineStrategy::Media,
+                "tweets" => crate::twitter::TimelineStrategy::Tweets,
+                "with_replies" => crate::twitter::TimelineStrategy::Replies,
+                _ => return Err(error("unsupported native configuration strategy")),
+            }),
+            Some(_) => return Err(error("native configuration strategy must be a string")),
+        };
+        let search_pagination = match self.search_pagination.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "max_id" | "maxid" | "id" => crate::twitter::SearchPagination::MaxId,
+                "cursor" => crate::twitter::SearchPagination::Cursor,
+                "until" | "date" | "datetime" | "dt" => crate::twitter::SearchPagination::Date,
+                _ => return Err(error("unsupported native configuration search-pagination")),
+            }),
+            Some(_) => {
+                return Err(error(
+                    "native configuration search-pagination must be a string",
+                ));
+            }
+        };
+        let search_results = match self.search_results.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.to_ascii_lowercase().as_str() {
+                "latest" | "live" => crate::twitter::SearchProduct::Latest,
+                "top" => crate::twitter::SearchProduct::Top,
+                "media" => crate::twitter::SearchProduct::Media,
+                "people" | "user" => crate::twitter::SearchProduct::People,
+                "lists" | "list" => crate::twitter::SearchProduct::Lists,
+                _ => return Err(error("unsupported native configuration search-results")),
+            }),
+            Some(_) => {
+                return Err(error(
+                    "native configuration search-results must be a string",
+                ));
+            }
+        };
+        let search_limit = bounded_integer(self.search_limit, 1, 100, "search-limit")?;
+        let search_stop = match self.search_stop.0 {
+            Some(Value::String(value)) if value == "auto" => Some(3),
+            value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
         let file_range = match self.file_range.0 {
             None => None,
@@ -476,6 +558,11 @@ impl RawOptions {
             quoted,
             pinned,
             replies,
+            strategy,
+            search_pagination,
+            search_results,
+            search_limit,
+            search_stop,
             directory: templates,
             filesize_min: size(self.filesize_min)?,
             filesize_max: size(self.filesize_max)?,
@@ -585,5 +672,23 @@ fn network_string(field: Field) -> Result<Option<String>> {
         None => Ok(None),
         Some(Value::String(value)) => Ok(Some(value)),
         Some(_) => Err(error("native network settings must be strings")),
+    }
+}
+
+fn bounded_integer(field: Field, min: u64, max: u64, name: &str) -> Result<Option<u8>> {
+    match field.0 {
+        None => Ok(None),
+        Some(Value::Number(value)) => value
+            .as_u64()
+            .filter(|value| (min..=max).contains(value))
+            .map(|value| Some(value as u8))
+            .ok_or_else(|| {
+                error(format!(
+                    "native configuration {name} must be an integer from {min} to {max}"
+                ))
+            }),
+        Some(_) => Err(error(format!(
+            "native configuration {name} must be an integer from {min} to {max}"
+        ))),
     }
 }

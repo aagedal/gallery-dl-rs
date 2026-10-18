@@ -68,7 +68,7 @@ stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fb
 `/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
 `/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
 `/USER/videos/ID` videos, and Twitter/X single-status plus `/USER/media`, `/USER/tweets`, `/USER/with_replies`,
-and `/USER/highlights` URLs.
+and `/USER/highlights` URLs, root profiles, search, and hashtags.
 Other profiles, threads, and album listings still need the
 compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
@@ -268,8 +268,42 @@ independently. These settings also forward to compatibility extraction only when
 explicitly configured. Profile tabs use unordered date filtering so pins and
 conversation context cannot hide later qualifying media.
 
-Root-profile dispatch and `/timeline` search fallback, likes, cards/articles,
-configurable duplicate handling, and other collection routes remain unfinished.
+Root profiles (`/USER`), `/USER/timeline`, `/id:USER_ID`, `/i/user/USER_ID`, and
+`/intent/user?user_id=USER_ID` run the native timeline traversal. They resolve a
+canonical username, including `UserByRestId` for numeric roots. The initial feed
+uses media by default or tweets when retweets are enabled. Scoped `"strategy"`
+can select `"auto"`, `"media"`, `"tweets"`, or `"with_replies"`. After that feed
+drains, search continues from its last raw post ID with `from:USER max_id:ID
+filter:links`; retweet modes add the matching include operators. If this link
+search has no post results, traversal retries the same boundary without the
+link filter. Empty initial feeds finish without a search. One deadline,
+deduplication set, and cancellation scope cover all stages; reply/text filtering
+does not discard the continuation boundary.
+
+Native `/search?q=QUERY` and `/hashtag/TAG` URLs use the same lazy search engine.
+Query parameters decode once, hashtag path plus signs stay literal, duplicate
+queries fail explicitly, and query text is limited to 8 KiB. Scoped settings are:
+
+- `search-results`: `Latest` (default), `Top`, `Media`, `People`, or `Lists`;
+  upstream aliases `live`, `user`, and `list` are accepted. User/list result
+  entries are skipped by this media pipeline.
+- `search-pagination`: `max_id` (default), `cursor`, or `date`, with upstream
+  `maxid`/`id` and `until`/`datetime`/`dt` aliases. Max-ID mode rewrites the query
+  to the last raw post ID minus one; date mode rewrites `until:YYYY-MM-DD` from
+  the post's snowflake timestamp and uses the opaque cursor when that full
+  timestamp repeats. Empty advancing pages retain cursor pagination.
+- `search-limit`: integer 1–100, default 20.
+- `search-stop`: integer 0–128 or `auto` (default 3), the number of empty
+  continuations tolerated before stopping. An explicit API keep-going hint
+  resets that counter. Request-history and non-advancing-bound checks reject
+  loops, and the active extraction deadline still applies.
+
+A single valid `from:USER` query resolves that profile when `replies: "self"`
+needs its owner context. Search/profile date filtering preserves source order.
+All new settings forward to compatibility extraction when explicitly configured.
+Likes, cards/articles, arbitrary root-profile dispatch selection, cursor-resume
+configuration, configurable duplicate handling, text-only output, and other
+collection routes remain unfinished.
 
 Scoped native configuration supports `"retweets": false` (default), `true`, or
 `"original"`, and `"quoted": false` (default) or `true`. For example:
@@ -559,7 +593,8 @@ Neither configuration file is loaded automatically.
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
-`retweets`, `quoted`, `pinned`, `replies`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`retweets`, `quoted`, `pinned`, `replies`, `strategy`, `search-pagination`,
+`search-results`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
@@ -788,6 +823,7 @@ and native extraction, and Retry-After parsing.
 `src/instagram.rs` owns the experimental native Instagram extractor;
 `src/twitter.rs` owns experimental native Twitter/X and transaction bootstrap;
 `src/twitter_expansion.rs` validates explicit retweet/quote links and media identity;
+`src/twitter_search.rs` handles search routing, options, and pagination progress;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
 [fixture and manual-check notes](tests/fixtures/instagram/README.md) before
 promoting native extraction to the default.

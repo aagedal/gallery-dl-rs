@@ -203,6 +203,11 @@ pub struct BackendOptions {
     pub quoted: Option<bool>,
     pub pinned: Option<bool>,
     pub replies: Option<crate::twitter::ReplyMode>,
+    pub strategy: Option<crate::twitter::TimelineStrategy>,
+    pub search_pagination: Option<crate::twitter::SearchPagination>,
+    pub search_results: Option<crate::twitter::SearchProduct>,
+    pub search_limit: Option<u8>,
+    pub search_stop: Option<u8>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -286,6 +291,43 @@ impl Backend {
                 crate::twitter::ReplyMode::SelfOnly => "\"self\"",
             };
             command.arg("--option").arg(format!("replies={value}"));
+        }
+        if let Some(strategy) = options.strategy {
+            let value = match strategy {
+                crate::twitter::TimelineStrategy::Auto => "auto",
+                crate::twitter::TimelineStrategy::Media => "media",
+                crate::twitter::TimelineStrategy::Tweets => "tweets",
+                crate::twitter::TimelineStrategy::Replies => "with_replies",
+            };
+            command.arg("--option").arg(format!("strategy=\"{value}\""));
+        }
+        if let Some(pagination) = options.search_pagination {
+            let value = match pagination {
+                crate::twitter::SearchPagination::MaxId => "max_id",
+                crate::twitter::SearchPagination::Cursor => "cursor",
+                crate::twitter::SearchPagination::Date => "date",
+            };
+            command
+                .arg("--option")
+                .arg(format!("search-pagination=\"{value}\""));
+        }
+        if let Some(product) = options.search_results {
+            let value = match product {
+                crate::twitter::SearchProduct::Latest => "Latest",
+                crate::twitter::SearchProduct::Top => "Top",
+                crate::twitter::SearchProduct::Media => "Media",
+                crate::twitter::SearchProduct::People => "People",
+                crate::twitter::SearchProduct::Lists => "Lists",
+            };
+            command
+                .arg("--option")
+                .arg(format!("search-results=\"{value}\""));
+        }
+        if let Some(limit) = options.search_limit {
+            command.arg("--option").arg(format!("search-limit={limit}"));
+        }
+        if let Some(stop) = options.search_stop {
+            command.arg("--option").arg(format!("search-stop={stop}"));
         }
         command.args([
             "--option",

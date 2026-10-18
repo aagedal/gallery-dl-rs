@@ -12,6 +12,11 @@ use crate::{
 #[path = "twitter_expansion.rs"]
 mod expansion;
 pub use expansion::{ExpansionOptions, RetweetMode, parse_response_with_options};
+#[path = "twitter_search.rs"]
+mod search;
+pub use search::{
+    SearchPagination, SearchProduct, TimelineOptions, TimelineStrategy, is_search_url,
+};
 #[path = "twitter_profile.rs"]
 mod profile;
 #[path = "twitter_timeline.rs"]
@@ -56,6 +61,7 @@ pub struct ProfileOptions {
 pub struct Twitter {
     expansion: ExpansionOptions,
     profile_options: ProfileOptions,
+    timeline_options: TimelineOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -86,6 +92,7 @@ impl Twitter {
                 .build()?,
             expansion: ExpansionOptions::default(),
             profile_options: ProfileOptions::default(),
+            timeline_options: TimelineOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -105,6 +112,11 @@ impl Twitter {
 
     pub fn with_profile_options(mut self, options: ProfileOptions) -> Self {
         self.profile_options = options;
+        self
+    }
+
+    pub fn with_timeline_options(mut self, options: TimelineOptions) -> Self {
+        self.timeline_options = options;
         self
     }
 

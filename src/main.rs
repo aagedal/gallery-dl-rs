@@ -20,7 +20,7 @@ use gallery_dl_rs::{
     network::NetworkOptions,
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
-    twitter::{ExpansionOptions, ProfileOptions, Twitter},
+    twitter::{ExpansionOptions, ProfileOptions, TimelineOptions, Twitter},
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -202,6 +202,7 @@ async fn run(args: Args) -> Result<()> {
                         gallery_dl_rs::instagram::is_story_url(&url)
                             || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
+                            || gallery_dl_rs::twitter::is_search_url(&url)
                             || (extract::social_site(&url) == Some("twitter")
                                 && settings["twitter"].options.quoted == Some(true))
                     });
@@ -423,6 +424,15 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_timeline_options(TimelineOptions {
+                                        strategy: options.strategy.unwrap_or_default(),
+                                        search_pagination: options
+                                            .search_pagination
+                                            .unwrap_or_default(),
+                                        search_product: options.search_results.unwrap_or_default(),
+                                        search_limit: options.search_limit.unwrap_or(20),
+                                        search_stop: options.search_stop.unwrap_or(3),
+                                    })
                                     .with_profile_options(ProfileOptions {
                                         pinned: options.pinned.unwrap_or_default(),
                                         replies: options.replies.unwrap_or_default(),
@@ -479,6 +489,21 @@ fn extract_input<'a>(
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
                             pinned: (category == "twitter").then_some(options.pinned).flatten(),
                             replies: (category == "twitter").then_some(options.replies).flatten(),
+                            strategy: (category == "twitter")
+                                .then_some(options.strategy)
+                                .flatten(),
+                            search_pagination: (category == "twitter")
+                                .then_some(options.search_pagination)
+                                .flatten(),
+                            search_results: (category == "twitter")
+                                .then_some(options.search_results)
+                                .flatten(),
+                            search_limit: (category == "twitter")
+                                .then_some(options.search_limit)
+                                .flatten(),
+                            search_stop: (category == "twitter")
+                                .then_some(options.search_stop)
+                                .flatten(),
                         },
                     )
                 }
@@ -540,6 +565,11 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         quoted: None,
         pinned: None,
         replies: None,
+        strategy: None,
+        search_pagination: None,
+        search_results: None,
+        search_limit: None,
+        search_stop: None,
         proxy: args.proxy.clone(),
         user_agent: args.user_agent.clone(),
         archive: args.download_archive.clone(),
