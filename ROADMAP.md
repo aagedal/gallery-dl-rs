@@ -73,7 +73,7 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Original and quoted media preserve direct-post archive identities; repost mode
   retains the repost identity. Parser, scoped configuration, compatibility
   forwarding, and local HTTP tests cover these paths. Live authenticated
-  expansion remains unverified. Articles remain outside native coverage.
+  expansion remains unverified. Article defaults and optional document rendering are described below.
   **Implemented experimental profile tabs:** `/USER/media`, `/USER/tweets`,
   `/USER/with_replies`, `/USER/highlights`, and numeric ID forms stream their
   operation-specific pages. Username lookup uses identity-bound `UserByScreenName`;
@@ -177,6 +177,22 @@ shared extraction interface that emits media, post metadata, and child URLs.
   explicit opt-in, compatibility forwarding, and cancellation. Live authenticated
   attempts of marked media remain unverified.
 
+
+  **Implemented experimental articles:** default article selection now emits
+  metadata, cover, and ordered embedded images. Scoped boolean/comma/list flags
+  add HTML inspection metadata and standalone document jobs, or independently
+  disable components. Escaped HTML rendering covers the upstream text/list/atomic
+  block and media/divider/emoji/LaTeX entity forms, validated links/mentions, and
+  UTF-16 inline ranges, with bounded output. Documents precede article images
+  after ordinary/card files, preserving shared numbering/archive identities.
+  Outer repost versus original article ownership, quote/thread traversal, lazy
+  cutoff, and optional-error recovery have local coverage. Completed files and
+  metadata survive later article failures; null/malformed optional envelopes do
+  not abort normal media or later pagination. Large metadata strings use shared
+  storage to avoid per-file amplification. Strict configuration and canonical
+  compatibility forwarding are tested. Real authenticated captures, image-size
+  fallbacks, broader content variants, and recovered-error warnings remain.
+
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and
 rate limits, plus a documented manual check against a real accessible post.
@@ -271,6 +287,13 @@ private request/adapter options. They publish atomically without overwriting,
 backfill missing sidecars for skipped media, and preserve completed media on
 metadata errors. Local tests cover schema/content, private option exclusion,
 concurrent publication, repair, failed media, and CLI behavior.
+
+**Implemented inline text:** compatibility `text:` rows and native article
+HTML documents retain exact bounded UTF-8 payloads in typed jobs. Inspection URLs
+encode content; identities include original bytes. Atomic publication, size
+selection, archives, sidecars, existing-file behavior, and resume bypass have
+regressions. Article sidecars exclude HTML/embedded URLs while retaining the
+allowlisted descriptive fields. No video companion adapter is needed for text.
 
 **Implemented pipeline step:** download mode now pulls one input at a time into
 a pipeline capped by `--jobs`. A full pipeline pauses later extraction, and active

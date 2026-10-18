@@ -1317,3 +1317,109 @@ fn twitter_unavailable_is_sparse_strict_and_preserves_false_precedence() {
         assert!(parse(document).is_err());
     }
 }
+
+#[test]
+fn twitter_article_flags_are_sparse_scoped_and_accept_canonical_aliases() {
+    use gallery_dl_rs::twitter::ArticleOptions;
+    let disabled = ArticleOptions::disabled();
+    let config = parse(r#"{"extractor":{"articles":true,"twitter":{"articles":[" html ","metadata","document","meta"]},"instagram":{"articles":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    let selected = ArticleOptions {
+        metadata: true,
+        cover: false,
+        media: false,
+        html: true,
+        document: true,
+    };
+    assert_eq!(twitter.articles, Some(selected));
+    assert_eq!(
+        config.resolve("facebook").unwrap().articles,
+        Some(ArticleOptions::default())
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().articles,
+        Some(disabled)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                articles: Some(disabled),
+                ..Default::default()
+            })
+            .articles,
+        Some(disabled)
+    );
+    let root = parse(
+        r#"{"articles":false,"extractor":{"articles":true,"twitter":{"articles":"cover,media"}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        assert_eq!(root.resolve(category).unwrap().articles, Some(disabled));
+    }
+    for value in [
+        serde_json::json!(""),
+        serde_json::json!("  "),
+        serde_json::json!([]),
+    ] {
+        let document =
+            serde_json::json!({"extractor":{"articles":true,"twitter":{"articles":value}}});
+        assert_eq!(
+            parse(&document.to_string())
+                .unwrap()
+                .resolve("twitter")
+                .unwrap()
+                .articles,
+            Some(disabled)
+        );
+    }
+    let equivalent = parse(r#"{"articles":" meta, html, doc "}"#)
+        .unwrap()
+        .resolve("twitter")
+        .unwrap();
+    assert_eq!(equivalent.articles, Some(selected));
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().articles,
+        None
+    );
+    assert!(parse(&serde_json::json!({"articles":vec!["meta";32]}).to_string()).is_ok());
+}
+
+#[test]
+fn twitter_article_flags_reject_malformed_values_privately_in_all_scopes() {
+    use serde_json::json;
+    for value in [
+        json!(null),
+        json!(0),
+        json!({"private-key":"private-value"}),
+        json!([true]),
+        json!(["meta", 1]),
+        json!("private-value"),
+        json!("Meta"),
+        json!("meta,,cover"),
+        json!([""]),
+        json!(["meta,cover"]),
+        json!(["meta\n"]),
+        json!(vec!["meta"; 33]),
+        json!(["x".repeat(129)]),
+    ] {
+        for document in [
+            json!({"articles":value}),
+            json!({"extractor":{"articles":value}}),
+            json!({"extractor":{"twitter":{"articles":value}}}),
+            json!({"extractor":{"instagram":{"articles":value}}}),
+            json!({"extractor":{"facebook":{"articles":value}}}),
+            json!({"extractor":{"direct":{"articles":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key") && !message.contains("private-value"));
+        }
+    }
+    for document in [
+        r#"{"articles":true,"articles":false}"#,
+        r#"{"extractor":{"articles":[],"articles":true}}"#,
+        r#"{"extractor":{"twitter":{"articles":"html","articles":"doc"}}}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}

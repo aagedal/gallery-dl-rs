@@ -25,7 +25,7 @@ Posts/replies/highlights tabs have synthetic/local coverage described in
 [the profile timeline notes](media_README.md). Root-profile search fallback and standalone search/hashtags also have synthetic
 coverage there. Likes, bookmarks, lists, and home feeds have separate
 [collection protocol notes](collections_README.md). TweetDetail and conversation modes have separate
-[detail protocol notes](detail_README.md). Articles, playlists, and other
+[detail protocol notes](detail_README.md). Playlists and other
 collections remain unsupported natively. Compatibility remains the default.
 
 `tests/twitter_media.rs` and local HTTP cases in `src/twitter_profile_tests.rs`
@@ -60,6 +60,19 @@ malformed-field failures. Pages containing only unavailable media still advance
 profile, search, and bookmark cursors. An opt-in cannot bypass protected-post identity/session
 checks or permit unsafe media URLs. No authenticated marked-media attempt has
 been verified.
+
+Article fixtures in `src/twitter_articles.rs`, `tests/twitter_articles.rs`, and
+local runtime cases are synthetic. Primary sources above and
+[upstream article utilities](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/extractor/utils/twitter_article.py)
+(inspected 2026-10-18) define default metadata/cover/media selection, flag aliases,
+file order, and document structure. The native renderer escapes content and
+attributes, validates links, handles UTF-16 ranges, and bounds output; malformed
+optional data recovers with previously completed files/metadata intact. Tests
+cover lists, entities, formatting, source ownership, shared metadata storage,
+archives, quote/thread cutoff, and pagination after optional failures. Inline
+text tests cover exact UTF-8 downloads, filtering, atomic publication, and sidecar
+HTML exclusion. No authenticated article response or download has been captured.
+Image-size fallbacks, additional content variants, and recovery warnings remain.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol

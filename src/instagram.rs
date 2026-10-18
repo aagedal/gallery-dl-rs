@@ -637,17 +637,18 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                     retweet_id: None,
                     quoted_by_id: None,
                     reposted_by_id: None,
+                    article: None,
                     post_id: post_id.clone(),
                     media_id,
                     shortcode: code.into(),
                     username: post
                         .pointer("/user/username")
                         .and_then(Value::as_str)
-                        .map(str::to_owned),
+                        .map(std::sync::Arc::from),
                     caption: post
                         .pointer("/caption/text")
                         .and_then(Value::as_str)
-                        .map(str::to_owned),
+                        .map(std::sync::Arc::from),
                     timestamp: post.get("taken_at").and_then(Value::as_i64),
                     index: index + 1,
                 }),

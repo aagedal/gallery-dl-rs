@@ -253,11 +253,17 @@ async fn write_metadata(path: &Path, media: &Media) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| error("invalid media filename"))?;
+    let mut metadata = media.metadata.clone();
+    if let Some(article) = metadata.as_mut().and_then(|post| post.article.as_mut()) {
+        // Article HTML can embed signed image URLs; sidecars retain only the
+        // descriptive article fields, just as they omit the media request URL.
+        article.html = None;
+    }
     let mut bytes = serde_json::to_vec_pretty(&MetadataSidecar {
         schema_version: 1,
         category: &media.category,
         filename,
-        metadata: media.metadata.as_ref(),
+        metadata: metadata.as_ref(),
     })?;
     bytes.push(b'\n');
     let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
@@ -302,6 +308,11 @@ async fn download_media(
     limits: SizeLimits,
 ) -> Result<Outcome> {
     match &media.job {
+        MediaJob::InlineText { data } => {
+            if data.len() > crate::extract::MAX_INLINE_TEXT {
+                return Err(error("inline text exceeds the payload size limit"));
+            }
+        }
         MediaJob::DirectHttp => {
             crate::extract::http_url(media.url.as_str())?;
         }
@@ -322,6 +333,14 @@ async fn download_media(
         Ok(_) => return Err(error("media destination is not a regular file")),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.into()),
+    }
+    if let MediaJob::InlineText { data } = &media.job {
+        if let Some(rejection) = limits.check(data.len() as u64) {
+            return Ok(Outcome::Filtered(rejection));
+        }
+        let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
+        tokio::fs::create_dir_all(parent).await?;
+        return write_inline_text(parent, &path, data).await;
     }
     let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
     tokio::fs::create_dir_all(parent).await?;
@@ -386,6 +405,32 @@ async fn download_media(
     unreachable!()
 }
 
+async fn write_inline_text(parent: &Path, path: &Path, data: &str) -> Result<Outcome> {
+    // TempPath removes an incomplete file if this future is cancelled.
+    let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&temporary)
+        .await?;
+    file.write_all(data.as_bytes()).await?;
+    file.flush().await?;
+    file.sync_all().await?;
+    drop(file);
+    match temporary.persist_noclobber(path) {
+        Ok(_) => Ok(Outcome::Downloaded(path.into())),
+        Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if std::fs::symlink_metadata(path)?.is_file() {
+                Ok(Outcome::Skipped(path.into()))
+            } else {
+                Err(error("media destination is not a regular file"))
+            }
+        }
+        Err(e) => Err(e.error.into()),
+    }
+}
+
+#[derive(Debug)]
 struct Failure {
     error: crate::Error,
     retry: bool,

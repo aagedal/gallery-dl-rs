@@ -1462,3 +1462,109 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         assert!(!log.exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn twitter_article_flags_forward_canonically_without_leaking_invalid_settings() {
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$ARTICLE_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, expected) in [
+        (json!({}), None),
+        (
+            json!({"extractor":{"twitter":{"articles":true}}}),
+            Some("articles=true"),
+        ),
+        (
+            json!({"extractor":{"articles":true,"twitter":{"articles":false}}}),
+            Some("articles=false"),
+        ),
+        (
+            json!({"extractor":{"articles":true,"twitter":{"articles":[]}}}),
+            Some("articles=false"),
+        ),
+        (
+            json!({"articles":"cover, metadata,media","extractor":{"twitter":{"articles":false}}}),
+            Some("articles=true"),
+        ),
+        (
+            json!({"extractor":{"twitter":{"articles":["document","html","metadata","meta"]}}}),
+            Some("articles=[\"meta\",\"html\",\"doc\"]"),
+        ),
+        (
+            json!({"extractor":{"twitter":{"articles":"doc,media,cover,html,meta"}}}),
+            Some("articles=[\"meta\",\"cover\",\"media\",\"html\",\"doc\"]"),
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/person/status/1", true),
+            ("https://instagram.com/p/example/", false),
+            ("https://facebook.com/photo/?fbid=1", false),
+        ] {
+            let output = binary()
+                .env("ARTICLE_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("articles="))
+                .collect();
+            assert_eq!(
+                forwarded,
+                if twitter {
+                    expected.into_iter().collect()
+                } else {
+                    vec![]
+                }
+            );
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    for settings in [
+        json!({"articles":"PRIVATE-ARTICLE-VALUE"}),
+        json!({"extractor":{"twitter":{"articles":["PRIVATE-ARTICLE-VALUE"]}}}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let output = binary()
+            .env("ARTICLE_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&backend)
+            .args(["-g", "https://x.com/person/status/1"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-ARTICLE-VALUE"));
+        assert!(!log.exists());
+    }
+}

@@ -48,10 +48,30 @@ pub fn parse_response_with_card_options(
     media_options: MediaOptions,
     card_options: CardOptions,
 ) -> Result<Vec<Media>> {
+    parse_response_with_article_options(
+        bytes,
+        requested_id,
+        options,
+        media_options,
+        card_options,
+        ArticleOptions::default(),
+    )
+}
+
+/// Parse explicit linked posts with shared file and article selection.
+pub fn parse_response_with_article_options(
+    bytes: &[u8],
+    requested_id: &str,
+    options: ExpansionOptions,
+    media_options: MediaOptions,
+    card_options: CardOptions,
+    article_options: ArticleOptions,
+) -> Result<Vec<Media>> {
     let value = response_root(bytes, requested_id)?;
     let mut engine = Engine::new(value, requested_id.into(), options, false)
         .with_media_options(media_options)
-        .with_card_options(card_options);
+        .with_card_options(card_options)
+        .with_article_options(article_options);
     let mut result = Vec::new();
     loop {
         match engine.next()? {
@@ -184,6 +204,7 @@ pub(super) struct Engine {
     allow_empty: bool,
     media_options: MediaOptions,
     card_options: CardOptions,
+    article_options: ArticleOptions,
     replies: ReplyMode,
     profile_owner: Option<String>,
 }
@@ -210,6 +231,7 @@ impl Engine {
             allow_empty,
             media_options: MediaOptions::default(),
             card_options: CardOptions::default(),
+            article_options: ArticleOptions::default(),
             replies: ReplyMode::All,
             profile_owner: None,
         }
@@ -222,6 +244,11 @@ impl Engine {
 
     pub(super) fn with_card_options(mut self, options: CardOptions) -> Self {
         self.card_options = options;
+        self
+    }
+
+    pub(super) fn with_article_options(mut self, options: ArticleOptions) -> Self {
+        self.article_options = options;
         self
     }
 
@@ -358,7 +385,18 @@ impl Engine {
                 self.media_options,
                 &self.card_options,
                 job.repost.as_ref().unwrap_or(tweet),
+                self.article_options,
             )?;
+            let repost_username: Option<std::sync::Arc<str>> = job
+                .repost
+                .as_ref()
+                .and_then(|outer| {
+                    outer
+                        .pointer("/core/user_results/result/core/screen_name")
+                        .or_else(|| outer.pointer("/core/user_results/result/legacy/screen_name"))
+                })
+                .and_then(Value::as_str)
+                .map(std::sync::Arc::from);
             for item in &mut media {
                 let metadata = item.metadata.as_mut().unwrap();
                 metadata.quoted_by_id = job.quoted_by.clone();
@@ -367,11 +405,7 @@ impl Engine {
                     let outer_id = outer["rest_id"].as_str().unwrap();
                     metadata.retweet_id = Some(job.id.clone());
                     metadata.post_id = outer_id.into();
-                    metadata.username = outer
-                        .pointer("/core/user_results/result/core/screen_name")
-                        .or_else(|| outer.pointer("/core/user_results/result/legacy/screen_name"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
+                    metadata.username = repost_username.clone();
                     metadata.timestamp = outer
                         .pointer("/legacy/created_at")
                         .and_then(Value::as_str)

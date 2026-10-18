@@ -27,6 +27,10 @@ pub struct Media {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MediaJob {
     DirectHttp,
+    InlineText {
+        #[serde(skip_serializing)]
+        data: String,
+    },
     VideoPage {
         page_url: Url,
     },
@@ -101,6 +105,7 @@ impl Media {
         }
         let inline_data = match &self.job {
             MediaJob::Manifest { inline_data, .. } => inline_data.as_deref(),
+            MediaJob::InlineText { data } => Some(data.as_str()),
             _ => None,
         };
         serde_json::json!([self.url, self.job, inline_data, self.headers, self.handoff]).to_string()
@@ -115,8 +120,8 @@ pub struct PostMetadata {
     pub media_id: String,
     /// Instagram post shortcode; empty for sites without Instagram shortcodes.
     pub shortcode: String,
-    pub username: Option<String>,
-    pub caption: Option<String>,
+    pub username: Option<std::sync::Arc<str>>,
+    pub caption: Option<std::sync::Arc<str>>,
     pub timestamp: Option<i64>,
     pub index: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,6 +130,8 @@ pub struct PostMetadata {
     pub quoted_by_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reposted_by_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub article: Option<crate::twitter::ArticleMetadata>,
 }
 
 #[derive(Clone, Debug)]
@@ -144,6 +151,31 @@ pub fn http_url(value: &str) -> Result<Url> {
         return Err(error("URLs containing credentials are not supported"));
     }
     Ok(url)
+}
+
+/// Maximum raw UTF-8 article/document payload, independent of URL encoding.
+pub(crate) const MAX_INLINE_TEXT: usize = 16 * 1024 * 1024;
+
+/// Construct an opaque inspection URL without URL parsing changing the payload.
+/// The job retains the original UTF-8 bytes used when saving the document.
+pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
+    if data.len() > MAX_INLINE_TEXT {
+        return Err(error("inline text exceeds the payload size limit"));
+    }
+    let mut source = String::with_capacity(data.len() + 5);
+    source.push_str("text:");
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for byte in data.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            source.push(byte as char);
+        } else {
+            source.push('%');
+            source.push(HEX[(byte >> 4) as usize] as char);
+            source.push(HEX[(byte & 15) as usize] as char);
+        }
+    }
+    let url = Url::parse(&source).map_err(|_| error("invalid inline text URL"))?;
+    Ok((url, MediaJob::InlineText { data }))
 }
 
 pub fn social_site(url: &Url) -> Option<&'static str> {
@@ -206,6 +238,7 @@ pub struct BackendOptions {
     pub videos: Option<crate::twitter::VideoMode>,
     pub previews: Option<bool>,
     pub unavailable: Option<bool>,
+    pub articles: Option<crate::twitter::ArticleOptions>,
     pub cards: Option<crate::twitter::CardMode>,
     pub cards_blacklist: Option<Vec<String>>,
     pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
@@ -312,6 +345,36 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("unavailable={unavailable}"));
+        }
+        if let Some(articles) = options.articles {
+            let value = if articles.metadata
+                && articles.cover
+                && articles.media
+                && !articles.html
+                && !articles.document
+            {
+                "true".to_owned()
+            } else if !articles.metadata
+                && !articles.cover
+                && !articles.media
+                && !articles.html
+                && !articles.document
+            {
+                "false".to_owned()
+            } else {
+                let flags: Vec<_> = [
+                    ("meta", articles.metadata),
+                    ("cover", articles.cover),
+                    ("media", articles.media),
+                    ("html", articles.html),
+                    ("doc", articles.document),
+                ]
+                .into_iter()
+                .filter_map(|(flag, enabled)| enabled.then_some(flag))
+                .collect();
+                serde_json::json!(flags).to_string()
+            };
+            command.arg("--option").arg(format!("articles={value}"));
         }
         if let Some(cards) = options.cards {
             let value = match cards {
@@ -446,48 +509,56 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
         .get(2)
         .and_then(Value::as_object)
         .ok_or_else(|| error("media message has no metadata"))?;
-    let delegated = source.strip_prefix("ytdl:");
-    let target = http_url(delegated.unwrap_or(source)).map_err(|_| {
-        error("backend media and video handoffs require an HTTP(S) target/base URL")
-    })?;
-    let url = if delegated.is_some() {
-        Url::parse(source)?
-    } else {
-        target.clone()
-    };
     let marker = metadata.get("_ytdl_manifest").filter(|v| !v.is_null());
     let inline_data = metadata.get("_ytdl_manifest_data").filter(|v| !v.is_null());
-    if marker.is_none() && inline_data.is_some() {
-        return Err(error("inline manifest data requires _ytdl_manifest"));
-    }
-    let job = if let Some(marker) = marker {
-        let protocol = match marker.as_str() {
-            Some("hls") => ManifestProtocol::Hls,
-            Some("dash") => ManifestProtocol::Dash,
-            _ => return Err(error("unsupported backend manifest type")),
-        };
-        let inline_data = inline_data
-            .map(|data| {
-                data.as_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| error("backend inline manifest data must be a string"))
-            })
-            .transpose()?;
-        MediaJob::Manifest {
-            protocol,
-            base_url: target,
-            inline_data,
+    let (url, job) = if let Some(data) = source.strip_prefix("text:") {
+        if marker.is_some() || inline_data.is_some() {
+            return Err(error("inline text cannot contain a manifest handoff"));
         }
-    } else if delegated.is_some() {
-        MediaJob::VideoPage { page_url: target }
-    } else if let Some(protocol) = manifest_protocol(&target) {
-        MediaJob::Manifest {
-            protocol,
-            base_url: target,
-            inline_data: None,
-        }
+        inline_text(data.to_owned())?
     } else {
-        MediaJob::DirectHttp
+        let delegated = source.strip_prefix("ytdl:");
+        let target = http_url(delegated.unwrap_or(source)).map_err(|_| {
+            error("backend media and video handoffs require an HTTP(S) target/base URL")
+        })?;
+        let url = if delegated.is_some() {
+            Url::parse(source)?
+        } else {
+            target.clone()
+        };
+        if marker.is_none() && inline_data.is_some() {
+            return Err(error("inline manifest data requires _ytdl_manifest"));
+        }
+        let job = if let Some(marker) = marker {
+            let protocol = match marker.as_str() {
+                Some("hls") => ManifestProtocol::Hls,
+                Some("dash") => ManifestProtocol::Dash,
+                _ => return Err(error("unsupported backend manifest type")),
+            };
+            let inline_data = inline_data
+                .map(|data| {
+                    data.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| error("backend inline manifest data must be a string"))
+                })
+                .transpose()?;
+            MediaJob::Manifest {
+                protocol,
+                base_url: target,
+                inline_data,
+            }
+        } else if delegated.is_some() {
+            MediaJob::VideoPage { page_url: target }
+        } else if let Some(protocol) = manifest_protocol(&target) {
+            MediaJob::Manifest {
+                protocol,
+                base_url: target,
+                inline_data: None,
+            }
+        } else {
+            MediaJob::DirectHttp
+        };
+        (url, job)
     };
     let handoff = metadata
         .iter()
@@ -614,15 +685,50 @@ fn compatibility_metadata(
         retweet_id: context_id("retweet_id"),
         quoted_by_id: context_id("quote_id"),
         reposted_by_id: None,
+        article: compatibility_article(data.get("article")),
         post_id,
         media_id,
         shortcode,
-        username,
-        caption,
+        username: username.map(std::sync::Arc::from),
+        caption: caption.map(std::sync::Arc::from),
         timestamp: data.get("date").and_then(|date| match date {
             Value::String(value) => crate::date::parse_date(value).ok(),
             value => value.as_i64(),
         }),
         index,
+    })
+}
+
+// Admit only public article fields; never retain an arbitrary backend object.
+fn compatibility_article(value: Option<&Value>) -> Option<crate::twitter::ArticleMetadata> {
+    let data = value?.as_object()?;
+    let timestamp = |key: &str| {
+        data.get(key)
+            .and_then(|value| match value {
+                Value::String(value) => crate::date::parse_date(value).ok(),
+                value => value.as_i64(),
+            })
+            .filter(|value| *value >= 0)
+    };
+    let id = data
+        .get("id")
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.clone()),
+            Value::Number(value) if value.is_u64() => Some(value.to_string()),
+            _ => None,
+        })
+        .filter(|id| crate::twitter::valid_id(id));
+    Some(crate::twitter::ArticleMetadata {
+        id,
+        title: data
+            .get("title")
+            .and_then(Value::as_str)
+            .map(std::sync::Arc::from),
+        date: timestamp("date"),
+        date_updated: timestamp("date_updated"),
+        html: data
+            .get("html")
+            .and_then(Value::as_str)
+            .map(std::sync::Arc::from),
     })
 }

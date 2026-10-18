@@ -239,6 +239,7 @@ mod tests {
                 retweet_id: None,
                 quoted_by_id: None,
                 reposted_by_id: None,
+                article: None,
                 post_id: "1".into(),
                 media_id: "1".into(),
                 shortcode: String::new(),

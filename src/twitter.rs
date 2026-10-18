@@ -12,8 +12,9 @@ use crate::{
 #[path = "twitter_expansion.rs"]
 mod expansion;
 pub use expansion::{
-    ExpansionOptions, RetweetMode, parse_response_with_card_options,
-    parse_response_with_media_options, parse_response_with_options,
+    ExpansionOptions, RetweetMode, parse_response_with_article_options,
+    parse_response_with_card_options, parse_response_with_media_options,
+    parse_response_with_options,
 };
 #[path = "twitter_media.rs"]
 mod media;
@@ -21,6 +22,9 @@ pub use media::{MediaOptions, VideoMode};
 #[path = "twitter_cards.rs"]
 mod cards;
 pub use cards::{CardMode, CardOptions};
+#[path = "twitter_articles.rs"]
+mod articles;
+pub use articles::{ArticleMetadata, ArticleOptions};
 #[path = "twitter_threads.rs"]
 mod threads;
 pub use threads::ThreadOptions;
@@ -86,6 +90,7 @@ pub struct Twitter {
     thread_options: ThreadOptions,
     media_options: MediaOptions,
     card_options: CardOptions,
+    article_options: ArticleOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -121,6 +126,7 @@ impl Twitter {
             thread_options: ThreadOptions::default(),
             media_options: MediaOptions::default(),
             card_options: CardOptions::default(),
+            article_options: ArticleOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -165,6 +171,11 @@ impl Twitter {
 
     pub fn with_card_options(mut self, options: CardOptions) -> Self {
         self.card_options = options;
+        self
+    }
+
+    pub fn with_article_options(mut self, options: ArticleOptions) -> Self {
+        self.article_options = options;
         self
     }
 
@@ -498,7 +509,7 @@ fn tweet_features() -> Value {
     Value::Object(features)
 }
 
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 20
         && id.bytes().all(|b| b.is_ascii_digit())

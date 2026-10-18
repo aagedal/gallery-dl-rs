@@ -48,6 +48,8 @@ pub struct Options {
     pub previews: Option<bool>,
     /// Attempt explicitly unavailable Twitter media when a URL is provided.
     pub unavailable: Option<bool>,
+    /// Select article metadata, cover, media, and generated documents.
+    pub articles: Option<crate::twitter::ArticleOptions>,
     /// Select embedded Twitter card media or delegated video pages.
     pub cards: Option<crate::twitter::CardMode>,
     /// Card names excluded from extraction; an empty list clears inherited entries.
@@ -113,6 +115,7 @@ impl Options {
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
             unavailable: overrides.unavailable.or(self.unavailable),
+            articles: overrides.articles.or(self.articles),
             cards: overrides.cards.or(self.cards),
             cards_blacklist: overrides
                 .cards_blacklist
@@ -182,6 +185,7 @@ struct RawRoot {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    articles: Field,
     cards: Field,
     cards_blacklist: Field,
     tweet_endpoint: Field,
@@ -221,6 +225,7 @@ struct RawExtractor {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    articles: Field,
     cards: Field,
     cards_blacklist: Field,
     tweet_endpoint: Field,
@@ -263,6 +268,7 @@ struct RawOptions {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    articles: Field,
     cards: Field,
     cards_blacklist: Field,
     tweet_endpoint: Field,
@@ -368,6 +374,7 @@ impl Config {
             videos: root.videos,
             previews: root.previews,
             unavailable: root.unavailable,
+            articles: root.articles,
             cards: root.cards,
             cards_blacklist: root.cards_blacklist,
             tweet_endpoint: root.tweet_endpoint,
@@ -405,6 +412,7 @@ impl Config {
             videos: extractor.videos,
             previews: extractor.previews,
             unavailable: extractor.unavailable,
+            articles: extractor.articles,
             cards: extractor.cards,
             cards_blacklist: extractor.cards_blacklist,
             tweet_endpoint: extractor.tweet_endpoint,
@@ -507,6 +515,7 @@ impl RawOptions {
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration unavailable must be a boolean")),
         };
+        let articles = article_options(self.articles)?;
         let cards = match self.cards.0 {
             None => None,
             Some(Value::Bool(true)) => Some(crate::twitter::CardMode::Files),
@@ -739,6 +748,7 @@ impl RawOptions {
             videos,
             previews,
             unavailable,
+            articles,
             cards,
             cards_blacklist,
             tweet_endpoint,
@@ -758,6 +768,55 @@ impl RawOptions {
             timeout,
         })
     }
+}
+
+fn article_options(field: Field) -> Result<Option<crate::twitter::ArticleOptions>> {
+    use crate::twitter::ArticleOptions;
+    let invalid = || error("native configuration articles requires a boolean or article flags");
+    let tokens = match field.0 {
+        None => return Ok(None),
+        Some(Value::Bool(true)) => return Ok(Some(ArticleOptions::default())),
+        Some(Value::Bool(false)) => return Ok(Some(ArticleOptions::disabled())),
+        Some(Value::String(value)) => {
+            if value.len() > 32 * 129 || value.chars().any(char::is_control) {
+                return Err(invalid());
+            }
+            if value.trim().is_empty() {
+                Vec::new()
+            } else {
+                value.split(',').map(str::to_owned).collect()
+            }
+        }
+        Some(Value::Array(values)) if values.len() <= 32 => values
+            .into_iter()
+            .map(|value| {
+                if let Value::String(value) = value {
+                    Ok(value)
+                } else {
+                    Err(invalid())
+                }
+            })
+            .collect::<Result<Vec<_>>>()?,
+        Some(_) => return Err(invalid()),
+    };
+    if tokens.len() > 32 {
+        return Err(invalid());
+    }
+    let mut options = ArticleOptions::disabled();
+    for token in tokens {
+        if token.len() > 128 || token.chars().any(char::is_control) {
+            return Err(invalid());
+        }
+        match token.trim() {
+            "meta" | "metadata" => options.metadata = true,
+            "cover" => options.cover = true,
+            "media" => options.media = true,
+            "html" => options.html = true,
+            "doc" | "document" => options.document = true,
+            _ => return Err(invalid()),
+        }
+    }
+    Ok(Some(options))
 }
 
 fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Option<PathBuf>)> {

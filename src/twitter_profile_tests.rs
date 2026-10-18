@@ -4440,3 +4440,195 @@ async fn unavailable_selection_propagates_to_quoted_and_threaded_unified_cards_w
         }
     }
 }
+
+fn article_post(mut post: Value) -> Value {
+    post["article"] = json!({"article_results":{"result":{
+        "rest_id":"900", "title":"Runtime article",
+        "metadata":{"first_published_at_secs":1700000000},
+        "lifecycle_state":{"modified_at_secs":1700000001},
+        "cover_media":{"media_info":{"original_img_url":"https://cdn.example/article-cover.jpg"}},
+        "media_entities":[{"media_id":"901","media_info":{"original_img_url":"https://cdn.example/article-body.png"}}],
+        "content_state":{"blocks":[{"key":"a","type":"unstyled","text":"Runtime article body"}],"entityMap":[]}
+    }}});
+    post
+}
+
+#[tokio::test]
+async fn articles_emit_documents_and_files_through_rest_id_and_detail_with_shared_metadata() {
+    for detail in [false, true] {
+        let post = article_post(tweet("100"));
+        let response = if detail {
+            detail_page(vec![post], None)
+        } else {
+            post_response(post)
+        };
+        let server = Server::new(vec![Response::json(response)]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_article_options(ArticleOptions {
+                document: true,
+                html: true,
+                ..Default::default()
+            });
+        let stream = if detail {
+            native.detail_stream_at(server.base.clone(), "100".into())
+        } else {
+            native.post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        };
+        let items: Vec<_> = stream.try_collect().await.unwrap();
+        assert_eq!(post_ids(&items), ["100"; 4]);
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["100_1.jpg", "100_2.html", "100_3.jpg", "100_4.png"]
+        );
+        let crate::extract::MediaJob::InlineText { data } = &items[1].job else {
+            panic!("article document was not inline text")
+        };
+        assert!(data.contains("Runtime article body"));
+        assert_eq!(items[2].url.path(), "/article-cover.jpg");
+        assert_eq!(items[3].url.path(), "/article-body.png");
+        let first = items[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .article
+            .as_ref()
+            .unwrap();
+        assert_eq!(first.id.as_deref(), Some("900"));
+        assert_eq!(first.title.as_deref(), Some("Runtime article"));
+        assert_eq!(first.date, Some(1700000000));
+        assert_eq!(first.date_updated, Some(1700000001));
+        assert!(
+            first
+                .html
+                .as_deref()
+                .unwrap()
+                .contains("Runtime article body")
+        );
+        for item in &items[1..] {
+            let article = item.metadata.as_ref().unwrap().article.as_ref().unwrap();
+            assert!(Arc::ptr_eq(
+                first.html.as_ref().unwrap(),
+                article.html.as_ref().unwrap()
+            ));
+        }
+        let keys: std::collections::HashSet<_> = items
+            .iter()
+            .map(|item| item.archive_key().unwrap())
+            .collect();
+        assert_eq!(keys.len(), 4);
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn quoted_and_expanded_thread_articles_keep_inline_options_and_drop_before_followups() {
+    for thread in [false, true] {
+        let id = if thread { "90" } else { "101" };
+        let mut child = article_post(text_tweet(id));
+        child["legacy"]["quoted_status_id_str"] = json!("102");
+        let responses = if thread {
+            vec![
+                Response::json(page(
+                    vec![in_thread(tweet("100"), json!("90"))],
+                    Some("parent-next"),
+                )),
+                Response::json(detail_page(vec![child], Some("child-next"))),
+                Response::json(detail_page(vec![tweet("102")], None)),
+            ]
+        } else {
+            vec![
+                Response::json(post_response(quoted_tweet("100", id))),
+                Response::json(post_response(child)),
+                Response::json(post_response(tweet("102"))),
+            ]
+        };
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_article_options(ArticleOptions {
+                document: true,
+                html: true,
+                cover: false,
+                media: false,
+                ..Default::default()
+            })
+            .with_expansion(expansion_options(RetweetMode::Skip))
+            .with_thread_options(ThreadOptions {
+                expand: thread,
+                unique: true,
+            });
+        let stream = if thread {
+            native.media_stream(input("id:42"), server.base.clone())
+        } else {
+            native.post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        };
+        let items: Vec<_> = stream
+            .take(if thread { 1 } else { 2 })
+            .try_collect()
+            .await
+            .unwrap();
+        let document = items.last().unwrap();
+        assert_eq!(document.metadata.as_ref().unwrap().post_id, id);
+        assert_eq!(document.filename, format!("{id}_1.html"));
+        assert!(matches!(
+            document.job,
+            crate::extract::MediaJob::InlineText { .. }
+        ));
+        assert!(
+            document
+                .metadata
+                .as_ref()
+                .unwrap()
+                .article
+                .as_ref()
+                .unwrap()
+                .html
+                .is_some()
+        );
+        assert_eq!(
+            document.metadata.as_ref().unwrap().quoted_by_id.as_deref(),
+            if thread { None } else { Some("100") }
+        );
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn default_articles_ignore_null_and_malformed_optional_data_and_continue_later_pages() {
+    let mut null_article = tweet("100");
+    null_article["article"] = Value::Null;
+    let mut malformed_text = text_tweet("101");
+    malformed_text["article"] = json!({"article_results":{"result":{"rest_id":"900","title":{"private":"PRIVATE-ARTICLE-PAYLOAD"}}}});
+    let mut malformed_photo = tweet("102");
+    malformed_photo["article"] = json!({"article_results":"PRIVATE-ARTICLE-PAYLOAD"});
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![null_article, malformed_text, malformed_photo],
+            Some("later-page"),
+        )),
+        Response::json(page(vec![tweet("103")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "102", "103"]);
+    assert_eq!(server.count(), 2);
+    assert_eq!(variables(&server.urls()[1])["cursor"], "later-page");
+    assert!(
+        !serde_json::to_string(&items)
+            .unwrap()
+            .contains("PRIVATE-ARTICLE-PAYLOAD")
+    );
+    assert!(
+        items
+            .iter()
+            .all(|item| item.metadata.as_ref().unwrap().article.is_none())
+    );
+}

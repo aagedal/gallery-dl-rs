@@ -29,8 +29,11 @@ pub(super) fn parse_tweet_media(
     options: MediaOptions,
     card_options: &CardOptions,
     card_source: &Value,
+    article_options: ArticleOptions,
 ) -> Result<Vec<Media>> {
     let has_card = card_options.mode != CardMode::Skip && card_source.get("card").is_some();
+    let has_article =
+        article_options != ArticleOptions::disabled() && card_source.get("article").is_some();
     let empty = Vec::new();
     let legacy = &tweet["legacy"];
     let items = match legacy.get("extended_entities") {
@@ -45,25 +48,25 @@ pub(super) fn parse_tweet_media(
             {
                 return Err(error("Twitter post extended media missing"));
             }
-            if !allow_empty && !has_card {
+            if !allow_empty && !has_card && !has_article {
                 return Err(error("Twitter post has no downloadable media"));
             }
             &empty
         }
     };
-    if items.is_empty() && !allow_empty && !has_card {
+    if items.is_empty() && !allow_empty && !has_card && !has_article {
         return Err(error("Twitter post has no downloadable media"));
     }
     let username = tweet
         .pointer("/core/user_results/result/core/screen_name")
         .or_else(|| tweet.pointer("/core/user_results/result/legacy/screen_name"))
         .and_then(Value::as_str)
-        .map(str::to_owned);
+        .map(std::sync::Arc::from);
     let caption = tweet
         .pointer("/note_tweet/note_tweet_results/result/text")
         .or_else(|| legacy.get("full_text"))
         .and_then(Value::as_str)
-        .map(str::to_owned);
+        .map(std::sync::Arc::from);
     let timestamp = legacy
         .get("created_at")
         .and_then(Value::as_str)
@@ -75,6 +78,8 @@ pub(super) fn parse_tweet_media(
         options,
         card_options,
     )?);
+    let (article_files, article) = articles::select(card_source, article_options);
+    selected.extend(article_files);
     // gallery-dl numbers files after selection, including previews after their video.
     Ok(selected
         .into_iter()
@@ -89,6 +94,7 @@ pub(super) fn parse_tweet_media(
                 retweet_id: None,
                 quoted_by_id: None,
                 reposted_by_id: None,
+                article: article.clone(),
                 post_id: requested_post_id.into(),
                 media_id: (i + 1).to_string(),
                 shortcode: String::new(),

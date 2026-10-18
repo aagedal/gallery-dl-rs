@@ -136,7 +136,9 @@ impl FilenameTemplate {
                                 "post_id" => metadata.post_id.clone(),
                                 "media_id" => metadata.media_id.clone(),
                                 "shortcode" => metadata.shortcode.clone(),
-                                "username" => metadata.username.clone().unwrap_or_default(),
+                                "username" => {
+                                    metadata.username.as_deref().unwrap_or_default().to_owned()
+                                }
                                 "timestamp" => metadata
                                     .timestamp
                                     .map(|v| v.to_string())

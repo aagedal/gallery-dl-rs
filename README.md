@@ -325,6 +325,36 @@ Disabled/blacklisted payloads are skipped. Image-size fallback chains, richer ca
 metadata, and real authenticated card captures remain unfinished. Library callers
 can use `Twitter::with_card_options` and `parse_response_with_card_options`.
 
+X articles default to `"articles": true`, selecting article metadata, cover,
+and embedded images after ordinary post/card media. Metadata includes the article
+ID, title, publication time, and update time. `false` disables article parsing.
+A comma-separated string or list selects flags: `meta`/`metadata`, `cover`,
+`media`, `html`, and `doc`/`document`. For example,
+`"articles": ["meta", "doc", "cover", "media"]` saves a standalone HTML document
+before the article images. `html` adds the rendered fragment to inspection
+metadata; it does not add a file. Empty strings/lists disable all flags.
+
+Article files share post order and consecutive file/archive positions. Repost
+mode uses the outer post's article; original mode uses the original article.
+Quotes and expanded threads retain their configured article flags. Malformed
+optional articles stop article processing while preserving metadata/files already
+selected and allowing later posts/pages to continue. The renderer supports text,
+atomic blocks, lists, media/dividers, LaTeX annotations, mentions, URLs, and inline
+styles; unsupported or malformed content can omit later article output. Text and
+attributes are escaped, links require HTTP(S), and rendered output is bounded to
+16 MiB. Documents reference remote images; they do not bundle local image files.
+
+Compatibility `text:` messages and native article documents now use typed
+inline-text jobs. Downloads save exact UTF-8 bytes atomically, apply size limits,
+and use normal archive/sidecar checks without an HTTP request or resume checkpoint.
+Inspection URLs percent-encode inline content; the job retains its exact original
+bytes. Article HTML is omitted from metadata sidecars so referenced media URLs
+are not copied there; article ID/title/dates remain. Native and compatibility
+settings forward only for X when explicit. Live authenticated article verification,
+image-size fallbacks, broader content variants, and upstream-style warning output
+for recovered article errors remain unfinished. Library callers can use
+`Twitter::with_article_options` and `parse_response_with_article_options`.
+
 Experimental X profile timelines use `Twitter::stream` and the native CLI at
 `/USERNAME/media`, `/USERNAME/tweets`, `/USERNAME/with_replies`, and
 `/USERNAME/highlights`, with equivalent `/id:USER_ID/TAB` forms on X/Twitter hosts.
@@ -416,7 +446,7 @@ date filtering preserves source order because bookmark, like, list, and ranked
 feed order need not match original post dates. No collection request credentials
 are copied to media requests.
 
-Articles, communities, list membership/follow relations, arbitrary
+Communities, list membership/follow relations, arbitrary
 root-profile dispatch selection, cursor-resume configuration,
 text-only output, and other collection routes remain
 unfinished. New collection behavior has synthetic/local coverage; successful
@@ -869,17 +899,16 @@ conditional directory templates, automatic discovery, and postprocessors remain 
 
 ## Limitations
 
-Facebook extraction is **not native Rust**, and live authenticated social downloads
-have not been verified in this repository. Native Instagram and Twitter/X use
-undocumented endpoints that may change; fixture tests establish parser and
-transport behavior, not current live coverage. Tests exercise all three routing paths
-with a fixture backend and HTTP downloads with a local server. Facebook coverage
-in particular must be checked against the installed backend before relying on it.
+Native Instagram, Facebook, and Twitter/X remain experimental, and live
+authenticated social downloads have not been verified in this repository.
+Their undocumented endpoints may change; fixture tests establish parser and
+transport behavior. Anonymous Facebook video extraction has been checked, but
+complete live downloads and authenticated coverage remain unverified.
 
-Only direct HTTP(S) media is downloaded. Extraction retains typed direct HTTP,
-video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
-source; `-j` includes the job kind and manifest protocol/base URL. Inline manifest
-data, headers, cookies, and other private handoff options are omitted from JSON.
+Direct HTTP(S) media and inline-text jobs are downloaded. Extraction retains
+typed direct HTTP, inline-text, video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
+source; `-j` includes the job kind and manifest protocol/base URL. Inline job bodies, headers, cookies, and other private handoff options are omitted
+from their job fields in JSON. Inline-text inspection URLs carry encoded text.
 The JSON output is for inspection, not a lossless job export. Different inline
 manifests with the same source can therefore look identical in inspection output.
 

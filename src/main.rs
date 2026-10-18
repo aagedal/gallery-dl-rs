@@ -447,6 +447,7 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_article_options(options.articles.unwrap_or_default())
                                     .with_card_options(CardOptions {
                                         mode: options.cards.unwrap_or_default(),
                                         blacklist: options
@@ -535,6 +536,9 @@ fn extract_input<'a>(
                             unique: (category == "twitter").then_some(options.unique).flatten(),
                             unavailable: (category == "twitter")
                                 .then_some(options.unavailable)
+                                .flatten(),
+                            articles: (category == "twitter")
+                                .then_some(options.articles)
                                 .flatten(),
                             cards: (category == "twitter").then_some(options.cards).flatten(),
                             cards_blacklist: (category == "twitter")
@@ -632,6 +636,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         videos: None,
         previews: None,
         unavailable: None,
+        articles: None,
         cards: None,
         cards_blacklist: None,
         tweet_endpoint: None,

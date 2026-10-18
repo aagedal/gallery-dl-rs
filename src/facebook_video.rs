@@ -87,6 +87,7 @@ pub fn parse_video(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                     retweet_id: None,
                     quoted_by_id: None,
                     reposted_by_id: None,
+                    article: None,
                     post_id: requested_id.into(),
                     media_id: format!("{requested_id}.{extension}"),
                     shortcode: String::new(),
@@ -94,12 +95,12 @@ pub fn parse_video(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                         .pointer("/owner/username")
                         .and_then(Value::as_str)
                         .filter(|name| !name.is_empty())
-                        .map(str::to_owned),
+                        .map(std::sync::Arc::from),
                     caption: node
                         .pointer("/creation_story/message/text")
                         .or_else(|| node.pointer("/message/text"))
                         .and_then(Value::as_str)
-                        .map(str::to_owned),
+                        .map(std::sync::Arc::from),
                     timestamp: node
                         .get("publish_time")
                         .or_else(|| node.get("created_time"))

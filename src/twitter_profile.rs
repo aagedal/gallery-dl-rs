@@ -150,6 +150,7 @@ impl Twitter {
                         };
                         state.engine = Some(
                             expansion::Engine::new(root, state.id.clone(), self.expansion, false)
+                                .with_article_options(self.article_options)
                                 .with_card_options(self.card_options.clone())
                                 .with_media_options(self.media_options)
                                 .with_replies(self.profile_options.replies, owner),
@@ -401,6 +402,7 @@ impl Twitter {
             if let Some((id, post)) = thread.posts.pop_front() {
                 state.expansion = Some(
                     expansion::Engine::new(post, id, self.expansion, true)
+                        .with_article_options(self.article_options)
                         .with_card_options(self.card_options.clone())
                         .with_media_options(self.media_options)
                         .with_replies(self.profile_options.replies, state.owner.clone()),
@@ -422,6 +424,7 @@ impl Twitter {
                         self.expansion,
                         true,
                     )
+                    .with_article_options(self.article_options)
                     .with_card_options(self.card_options.clone())
                     .with_media_options(self.media_options)
                     .with_replies(self.profile_options.replies, state.owner.clone()),
@@ -465,6 +468,7 @@ impl Twitter {
             }
             state.expansion = Some(
                 expansion::Engine::new(post, id, self.expansion, true)
+                    .with_article_options(self.article_options)
                     .with_card_options(self.card_options.clone())
                     .with_media_options(self.media_options)
                     .with_replies(self.profile_options.replies, state.owner.clone()),

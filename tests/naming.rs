@@ -14,6 +14,7 @@ fn media() -> Media {
             retweet_id: None,
             quoted_by_id: None,
             reposted_by_id: None,
+            article: None,
             post_id: "123".into(),
             media_id: "456".into(),
             shortcode: "BA".into(),

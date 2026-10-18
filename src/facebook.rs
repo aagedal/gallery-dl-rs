@@ -459,6 +459,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 retweet_id: None,
                 quoted_by_id: None,
                 reposted_by_id: None,
+                article: None,
                 post_id: requested_id.into(),
                 media_id: format!("{requested_id}.{extension}"),
                 shortcode: String::new(),
@@ -466,12 +467,12 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                     .pointer("/owner/username")
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty())
-                    .map(str::to_owned),
+                    .map(std::sync::Arc::from),
                 caption: photo
                     .pointer("/creation_story/message/text")
                     .or_else(|| photo.pointer("/message/text"))
                     .and_then(Value::as_str)
-                    .map(str::to_owned),
+                    .map(std::sync::Arc::from),
                 timestamp: photo.get("created_time").and_then(Value::as_i64),
                 index: 1,
             }),

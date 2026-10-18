@@ -48,6 +48,7 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
         retweet_id: None,
         quoted_by_id: None,
         reposted_by_id: None,
+        article: None,
         post_id: "post-1".into(),
         media_id: "media-2".into(),
         shortcode: "example".into(),
