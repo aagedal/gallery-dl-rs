@@ -1,4 +1,5 @@
 pub mod archive;
+pub mod config;
 pub mod cookies;
 pub mod download;
 pub mod extract;

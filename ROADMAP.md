@@ -139,8 +139,22 @@ category directory, are sanitized to safe ASCII, and are bounded to 240 bytes
 while preserving the final extension. Unsupported syntax and unavailable values
 fail explicitly. Downloads, sidecars, archive recording, and no-overwrite behavior
 share the same rendered destination. Default names remain unchanged. This is a
-documented subset, not full gallery-dl formatting compatibility; native
-configuration, directory templates, expressions, and additional sites remain.
+documented subset, not full gallery-dl formatting compatibility; directory
+templates, expressions, and additional sites remain.
+
+**Implemented configuration step:** `--native-config` accepts an explicit strict
+subset of gallery-dl's JSON scopes: extractor defaults, category settings, and
+root overrides, followed by explicit CLI flags. Supported settings include
+base-directory, filename, cookies, archive, retries, and fractional-second timeout.
+Paths are anchored to the configuration directory, and unknown/unsupported values
+fail without echoing private input. The same settings drive Rust media downloads,
+per-category compatibility cookie arguments, and native Instagram credentials,
+retries, and per-request deadlines. The overall extraction deadline remains
+separate. Inspection opens no configured archives and creates no output paths.
+Tests cover schema, scope/CLI precedence, relative paths, credentials selection,
+fractional timeouts, retry counts, and separate compatibility configuration.
+Full configuration compatibility, discovery, directory templates, and
+postprocessors remain.
 
 ### Companion yt-dlp-rs integration
 

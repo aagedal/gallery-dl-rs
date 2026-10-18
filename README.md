@@ -62,6 +62,7 @@ it is invoked directly, without a shell.
 `/p/`, `/reel/`, and `/tv/` single-post URLs only; Facebook, Twitter/X, profiles,
 stories, and albums still need the compatibility backend. There is no automatic
 fallback. Native mode rejects `--config`, which contains gallery-dl settings.
+Use `--native-config` for settings applied by Rust with either extractor backend.
 
 The native extractor reads Netscape cookies scoped to the API URL's domain, path,
 HTTPS requirement, and expiry. Response `Set-Cookie` updates, including session
@@ -80,8 +81,10 @@ HTTP 5xx, and send/read transport failures as well as downloads. Authentication,
 missing-post, rejected-redirect, and parser errors are not retried; this includes
 rate-limit payloads returned with HTTP 200. `--extraction-timeout` bounds the entire
 native operation, including backoff and cooldown waits, with a 16 MiB response
-limit per attempt. Library callers retain zero retries with `Instagram::new` and can opt in
-with `with_retries`.
+limit per attempt. `--timeout` also bounds each native HTTP request (default 60
+seconds), inside that overall deadline. Library callers retain zero retries with
+`Instagram::new` and can opt in with `with_retries`; `with_request_timeout` sets a
+separate request deadline.
 
 Native responses include all carousel children in order and select the largest
 available photo or direct video variant by pixel area. Missing children or video
@@ -89,6 +92,56 @@ variants fail extraction rather than silently downloading a partial post or vide
 thumbnail. JSON includes post/media IDs, shortcode, username, caption, timestamp,
 and a one-based carousel index. Media requests carry user-agent/referer headers;
 Instagram session cookies are never copied to media hosts.
+
+## Native configuration
+
+`--native-config settings.json` loads an explicit, strict subset of
+[gallery-dl's JSON configuration structure](https://gdl-org.github.io/docs/configuration.html).
+It works with native and compatibility extraction;
+`--config` remains a separate file passed only to the compatibility executable.
+Neither configuration file is loaded automatically.
+
+```json
+{
+  "extractor": {
+    "base-directory": "downloads",
+    "retries": 2,
+    "timeout": 60,
+    "instagram": {
+      "cookies": "cookies.txt",
+      "archive": "instagram.sqlite3",
+      "filename": "{post_id}_{media_id}.{extension}"
+    },
+    "direct": {
+      "filename": "{filename}"
+    }
+  }
+}
+```
+
+Supported settings are `base-directory`, `filename`, `cookies`, `archive`,
+`retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+They can appear at the root, under `extractor`, or under `extractor.instagram`,
+`extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
+built-in defaults, extractor defaults, category settings, root settings, then
+explicit CLI flags. In particular, an explicit `--retries 2` or `--timeout 60`
+overrides a different configured value even though it equals the built-in default.
+
+Configuration paths are literal and relative to the configuration file's parent
+directory. CLI paths remain relative to the working directory. Cookies apply to
+social extraction; retries/timeouts apply to Rust downloads and native extraction
+(the compatibility executable retains its own network settings). Native extraction
+also retains its overall `--extraction-timeout`. Category settings select each
+media item's destination, filename, and archive. Inspection with `-g`/`-j` performs
+extraction without creating configured destinations or opening archives.
+The CLI also accepts fractional `--timeout` seconds; zero, non-finite values, and
+timeouts outside the monotonic clock's range or precision are rejected.
+
+Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, nulls,
+unsupported types, hooks, environment expansion, and conditional values fail
+explicitly. Filenames use the native template subset described below; archive
+files use the Rust archive format. Full gallery-dl configuration compatibility,
+directory templates, automatic discovery, and postprocessors remain unimplemented.
 
 ## Current behavior
 
@@ -253,6 +306,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/download.rs` owns request headers, downloads, retries, and file publication.
 `src/archive.rs` owns SQLite completed-media history and archive-aware downloads.
 `src/naming.rs` owns native filename template parsing and safe basename rendering.
+`src/config.rs` owns native configuration parsing, validation, and precedence.
 `src/resume.rs` owns locked partial files and durable checkpoints;
 `src/range.rs` validates resumable HTTP representations and ranges.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads

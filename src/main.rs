@@ -3,6 +3,7 @@ use futures_util::{StreamExt, stream};
 use gallery_dl_rs::{
     Result,
     archive::{Archive, ArchiveOutcome},
+    config::{Config, Options as ConfigOptions},
     download::{self, DownloadOptions, Outcome},
     error,
     extract::{self, Backend},
@@ -10,7 +11,12 @@ use gallery_dl_rs::{
     naming::FilenameTemplate,
 };
 use sha2::{Digest, Sha256};
-use std::{cell::Cell, collections::HashSet, path::PathBuf, time::Duration};
+use std::{
+    cell::Cell,
+    collections::{BTreeMap, HashSet},
+    path::PathBuf,
+    time::Duration,
+};
 
 #[derive(Parser)]
 #[command(
@@ -21,8 +27,9 @@ struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
     #[arg(required = true)]
     urls: Vec<String>,
-    #[arg(short, long, default_value = "downloads")]
-    destination: PathBuf,
+    /// Output root (default: downloads)
+    #[arg(short, long)]
+    destination: Option<PathBuf>,
     /// Maximum simultaneous downloads
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=32))]
     jobs: u8,
@@ -53,23 +60,36 @@ struct Args {
     /// Explicit gallery-dl configuration file (default config is ignored)
     #[arg(short, long)]
     config: Option<PathBuf>,
+    /// Explicit native JSON settings (separate from compatibility backend config)
+    #[arg(long)]
+    native_config: Option<PathBuf>,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
     /// Total seconds allowed for each social URL's extraction
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
-    /// Seconds allowed per media attempt and per rate-limit wait
-    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..))]
-    timeout: u64,
-    /// Additional download/native extraction attempts on rate limits, server or transport errors
-    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=10))]
-    retries: u8,
+    /// Seconds per media attempt/native HTTP request (default: 60)
+    #[arg(long, value_parser = parse_timeout)]
+    timeout: Option<Duration>,
+    /// Additional download/native extraction attempts (default: 2)
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=10))]
+    retries: Option<u8>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Extractor {
     Compatibility,
     Native,
+}
+
+fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
+    let invalid = || "timeout must be positive finite seconds within the clock range".to_owned();
+    let seconds = value.parse::<f64>().map_err(|_| invalid())?;
+    let timeout = Duration::try_from_secs_f64(seconds).map_err(|_| invalid())?;
+    if timeout.is_zero() || std::time::Instant::now().checked_add(timeout).is_none() {
+        return Err(invalid());
+    }
+    Ok(timeout)
 }
 
 #[tokio::main]
@@ -99,31 +119,30 @@ async fn run(args: Args) -> Result<()> {
             "--config is only supported with --extractor compatibility",
         ));
     }
-    let filename = args
-        .filename
-        .as_deref()
-        .map(FilenameTemplate::parse)
-        .transpose()?;
-    let archive = match &args.download_archive {
-        Some(path) => Some(Archive::open(path).await?),
-        None => None,
-    };
-    let native = if matches!(args.extractor, Extractor::Native) {
+    let settings = resolved_settings(&args).await?;
+    let instagram_settings = &settings["instagram"];
+    let native = if matches!(args.extractor, Extractor::Native)
+        && args.urls.iter().any(|source| {
+            extract::http_url(source)
+                .ok()
+                .is_some_and(|url| extract::social_site(&url) == Some("instagram"))
+        }) {
         Some(
             Instagram::new(
-                args.cookies.as_deref(),
+                instagram_settings.options.cookies.as_deref(),
                 Duration::from_secs(args.extraction_timeout),
             )
             .await?
-            .with_retries(args.retries),
+            .with_retries(instagram_settings.options.retries.unwrap())
+            .with_request_timeout(instagram_settings.options.timeout.unwrap()),
         )
     } else {
         None
     };
     let backend = Backend {
-        executable: args.extractor_command,
-        cookies: args.cookies,
-        config: args.config,
+        executable: args.extractor_command.clone(),
+        cookies: None,
+        config: args.config.clone(),
         timeout: Duration::from_secs(args.extraction_timeout),
     };
     let failed = Cell::new(0);
@@ -135,8 +154,10 @@ async fn run(args: Args) -> Result<()> {
             let native = &native;
             let backend = &backend;
             let failed = &failed;
+            let settings = &settings;
             async move {
-                let result = extract_input(source, native.as_ref(), backend).await;
+                let result =
+                    extract_input(source, native.as_ref(), backend, args.extractor, settings).await;
                 match result {
                     Ok(items) => items,
                     Err(e) => {
@@ -162,15 +183,18 @@ async fn run(args: Args) -> Result<()> {
             println!("{}", item.url);
         }
     } else {
-        let client = download::client(Duration::from_secs(args.timeout))?.with_resume(args.resume);
+        let client = download::client(Duration::from_secs(60))?.with_resume(args.resume);
         let results = media
             .map(|item| {
-                let client = &client;
-                let destination = &args.destination;
-                let archive = &archive;
-                let filename = filename.as_ref();
+                let settings = &settings[item.category.as_str()];
+                let client = client
+                    .clone()
+                    .with_timeout(settings.options.timeout.unwrap());
+                let destination = settings.options.base_directory.as_ref().unwrap();
+                let archive = &settings.archive;
+                let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
-                    retries: args.retries,
+                    retries: settings.options.retries.unwrap(),
                     write_metadata: args.write_metadata,
                 };
                 async move {
@@ -178,7 +202,7 @@ async fn run(args: Args) -> Result<()> {
                         Some(archive) => {
                             archive
                                 .download_with_template(
-                                    client,
+                                    &client,
                                     destination,
                                     &item,
                                     options,
@@ -187,7 +211,7 @@ async fn run(args: Args) -> Result<()> {
                                 .await
                         }
                         None => download::download_with_template(
-                            client,
+                            &client,
                             destination,
                             &item,
                             options,
@@ -228,19 +252,28 @@ async fn extract_input(
     source: &str,
     native: Option<&Instagram>,
     backend: &Backend,
+    extractor: Extractor,
+    settings: &BTreeMap<&str, Settings>,
 ) -> Result<Vec<extract::Media>> {
     let url = extract::http_url(source)?;
     // Social pages always go through their extractor, even if their path
     // happens to end with a media extension.
-    if extract::social_site(&url).is_some() {
-        match native {
-            Some(native) if extract::social_site(&url) == Some("instagram") => {
-                native.extract(&url).await
+    if let Some(category) = extract::social_site(&url) {
+        match extractor {
+            Extractor::Native if category == "instagram" => {
+                native
+                    .ok_or_else(|| error("native Instagram extractor was not initialized"))?
+                    .extract(&url)
+                    .await
             }
-            Some(_) => Err(error(
+            Extractor::Native => Err(error(
                 "native extraction currently supports Instagram single posts only; use --extractor compatibility",
             )),
-            None => backend.extract(&url).await,
+            Extractor::Compatibility => {
+                let mut backend = backend.clone();
+                backend.cookies = settings[category].options.cookies.clone();
+                backend.extract(&url).await
+            }
         }
     } else if let Some(item) = extract::direct(&url) {
         Ok(vec![item])
@@ -249,4 +282,74 @@ async fn extract_input(
             "unsupported URL; expected a social URL or direct media file",
         ))
     }
+}
+
+struct Settings {
+    options: ConfigOptions,
+    filename: Option<FilenameTemplate>,
+    archive: Option<Archive>,
+}
+
+async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
+    let config = match &args.native_config {
+        Some(path) => Config::load(path).await?,
+        None => Config::default(),
+    };
+    let defaults = ConfigOptions {
+        base_directory: Some(PathBuf::from("downloads")),
+        retries: Some(2),
+        timeout: Some(Duration::from_secs(60)),
+        ..ConfigOptions::default()
+    };
+    let overrides = ConfigOptions {
+        base_directory: args.destination.clone(),
+        filename: args.filename.clone(),
+        cookies: args.cookies.clone(),
+        archive: args.download_archive.clone(),
+        retries: args.retries,
+        timeout: args.timeout,
+    };
+    let mut settings = BTreeMap::new();
+    for category in ["instagram", "twitter", "facebook", "direct"] {
+        let options = defaults
+            .overlay(&config.resolve(category)?)
+            .overlay(&overrides);
+        let filename = options
+            .filename
+            .as_deref()
+            .map(FilenameTemplate::parse)
+            .transpose()?;
+        settings.insert(
+            category,
+            Settings {
+                options,
+                filename,
+                archive: None,
+            },
+        );
+    }
+    // Inspection needs no archive connection or output directory. Open archives
+    // only for categories present among valid inputs, and share same-path instances.
+    if !args.get_urls && !args.dump_json {
+        let mut archives = BTreeMap::new();
+        for source in &args.urls {
+            let Ok(url) = extract::http_url(source) else {
+                continue;
+            };
+            let category = extract::social_site(&url).unwrap_or("direct");
+            let settings = settings.get_mut(category).unwrap();
+            if let Some(path) = &settings.options.archive {
+                let archive = match archives.get(path) {
+                    Some(archive) => Archive::clone(archive),
+                    None => {
+                        let archive = Archive::open(path).await?;
+                        archives.insert(path.clone(), archive.clone());
+                        archive
+                    }
+                };
+                settings.archive = Some(archive);
+            }
+        }
+    }
+    Ok(settings)
 }

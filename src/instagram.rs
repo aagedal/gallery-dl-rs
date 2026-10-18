@@ -23,6 +23,7 @@ pub struct Instagram {
     client: Client,
     cookies: Mutex<CookieJar>,
     timeout: Duration,
+    request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
 }
@@ -41,6 +42,7 @@ impl Instagram {
                 .build()?,
             cookies: Mutex::new(cookies),
             timeout,
+            request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
         })
@@ -50,6 +52,12 @@ impl Instagram {
     /// The extraction timeout covers all attempts and waits. Defaults to zero.
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;
+        self
+    }
+
+    /// Bound each HTTP request separately from the overall extraction deadline.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
         self
     }
 
@@ -94,6 +102,7 @@ impl Instagram {
             let mut request = self
                 .client
                 .get(target.clone())
+                .timeout(self.request_timeout)
                 .header(header::ACCEPT, "application/json")
                 .header(
                     header::REFERER,
@@ -389,6 +398,22 @@ mod transport_tests {
     };
 
     const PHOTO: &[u8] = include_bytes!("../tests/fixtures/instagram/photo.json");
+
+    #[tokio::test]
+    async fn request_timeout_is_separate_from_the_overall_extraction_deadline() {
+        let (endpoint, server) = serve_once("200 OK", "", PHOTO, Duration::from_millis(200));
+        let native = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_request_timeout(Duration::from_millis(50));
+        let message = native
+            .extract_endpoint(&endpoint, "BA")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("Instagram request failed"), "{message}");
+        server.join().unwrap();
+    }
 
     fn serve_once(
         status: &str,
