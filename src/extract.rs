@@ -439,8 +439,10 @@ fn compatibility_metadata(
         shortcode,
         username,
         caption,
-        // Upstream formatted datetimes are intentionally not treated as epochs.
-        timestamp: data.get("date").and_then(Value::as_i64),
+        timestamp: data.get("date").and_then(|date| match date {
+            Value::String(value) => crate::date::parse_date(value).ok(),
+            value => value.as_i64(),
+        }),
         index,
     })
 }

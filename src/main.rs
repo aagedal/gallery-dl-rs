@@ -9,6 +9,7 @@ use gallery_dl_rs::{
     browser::FirefoxProfile,
     config::{Config, Options as ConfigOptions},
     cookies::CookieJar,
+    date::{DateFilter, parse_date},
     download::{self, DownloadOptions, Outcome},
     error,
     extract::{self, Backend},
@@ -53,6 +54,12 @@ struct Args {
     /// Select one-based file positions per input (e.g. 5, 8-20, or 1:24:3)
     #[arg(long = "range", allow_hyphen_values = true)]
     file_range: Option<String>,
+    /// Process posts created before this UTC date or Unix timestamp (exclusive)
+    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
+    date_before: Option<i64>,
+    /// Stop this input at a post on or before this UTC date or Unix timestamp
+    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
+    date_after: Option<i64>,
     /// Minimum media size in bytes or binary units, e.g. 500k or 2.5M
     #[arg(long, value_parser = parse_size)]
     filesize_min: Option<u64>,
@@ -112,6 +119,10 @@ struct Args {
 enum Extractor {
     Compatibility,
     Native,
+}
+
+fn parse_date_arg(value: &str) -> std::result::Result<i64, String> {
+    parse_date(value).map_err(|e| e.to_string())
 }
 
 fn parse_size(value: &str) -> std::result::Result<u64, String> {
@@ -190,11 +201,9 @@ async fn run(args: Args) -> Result<()> {
             let failed = &failed;
             let input = match source {
                 Ok(source) => {
-                    let selection = extract::http_url(&source).ok().and_then(|url| {
-                        settings[extract::social_site(&url).unwrap_or("direct")]
-                            .selection
-                            .as_ref()
-                    });
+                    let selected_settings = extract::http_url(&source)
+                        .ok()
+                        .map(|url| &settings[extract::social_site(&url).unwrap_or("direct")]);
                     let input = extract_input(
                         source,
                         &extractors,
@@ -203,8 +212,20 @@ async fn run(args: Args) -> Result<()> {
                         &settings,
                         args.cookies_from_browser.as_deref(),
                     );
-                    match selection {
-                        Some(selection) => selection.apply(input),
+                    match selected_settings {
+                        Some(settings) => {
+                            let input = if settings.options.date_before.is_some()
+                                || settings.options.date_after.is_some()
+                            {
+                                settings.dates.apply(input)
+                            } else {
+                                input
+                            };
+                            match &settings.selection {
+                                Some(selection) => selection.apply(input),
+                                None => input,
+                            }
+                        }
                         None => input,
                     }
                 }
@@ -450,6 +471,7 @@ struct Settings {
     filename: Option<FilenameTemplate>,
     directory: Option<DirectoryTemplate>,
     selection: Option<RangeSelection>,
+    dates: DateFilter,
     limits: SizeLimits,
 }
 
@@ -471,6 +493,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .or_else(|| args.destination.clone()),
         filename: args.filename.clone(),
         file_range: args.file_range.clone(),
+        date_before: args.date_before,
+        date_after: args.date_after,
         directory: if args.exact_directory.is_some() {
             Some(Vec::new())
         } else {
@@ -504,6 +528,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .map(RangeSelection::parse)
             .transpose()?;
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
+        let dates = DateFilter::new(options.date_before, options.date_after)?;
         settings.insert(
             category,
             Settings {
@@ -511,6 +536,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 filename,
                 directory,
                 selection,
+                dates,
                 limits,
             },
         );

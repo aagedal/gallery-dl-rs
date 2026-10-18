@@ -242,6 +242,34 @@ boundaries. The separate compatibility configuration can apply its own selection
 before Rust receives media. Post/child ranges and metadata expressions remain
 unimplemented.
 
+## Date selection
+
+`--date-before 2026-10-01 --date-after 2026-09-01` selects posts strictly between
+those instants. `--date-before` excludes posts at or after its bound and continues
+looking. `--date-after` stops the current input at the first post at or before its
+bound, drops the extractor, and proceeds to the next input. This assumes newest
+first ordering; an older pinned or out-of-order post can end traversal early.
+Already selected downloads finish normally.
+
+Values accept signed integer Unix seconds, `YYYY-MM-DD` (midnight UTC), or
+`YYYY-MM-DDTHH:MM[:SS]` with an optional dot-separated fraction after seconds.
+A space can replace `T`. Naive date-times use UTC; `Z`, `+HH:MM`, `-HH:MM`, and
+compact `+HHMM`/`-HHMM` offsets normalize to UTC. Fractions are discarded to whole
+seconds, including before 1970. Inputs are limited to 128 ASCII bytes; calendar,
+clock, offset, and integer bounds are validated. Relative dates, week dates, and
+the full upstream ISO syntax are not supported. An effective `date-after` at or
+later than `date-before` fails explicitly. Epoch zero is a real bound.
+
+Native configuration supports `date-before` and `date-after` as strings or
+integer timestamps in the normal scopes, followed by CLI overrides. Date
+selection applies to downloads and inspection before file ranges, deduplication,
+and archive checks. Excluded media receives no files, sidecars, or archive entry.
+Media with missing or unparseable timestamps passes through unchanged, including
+direct links. Compatibility formatted dates are normalized into public numeric
+metadata when recognized; invalid formats remain unknown. Counters and cutoffs
+apply to each input's flattened stream; site-specific date skipping and nested
+child boundaries remain unimplemented.
+
 ## File-size limits
 
 `--filesize-min 500k --filesize-max 2.5M` filters direct HTTP media by its complete
@@ -295,7 +323,7 @@ Neither configuration file is loaded automatically.
 ```
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
-`filesize-min`, `filesize-max`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`date-before`, `date-after`, `filesize-min`, `filesize-max`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
@@ -364,7 +392,8 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   shortcode, username, caption, timestamp, and carousel index). Post metadata is
   provided by native Instagram/Facebook/Twitter and allowlisted compatibility Instagram,
   Twitter/X, and Facebook fields when available. Compatibility timestamps are
-  retained only when numeric; formatted backend dates are omitted. Instagram
+  normalized from numeric epochs or recognized ISO calendar date-times; unsupported
+  backend date formats are omitted. Instagram
   uses site post/media IDs, Twitter uses tweet ID and file number, and Facebook
   uses `id.extension` as media ID to distinguish audio and video. Non-Instagram
   shortcodes are empty; unavailable fields stay empty/null. URLs, request headers,
@@ -514,6 +543,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/input.rs` reads bounded URL lines lazily from files and stdin.
 `src/browser.rs` imports explicitly selected Firefox cookies with site/context scoping.
 `src/size.rs` parses binary byte amounts and applies inclusive size limits.
+`src/date.rs` normalizes date bounds and stops timestamp-ordered collections.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

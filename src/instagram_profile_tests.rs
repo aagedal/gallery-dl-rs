@@ -418,3 +418,21 @@ async fn file_range_stops_native_collection_without_requesting_later_pages() {
     assert!(empty.next().await.is_none());
     assert_eq!(server.count(), 0);
 }
+
+#[tokio::test]
+async fn date_after_stops_native_profile_without_following_older_cursor() {
+    let mut recent = post("64", "BA");
+    recent["taken_at"] = json!(1700000001);
+    let old = post("65", "BB");
+    let server = Server::new(vec![profile(), page(vec![recent, old], Some("older-page"))]);
+    let instagram = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+    let dates = crate::date::DateFilter::new(None, Some(1700000000)).unwrap();
+    let items: Vec<_> = dates
+        .apply(instagram.profile_stream("fixture_user".into(), server.base.clone()))
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].metadata.as_ref().unwrap().post_id, "64");
+    assert_eq!(server.count(), 2);
+}

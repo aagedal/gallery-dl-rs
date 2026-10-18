@@ -3,6 +3,7 @@ mod backend;
 pub mod browser;
 pub mod config;
 pub mod cookies;
+pub mod date;
 pub mod download;
 pub mod extract;
 pub mod facebook;

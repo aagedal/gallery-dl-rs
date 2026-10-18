@@ -372,3 +372,50 @@ fn invalid_size_configuration_fails_without_echoing_values() {
     }
     assert!(parse(r#"{"filesize-min":1,"filesize-min":2}"#).is_err());
 }
+
+#[test]
+fn date_limits_resolve_scopes_and_preserve_epoch_zero() {
+    let config =
+        parse(r#"{"extractor":{"date-before":"2000-01-01","twitter":{"date-after":0}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.date_before, Some(946684800));
+    assert_eq!(twitter.date_after, Some(0));
+    assert_eq!(config.resolve("instagram").unwrap().date_after, None);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                date_after: Some(-1),
+                ..Default::default()
+            })
+            .date_after,
+        Some(-1)
+    );
+    let global = parse(r#"{"date-before":123,"extractor":{"date-before":456}}"#).unwrap();
+    assert_eq!(global.resolve("direct").unwrap().date_before, Some(123));
+}
+
+#[test]
+fn date_limits_reject_invalid_private_values_and_duplicate_keys() {
+    for field in ["date-before", "date-after"] {
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(false),
+            serde_json::json!(1.5),
+            serde_json::json!([]),
+            serde_json::json!("private-date"),
+            serde_json::json!("2025-02-29"),
+            serde_json::json!("2026-01-01T24:00:00"),
+            serde_json::json!("18446744073709551615"),
+        ] {
+            for doc in [
+                serde_json::json!({(field):value}),
+                serde_json::json!({"extractor":{(field):value}}),
+                serde_json::json!({"extractor":{"instagram":{(field):value}}}),
+            ] {
+                let message = parse(&doc.to_string()).unwrap_err().to_string();
+                assert!(!message.contains("private-date"));
+            }
+        }
+    }
+    assert!(parse(r#"{"date-before":1,"date-before":2}"#).is_err());
+}

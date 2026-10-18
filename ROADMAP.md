@@ -185,6 +185,19 @@ files/archive hits keep their skip behavior; extraction-only inspection makes no
 media requests. Local HTTP tests cover withheld/chunked bodies, unknown sizes,
 resume transitions, cleanup, config/CLI precedence, and archive retryability.
 
+**Implemented date selection:** native CLI/configuration `date-before` and
+`date-after` accept integer Unix timestamps and validated ISO calendar date-times,
+with UTC defaults/offset normalization. Bounds are strict; after-cutoff stops and
+drops the current input at its first older/equal timestamp, following the newest
+first assumption. Unknown timestamps pass through. Date filtering precedes file
+ranges/deduplication/archive checks and applies to inspection too. Compatibility
+metadata now normalizes recognized formatted dates without changing stable IDs.
+Local tests cover calendar/offset/fraction boundaries, range order, private
+configuration errors, native pagination and process cancellation, later inputs,
+and selected-only metadata/archive effects. Relative/week-date syntax,
+site-specific skip optimizations, pinned/out-of-order handling, and nested child
+boundaries remain.
+
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and
 compatibility Instagram, Twitter/X, and Facebook survive signed URL/header

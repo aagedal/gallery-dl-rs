@@ -171,3 +171,25 @@ fn direct_links_have_explicit_private_full_request_identities() {
         .insert("_fallback".into(), json!(["https://example.com/other.jpg"]));
     assert_ne!(header_key, first.archive_key());
 }
+
+#[test]
+fn compatibility_dates_normalize_to_utc_without_affecting_stable_ids() {
+    for category in ["instagram", "twitter", "facebook"] {
+        let base = json!({"post_id":"100","media_id":"101","tweet_id":"100","id":"100","extension":"jpg","num":1});
+        let original = compatibility(category, base.clone(), "original").archive_key();
+        for (date, expected) in [
+            (json!("1970-01-01 00:00:00"), Some(0)),
+            (json!("2000-01-01T01:00:00+01:00"), Some(946684800)),
+            (json!("1969-12-31T23:59:59.9Z"), Some(-1)),
+            (json!(123), Some(123)),
+            (json!("not-a-date"), None),
+            (json!(null), None),
+        ] {
+            let mut data = base.clone();
+            data["date"] = date;
+            let item = compatibility(category, data, "rotated");
+            assert_eq!(item.metadata.as_ref().unwrap().timestamp, expected);
+            assert_eq!(item.archive_key(), original);
+        }
+    }
+}

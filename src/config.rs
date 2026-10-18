@@ -5,7 +5,9 @@
 //! Paths are literal, relative to the configuration directory; expansion,
 //! conditions, hooks, subcategories, and unsupported options are rejected.
 use crate::{
-    Result, error,
+    Result,
+    date::parse_date,
+    error,
     naming::{DirectoryTemplate, FilenameTemplate},
     selection::RangeSelection,
     size::parse_bytes,
@@ -29,6 +31,8 @@ pub struct Options {
     pub filename: Option<String>,
     /// One-based media position ranges, applied separately to each input.
     pub file_range: Option<String>,
+    pub date_before: Option<i64>,
+    pub date_after: Option<i64>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
@@ -54,6 +58,8 @@ impl Options {
                 .file_range
                 .clone()
                 .or_else(|| self.file_range.clone()),
+            date_before: overrides.date_before.or(self.date_before),
+            date_after: overrides.date_after.or(self.date_after),
             directory: overrides
                 .directory
                 .clone()
@@ -83,6 +89,8 @@ struct RawRoot {
     base_directory: Field,
     filename: Field,
     file_range: Field,
+    date_before: Field,
+    date_after: Field,
     directory: Field,
     cookies: Field,
     archive: Field,
@@ -99,6 +107,8 @@ struct RawExtractor {
     base_directory: Field,
     filename: Field,
     file_range: Field,
+    date_before: Field,
+    date_after: Field,
     directory: Field,
     cookies: Field,
     archive: Field,
@@ -118,6 +128,8 @@ struct RawOptions {
     base_directory: Field,
     filename: Field,
     file_range: Field,
+    date_before: Field,
+    date_after: Field,
     directory: Field,
     cookies: Field,
     archive: Field,
@@ -200,6 +212,8 @@ impl Config {
             base_directory: root.base_directory,
             filename: root.filename,
             file_range: root.file_range,
+            date_before: root.date_before,
+            date_after: root.date_after,
             directory: root.directory,
             cookies: root.cookies,
             archive: root.archive,
@@ -214,6 +228,8 @@ impl Config {
             base_directory: extractor.base_directory,
             filename: extractor.filename,
             file_range: extractor.file_range,
+            date_before: extractor.date_before,
+            date_after: extractor.date_after,
             directory: extractor.directory,
             cookies: extractor.cookies,
             archive: extractor.archive,
@@ -341,6 +357,8 @@ impl RawOptions {
             archive: path(self.archive, directory, "archive")?,
             filename,
             file_range,
+            date_before: date(self.date_before)?,
+            date_after: date(self.date_after)?,
             directory: templates,
             filesize_min: size(self.filesize_min)?,
             filesize_max: size(self.filesize_max)?,
@@ -394,6 +412,22 @@ fn size(field: Field) -> Result<Option<u64>> {
             .map(Some)
             .map_err(|_| invalid()),
         Value::String(value) => parse_bytes(&value).map(Some).map_err(|_| invalid()),
+        _ => Err(invalid()),
+    }
+}
+
+fn date(field: Field) -> Result<Option<i64>> {
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
+    let invalid = || {
+        error(
+            "native configuration date limit must be a supported ISO date or integer Unix timestamp",
+        )
+    };
+    match value {
+        Value::String(value) => parse_date(&value).map(Some).map_err(|_| invalid()),
+        Value::Number(value) => value.as_i64().map(Some).ok_or_else(invalid),
         _ => Err(invalid()),
     }
 }
