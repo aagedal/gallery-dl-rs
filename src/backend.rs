@@ -89,7 +89,7 @@ impl Process {
         require_media: bool,
     ) -> Result<Self> {
         let category = extract::social_site(&url).ok_or_else(|| {
-            error("unsupported URL; use an Instagram, Facebook, Twitter/X, Imgur, Bluesky, Reddit, Danbooru, e621, Gelbooru, Safebooru, Mastodon, Kemono, Coomer, Pixeldrain, Catbox, imgbox, Postimg, Tumblr, Pixiv, DeviantArt, Flickr, Wallhaven URL or direct media link")
+            error("unsupported URL; use an Instagram, Facebook, Twitter/X, Imgur, Bluesky, Reddit, Danbooru, e621, Gelbooru, Safebooru, Mastodon, Kemono, Coomer, Pixeldrain, Catbox, imgbox, Postimg, Tumblr, Pixiv, DeviantArt, Flickr, Wallhaven, ArtStation URL or direct media link")
         })?;
         crate::network::NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let mut child = backend

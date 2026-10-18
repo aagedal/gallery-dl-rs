@@ -415,6 +415,7 @@ async fn run(args: Args) -> Result<()> {
                     | "deviantart"
                     | "flickr"
                     | "wallhaven"
+                    | "artstation"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -597,6 +598,7 @@ struct Extractors {
     deviantart: OnceCell<Result<gallery_dl_rs::deviantart::DeviantArt>>,
     flickr: OnceCell<Result<gallery_dl_rs::flickr::Flickr>>,
     wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
+    artstation: OnceCell<Result<gallery_dl_rs::artstation::ArtStation>>,
 }
 
 impl Extractors {
@@ -849,6 +851,26 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Flickr initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "artstation" => {
+                    let native = extractors
+                        .artstation
+                        .get_or_init(|| async {
+                            gallery_dl_rs::artstation::ArtStation::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native ArtStation initialization failed: {e}"))
+                        })?;
                     native.events(&url)
                 }
                 Extractor::Native if category == "wallhaven" => {
@@ -1153,6 +1175,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "deviantart",
         "flickr",
         "wallhaven",
+        "artstation",
         "direct",
     ] {
         let options = defaults

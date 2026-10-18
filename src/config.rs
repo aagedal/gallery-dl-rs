@@ -358,6 +358,7 @@ struct RawExtractor {
     deviantart: Box<RawOptions>,
     flickr: Box<RawOptions>,
     wallhaven: Box<RawOptions>,
+    artstation: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
 
@@ -494,6 +495,7 @@ impl Config {
                 "deviantart",
                 "flickr",
                 "wallhaven",
+                "artstation",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -625,6 +627,7 @@ impl Config {
             ("deviantart", extractor.deviantart),
             ("flickr", extractor.flickr),
             ("wallhaven", extractor.wallhaven),
+            ("artstation", extractor.artstation),
             ("direct", extractor.direct),
         ] {
             if !matches!(name, "tumblr" | "flickr" | "wallhaven") && settings.api_key.0.is_some() {
@@ -679,6 +682,7 @@ impl Config {
                 | "deviantart"
                 | "flickr"
                 | "wallhaven"
+                | "artstation"
                 | "direct"
         ) {
             return Err(error("unsupported native configuration category"));

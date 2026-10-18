@@ -1,4 +1,5 @@
 pub mod archive;
+pub mod artstation;
 mod backend;
 pub mod bluesky;
 pub mod booru;

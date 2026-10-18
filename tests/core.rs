@@ -342,6 +342,25 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.deviantart.com/", None),
         ("https://images-wixmp-x.wixmp.com/f/a.jpg", None),
         ("https://www.deviantart.com.evil.example/alice", None),
+        (
+            "https://www.artstation.com/artwork/LQVJr",
+            Some("artstation"),
+        ),
+        (
+            "https://alice.artstation.com/projects/LQVJr",
+            Some("artstation"),
+        ),
+        ("https://www.artstation.com/alice", Some("artstation")),
+        (
+            "https://www.artstation.com/alice/albums/all",
+            Some("artstation"),
+        ),
+        ("https://www.artstation.com/", None),
+        (
+            "https://cdna.artstation.com/p/assets/images/1/large/a.jpg",
+            None,
+        ),
+        ("https://www.artstation.com.evil.example/alice", None),
         ("https://wallhaven.cc/w/94x38z", Some("wallhaven")),
         ("https://whvn.cc/94x38z", Some("wallhaven")),
         ("https://wallhaven.cc/search?q=cat", Some("wallhaven")),

@@ -152,6 +152,14 @@ impl Media {
                     serde_json::json!([blog, post.post_id, post.media_id]).to_string(),
                 )
             }
+            // ArtStation files are identified by asset ID.
+            "artstation" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::artstation::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("artstation", serde_json::json!([post.media_id]).to_string())
+            }
             // Wallhaven files are identified by wallpaper ID.
             "wallhaven" => {
                 let post = self.metadata.as_ref()?;
@@ -344,6 +352,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if let Some(category) = crate::kemono::category(host) {
         return Some(category);
+    }
+    if crate::artstation::is_artstation_url(url) {
+        return Some("artstation");
     }
     if crate::wallhaven::is_wallhaven_url(url) {
         return Some("wallhaven");
