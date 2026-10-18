@@ -767,3 +767,22 @@ async fn invalid_retry_after_uses_backoff_and_rate_limit_retries_are_bounded() {
     assert!(start.elapsed() >= Duration::from_millis(250));
     assert_eq!(handle.join().unwrap().len(), 2);
 }
+
+#[test]
+fn compatibility_mode_downloads_plain_imgur_file_links_directly() {
+    // A fake backend executable proves the Python backend is not consulted.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .args(["--extractor-command", "/nonexistent/gallery-dl", "-g"])
+        .arg("https://i.imgur.com/abcdefg.jpg")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "https://i.imgur.com/abcdefg.jpg"
+    );
+}

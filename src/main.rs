@@ -209,6 +209,17 @@ fn default_native_config() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
+/// Compatibility mode keeps plain Imgur file links as direct downloads, as
+/// before native Imgur support; native mode extracts them for metadata.
+fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
+    extract::social_site(url).filter(|site| {
+        !(*site == "imgur"
+            && matches!(extractor, Extractor::Compatibility)
+            && url.host_str() == Some("i.imgur.com")
+            && extract::direct(url).is_some())
+    })
+}
+
 fn parse_sleep(value: &str) -> std::result::Result<gallery_dl_rs::sleep::SleepRange, String> {
     gallery_dl_rs::sleep::SleepRange::parse(value).map_err(|e| e.to_string())
 }
@@ -297,9 +308,9 @@ async fn run(args: Args) -> Result<()> {
                                             )
                                         ))))
                     });
-                    let selected_settings = extract::http_url(&source)
-                        .ok()
-                        .map(|url| &settings[extract::social_site(&url).unwrap_or("direct")]);
+                    let selected_settings = extract::http_url(&source).ok().map(|url| {
+                        &settings[routed_site(&url, args.extractor).unwrap_or("direct")]
+                    });
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
@@ -562,7 +573,7 @@ fn extract_input<'a>(
     stream::once(async move {
         let url = extract::http_url(&source)?;
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
-            extract::social_site(&url)
+            routed_site(&url, extractor)
         {
             let configured = &settings[category];
             let options = &configured.options;
