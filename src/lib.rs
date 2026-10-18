@@ -6,6 +6,7 @@ pub mod browser;
 pub mod config;
 pub mod cookies;
 pub mod date;
+pub mod deviantart;
 pub mod download;
 pub mod event;
 pub mod exec;

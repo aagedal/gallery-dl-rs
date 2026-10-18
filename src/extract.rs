@@ -152,6 +152,14 @@ impl Media {
                     serde_json::json!([blog, post.post_id, post.media_id]).to_string(),
                 )
             }
+            // DeviantArt files are identified by deviation UUID.
+            "deviantart" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::deviantart::valid_uuid(&post.post_id) {
+                    return None;
+                }
+                ("deviantart", serde_json::json!([post.post_id]).to_string())
+            }
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
@@ -320,6 +328,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if let Some(category) = crate::kemono::category(host) {
         return Some(category);
+    }
+    if crate::deviantart::is_deviantart_url(url) {
+        return Some("deviantart");
     }
     if crate::pixiv::is_pixiv_url(url) {
         return Some("pixiv");

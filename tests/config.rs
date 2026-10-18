@@ -172,7 +172,7 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"secret-key":"secret-value"}}"#,
         r#"{"extractor":{"instagram":{"secret-key":"secret-value"}}}"#,
         r#"{"extractor":{"instagram":{"post":{"cookies":"secret-value"}}}}"#,
-        r#"{"extractor":{"deviantart":{"cookies":"secret-value"}}}"#,
+        r#"{"extractor":{"flickr":{"cookies":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
@@ -1860,6 +1860,28 @@ fn refresh_token_is_pixiv_only_and_never_echoed() {
         r#"{"extractor":{"tumblr":{"refresh-token":"abc123"}}}"#,
         r#"{"extractor":{"pixiv":{"refresh-token":"abc 123!"}}}"#,
         r#"{"extractor":{"pixiv":{"refresh-token":7}}}"#,
+    ] {
+        let error = parse(json).err().unwrap().to_string();
+        assert!(!error.contains("abc"), "{error}");
+    }
+}
+
+#[test]
+fn client_credentials_are_deviantart_only_and_never_echoed() {
+    let config =
+        parse(r#"{"extractor":{"deviantart":{"client-id":"123","client-secret":"abcdef0"}}}"#)
+            .unwrap();
+    let resolved = config.resolve("deviantart").unwrap();
+    assert_eq!(resolved.client_id.as_deref(), Some("123"));
+    assert_eq!(resolved.client_secret.as_deref(), Some("abcdef0"));
+    assert_eq!(config.resolve("pixiv").unwrap().client_secret, None);
+    for json in [
+        r#"{"client-secret":"abc123"}"#,
+        r#"{"extractor":{"client-id":"123"}}"#,
+        r#"{"extractor":{"pixiv":{"client-secret":"abc123"}}}"#,
+        r#"{"extractor":{"deviantart":{"client-id":"abc1"}}}"#,
+        r#"{"extractor":{"deviantart":{"client-secret":"abc 123!"}}}"#,
+        r#"{"extractor":{"deviantart":{"client-secret":7}}}"#,
     ] {
         let error = parse(json).err().unwrap().to_string();
         assert!(!error.contains("abc"), "{error}");

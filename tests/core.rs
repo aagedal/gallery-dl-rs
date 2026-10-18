@@ -329,6 +329,19 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://64.media.tumblr.com/a/b/s1280x1920/x.jpg", None),
         ("https://va.media.tumblr.com/tumblr_x.mp4", None),
         ("https://alice.tumblr.com.evil.example/", None),
+        (
+            "https://www.deviantart.com/alice/art/My-Art-123",
+            Some("deviantart"),
+        ),
+        ("https://alice.deviantart.com/art/x-1", Some("deviantart")),
+        (
+            "https://www.deviantart.com/alice/gallery",
+            Some("deviantart"),
+        ),
+        ("https://www.deviantart.com/alice", Some("deviantart")),
+        ("https://www.deviantart.com/", None),
+        ("https://images-wixmp-x.wixmp.com/f/a.jpg", None),
+        ("https://www.deviantart.com.evil.example/alice", None),
         ("https://www.pixiv.net/artworks/1", Some("pixiv")),
         ("https://www.pixiv.net/en/artworks/1", Some("pixiv")),
         (

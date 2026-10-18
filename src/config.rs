@@ -89,6 +89,10 @@ pub struct Options {
     pub api_key: Option<String>,
     /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
     pub refresh_token: Option<String>,
+    /// DeviantArt OAuth client ID; only accepted in the `deviantart` category.
+    pub client_id: Option<String>,
+    /// DeviantArt OAuth client secret; only accepted in the `deviantart` category.
+    pub client_secret: Option<String>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     /// Ordered `(filter, components)` pairs from an object-valued `directory`.
@@ -183,6 +187,14 @@ impl Options {
                 .refresh_token
                 .clone()
                 .or_else(|| self.refresh_token.clone()),
+            client_id: overrides
+                .client_id
+                .clone()
+                .or_else(|| self.client_id.clone()),
+            client_secret: overrides
+                .client_secret
+                .clone()
+                .or_else(|| self.client_secret.clone()),
             directory: if overrides.directory_conditions.is_some() {
                 overrides.directory.clone()
             } else {
@@ -343,6 +355,7 @@ struct RawExtractor {
     postimg: Box<RawOptions>,
     tumblr: Box<RawOptions>,
     pixiv: Box<RawOptions>,
+    deviantart: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
 
@@ -383,6 +396,8 @@ struct RawOptions {
     search_stop: Field,
     api_key: Field,
     refresh_token: Field,
+    client_id: Field,
+    client_secret: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -474,6 +489,7 @@ impl Config {
                 "postimg",
                 "tumblr",
                 "pixiv",
+                "deviantart",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -519,6 +535,8 @@ impl Config {
             search_stop: root.search_stop,
             api_key: Field::default(),
             refresh_token: Field::default(),
+            client_id: Field::default(),
+            client_secret: Field::default(),
             directory: root.directory,
             cookies: root.cookies,
             proxy: root.proxy,
@@ -566,6 +584,8 @@ impl Config {
             search_stop: extractor.search_stop,
             api_key: Field::default(),
             refresh_token: Field::default(),
+            client_id: Field::default(),
+            client_secret: Field::default(),
             directory: extractor.directory,
             cookies: extractor.cookies,
             proxy: extractor.proxy,
@@ -598,6 +618,7 @@ impl Config {
             ("postimg", extractor.postimg),
             ("tumblr", extractor.tumblr),
             ("pixiv", extractor.pixiv),
+            ("deviantart", extractor.deviantart),
             ("direct", extractor.direct),
         ] {
             if name != "tumblr" && settings.api_key.0.is_some() {
@@ -608,6 +629,13 @@ impl Config {
             if name != "pixiv" && settings.refresh_token.0.is_some() {
                 return Err(error(
                     "native configuration refresh-token is only supported for pixiv",
+                ));
+            }
+            if name != "deviantart"
+                && (settings.client_id.0.is_some() || settings.client_secret.0.is_some())
+            {
+                return Err(error(
+                    "native configuration client-id and client-secret are only supported for deviantart",
                 ));
             }
             // Boxed: unoptimized builds overflow the stack with inline settings.
@@ -642,6 +670,7 @@ impl Config {
                 | "postimg"
                 | "tumblr"
                 | "pixiv"
+                | "deviantart"
                 | "direct"
         ) {
             return Err(error("unsupported native configuration category"));
@@ -915,6 +944,31 @@ impl RawOptions {
                 ));
             }
         };
+        let credential = |field: Field, name: &str, digits: bool| match field.0 {
+            None => Ok(None),
+            Some(Value::String(value))
+                if (1..=128).contains(&value.len())
+                    && value.bytes().all(|b| {
+                        if digits {
+                            b.is_ascii_digit()
+                        } else {
+                            b.is_ascii_alphanumeric()
+                        }
+                    }) =>
+            {
+                Ok(Some(value))
+            }
+            Some(_) => Err(error(format!(
+                "native configuration {name} must be 1-128 ASCII {}",
+                if digits {
+                    "digits"
+                } else {
+                    "letters or digits"
+                }
+            ))),
+        };
+        let client_id = credential(self.client_id, "client-id", true)?;
+        let client_secret = credential(self.client_secret, "client-secret", false)?;
         let file_range = range_spec(self.file_range, "file-range")?;
         let (filename, filename_conditions) = match self.filename.0 {
             None => (None, None),
@@ -1052,6 +1106,8 @@ impl RawOptions {
             search_stop,
             api_key,
             refresh_token,
+            client_id,
+            client_secret,
             directory: templates,
             directory_conditions,
             filesize_min: size(self.filesize_min)?,
