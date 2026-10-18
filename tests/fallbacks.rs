@@ -570,9 +570,10 @@ async fn cancelling_an_active_fallback_cleans_temporary_files_and_stops_the_chai
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let has_temporary = std::fs::read_dir(root.path().join("direct")).is_ok_and(|entries| {
+            // Windows directory listings cache sizes of files still open for
+            // writing; query each file directly for its current length.
             entries.filter_map(Result::ok).any(|entry| {
-                entry
-                    .metadata()
+                std::fs::metadata(entry.path())
                     .is_ok_and(|metadata| metadata.is_file() && metadata.len() == 4096)
             })
         });

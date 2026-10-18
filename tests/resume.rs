@@ -537,7 +537,8 @@ async fn cancellation_retains_checkpoint_and_concurrent_downloads_cannot_share_i
             if let Ok(entries) = std::fs::read_dir(root.path().join("direct/.gallery-dl-rs"))
                 && entries.filter_map(std::result::Result::ok).any(|entry| {
                     entry.path().extension().is_some_and(|ext| ext == "part")
-                        && entry.metadata().is_ok_and(|meta| meta.len() == HALF as u64)
+                        && std::fs::metadata(entry.path())
+                            .is_ok_and(|meta| meta.len() == HALF as u64)
                 })
             {
                 break;
@@ -787,7 +788,7 @@ async fn size_limits_use_full_resumed_total_and_clear_rejected_checkpoints() {
             let entry = entry.unwrap();
             assert!(!entry.path().extension().is_some_and(|ext| ext == "json"));
             if entry.path().extension().is_some_and(|ext| ext == "part") {
-                assert_eq!(entry.metadata().unwrap().len(), 0);
+                assert_eq!(std::fs::metadata(entry.path()).unwrap().len(), 0);
             }
         }
         download::download(&client(), root.path(), &item, 0)
