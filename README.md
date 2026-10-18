@@ -786,6 +786,11 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   a run are removed, and existing paths are skipped for direct downloads. Bare
   direct links keep their original URL-only digest; media with headers now use a
   different digest and may be downloaded again after upgrading.
+- CLI deduplication includes validated social post/file identity as well as request
+  context. Distinct Instagram, X, and Facebook files sharing a URL are retained;
+  repeated copies of the same file and request are suppressed across inputs.
+  Rows without usable social IDs retain request-based deduplication. This also
+  applies without a download archive; X `unique: false` bypasses deduplication.
 - `-f` / `--filename` replaces the default digest-prefixed basename with a native
   template under `destination/category/`. Available fields are `{filename}`
   (including extension), `{name}` (without the final extension), `{extension}`

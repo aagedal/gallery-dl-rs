@@ -268,9 +268,16 @@ async fn run(args: Args) -> Result<()> {
             if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
                 return std::future::ready(true);
             }
-            // Keep fixed-size digests instead of retaining URLs, headers, or inline manifests.
-            let identity: [u8; 32] = Sha256::digest(item.identity().as_bytes()).into();
-            std::future::ready(seen.insert(identity))
+            let mut identity = item.identity();
+            // Distinct social files can share a URL and request context.
+            if matches!(item.category.as_str(), "instagram" | "twitter" | "facebook")
+                && let Some(file_key) = item.archive_key()
+            {
+                identity = serde_json::json!([file_key, identity]).to_string();
+            }
+            // Retain only fixed-size digests, without URLs, headers, or manifests.
+            let digest: [u8; 32] = Sha256::digest(identity.as_bytes()).into();
+            std::future::ready(seen.insert(digest))
         });
     tokio::pin!(media);
     if args.dump_json {

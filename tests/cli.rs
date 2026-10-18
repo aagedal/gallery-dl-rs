@@ -1255,3 +1255,100 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         assert!(!log.exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn social_dedup_preserves_distinct_files_and_request_context_across_inputs() {
+    use serde_json::{Value, json};
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("backend");
+    let fixture = root.path().join("rows.json");
+    std::fs::write(&script, "#!/bin/sh\ncat \"$SOCIAL_ROWS\"\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (category, source, other_source) in [
+        (
+            "twitter",
+            "https://x.com/person/status/1",
+            "https://x.com/person/status/2",
+        ),
+        (
+            "instagram",
+            "https://instagram.com/p/first/",
+            "https://instagram.com/p/second/",
+        ),
+        (
+            "facebook",
+            "https://facebook.com/photo/?fbid=1",
+            "https://facebook.com/photo/?fbid=2",
+        ),
+    ] {
+        let row = |name: &str, post: &str, media: usize, url: &str| -> Value {
+            let mut metadata = json!({"filename": name, "extension":"jpg"});
+            match category {
+                "twitter" => {
+                    metadata["tweet_id"] = json!(post);
+                    metadata["num"] = json!(media);
+                }
+                "instagram" => {
+                    metadata["post_id"] = json!(post);
+                    metadata["media_id"] = json!(media.to_string());
+                }
+                "facebook" => {
+                    metadata["id"] = json!(post);
+                }
+                _ => unreachable!(),
+            }
+            json!([3, url, metadata])
+        };
+        let url = "https://cdn.example/shared.jpg";
+        let mut rows = vec![row("first", "100", 1, url)];
+        let mut expected = vec!["first.jpg"];
+        if category != "facebook" {
+            rows.push(row("sibling", "100", 2, url));
+            expected.push("sibling.jpg");
+        }
+        rows.push(row("other-post", "200", 1, url));
+        expected.push("other-post.jpg");
+        // An alternative filename cannot turn the same stable file/request into a new item.
+        rows.push(row("duplicate", "100", 1, url));
+        rows.push(row(
+            "changed-url",
+            "100",
+            1,
+            "https://cdn.example/refreshed.jpg",
+        ));
+        expected.push("changed-url.jpg");
+        let mut headers = row("changed-headers", "100", 1, url);
+        headers[2]["_http_headers"] = json!({"Referer":"https://example.com/context"});
+        rows.push(headers);
+        expected.push("changed-headers.jpg");
+        // Invalid and absent IDs retain the request-only fallback.
+        let invalid_url = "https://cdn.example/invalid.jpg";
+        rows.push(row("invalid-first", "invalid-id-a", 1, invalid_url));
+        rows.push(row("invalid-second", "invalid-id-b", 2, invalid_url));
+        rows.push(json!([3, invalid_url, {"filename":"missing-ids", "extension":"jpg"}]));
+        expected.push("invalid-first.jpg");
+        std::fs::write(&fixture, serde_json::to_vec(&rows).unwrap()).unwrap();
+        let output = binary()
+            .env("SOCIAL_ROWS", &fixture)
+            .arg("--extractor-command")
+            .arg(&script)
+            .args(["-j", source, other_source])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let media: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let names: Vec<_> = media
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["filename"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, expected, "{category}");
+    }
+}

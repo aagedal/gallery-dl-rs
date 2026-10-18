@@ -255,6 +255,14 @@ inspection still buffers one array. CLI regressions cover publication during
 blocked extraction, backpressure at capacity, deduplication/order, failure
 continuation, and simultaneous extraction/download cancellation.
 
+Global CLI deduplication now combines validated social post/file archive keys
+with request context, retaining distinct siblings/posts that share a media URL.
+Repeated copies of the same file/request still collapse across inputs; changed
+URLs or headers remain distinct. Missing/invalid social IDs retain request-based
+fallback, and X `unique: false` still bypasses suppression. CLI regressions cover
+Instagram, X, and Facebook, including a demonstrated pre-fix loss of media siblings.
+Download naming and resume request identities are unchanged.
+
 **Implemented message-streaming step:** compatibility results now flow through
 an incremental resolved-array parser rather than buffering a whole Rust vector.
 Only the current encoded message (up to 16 MiB, bounded nesting), stdout buffer,
