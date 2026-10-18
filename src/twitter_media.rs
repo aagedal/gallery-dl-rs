@@ -30,13 +30,18 @@ pub(super) struct FileOptions<'a> {
     pub(super) images: &'a ImageOptions,
 }
 
+pub(super) struct ParsedPost {
+    pub(super) metadata: PostMetadata,
+    pub(super) media: Vec<Media>,
+}
+
 pub(super) fn parse_tweet_media(
     tweet: &Value,
     requested_post_id: &str,
     allow_empty: bool,
     card_source: &Value,
     selection: FileOptions<'_>,
-) -> Result<Vec<Media>> {
+) -> Result<ParsedPost> {
     let FileOptions {
         media: options,
         cards: card_options,
@@ -95,8 +100,17 @@ pub(super) fn parse_tweet_media(
         articles::select_with_images(card_source, article_options, image_options);
     selected.extend(article_files);
     let community = community::native(card_source);
+    let metadata = PostMetadata {
+        community,
+        article,
+        post_id: requested_post_id.into(),
+        username,
+        caption,
+        timestamp,
+        ..Default::default()
+    };
     // gallery-dl numbers files after selection, including previews after their video.
-    Ok(selected
+    let media = selected
         .into_iter()
         .enumerate()
         .map(|(i, (url, extension, job, fallback, file))| Media {
@@ -111,26 +125,17 @@ pub(super) fn parse_tweet_media(
             filename: format!("{requested_post_id}_{}.{extension}", i + 1),
             metadata: Some(PostMetadata {
                 file: (file != FileMetadata::default()).then_some(file),
-                community: community.clone(),
-                community_archive: false,
-                retweet_id: None,
-                quoted_by_id: None,
-                reposted_by_id: None,
-                article: article.clone(),
-                post_id: requested_post_id.into(),
                 media_id: (i + 1).to_string(),
-                shortcode: String::new(),
-                username: username.clone(),
-                caption: caption.clone(),
-                timestamp,
                 index: i + 1,
+                ..metadata.clone()
             }),
             headers: BTreeMap::from([
                 ("User-Agent".into(), USER_AGENT.into()),
                 ("Referer".into(), "https://x.com/".into()),
             ]),
         })
-        .collect())
+        .collect();
+    Ok(ParsedPost { metadata, media })
 }
 
 pub(super) type SelectedFile = (Url, String, MediaJob, Vec<Url>, FileMetadata);

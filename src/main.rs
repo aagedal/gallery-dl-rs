@@ -70,6 +70,12 @@ struct Args {
     /// Select posts before file filtering; repeat to require all expressions
     #[arg(long = "post-filter", value_name = "EXPR", allow_hyphen_values = true)]
     post_filter: Vec<String>,
+    /// Include native X text posts as text files
+    #[arg(long, conflicts_with = "no_text_tweets")]
+    text_tweets: bool,
+    /// Disable configured X text-post output
+    #[arg(long, conflicts_with = "text_tweets")]
+    no_text_tweets: bool,
     /// Process posts created before this UTC date or Unix timestamp (exclusive)
     #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
     date_before: Option<i64>,
@@ -474,6 +480,7 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_text_tweets(options.text_tweets.unwrap_or(false))
                                     .with_image_options(options.size.clone().unwrap_or_default())
                                     .with_article_options(options.articles.unwrap_or_default())
                                     .with_card_options(CardOptions {
@@ -562,6 +569,9 @@ fn extract_input<'a>(
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
                             expand: (category == "twitter").then_some(options.expand).flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
+                            text_tweets: (category == "twitter")
+                                .then_some(options.text_tweets)
+                                .flatten(),
                             unavailable: (category == "twitter")
                                 .then_some(options.unavailable)
                                 .flatten(),
@@ -673,6 +683,13 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         videos: None,
         previews: None,
         unavailable: None,
+        text_tweets: if args.text_tweets {
+            Some(true)
+        } else if args.no_text_tweets {
+            Some(false)
+        } else {
+            None
+        },
         size: None,
         fallback: None,
         articles: None,

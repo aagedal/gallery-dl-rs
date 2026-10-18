@@ -35,7 +35,7 @@ fn parse(
     let mut media = Vec::new();
     loop {
         match engine.next()? {
-            expansion::Action::Media(items) => media.extend(items),
+            expansion::Action::Post(post) => media.extend(post.media),
             expansion::Action::Done => return Ok(media),
             expansion::Action::Fetch(_) => panic!("fixture target missing"),
         }

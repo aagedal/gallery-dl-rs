@@ -1852,3 +1852,125 @@ fn compatibility_community_archives_keep_scoped_files_distinct_from_ordinary_pos
     assert!(media[3]["metadata"].get("community").is_none());
     assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE-UNALLOWED-FIELD"));
 }
+
+#[cfg(unix)]
+#[test]
+fn text_tweet_flags_override_scopes_and_forward_only_explicit_twitter_settings() {
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$TEXT_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, extra, expected) in [
+        (json!({}), vec![], None),
+        (
+            json!({"extractor":{"twitter":{"text-tweets":true}}}),
+            vec![],
+            Some("text-tweets=true"),
+        ),
+        (
+            json!({"extractor":{"text-tweets":true,"twitter":{"text-tweets":false}}}),
+            vec![],
+            Some("text-tweets=false"),
+        ),
+        (
+            json!({"text-tweets":false,"extractor":{"twitter":{"text-tweets":true}}}),
+            vec![],
+            Some("text-tweets=false"),
+        ),
+        (
+            json!({"text-tweets":false}),
+            vec!["--text-tweets"],
+            Some("text-tweets=true"),
+        ),
+        (
+            json!({"text-tweets":true}),
+            vec!["--no-text-tweets"],
+            Some("text-tweets=false"),
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/person/status/1", true),
+            ("https://instagram.com/p/example/", false),
+            ("https://facebook.com/photo/?fbid=1", false),
+        ] {
+            let output = binary()
+                .env("TEXT_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .arg("-g")
+                .args(&extra)
+                .arg(url)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("text-tweets="))
+                .collect();
+            assert_eq!(
+                forwarded,
+                if twitter {
+                    expected.into_iter().collect()
+                } else {
+                    vec![]
+                }
+            );
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    std::fs::write(
+        &config,
+        br#"{"extractor":{"twitter":{"text-tweets":"PRIVATE-TEXT-VALUE"}}}"#,
+    )
+    .unwrap();
+    let output = binary()
+        .env("TEXT_ARGUMENTS", &log)
+        .arg("--native-config")
+        .arg(&config)
+        .arg("--extractor-command")
+        .arg(&backend)
+        .args(["-g", "https://x.com/person/status/1"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-TEXT-VALUE"));
+    assert!(!log.exists());
+    let output = binary()
+        .env("TEXT_ARGUMENTS", &log)
+        .arg("--extractor-command")
+        .arg(&backend)
+        .args([
+            "-g",
+            "--text-tweets",
+            "--no-text-tweets",
+            "https://x.com/person/status/1",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!log.exists());
+}

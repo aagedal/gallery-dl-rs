@@ -90,6 +90,7 @@ pub struct ProfileOptions {
 
 pub struct Twitter {
     expansion: ExpansionOptions,
+    text_tweets: bool,
     profile_options: ProfileOptions,
     timeline_options: TimelineOptions,
     status_options: StatusOptions,
@@ -127,6 +128,7 @@ impl Twitter {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
             expansion: ExpansionOptions::default(),
+            text_tweets: false,
             profile_options: ProfileOptions::default(),
             timeline_options: TimelineOptions::default(),
             status_options: StatusOptions::default(),
@@ -149,6 +151,12 @@ impl Twitter {
     /// Select repost identity and opt into explicit quoted-post traversal.
     pub fn with_expansion(mut self, options: ExpansionOptions) -> Self {
         self.expansion = options;
+        self
+    }
+
+    /// Emit post events even when accepted tweets have no selected files.
+    pub fn with_text_tweets(mut self, enabled: bool) -> Self {
+        self.text_tweets = enabled;
         self
     }
 

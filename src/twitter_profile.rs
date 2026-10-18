@@ -164,6 +164,7 @@ impl Twitter {
                         };
                         state.engine = Some(
                             expansion::Engine::new(root, state.id.clone(), self.expansion, false)
+                                .with_text_tweets(self.text_tweets)
                                 .with_article_options(self.article_options)
                                 .with_image_options(self.image_options.clone())
                                 .with_card_options(self.card_options.clone())
@@ -210,15 +211,15 @@ impl Twitter {
         base: &Url,
         known: Option<&BTreeMap<String, Value>>,
         extra: Option<&BTreeMap<String, Value>>,
-    ) -> Result<Option<Vec<Media>>> {
+    ) -> Result<Option<media::ParsedPost>> {
         loop {
             match engine.next()? {
                 expansion::Action::Done => return Ok(None),
-                expansion::Action::Media(mut media) => {
-                    for item in &mut media {
+                expansion::Action::Post(mut post) => {
+                    for item in &mut post.media {
                         self.network.apply_media(item);
                     }
-                    return Ok(Some(media));
+                    return Ok(Some(*post));
                 }
                 expansion::Action::Fetch(id) => {
                     if let Some(value) = known
@@ -457,7 +458,8 @@ impl Twitter {
                                 | collections::Collection::Communities
                         )
                     ) {
-                        for item in &mut media {
+                        media.metadata.community_archive = true;
+                        for item in &mut media.media {
                             if let Some(metadata) = item.metadata.as_mut() {
                                 metadata.community_archive = true;
                             }
@@ -480,6 +482,7 @@ impl Twitter {
             if let Some((id, post)) = thread.posts.pop_front() {
                 state.expansion = Some(
                     expansion::Engine::new(post, id, self.expansion, true)
+                        .with_text_tweets(self.text_tweets)
                         .with_article_options(self.article_options)
                         .with_image_options(self.image_options.clone())
                         .with_card_options(self.card_options.clone())
@@ -503,6 +506,7 @@ impl Twitter {
                         self.expansion,
                         true,
                     )
+                    .with_text_tweets(self.text_tweets)
                     .with_article_options(self.article_options)
                     .with_image_options(self.image_options.clone())
                     .with_card_options(self.card_options.clone())
@@ -548,6 +552,7 @@ impl Twitter {
             }
             state.expansion = Some(
                 expansion::Engine::new(post, id, self.expansion, true)
+                    .with_text_tweets(self.text_tweets)
                     .with_article_options(self.article_options)
                     .with_image_options(self.image_options.clone())
                     .with_card_options(self.card_options.clone())
@@ -685,10 +690,20 @@ impl Twitter {
                     kind,
                     state.cursor.as_deref(),
                     self.timeline_options.limit,
+                    self.text_tweets,
                 )?;
                 self.ensure_transaction_at("", &target).await?;
                 let body = self.fetch(&target, "", true).await?;
-                let page = collections::parse_collection_posts(&body, kind, state.pinned_pending)?;
+                let page = if self.text_tweets {
+                    collections::parse_collection_posts_with_text(
+                        &body,
+                        kind,
+                        state.pinned_pending,
+                        true,
+                    )?
+                } else {
+                    collections::parse_collection_posts(&body, kind, state.pinned_pending)?
+                };
                 state.pinned_pending = false;
                 let allowance = if matches!(kind, collections::Collection::Bookmarks) {
                     128
@@ -947,6 +962,7 @@ fn feed_endpoint(
     kind: &collections::Collection,
     cursor: Option<&str>,
     limit: u8,
+    text_tweets: bool,
 ) -> Result<Url> {
     use collections::Collection;
     validate_limit(limit)?;
@@ -969,7 +985,13 @@ fn feed_endpoint(
             }
             variables["communityId"] = id.as_str().into();
             variables["withCommunity"] = true.into();
-            "ZniZ7AAK_VVu1xtSx1V-gQ/CommunityMediaTimeline"
+            if text_tweets {
+                variables["displayLocation"] = "Community".into();
+                variables["rankingMode"] = "Recency".into();
+                "Nyt-88UX4-pPCImZNUl9RQ/CommunityTweetsTimeline"
+            } else {
+                "ZniZ7AAK_VVu1xtSx1V-gQ/CommunityMediaTimeline"
+            }
         }
         Collection::Communities => {
             variables["withCommunity"] = true.into();
@@ -1017,27 +1039,31 @@ fn search_endpoint(base: &Url, paging: &search::Paging, options: TimelineOptions
     )
 }
 
-// Engine media batches belong to one emitted post. Keep all siblings from its
-// first occurrence, then suppress the complete post on overlapping pages/pins.
+// Accepted posts retain independent metadata even when they have no files.
+// Keep every sibling from the first occurrence, suppress overlapping posts.
 fn queue_unique(
-    media: Vec<Media>,
+    post: media::ParsedPost,
     pending: &mut VecDeque<ExtractionEvent>,
     seen: &mut HashSet<[u8; 32]>,
     unique: bool,
 ) -> bool {
-    let Some(first) = media.first() else {
-        return false;
-    };
-    if !unique {
-        pending.extend(event::group(media, "twitter"));
-        return true;
+    if unique {
+        let digest = <[u8; 32]>::from(Sha256::digest(post.metadata.post_id.as_bytes()));
+        if !seen.insert(digest) {
+            return false;
+        }
     }
-    let metadata = first.metadata.as_ref().unwrap();
-    let digest = <[u8; 32]>::from(Sha256::digest(metadata.post_id.as_bytes()));
-    if !seen.insert(digest) {
-        return false;
-    }
-    pending.extend(event::group(media, "twitter"));
+    pending.push_back(ExtractionEvent::Post(Box::new(event::Post {
+        category: "twitter".into(),
+        metadata: Some(post.metadata),
+        count: Some(post.media.len()),
+    })));
+    pending.extend(
+        post.media
+            .into_iter()
+            .map(|media| ExtractionEvent::Media(Box::new(media))),
+    );
+    pending.push_back(ExtractionEvent::EndPost);
     true
 }
 

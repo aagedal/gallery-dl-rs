@@ -54,6 +54,8 @@ pub struct Options {
     pub previews: Option<bool>,
     /// Attempt explicitly unavailable Twitter media when a URL is provided.
     pub unavailable: Option<bool>,
+    /// Include Twitter text posts as explicit text files.
+    pub text_tweets: Option<bool>,
     /// Ordered Twitter image sizes.
     pub size: Option<crate::twitter::ImageOptions>,
     /// Try media fallback URLs after the primary URL fails.
@@ -137,6 +139,7 @@ impl Options {
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
             unavailable: overrides.unavailable.or(self.unavailable),
+            text_tweets: overrides.text_tweets.or(self.text_tweets),
             size: overrides.size.clone().or_else(|| self.size.clone()),
             fallback: overrides.fallback.or(self.fallback),
             articles: overrides.articles.or(self.articles),
@@ -213,6 +216,7 @@ struct RawRoot {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    text_tweets: Field,
     size: Field,
     fallback: Field,
     articles: Field,
@@ -259,6 +263,7 @@ struct RawExtractor {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    text_tweets: Field,
     size: Field,
     fallback: Field,
     articles: Field,
@@ -308,6 +313,7 @@ struct RawOptions {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    text_tweets: Field,
     size: Field,
     fallback: Field,
     articles: Field,
@@ -420,6 +426,7 @@ impl Config {
             videos: root.videos,
             previews: root.previews,
             unavailable: root.unavailable,
+            text_tweets: root.text_tweets,
             size: root.size,
             fallback: root.fallback,
             articles: root.articles,
@@ -464,6 +471,7 @@ impl Config {
             videos: extractor.videos,
             previews: extractor.previews,
             unavailable: extractor.unavailable,
+            text_tweets: extractor.text_tweets,
             size: extractor.size,
             fallback: extractor.fallback,
             articles: extractor.articles,
@@ -576,6 +584,11 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration unavailable must be a boolean")),
+        };
+        let text_tweets = match self.text_tweets.0 {
+            None => None,
+            Some(Value::Bool(value)) => Some(value),
+            Some(_) => return Err(error("native configuration text-tweets must be a boolean")),
         };
         let fallback = match self.fallback.0 {
             None => None,
@@ -829,6 +842,7 @@ impl RawOptions {
             videos,
             previews,
             unavailable,
+            text_tweets,
             size: image_size,
             fallback,
             articles,

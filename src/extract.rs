@@ -254,6 +254,7 @@ pub struct BackendOptions {
     pub videos: Option<crate::twitter::VideoMode>,
     pub previews: Option<bool>,
     pub unavailable: Option<bool>,
+    pub text_tweets: Option<bool>,
     pub size: Option<crate::twitter::ImageOptions>,
     pub fallback: Option<bool>,
     pub articles: Option<crate::twitter::ArticleOptions>,
@@ -372,6 +373,11 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("unavailable={unavailable}"));
+        }
+        if let Some(text_tweets) = options.text_tweets {
+            command
+                .arg("--option")
+                .arg(format!("text-tweets={text_tweets}"));
         }
         if let Some(size) = &options.size {
             command

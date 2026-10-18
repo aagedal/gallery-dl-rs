@@ -5246,3 +5246,279 @@ async fn expanded_thread_events_end_before_requesting_another_child_page_or_pare
     );
     assert_eq!(server.count(), 2);
 }
+
+#[tokio::test]
+async fn text_tweet_events_preserve_metadata_and_nonempty_siblings_but_default_skips_text() {
+    use crate::event::ExtractionEvent;
+    for enabled in [false, true] {
+        let mut text = text_tweet("100");
+        text["legacy"]["full_text"] = json!("Native text fixture");
+        let mut photos = tweet("101");
+        let second = photos["legacy"]["extended_entities"]["media"][0].clone();
+        photos["legacy"]["extended_entities"]["media"]
+            .as_array_mut()
+            .unwrap()
+            .push(second);
+        let server = Server::new(vec![Response::json(page(vec![text, photos], None))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_text_tweets(enabled);
+        let events: Vec<_> = native
+            .profile_events(
+                input("id:42"),
+                timeline::ProfileTab::Media,
+                server.base.clone(),
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        let mut expected = vec![];
+        if enabled {
+            expected.extend([('P', "100".into(), 0), ('E', String::new(), 0)]);
+            let ExtractionEvent::Post(post) = &events[0] else {
+                panic!("text post boundary missing")
+            };
+            assert_eq!(post.count, Some(0));
+            let metadata = post.metadata.as_ref().unwrap();
+            assert_eq!(metadata.caption.as_deref(), Some("Native text fixture"));
+            assert_eq!(metadata.timestamp, Some(1_700_000_000));
+            assert!(metadata.file.is_none());
+            assert!(metadata.media_id.is_empty());
+            assert_eq!(metadata.index, 0);
+            let predicate = crate::filter::FilterExpression::parse("count == 0 and tweet_id == 100 and content == 'Native text fixture' and date == 1700000000").unwrap();
+            assert!(predicate.matches_post(post).unwrap());
+            for name in ["width", "index", "num", "media_id", "url", "_url"] {
+                assert!(
+                    !crate::filter::FilterExpression::parse(&format!("{name} is not None"))
+                        .unwrap()
+                        .matches_post(post)
+                        .unwrap_or(false)
+                );
+            }
+        }
+        expected.extend([
+            ('P', "101".into(), 0),
+            ('M', "101".into(), 1),
+            ('M', "101".into(), 2),
+            ('E', String::new(), 0),
+        ]);
+        assert_eq!(event_shape(&events), expected);
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn text_tweet_post_range_finishes_at_empty_end_without_fetching_quotes_or_next_page() {
+    for quoted in [false, true] {
+        let mut text = text_tweet("100");
+        if quoted {
+            text["legacy"]["quoted_status_id_str"] = json!("102");
+        }
+        let server = Server::new(vec![
+            Response::json(page(vec![text, tweet("101")], Some("later"))),
+            Response::json(post_response(tweet("102"))),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_text_tweets(true)
+            .with_expansion(expansion_options(RetweetMode::Skip));
+        let selection = crate::post_selection::PostSelection::new(
+            Some(crate::selection::RangeSelection::parse("1").unwrap()),
+            None,
+        );
+        let files: Vec<_> = selection
+            .apply(
+                native.profile_events(
+                    input("id:42"),
+                    timeline::ProfileTab::Media,
+                    server.base.clone(),
+                ),
+                None,
+                None,
+                false,
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(files.is_empty());
+        assert_eq!(server.count(), 1, "quoted={quoted}");
+    }
+}
+
+#[tokio::test]
+async fn text_tweet_post_dates_and_filter_precede_range_and_preserve_next_whole_batch() {
+    let mut old = text_tweet("100");
+    old["legacy"]["created_at"] = json!("Mon Nov 13 22:13:20 +0000 2023");
+    let mut photos = tweet("102");
+    let second = photos["legacy"]["extended_entities"]["media"][0].clone();
+    photos["legacy"]["extended_entities"]["media"]
+        .as_array_mut()
+        .unwrap()
+        .push(second);
+    let server = Server::new(vec![Response::json(page(
+        vec![old, text_tweet("101"), photos],
+        Some("later"),
+    ))]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_text_tweets(true);
+    let selection = crate::post_selection::PostSelection::new(
+        Some(crate::selection::RangeSelection::parse("1").unwrap()),
+        Some(crate::filter::FilterExpression::parse("count > 0").unwrap()),
+    );
+    let files: Vec<_> = selection
+        .apply(
+            native.profile_events(
+                input("id:42"),
+                timeline::ProfileTab::Media,
+                server.base.clone(),
+            ),
+            None,
+            Some(1_699_999_999),
+            true,
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&files), vec!["102", "102"]);
+    assert_eq!(
+        files
+            .iter()
+            .map(|file| file.metadata.as_ref().unwrap().index)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn text_tweet_quote_and_original_repost_events_keep_distinct_posts_and_empty_uniqueness() {
+    use crate::event::ExtractionEvent;
+    for unique in [false, true] {
+        let mut original = text_tweet("101");
+        original["legacy"]["quoted_status_id_str"] = json!("102");
+        original["quoted_status_result"] = json!({"result":text_tweet("102")});
+        let mut repost = text_tweet("100");
+        repost["legacy"]["retweeted_status_id_str"] = json!("101");
+        repost["retweeted_status_result"] = json!({"result":original.clone()});
+        let server = Server::new(vec![
+            Response::json(page(vec![repost], Some("overlap"))),
+            Response::json(page(vec![original], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_text_tweets(true)
+            .with_expansion(expansion_options(RetweetMode::Original))
+            .with_thread_options(ThreadOptions {
+                expand: false,
+                unique,
+            });
+        let events: Vec<_> = native
+            .profile_events(
+                input("id:42"),
+                timeline::ProfileTab::Media,
+                server.base.clone(),
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        let ids: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                ExtractionEvent::Post(post) => {
+                    assert_eq!(post.count, Some(0));
+                    Some(post.metadata.as_ref().unwrap().post_id.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            if unique {
+                vec!["101", "102"]
+            } else {
+                vec!["101", "102", "101", "102"]
+            }
+        );
+        assert_eq!(events.len(), ids.len() * 2);
+        assert_eq!(server.count(), 2);
+    }
+}
+
+fn community_text_page(posts: Vec<Value>, cursor: Option<&str>) -> Value {
+    let mut body = feed_page(
+        &collections::Collection::Community("55".into()),
+        posts,
+        cursor,
+    );
+    let result = body["data"]["communityResults"]["result"]
+        .as_object_mut()
+        .unwrap();
+    let timeline = result.remove("community_media_timeline").unwrap();
+    result.insert("ranked_community_timeline".into(), timeline);
+    body
+}
+
+#[tokio::test]
+async fn community_text_timeline_uses_ranked_operation_and_keeps_lazy_empty_post_boundaries() {
+    use crate::event::ExtractionEvent;
+    for stop_after_text in [false, true] {
+        let mut text = community_post("100", "55");
+        text["legacy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("extended_entities");
+        text["legacy"]["entities"] = json!({});
+        let server = Server::new(vec![
+            Response::json(community_text_page(vec![text], Some("opaque+/=?"))),
+            Response::json(community_text_page(vec![community_post("101", "55")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_text_tweets(true);
+        let stream = native.feed_events(
+            collections::Collection::Community("55".into()),
+            server.base.clone(),
+        );
+        let events: Vec<_> = if stop_after_text {
+            stream.take(2).try_collect().await.unwrap()
+        } else {
+            stream.try_collect().await.unwrap()
+        };
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("missing text post")
+        };
+        assert_eq!(post.count, Some(0));
+        let metadata = post.metadata.as_ref().unwrap();
+        assert_eq!(metadata.post_id, "100");
+        assert_eq!(metadata.community.as_ref().unwrap().id, "55");
+        assert!(metadata.community_archive);
+        assert!(matches!(events[1], ExtractionEvent::EndPost));
+        assert_eq!(server.count(), if stop_after_text { 1 } else { 2 });
+        let urls = server.urls();
+        for url in &urls {
+            assert_eq!(
+                url.path(),
+                "/i/api/graphql/Nyt-88UX4-pPCImZNUl9RQ/CommunityTweetsTimeline"
+            );
+            let vars = variables(url);
+            assert_eq!(vars["communityId"], "55");
+            assert_eq!(vars["displayLocation"], "Community");
+            assert_eq!(vars["rankingMode"], "Recency");
+            assert_eq!(vars["withCommunity"], true);
+            assert!(vars["count"].as_u64().unwrap() > 0);
+        }
+        assert!(variables(&urls[0]).get("cursor").is_none());
+        if !stop_after_text {
+            assert_eq!(variables(&urls[1])["cursor"], "opaque+/=?");
+            assert_eq!(
+                event_shape(&events[2..]),
+                vec![
+                    ('P', "101".into(), 0),
+                    ('M', "101".into(), 1),
+                    ('E', String::new(), 0)
+                ]
+            );
+        }
+    }
+}

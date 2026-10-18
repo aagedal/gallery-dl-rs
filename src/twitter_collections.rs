@@ -86,6 +86,15 @@ pub(super) fn parse_collection_posts(
     collection: &Collection,
     pinned: bool,
 ) -> Result<Page> {
+    parse_collection_posts_with_text(bytes, collection, pinned, false)
+}
+
+pub(super) fn parse_collection_posts_with_text(
+    bytes: &[u8],
+    collection: &Collection,
+    pinned: bool,
+    text_tweets: bool,
+) -> Result<Page> {
     let data = timeline::document(bytes)?;
     let path = match collection {
         Collection::Bookmarks => "/data/bookmark_timeline_v2/timeline/instructions",
@@ -134,7 +143,11 @@ pub(super) fn parse_collection_posts(
                     }
                 }
             }
-            "/data/communityResults/result/community_media_timeline/timeline/instructions"
+            if text_tweets {
+                "/data/communityResults/result/ranked_community_timeline/timeline/instructions"
+            } else {
+                "/data/communityResults/result/community_media_timeline/timeline/instructions"
+            }
         }
         Collection::List(expected) => {
             if !valid_id(expected) {
@@ -550,5 +563,138 @@ mod tests {
                 .to_string();
             assert!(!error.contains("PRIVATE"));
         }
+    }
+    #[test]
+    fn community_text_mode_selects_only_the_ranked_owned_timeline() {
+        let collection = Collection::Community("42".into());
+        let instructions = |post: Value| json!([{"type":"TimelineAddEntries","entries":[entry(post),cursor("opaque+/=?")] }]);
+        let mut text = tweet("12", "99");
+        text["legacy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("extended_entities");
+        text["legacy"]["full_text"] = "A community text post".into();
+        let data = json!({"data":{"communityResults":{"result":{
+            "rest_id":"42",
+            "community_media_timeline":{"timeline":{"instructions":instructions(tweet("11", "98"))}},
+            "ranked_community_timeline":{"timeline":{"instructions":instructions(text)}}}}}});
+        for (enabled, expected) in [(false, "11"), (true, "12")] {
+            let page = parse_collection_posts_with_text(
+                &serde_json::to_vec(&data).unwrap(),
+                &collection,
+                false,
+                enabled,
+            )
+            .unwrap();
+            assert_eq!(page.posts.len(), 1);
+            assert_eq!(page.posts[0].0, expected);
+            assert_eq!(page.posts[0].1["legacy"]["id_str"], expected);
+            assert_eq!(page.cursor.as_deref(), Some("opaque+/=?"));
+            assert!(!page.done);
+            assert!(page.continue_empty);
+        }
+        assert_eq!(
+            parse(data.clone(), &collection, false).unwrap().posts[0].0,
+            "11",
+            "legacy API keeps media mode"
+        );
+        for enabled in [false, true] {
+            let selected = if enabled {
+                "ranked_community_timeline"
+            } else {
+                "community_media_timeline"
+            };
+            for invalid in [
+                Value::Null,
+                json!({"timeline":{"instructions":"private malformed instructions"}}),
+            ] {
+                let mut wrong = data.clone();
+                wrong["data"]["communityResults"]["result"][selected] = invalid;
+                let error = parse_collection_posts_with_text(
+                    &serde_json::to_vec(&wrong).unwrap(),
+                    &collection,
+                    false,
+                    enabled,
+                )
+                .err()
+                .unwrap()
+                .to_string();
+                assert!(!error.contains("private malformed instructions"));
+            }
+            let mut missing = data.clone();
+            missing["data"]["communityResults"]["result"]
+                .as_object_mut()
+                .unwrap()
+                .remove(selected);
+            assert!(
+                parse_collection_posts_with_text(
+                    &serde_json::to_vec(&missing).unwrap(),
+                    &collection,
+                    false,
+                    enabled
+                )
+                .is_err(),
+                "must not fall back to the other envelope"
+            );
+        }
+    }
+
+    #[test]
+    fn community_text_mode_preserves_identity_checks_and_pin_selection() {
+        let collection = Collection::Community("42".into());
+        let data = json!({"data":{"communityResults":{"result":{
+            "id":STANDARD.encode("Community:42"), "id_str":"42",
+            "ranked_community_timeline":{"timeline":{"instructions":[
+                {"type":"TimelinePinEntry","entry":entry(tweet("10","88"))},
+                {"type":"TimelineAddEntries","entries":[entry(tweet("11","99"))]}
+            ]}}
+        }}}});
+        for (pinned, expected) in [(false, vec!["11"]), (true, vec!["10", "11"])] {
+            let page = parse_collection_posts_with_text(
+                &serde_json::to_vec(&data).unwrap(),
+                &collection,
+                pinned,
+                true,
+            )
+            .unwrap();
+            assert_eq!(
+                page.posts
+                    .iter()
+                    .map(|(id, _)| id.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(page.done);
+        }
+        for field in ["rest_id", "id_str", "id"] {
+            let mut wrong = data.clone();
+            wrong["data"]["communityResults"]["result"][field] = "private-wrong-community".into();
+            let error = parse_collection_posts_with_text(
+                &serde_json::to_vec(&wrong).unwrap(),
+                &collection,
+                false,
+                true,
+            )
+            .err()
+            .unwrap()
+            .to_string();
+            assert!(!error.contains("private-wrong-community"));
+        }
+        let bookmark = envelope(
+            &Collection::Bookmarks,
+            json!([{"type":"TimelineAddEntries","entries":[entry(tweet("11","99"))]}]),
+        );
+        let ordinary = parse(bookmark.clone(), &Collection::Bookmarks, false).unwrap();
+        let text = parse_collection_posts_with_text(
+            &serde_json::to_vec(&bookmark).unwrap(),
+            &Collection::Bookmarks,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            ordinary.posts, text.posts,
+            "other feeds retain their exact owned envelopes"
+        );
     }
 }

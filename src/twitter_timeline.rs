@@ -272,7 +272,7 @@ pub(super) fn parse_page(bytes: &[u8], owner_id: &str) -> Result<Page> {
         let mut engine = expansion::Engine::new(post, id, ExpansionOptions::default(), true);
         loop {
             match engine.next()? {
-                expansion::Action::Media(media) => page.media.extend(media),
+                expansion::Action::Post(post) => page.media.extend(post.media),
                 expansion::Action::Done => break,
                 expansion::Action::Fetch(_) => {
                     return Err(error("Twitter linked post result missing"));

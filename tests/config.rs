@@ -1719,3 +1719,66 @@ fn post_selection_invalid_types_syntax_and_bounds_fail_privately_in_all_scopes()
         }
     }
 }
+
+#[test]
+fn text_tweet_settings_are_sparse_scoped_and_preserve_explicit_false() {
+    let config =
+        parse(r#"{"extractor":{"text-tweets":true,"twitter":{"text-tweets":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.text_tweets, Some(false));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.text_tweets, Some(true));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        inherited
+            .overlay(&Options {
+                text_tweets: Some(false),
+                ..Default::default()
+            })
+            .text_tweets,
+        Some(false)
+    );
+    let root = parse(
+        r#"{"text-tweets":false,"extractor":{"text-tweets":true,"twitter":{"text-tweets":true}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        assert_eq!(root.resolve(category).unwrap().text_tweets, Some(false));
+    }
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().text_tweets,
+        None
+    );
+}
+
+#[test]
+fn text_tweet_configuration_rejects_private_types_and_duplicate_keys() {
+    use serde_json::json;
+    for value in [
+        json!(null),
+        json!(1),
+        json!("false"),
+        json!([]),
+        json!({"private-key":"PRIVATE-TEXT-VALUE"}),
+    ] {
+        for document in [
+            json!({"text-tweets":value}),
+            json!({"extractor":{"text-tweets":value}}),
+            json!({"extractor":{"twitter":{"text-tweets":value}}}),
+            json!({"extractor":{"instagram":{"text-tweets":value}}}),
+            json!({"extractor":{"facebook":{"text-tweets":value}}}),
+            json!({"extractor":{"direct":{"text-tweets":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(message.contains("text-tweets"));
+            assert!(!message.contains("private-key") && !message.contains("PRIVATE-TEXT-VALUE"));
+        }
+    }
+    for document in [
+        r#"{"text-tweets":true,"text-tweets":false}"#,
+        r#"{"extractor":{"text-tweets":false,"text-tweets":true}}"#,
+        r#"{"extractor":{"twitter":{"text-tweets":false,"text-tweets":true}}}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}

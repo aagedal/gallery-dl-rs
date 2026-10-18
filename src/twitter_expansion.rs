@@ -97,7 +97,7 @@ pub fn parse_response_with_image_options(
     let mut result = Vec::new();
     loop {
         match engine.next()? {
-            Action::Media(media) => result.extend(media),
+            Action::Post(post) => result.extend(post.media),
             Action::Fetch(_) => return Err(error("Twitter linked post result missing")),
             Action::Done => return Ok(result),
         }
@@ -215,7 +215,7 @@ struct Job {
 }
 
 pub(super) enum Action {
-    Media(Vec<Media>),
+    Post(Box<media::ParsedPost>),
     Fetch(String),
     Done,
 }
@@ -224,6 +224,7 @@ pub(super) struct Engine {
     jobs: VecDeque<Job>,
     options: ExpansionOptions,
     allow_empty: bool,
+    text_tweets: bool,
     media_options: MediaOptions,
     card_options: CardOptions,
     article_options: ArticleOptions,
@@ -252,6 +253,7 @@ impl Engine {
             }]),
             options,
             allow_empty,
+            text_tweets: false,
             media_options: MediaOptions::default(),
             card_options: CardOptions::default(),
             article_options: ArticleOptions::default(),
@@ -259,6 +261,11 @@ impl Engine {
             replies: ReplyMode::All,
             profile_owner: None,
         }
+    }
+
+    pub(super) fn with_text_tweets(mut self, enabled: bool) -> Self {
+        self.text_tweets = enabled;
+        self
     }
 
     pub(super) fn with_media_options(mut self, options: MediaOptions) -> Self {
@@ -400,17 +407,17 @@ impl Engine {
                 self.replies,
                 self.profile_owner.as_deref(),
             )? {
-                return Ok(Action::Media(Vec::new()));
+                continue;
             }
             let output_id = job
                 .repost
                 .as_ref()
                 .and_then(|outer| outer["rest_id"].as_str())
                 .unwrap_or(&job.id);
-            let mut media = media::parse_tweet_media(
+            let mut post = media::parse_tweet_media(
                 tweet,
                 output_id,
-                self.allow_empty || has_quote,
+                self.allow_empty || has_quote || self.text_tweets,
                 job.repost.as_ref().unwrap_or(tweet),
                 media::FileOptions {
                     media: self.media_options,
@@ -429,8 +436,7 @@ impl Engine {
                 })
                 .and_then(Value::as_str)
                 .map(std::sync::Arc::from);
-            for item in &mut media {
-                let metadata = item.metadata.as_mut().unwrap();
+            let transform = |metadata: &mut PostMetadata| {
                 metadata.quoted_by_id = job.quoted_by.clone();
                 metadata.reposted_by_id = job.reposted_by.clone();
                 if let Some(outer) = &job.repost {
@@ -442,11 +448,21 @@ impl Engine {
                         .pointer("/legacy/created_at")
                         .and_then(Value::as_str)
                         .and_then(timestamp);
+                }
+            };
+            transform(&mut post.metadata);
+            for item in &mut post.media {
+                let metadata = item.metadata.as_mut().unwrap();
+                transform(metadata);
+                if job.repost.is_some() {
                     let extension = item.filename.rsplit_once('.').unwrap().1;
-                    item.filename = format!("{outer_id}_{}.{extension}", metadata.index);
+                    item.filename = format!("{}_{}.{extension}", metadata.post_id, metadata.index);
                 }
             }
-            return Ok(Action::Media(media));
+            if post.media.is_empty() && !self.text_tweets {
+                continue;
+            }
+            return Ok(Action::Post(Box::new(post)));
         }
     }
 }
