@@ -215,6 +215,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
     let mut item = media(&server.url);
     item.category = "instagram".into();
     item.metadata = Some(PostMetadata {
+        file: None,
         community: None,
         community_archive: false,
         retweet_id: None,

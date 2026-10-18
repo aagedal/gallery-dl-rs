@@ -1,6 +1,7 @@
 //! File selection shared by statuses, linked posts, and timeline traversal.
 use super::*;
-use crate::extract::MediaJob;
+use crate::{extract::MediaJob, file_metadata::FileMetadata};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VideoMode {
@@ -98,7 +99,7 @@ pub(super) fn parse_tweet_media(
     Ok(selected
         .into_iter()
         .enumerate()
-        .map(|(i, (url, extension, job, fallback))| Media {
+        .map(|(i, (url, extension, job, fallback, file))| Media {
             url,
             job,
             handoff: if fallback.is_empty() {
@@ -109,6 +110,7 @@ pub(super) fn parse_tweet_media(
             category: "twitter".into(),
             filename: format!("{requested_post_id}_{}.{extension}", i + 1),
             metadata: Some(PostMetadata {
+                file: (file != FileMetadata::default()).then_some(file),
                 community: community.clone(),
                 community_archive: false,
                 retweet_id: None,
@@ -131,7 +133,7 @@ pub(super) fn parse_tweet_media(
         .collect())
 }
 
-pub(super) type SelectedFile = (Url, String, MediaJob, Vec<Url>);
+pub(super) type SelectedFile = (Url, String, MediaJob, Vec<Url>, FileMetadata);
 
 pub(super) fn select_entities<'a>(
     items: impl IntoIterator<Item = &'a Value>,
@@ -159,12 +161,16 @@ pub(super) fn select_entities<'a>(
         }
         if video {
             match options.videos {
-                VideoMode::Files => selected.push((
-                    video_url(item)?,
-                    "mp4".into(),
-                    MediaJob::DirectHttp,
-                    Vec::new(),
-                )),
+                VideoMode::Files => {
+                    let (url, bitrate) = video_url(item)?;
+                    selected.push((
+                        url,
+                        "mp4".into(),
+                        MediaJob::DirectHttp,
+                        Vec::new(),
+                        entity_metadata(item, false, bitrate),
+                    ));
+                }
                 VideoMode::Skip => {}
                 VideoMode::Ytdl => {
                     // Fixed first-party page; never take a delegate target from response data.
@@ -175,6 +181,7 @@ pub(super) fn select_entities<'a>(
                         "mp4".into(),
                         MediaJob::VideoPage { page_url },
                         Vec::new(),
+                        entity_metadata(item, false, None),
                     ));
                 }
             }
@@ -184,12 +191,95 @@ pub(super) fn select_entities<'a>(
         }
         let (url, extension) = image_url(item)?;
         let (url, fallback) = image_options.apply(url);
-        selected.push((url, extension, MediaJob::DirectHttp, fallback));
+        selected.push((
+            url,
+            extension,
+            MediaJob::DirectHttp,
+            fallback,
+            entity_metadata(item, video, None),
+        ));
     }
     Ok(selected)
 }
 
-fn video_url(item: &Value) -> Result<Url> {
+pub(super) fn dimension(value: Option<&Value>) -> Option<u64> {
+    value.and_then(Value::as_u64).filter(|value| *value > 0)
+}
+
+pub(super) fn image_dimensions(value: &Value) -> FileMetadata {
+    FileMetadata {
+        width: dimension(value.get("width")),
+        height: dimension(value.get("height")),
+        width_original: dimension(value.get("width_original")),
+        height_original: dimension(value.get("height_original")),
+        ..Default::default()
+    }
+}
+
+fn entity_metadata(item: &Value, preview: bool, bitrate: Option<u64>) -> FileMetadata {
+    let info = item.get("original_info");
+    let width = dimension(info.and_then(|info| info.get("width")));
+    let height = dimension(info.and_then(|info| info.get("height")));
+    let video = matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("video" | "animated_gif")
+    );
+    let source_id = item
+        .get("source_status_id_str")
+        .and_then(Value::as_str)
+        .filter(|id| valid_id(id))
+        .map(str::to_owned);
+    let source = item.pointer("/additional_media_info/source_user/user_results/result");
+    let source_username = source
+        .and_then(|source| {
+            source
+                .pointer("/core/screen_name")
+                .or_else(|| source.pointer("/legacy/screen_name"))
+        })
+        .and_then(Value::as_str)
+        .map(Arc::from);
+    let flags: Arc<[Arc<str>]> = [
+        ("adult_content", "Nudity"),
+        ("other", "Sensitive"),
+        ("graphic_violence", "Violence"),
+    ]
+    .into_iter()
+    .filter(|(key, _)| {
+        item.get("sensitive_media_warning")
+            .is_some_and(|value| value.get(key).is_some())
+    })
+    .map(|(_, value)| Arc::from(value))
+    .collect();
+    FileMetadata {
+        width,
+        height,
+        width_original: width,
+        height_original: height,
+        duration: (video && !preview)
+            .then(|| {
+                item.pointer("/video_info/duration_millis")
+                    .and_then(Value::as_f64)
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .map(|value| value / 1000.0)
+            })
+            .flatten(),
+        bitrate: if preview { None } else { bitrate },
+        media_type: Some(Arc::from(if preview {
+            "preview"
+        } else {
+            item["type"].as_str().unwrap()
+        })),
+        description: item
+            .get("ext_alt_text")
+            .and_then(Value::as_str)
+            .map(Arc::from),
+        sensitive_flags: flags,
+        source_id,
+        source_username,
+    }
+}
+
+fn video_url(item: &Value) -> Result<(Url, Option<u64>)> {
     item.pointer("/video_info/variants")
         .and_then(Value::as_array)
         .into_iter()
@@ -203,10 +293,9 @@ fn video_url(item: &Value) -> Result<Url> {
             if !url.path().ends_with(".mp4") {
                 return None;
             }
-            Some((url, v.get("bitrate").and_then(Value::as_u64).unwrap_or(0)))
+            Some((url, v.get("bitrate").and_then(Value::as_u64)))
         })
-        .max_by_key(|(_, rate)| *rate)
-        .map(|(url, _)| url)
+        .max_by_key(|(_, rate)| rate.unwrap_or(0))
         .ok_or_else(|| {
             error("Twitter video has no direct MP4 variant; thumbnail fallback is disabled")
         })

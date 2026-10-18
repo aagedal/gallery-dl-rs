@@ -634,6 +634,7 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                 category: "instagram".into(),
                 filename: format!("{post_id}_{media_id}.{extension}"),
                 metadata: Some(PostMetadata {
+                    file: Some(file_metadata(item, variant, kind == Some(2))),
                     community: None,
                     community_archive: false,
                     retweet_id: None,
@@ -661,6 +662,32 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
             })
         })
         .collect()
+}
+
+/// Metadata follows the selected carousel child and representation, never its
+/// parent post or a video's image preview.
+fn file_metadata(item: &Value, variant: &Value, video: bool) -> crate::file_metadata::FileMetadata {
+    let dimension =
+        |value: Option<&Value>| value.and_then(Value::as_u64).filter(|value| *value > 0);
+    crate::file_metadata::FileMetadata {
+        width: dimension(variant.get("width")),
+        height: dimension(variant.get("height")),
+        width_original: dimension(item.get("original_width")),
+        height_original: dimension(item.get("original_height")),
+        duration: if video {
+            item.get("video_duration")
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite() && *value >= 0.0)
+        } else {
+            None
+        },
+        media_type: Some(std::sync::Arc::from(if video { "video" } else { "image" })),
+        description: item
+            .get("accessibility_caption")
+            .and_then(Value::as_str)
+            .map(std::sync::Arc::from),
+        ..Default::default()
+    }
 }
 
 fn identifier(value: Option<&Value>) -> Result<String> {
@@ -767,6 +794,9 @@ mod transport_tests {
             .await
             .unwrap();
         assert_eq!(media.len(), 1);
+        let file = media[0].metadata.as_ref().unwrap().file.as_ref().unwrap();
+        assert_eq!((file.width, file.height), (Some(1080), Some(1080)));
+        assert_eq!(file.media_type.as_deref(), Some("image"));
         assert_eq!(
             media[0].headers.get("User-Agent").map(String::as_str),
             Some("gallery-dl-native-test/1")
@@ -806,6 +836,9 @@ mod transport_tests {
             .await
             .unwrap();
         assert_eq!(media.len(), 1);
+        let file = media[0].metadata.as_ref().unwrap().file.as_ref().unwrap();
+        assert_eq!((file.width, file.height), (Some(10), Some(10)));
+        assert_eq!(file.media_type.as_deref(), Some("image"));
         assert_eq!(
             media[0].headers.get("User-Agent").map(String::as_str),
             Some("native-story-test/1")

@@ -3,6 +3,8 @@ use crate::{
     Result, error,
     extract::{Media, MediaJob, PostMetadata, http_url},
     facebook::{embedded_payloads, has_error_root},
+    facebook_dash::SelectedFile,
+    file_metadata::FileMetadata,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -77,42 +79,50 @@ pub fn parse_video(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
         let media: Vec<_> = urls
             .into_iter()
             .enumerate()
-            .map(|(index, (url, extension))| Media {
-                url,
-                job: MediaJob::DirectHttp,
-                category: "facebook".into(),
-                filename: format!("{requested_id}.{extension}"),
-                handoff: BTreeMap::new(),
-                metadata: Some(PostMetadata {
-                    community: None,
-                    community_archive: false,
-                    retweet_id: None,
-                    quoted_by_id: None,
-                    reposted_by_id: None,
-                    article: None,
-                    post_id: requested_id.into(),
-                    media_id: format!("{requested_id}.{extension}"),
-                    shortcode: String::new(),
-                    username: node
-                        .pointer("/owner/username")
-                        .and_then(Value::as_str)
-                        .filter(|name| !name.is_empty())
-                        .map(std::sync::Arc::from),
-                    caption: node
-                        .pointer("/creation_story/message/text")
-                        .or_else(|| node.pointer("/message/text"))
-                        .and_then(Value::as_str)
-                        .map(std::sync::Arc::from),
-                    timestamp: node
-                        .get("publish_time")
-                        .or_else(|| node.get("created_time"))
-                        .and_then(Value::as_i64),
-                    index: index + 1,
-                }),
-                headers: BTreeMap::from([
-                    ("User-Agent".into(), super::facebook::USER_AGENT.into()),
-                    ("Referer".into(), "https://www.facebook.com/".into()),
-                ]),
+            .map(|(index, (url, extension, mut file))| {
+                file.duration = video_duration(node);
+                file.description = node
+                    .pointer("/savable_description/text")
+                    .and_then(Value::as_str)
+                    .map(std::sync::Arc::from);
+                Media {
+                    url,
+                    job: MediaJob::DirectHttp,
+                    category: "facebook".into(),
+                    filename: format!("{requested_id}.{extension}"),
+                    handoff: BTreeMap::new(),
+                    metadata: Some(PostMetadata {
+                        file: Some(file),
+                        community: None,
+                        community_archive: false,
+                        retweet_id: None,
+                        quoted_by_id: None,
+                        reposted_by_id: None,
+                        article: None,
+                        post_id: requested_id.into(),
+                        media_id: format!("{requested_id}.{extension}"),
+                        shortcode: String::new(),
+                        username: node
+                            .pointer("/owner/username")
+                            .and_then(Value::as_str)
+                            .filter(|name| !name.is_empty())
+                            .map(std::sync::Arc::from),
+                        caption: node
+                            .pointer("/creation_story/message/text")
+                            .or_else(|| node.pointer("/message/text"))
+                            .and_then(Value::as_str)
+                            .map(std::sync::Arc::from),
+                        timestamp: node
+                            .get("publish_time")
+                            .or_else(|| node.get("created_time"))
+                            .and_then(Value::as_i64),
+                        index: index + 1,
+                    }),
+                    headers: BTreeMap::from([
+                        ("User-Agent".into(), super::facebook::USER_AGENT.into()),
+                        ("Referer".into(), "https://www.facebook.com/".into()),
+                    ]),
+                }
             })
             .collect();
         if let Some(prior) = &chosen {
@@ -190,7 +200,19 @@ fn find_videos<'a>(value: &'a Value, id: &str, nodes: &mut Vec<&'a Value>) {
     }
 }
 
-fn delivery(node: &Value) -> Result<Option<Vec<(Url, &'static str)>>> {
+fn video_duration(node: &Value) -> Option<f64> {
+    let number = |value: &Value| {
+        value
+            .as_f64()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+    };
+    node.get("playable_duration_in_ms")
+        .and_then(number)
+        .map(|ms| ms / 1000.0)
+        .or_else(|| node.get("length_in_second").and_then(number))
+}
+
+fn delivery(node: &Value) -> Result<Option<Vec<SelectedFile>>> {
     let legacy = node
         .get("videoDeliveryLegacyFields")
         .filter(|value| value.as_object().is_some_and(|object| !object.is_empty()))
@@ -226,10 +248,17 @@ fn delivery(node: &Value) -> Result<Option<Vec<(Url, &'static str)>>> {
         let mut chosen = None;
         for xml in manifests {
             let parsed = crate::facebook_dash::parse_manifest(xml)?;
-            if chosen.as_ref().is_some_and(|prior| prior != &parsed) {
+            if chosen.as_ref().is_some_and(|prior: &Vec<SelectedFile>| {
+                prior
+                    .iter()
+                    .map(|(url, extension, _)| (url, extension))
+                    .ne(parsed.iter().map(|(url, extension, _)| (url, extension)))
+            }) {
                 return Err(error("Facebook returned ambiguous video manifests"));
             }
-            chosen = Some(parsed);
+            if chosen.is_none() {
+                chosen = Some(parsed);
+            }
         }
         return Ok(chosen);
     }
@@ -284,7 +313,14 @@ fn delivery(node: &Value) -> Result<Option<Vec<(Url, &'static str)>>> {
         {
             return Err(error("Facebook returned ambiguous progressive video URLs"));
         }
-        return Ok(Some(vec![(url.clone(), "mp4")]));
+        return Ok(Some(vec![(
+            url.clone(),
+            "mp4",
+            FileMetadata {
+                media_type: Some(std::sync::Arc::from("video")),
+                ..Default::default()
+            },
+        )]));
     }
     if legacy
         .get("playable_url_dash")

@@ -124,6 +124,8 @@ impl Media {
 #[derive(Clone, Debug, Serialize)]
 pub struct PostMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<crate::file_metadata::FileMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<crate::twitter::CommunityMetadata>,
     /// Community feeds use their own archive namespace; ordinary posts do not.
     #[serde(skip_serializing)]
@@ -706,6 +708,7 @@ fn compatibility_metadata(
         .then_some(value)
     };
     Some(PostMetadata {
+        file: crate::file_metadata::compatibility(data),
         community: (category == "twitter")
             .then(|| {
                 data.get("community")

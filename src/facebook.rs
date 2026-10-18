@@ -456,6 +456,22 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
             filename: format!("{requested_id}.{extension}"),
             handoff: BTreeMap::new(),
             metadata: Some(PostMetadata {
+                file: Some(crate::file_metadata::FileMetadata {
+                    width: photo
+                        .pointer("/image/width")
+                        .and_then(Value::as_u64)
+                        .filter(|value| *value > 0),
+                    height: photo
+                        .pointer("/image/height")
+                        .and_then(Value::as_u64)
+                        .filter(|value| *value > 0),
+                    media_type: Some(std::sync::Arc::from("photo")),
+                    description: photo
+                        .get("accessibility_caption")
+                        .and_then(Value::as_str)
+                        .map(std::sync::Arc::from),
+                    ..Default::default()
+                }),
                 community: None,
                 community_archive: false,
                 retweet_id: None,

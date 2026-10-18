@@ -74,6 +74,13 @@ impl FilenameTemplate {
                             | "timestamp"
                             | "community_id"
                             | "community_name"
+                            | "width"
+                            | "height"
+                            | "width_original"
+                            | "height_original"
+                            | "duration"
+                            | "bitrate"
+                            | "media_type"
                     ) {
                         return Err(error(format!("unknown filename template field: {name}")));
                     }
@@ -146,6 +153,34 @@ impl FilenameTemplate {
                                     .and_then(|value| value.name.as_deref())
                                     .unwrap_or_default()
                                     .to_owned(),
+                                "width" | "height" | "width_original" | "height_original"
+                                | "duration" | "bitrate" | "media_type" => {
+                                    let file = metadata.file.as_ref().ok_or_else(|| {
+                                        error(format!(
+                                            "filename field {field} requires file metadata"
+                                        ))
+                                    })?;
+                                    match field {
+                                        "width" => file.width.map(|v| v.to_string()),
+                                        "height" => file.height.map(|v| v.to_string()),
+                                        "width_original" => {
+                                            file.width_original.map(|v| v.to_string())
+                                        }
+                                        "height_original" => {
+                                            file.height_original.map(|v| v.to_string())
+                                        }
+                                        "duration" => file
+                                            .duration
+                                            .filter(|v| v.is_finite() && *v >= 0.0)
+                                            .map(|v| v.to_string()),
+                                        "bitrate" => file.bitrate.map(|v| v.to_string()),
+                                        "media_type" => {
+                                            file.media_type.as_deref().map(str::to_owned)
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                    .unwrap_or_default()
+                                }
                                 "post_id" => metadata.post_id.clone(),
                                 "media_id" => metadata.media_id.clone(),
                                 "shortcode" => metadata.shortcode.clone(),

@@ -870,7 +870,8 @@ conditional directory templates, automatic discovery, and postprocessors remain 
 - `--write-metadata` saves `<media filename>.json` beside completed media, including
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,
-  shortcode, username, caption, timestamp, and carousel/album index). Post metadata is
+  shortcode, username, caption, timestamp, carousel/album index, and optional
+  per-file properties). Post metadata is
   provided by native Instagram/Facebook/Twitter and allowlisted compatibility Instagram,
   Twitter/X, and Facebook fields when available. Compatibility timestamps are
   normalized from numeric epochs or recognized ISO calendar date-times; unsupported
@@ -879,6 +880,20 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   uses `id.extension` as media ID to distinguish audio and video. Non-Instagram
   shortcodes are empty; unavailable fields stay empty/null. URLs, request headers,
   cookies, and private adapter options are excluded.
+  When supplied by the extractor, `metadata.file` contains positive `width` /
+  `height`, original dimensions, duration in seconds, bitrate, media type,
+  description/alt text, recognized sensitive flags, and media source ID/username.
+  Properties belong to the selected file: carousel siblings and separate audio
+  tracks do not borrow another file's dimensions. Invalid optional values are
+  omitted. These are response-declared properties; Rust does not probe downloaded
+  bytes, and a smaller fallback image can differ from the original declared size.
+  X/card/article dimensions are retained only when explicitly supplied. Instagram
+  uses the selected variant's dimensions and per-item original dimensions;
+  Facebook DASH uses the selected representation's dimensions and bandwidth.
+  Compatibility properties use an allowlist, including `image_width` /
+  `image_height` aliases. Adding descriptive file properties does not change
+  request identities, default paths, file numbering, or stable archive keys.
+  Metadata expression filtering remains unfinished.
   Existing sidecars are never overwritten. Sidecar publication is atomic but is
   separate from media publication: a sidecar failure returns a nonzero status and
   keeps the media; rerunning backfills missing sidecars without downloading again.
@@ -916,6 +931,9 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   (including extension), `{name}` (without the final extension), `{extension}`
   (without the dot), `{category}`, `{post_id}`, `{media_id}`, `{shortcode}`,
   `{username}`, `{index}`, `{timestamp}`, `{community_id}`, and `{community_name}`.
+  File properties also support `{width}`, `{height}`, `{width_original}`,
+  `{height_original}`, `{duration}`, `{bitrate}`, and `{media_type}` in filename
+  and directory templates. Missing values fail explicitly.
   Only index supports zero-padding,
   such as `{index:03}` or `{index:03d}`. `{{` / `}}` escape braces; all output then
   uses safe ASCII filename characters, so literal braces become underscores.

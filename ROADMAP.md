@@ -480,6 +480,21 @@ Add native configuration and filename templates, then prioritize additional site
 Integrate the companion **yt-dlp-rs** project for video extraction and segmented
 downloads. Document compatibility differences as features land.
 
+**Implemented descriptive file metadata:** native Instagram, X, and Facebook
+selections retain available file dimensions, original dimensions, seconds-based
+duration, bitrate, media type, description/alt text, sensitivity, and source
+identity in a typed optional `metadata.file` object. Compatibility normalization
+accepts only known fields and types. Selected variants/representations supply
+properties; separate audio tracks and carousel siblings do not inherit video or
+neighbor dimensions. Optional malformed metadata is omitted without changing
+selection. Large text uses shared storage. Inspection, sidecars, and numeric/type
+filename/directory substitutions expose these properties while request identity,
+default paths, file order, and stable archives remain unchanged. Dimensions are
+API declarations, not downloaded-file probes; fallback image sizes can differ.
+Synthetic parser, selection, inheritance, naming, privacy, and identity tests
+cover these paths. Real authenticated captures, complete upstream metadata, and
+metadata expression filtering remain unfinished.
+
 **Implemented filename step:** `-f` / `--filename` supports native placeholders
 for filename/name/extension/category and available post IDs, username, shortcode,
 index, and timestamp, with optional index zero-padding. Names remain under the

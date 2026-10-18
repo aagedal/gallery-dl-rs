@@ -138,3 +138,11 @@ Experimental native profile tabs have separate
 [synthetic timeline protocol notes](media_README.md). Local HTTP tests exercise
 lazy traversal and account/transaction identity. Successful authenticated media
 timeline extraction and sanitized real response fixtures remain unverified.
+
+`tests/twitter_file_metadata.rs` covers synthetic file properties across photos,
+selected video variants, GIFs, posters, cards, articles, and documents. It checks
+API-declared dimensions, seconds-based duration, bitrate, alt text, sensitivity,
+source attribution, disabled malformed fields, and unchanged request/archive
+identities. Raw component URLs do not acquire inferred dimensions. Fallback URLs
+retain the original declared metadata; actual returned image dimensions are not
+probed. Shared compatibility/naming/sidecar cases are in `tests/file_metadata.rs`.

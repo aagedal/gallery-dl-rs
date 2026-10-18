@@ -11,6 +11,7 @@ fn media() -> Media {
         category: "instagram".into(),
         filename: "native.photo.jpg".into(),
         metadata: Some(PostMetadata {
+            file: None,
             community: None,
             community_archive: false,
             retweet_id: None,

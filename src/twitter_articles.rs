@@ -3,7 +3,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // https://github.com/mikf/gallery-dl/blob/master/gallery_dl/extractor/utils/twitter_article.py
 use super::*;
-use crate::extract::{MediaJob, inline_text};
+use crate::{
+    extract::{MediaJob, inline_text},
+    file_metadata::FileMetadata,
+};
 use media::SelectedFile;
 use serde::Serialize;
 use std::{
@@ -120,12 +123,23 @@ fn select_into(
     if options.document {
         let document = document(article, html.as_deref().unwrap(), image_options)?;
         let (url, job) = inline_text(document)?;
-        files.push((url, "html".into(), job, Vec::new()));
+        files.push((
+            url,
+            "html".into(),
+            job,
+            Vec::new(),
+            FileMetadata {
+                media_type: Some(Arc::from("document")),
+                ..Default::default()
+            },
+        ));
     }
     if options.cover
         && let Some(cover) = article.get("cover_media").filter(|value| !value.is_null())
     {
-        files.push(image(cover, image_options)?);
+        let mut cover = image(cover, image_options)?;
+        cover.4.media_type = Some(Arc::from("article:cover"));
+        files.push(cover);
     }
     if options.media {
         for media in article
@@ -204,7 +218,23 @@ fn image_selection(
     } else {
         (image_options.primary(url), Vec::new())
     };
-    Ok((url, extension, MediaJob::DirectHttp, fallback))
+    let info = &value["media_info"];
+    let width = media::dimension(info.get("original_img_width"));
+    let height = media::dimension(info.get("original_img_height"));
+    Ok((
+        url,
+        extension,
+        MediaJob::DirectHttp,
+        fallback,
+        FileMetadata {
+            width,
+            height,
+            width_original: width,
+            height_original: height,
+            media_type: Some(Arc::from("article:image")),
+            ..Default::default()
+        },
+    ))
 }
 
 #[derive(Default)]
@@ -412,7 +442,7 @@ fn render_entity(
                 let source = media
                     .get(&id)
                     .ok_or_else(|| error("Twitter article referenced media missing"))?;
-                let (url, _, _, _) = image_selection(source, image_options, false)?;
+                let (url, _, _, _, _) = image_selection(source, image_options, false)?;
                 html.push("<img src=\"")?;
                 html.escape(url.as_str())?;
                 html.push("\" alt=\"\">\n")?;
@@ -582,7 +612,7 @@ fn document(article: &Value, content: &str, image_options: &ImageOptions) -> Res
     html.escape(title)?;
     html.push("</title></head><body>\n")?;
     if let Some(cover) = article.get("cover_media").filter(|value| !value.is_null()) {
-        let (url, _, _, _) = image_selection(cover, image_options, false)?;
+        let (url, _, _, _, _) = image_selection(cover, image_options, false)?;
         html.push("<img class=\"cover\" src=\"")?;
         html.escape(url.as_str())?;
         html.push("\" alt=\"")?;

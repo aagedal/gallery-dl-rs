@@ -1,6 +1,6 @@
 //! Full-resource MP4 representations from Facebook's embedded DASH manifest.
 //! Segment addressing is deliberately unsupported: callers download whole files.
-use crate::{Result, error};
+use crate::{Result, error, file_metadata::FileMetadata};
 use roxmltree::{Document, Node, ParsingOptions};
 use url::Url;
 
@@ -17,9 +17,12 @@ enum Kind {
 struct Candidate {
     url: Url,
     rank: (u64, u64, u64),
+    file: FileMetadata,
 }
 
-pub(crate) fn parse_manifest(xml: &str) -> Result<Vec<(Url, &'static str)>> {
+pub(crate) type SelectedFile = (Url, &'static str, FileMetadata);
+
+pub(crate) fn parse_manifest(xml: &str) -> Result<Vec<SelectedFile>> {
     if xml.len() > MAX_BYTES {
         return Err(error("Facebook DASH manifest exceeds the size limit"));
     }
@@ -109,7 +112,20 @@ pub(crate) fn parse_manifest(xml: &str) -> Result<Vec<(Url, &'static str)>> {
                 ),
                 Kind::Audio => (0, 0, bandwidth),
             };
-            let candidate = Candidate { url, rank };
+            let candidate = Candidate {
+                url,
+                rank,
+                file: FileMetadata {
+                    width: (kind == Kind::Video && width > 0).then_some(width),
+                    height: (kind == Kind::Video && height > 0).then_some(height),
+                    bitrate: (bandwidth > 0).then_some(bandwidth),
+                    media_type: Some(std::sync::Arc::from(match kind {
+                        Kind::Video => "video",
+                        Kind::Audio => "audio",
+                    })),
+                    ..Default::default()
+                },
+            };
             match kind {
                 Kind::Video => videos.push(candidate),
                 Kind::Audio => audios.push(candidate),
@@ -120,9 +136,9 @@ pub(crate) fn parse_manifest(xml: &str) -> Result<Vec<(Url, &'static str)>> {
         }
     }
     let video = select(videos)?.ok_or_else(|| error("Facebook DASH manifest has no MP4 video"))?;
-    let mut selected = vec![(video, "mp4")];
+    let mut selected = vec![(video.url, "mp4", video.file)];
     if let Some(audio) = select(audios)? {
-        selected.push((audio, "m4a"));
+        selected.push((audio.url, "m4a", audio.file));
     }
     Ok(selected)
 }
@@ -260,7 +276,7 @@ fn validate_url(url: &Url) -> Result<()> {
     Ok(())
 }
 
-fn select(candidates: Vec<Candidate>) -> Result<Option<Url>> {
+fn select(candidates: Vec<Candidate>) -> Result<Option<Candidate>> {
     let Some(best) = candidates.iter().map(|candidate| candidate.rank).max() else {
         return Ok(None);
     };
@@ -269,10 +285,13 @@ fn select(candidates: Vec<Candidate>) -> Result<Option<Url>> {
         .into_iter()
         .filter(|candidate| candidate.rank == best)
     {
-        if selected.as_ref().is_some_and(|url| url != &candidate.url) {
+        if selected
+            .as_ref()
+            .is_some_and(|prior: &Candidate| prior.url != candidate.url)
+        {
             return Err(error("ambiguous Facebook DASH quality selection"));
         }
-        selected = Some(candidate.url);
+        selected = Some(candidate);
     }
     Ok(selected)
 }
@@ -315,7 +334,7 @@ mod tests {
         ));
         let result = parse_manifest(&xml).unwrap();
         assert_eq!(
-            result.iter().map(|(_, ext)| *ext).collect::<Vec<_>>(),
+            result.iter().map(|(_, ext, _)| *ext).collect::<Vec<_>>(),
             ["mp4", "m4a"]
         );
         assert_eq!(result[0].0.as_str(), "https://cdn.test/high?a=1&b=2");

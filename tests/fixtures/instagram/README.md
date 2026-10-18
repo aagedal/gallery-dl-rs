@@ -44,3 +44,9 @@ authenticated live verification remains pending as well.
 Explicit posts/reels/tagged/saved collections have separate
 [synthetic request and pagination notes](collections_README.md), including POST
 transport and source-order date filtering. Their live verification also remains pending.
+
+`tests/instagram_file_metadata.rs` adds synthetic selected-variant metadata cases:
+per-child dimensions and originals, video duration in seconds, accessibility text,
+invalid optional values, and unchanged request/archive identities. Existing local
+profile and story tests confirm these fields survive their shared parser paths.
+Dimensions describe the selected API variant; no media bytes are probed.

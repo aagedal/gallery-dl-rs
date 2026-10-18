@@ -1,6 +1,7 @@
 //! Explicit card bindings; embedded unified media preserve their JSON source order.
 use super::*;
 use crate::extract::{MediaJob, direct};
+use crate::file_metadata::FileMetadata;
 use media::SelectedFile;
 use serde::{
     Deserialize, Deserializer,
@@ -81,7 +82,9 @@ pub(super) fn select(
                     let url = url
                         .as_str()
                         .ok_or_else(|| error("Twitter card image URL invalid"))?;
-                    return Ok(vec![image_file(url, true, image_options)?]);
+                    let mut selected = image_file(url, true, image_options)?;
+                    selected.4 = media::image_dimensions(&bindings[&key]["image_value"]);
+                    return Ok(vec![selected]);
                 }
             }
         }
@@ -154,6 +157,7 @@ pub(super) fn select(
             "mp4".into(),
             MediaJob::VideoPage { page_url },
             Vec::new(),
+            FileMetadata::default(),
         )]);
     }
     Ok(Vec::new())
@@ -205,14 +209,26 @@ fn image_file(source: &str, normalize: bool, image_options: &ImageOptions) -> Re
     } else {
         (url, Vec::new())
     };
-    Ok((url, extension, MediaJob::DirectHttp, fallback))
+    Ok((
+        url,
+        extension,
+        MediaJob::DirectHttp,
+        fallback,
+        FileMetadata::default(),
+    ))
 }
 
 fn component_file(source: &str) -> Result<SelectedFile> {
     let url = http_url(source).map_err(|_| error("Twitter card preview URL invalid"))?;
     if let Some(media) = direct(&url) {
         let extension = media.filename.rsplit_once('.').unwrap().1.to_owned();
-        return Ok((url, extension, media.job, Vec::new()));
+        return Ok((
+            url,
+            extension,
+            media.job,
+            Vec::new(),
+            FileMetadata::default(),
+        ));
     }
     image_file(source, false, &ImageOptions::default())
 }

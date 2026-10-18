@@ -236,6 +236,7 @@ mod tests {
             category: "direct".into(),
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
+                file: None,
                 community: None,
                 community_archive: false,
                 retweet_id: None,

@@ -15,3 +15,9 @@ authenticated album traversal remains a separate live verification gate.
 Video extraction has separate [synthetic fixture and live-check notes](video_README.md).
 Anonymous native checks extracted upstream's one-file and two-file public videos;
 real sanitized delivery responses and authenticated/download verification remain.
+
+`tests/facebook_file_metadata.rs` covers synthetic owned-photo dimensions and
+accessibility text, selected DASH video dimensions/bandwidth, separate audio
+properties, duration conversion, and optional-field omission. Progressive quality
+labels do not imply a resolution. These properties do not change file selection
+or request/archive identities; live property verification remains pending.
