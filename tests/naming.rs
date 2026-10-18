@@ -120,12 +120,24 @@ fn templates_reject_paths_and_arbitrary_expressions() {
         "{{{",
         "{unknown}",
         "{username.upper()}",
-        "{index:3}",
-        "{index:00}",
         "{index:0241}",
-        "{index:03x}",
         "{index:03:04}",
-        "{filename:03}",
+        "{index:03q}",
+        "{url}",
+        "{_url}",
+        "{username!z}",
+        "{username!lu}",
+        "{username:?_/}",
+        "{username:L5}",
+        "{username:Ax1/}",
+        "{username:Cz/}",
+        "{username:Ofoo/}",
+        "{username[}",
+        "{username[0}",
+        "{username[a b]}",
+        "{username|unknown}",
+        "{'unterminated}",
+        "{username.__class__.__init__()}",
     ] {
         assert!(
             FilenameTemplate::parse(template).is_err(),
@@ -294,4 +306,151 @@ fn directory_limits_and_reserved_names_apply_to_each_component() {
         reserved.render(&media()).unwrap(),
         std::path::PathBuf::from("_CON/_LPT1.jpg")
     );
+}
+
+fn render(template: &str, item: &Media) -> gallery_dl_rs::Result<String> {
+    FilenameTemplate::parse(template)
+        .unwrap_or_else(|error| panic!("{template:?}: {error}"))
+        .render(item)
+}
+
+#[test]
+fn gallery_dl_conversions_slices_and_alternatives() {
+    let mut item = media();
+    item.metadata.as_mut().unwrap().caption = Some("  Hello <b>World</b> &amp; more  ".into());
+    for (template, expected) in [
+        ("{username!u}", "ALICE"),
+        ("{username!c}", "Alice"),
+        ("{username[1:3]}", "li"),
+        ("{username[-2:]}", "ce"),
+        ("{username[0]}", "a"),
+        ("{caption!t}", "Hello__b_World__b___amp__more"),
+        ("{caption!H}", "Hello_World___more"),
+        ("{caption!g}", "hello-bworldb-amp-more"),
+        ("{caption!W:L11/short/}", "short"),
+        ("{caption!W:L40/~/}", "Hello__b_World__b___amp__more"),
+        ("{caption:CHl/}", "hello_world___more"),
+        ("{source_id|username}", "alice"),
+        ("{shortcode|username}", "BA"),
+        ("{'literal'}", "literal"),
+        ("{source_username|'nobody'}", "nobody"),
+        ("{username:Rl/L/}", "aLice"),
+        ("{index:A+10/}", "12"),
+        ("{index:A*3/>04}", "0006"),
+        ("{index:>4}", "___2"),
+        ("{index:^5}", "__2__"),
+        ("{index:*<4}", "2___"),
+        ("{index:+}", "_2"),
+        ("{index:#06x}", "0x0002"),
+        ("{index:b}", "10"),
+        ("{post_id:,}", "123"),
+        ("{timestamp:,}", "123_456"),
+        ("{timestamp:_x}", "1_e240"),
+        ("{index:.2f}", "2.00"),
+        ("{index:.1%}", "200.0_"),
+        ("{index:e}", "2.000000e_00"),
+        ("{username:>8.3}", "_____ali"),
+        ("{username:x<6}", "alicex"),
+        ("{username!r}", "_alice_"),
+        ("{username!j}", "_alice_"),
+    ] {
+        assert_eq!(render(template, &item).unwrap(), expected, "{template}");
+    }
+    let rendered = render("{caption!S:L10/long/}.jpg", &item).unwrap();
+    assert_eq!(rendered, "long.jpg");
+    assert!(render("{username:d}", &item).is_err());
+    assert!(render("{index:s}", &item).is_err());
+    assert!(render("{username:A+1/}", &item).is_err());
+}
+
+#[test]
+fn optional_fields_render_empty_without_hiding_required_ones() {
+    let mut item = media();
+    assert_eq!(
+        render("{username}{community_name:?[/]/}_{index}", &item).unwrap(),
+        "alice_2"
+    );
+    assert_eq!(
+        render("{username:?[/]/}.jpg", &item).unwrap(),
+        "_alice_.jpg"
+    );
+    item.metadata.as_mut().unwrap().username = None;
+    assert_eq!(render("x{username:?@/@/}.jpg", &item).unwrap(), "x.jpg");
+    assert!(render("{username:L5/~/}.jpg", &item).is_err());
+    assert!(render("{username!S}.jpg", &item).is_err());
+    assert!(render("{source_id|username}", &item).is_err());
+    item.metadata.as_mut().unwrap().index = 0;
+    assert_eq!(render("p{index:?_//}", &item).unwrap(), "p");
+    assert_eq!(render("p{index:?_//>03}", &item).unwrap(), "p");
+    item.metadata.as_mut().unwrap().index = 7;
+    assert_eq!(render("p{index:?_//>03}", &item).unwrap(), "p_007");
+}
+
+#[test]
+fn dates_use_upstream_datetime_formatting() {
+    let mut item = media();
+    item.metadata.as_mut().unwrap().timestamp = Some(1_234_567_890);
+    for (template, expected) in [
+        ("{date}", "2009-02-13_23_31_30"),
+        ("{date:%Y-%m-%d}", "2009-02-13"),
+        ("{date:%Y%m%d_%H%M%S}", "20090213_233130"),
+        (
+            "{date:%a_%A_%b_%B_%j_%y_%I%p_%w_%%}",
+            "Fri_Friday_Feb_February_044_09_11PM_5__",
+        ),
+        ("{date:%z_%Z}", "_0000_UTC"),
+        ("{date:O+02:00/%H%z}", "01_0200"),
+        ("{date:O-05:30/%d_%H%M}", "13_1801"),
+        ("{timestamp!d:%Y}", "2009"),
+        ("{date!T}", "1234567890"),
+        ("{date!j}", "_2009-02-13_23_31_30_"),
+    ] {
+        assert_eq!(render(template, &item).unwrap(), expected, "{template}");
+    }
+    assert!(render("{date:%Q}", &item).is_err());
+    assert!(render("{username:O+01:00/}", &item).is_err());
+    item.metadata.as_mut().unwrap().timestamp = None;
+    assert!(render("{date:%Y}", &item).is_err());
+    assert_eq!(render("x{date:?_/_/%Y}", &item).unwrap(), "x");
+}
+
+#[test]
+fn nested_metadata_and_lists_are_addressable() {
+    let mut item = media();
+    item.category = "twitter".into();
+    item.metadata.as_mut().unwrap().file = Some(gallery_dl_rs::file_metadata::FileMetadata {
+        width: Some(1920),
+        height: Some(1080),
+        duration: Some(12.5),
+        media_type: Some("video".into()),
+        sensitive_flags: vec!["adult".into(), "graphic".into()].into(),
+        ..Default::default()
+    });
+    for (template, expected) in [
+        (
+            "{metadata[file][width]}x{metadata.file.height}",
+            "1920x1080",
+        ),
+        ("{width}x{height}", "1920x1080"),
+        ("{duration}", "12.5"),
+        ("{duration:.0f}", "12"),
+        ("{tweet_id}", "123"),
+        ("{retweet_id}", "0"),
+        ("{retweet_id:?r//}", ""),
+        ("{sensitive_flags}", "__adult____graphic__"),
+        ("{sensitive_flags!S}", "adult__graphic"),
+        ("{sensitive_flags:J+/}", "adult_graphic"),
+        ("{sensitive_flags:Sr/J-/}", "graphic-adult"),
+        ("{sensitive_flags[-1]}", "graphic"),
+        ("{sensitive_flags[:1]:J/}", "adult"),
+        ("{metadata[post_id]}", "123"),
+        ("{media_type!u}", "VIDEO"),
+    ] {
+        let rendered = if template == "{retweet_id:?r//}" {
+            render(&format!("x{template}"), &item).map(|v| v[1..].to_string())
+        } else {
+            render(template, &item)
+        };
+        assert_eq!(rendered.unwrap(), expected, "{template}");
+    }
 }

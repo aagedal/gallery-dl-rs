@@ -537,6 +537,16 @@ fail explicitly. Downloads, sidecars, archive recording, and no-overwrite behavi
 share the same rendered destination. Default names remain unchanged. This is a
 documented subset, not full gallery-dl formatting compatibility; conditional templates, expressions, and additional sites remain.
 
+**Implemented replacement-field step:** filename and directory templates now
+parse gallery-dl's replacement-field grammar: nested key/index/slice accessors,
+`|` alternatives with quoted literals, upstream conversions, chained `?`, `L`,
+`J`, `R`, `A`, `C`, `S`, and `O` specifiers, Python format specifications, and
+`strftime` date formatting over `{date}`. Field values come from the same
+metadata context as `--filter`, minus transport URLs. Output was cross-checked
+against upstream's formatter; unsupported specifiers, globals, and `\f`
+expression templates still fail explicitly. Missing values fail unless an
+alternative or `?` specifier handles them.
+
 **Implemented configuration step:** `--native-config` accepts an explicit strict
 subset of gallery-dl's JSON scopes: extractor defaults, category settings, and
 root overrides, followed by explicit CLI flags. Supported settings include

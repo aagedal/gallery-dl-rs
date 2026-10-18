@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, sync::Arc};
 mod eval;
 #[path = "filter_parser.rs"]
 mod parser;
+pub(crate) use eval::float_repr;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Value {
@@ -246,7 +247,7 @@ fn identifier(value: &str) -> Value {
         .map(Value::Int)
         .unwrap_or_else(|| text(value))
 }
-fn context(media: &Media) -> BTreeMap<String, Value> {
+pub(crate) fn context(media: &Media) -> BTreeMap<String, Value> {
     context_parts(&media.category, media.metadata.as_ref(), Some(media))
 }
 fn context_parts(

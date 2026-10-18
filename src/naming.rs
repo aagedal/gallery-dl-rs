@@ -1,18 +1,69 @@
-//! Small, deliberately non-executable filename templates.
+//! Non-executable filename and directory templates.
 use crate::{Result, error, extract::Media};
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
+#[path = "naming_format.rs"]
+mod format;
+use format::{Field, Value};
 
 const MAX_BYTES: usize = 240;
+const MAX_TEMPLATE: usize = 8192;
+
+/// Names a template may reference. Signed transport URLs are deliberately
+/// unavailable so credentials cannot leak into paths.
+const FIELDS: &[&str] = &[
+    "filename",
+    "name",
+    "extension",
+    "category",
+    "post_id",
+    "media_id",
+    "shortcode",
+    "username",
+    "index",
+    "num",
+    "timestamp",
+    "date",
+    "caption",
+    "content",
+    "description",
+    "community",
+    "community_id",
+    "community_name",
+    "article",
+    "width",
+    "height",
+    "width_original",
+    "height_original",
+    "image_width",
+    "image_height",
+    "duration",
+    "bitrate",
+    "media_type",
+    "type",
+    "sensitive_flags",
+    "source_id",
+    "source_username",
+    "source_user",
+    "post_shortcode",
+    "tweet_id",
+    "retweet_id",
+    "quote_id",
+    "quoted_by_id",
+    "reposted_by_id",
+    "id",
+    "metadata",
+];
 
 #[derive(Clone, Debug)]
 enum Part {
     Literal(String),
-    Field { name: String, width: usize },
+    Field(Field),
 }
 
-/// A single-basename template. Fields use `{name}`; only `index` accepts a
-/// zero-padded width, such as `{index:03}` or `{index:03d}`. Doubled braces
-/// escape literal braces. Rendered names use the downloader's ASCII alphabet.
+/// A single-basename template using gallery-dl replacement fields, such as
+/// `{date:%Y-%m-%d}_{username!l}_{index:>03}`, `{caption[:40]|post_id}`, or
+/// `{community_name:?[/]/}`. Doubled braces escape literal braces. Rendered
+/// names use the downloader's ASCII alphabet.
 #[derive(Clone, Debug)]
 pub struct FilenameTemplate {
     parts: Vec<Part>,
@@ -22,6 +73,9 @@ impl FilenameTemplate {
     pub fn parse(template: &str) -> Result<Self> {
         if template.is_empty() || matches!(template, "." | "..") {
             return Err(error("filename template must produce a basename"));
+        }
+        if template.len() > MAX_TEMPLATE {
+            return Err(error("filename template exceeds 8192 bytes"));
         }
         let mut chars = template.chars().peekable();
         let mut parts = Vec::new();
@@ -55,61 +109,12 @@ impl FilenameTemplate {
                             Some(c) => field.push(c),
                         }
                     }
-                    let (name, format) = field
-                        .split_once(':')
-                        .map_or((field.as_str(), None), |(name, format)| {
-                            (name, Some(format))
-                        });
-                    if !matches!(
-                        name,
-                        "filename"
-                            | "name"
-                            | "extension"
-                            | "category"
-                            | "post_id"
-                            | "media_id"
-                            | "shortcode"
-                            | "username"
-                            | "index"
-                            | "timestamp"
-                            | "community_id"
-                            | "community_name"
-                            | "width"
-                            | "height"
-                            | "width_original"
-                            | "height_original"
-                            | "duration"
-                            | "bitrate"
-                            | "media_type"
-                    ) {
-                        return Err(error(format!("unknown filename template field: {name}")));
+                    if parts.len() >= 256 {
+                        return Err(error("filename template has too many fields"));
                     }
-                    let width = match format {
-                        None => 0,
-                        Some(format) if name == "index" => {
-                            let digits = format.strip_suffix('d').unwrap_or(format);
-                            if !digits.starts_with('0')
-                                || digits.len() < 2
-                                || !digits.bytes().all(|c| c.is_ascii_digit())
-                            {
-                                return Err(error(
-                                    "index format must be a zero-padded width, such as 03",
-                                ));
-                            }
-                            let width = digits
-                                .parse::<usize>()
-                                .map_err(|_| error("invalid index width"))?;
-                            if !(1..=MAX_BYTES).contains(&width) {
-                                return Err(error("index width must be between 1 and 240"));
-                            }
-                            width
-                        }
-                        Some(_) => return Err(error("only index supports filename formatting")),
-                    };
-                    parts.push(Part::Field {
-                        name: name.into(),
-                        width,
-                    });
+                    parts.push(Part::Field(Field::parse(&field, |name| {
+                        FIELDS.contains(&name)
+                    })?));
                 }
                 '}' => return Err(error("unmatched closing brace in filename template")),
                 c => literal.push(c),
@@ -122,89 +127,38 @@ impl FilenameTemplate {
     }
 
     pub fn render(&self, media: &Media) -> Result<String> {
+        self.render_with(media, &mut None)
+    }
+
+    fn render_with(
+        &self,
+        media: &Media,
+        context: &mut Option<BTreeMap<String, crate::filter::Value>>,
+    ) -> Result<String> {
         let mut output = String::new();
         for part in &self.parts {
             match part {
                 Part::Literal(value) => output.push_str(value),
-                Part::Field { name, width } => {
-                    let (stem, extension) = media
-                        .filename
-                        .rsplit_once('.')
-                        .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
-                        .unwrap_or((&media.filename, ""));
-                    let value = match name.as_str() {
-                        "filename" => media.filename.clone(),
-                        "name" => stem.to_string(),
-                        "extension" => extension.to_string(),
-                        "category" => media.category.clone(),
-                        field => {
-                            let metadata = media.metadata.as_ref().ok_or_else(|| {
-                                error(format!("filename field {field} requires post metadata"))
-                            })?;
-                            match field {
-                                "community_id" => metadata
-                                    .community
-                                    .as_ref()
-                                    .map(|value| value.id.clone())
-                                    .unwrap_or_default(),
-                                "community_name" => metadata
-                                    .community
-                                    .as_ref()
-                                    .and_then(|value| value.name.as_deref())
-                                    .unwrap_or_default()
-                                    .to_owned(),
-                                "width" | "height" | "width_original" | "height_original"
-                                | "duration" | "bitrate" | "media_type" => {
-                                    let file = metadata.file.as_ref().ok_or_else(|| {
-                                        error(format!(
-                                            "filename field {field} requires file metadata"
-                                        ))
-                                    })?;
-                                    match field {
-                                        "width" => file.width.map(|v| v.to_string()),
-                                        "height" => file.height.map(|v| v.to_string()),
-                                        "width_original" => {
-                                            file.width_original.map(|v| v.to_string())
-                                        }
-                                        "height_original" => {
-                                            file.height_original.map(|v| v.to_string())
-                                        }
-                                        "duration" => file
-                                            .duration
-                                            .filter(|v| v.is_finite() && *v >= 0.0)
-                                            .map(|v| v.to_string()),
-                                        "bitrate" => file.bitrate.map(|v| v.to_string()),
-                                        "media_type" => {
-                                            file.media_type.as_deref().map(str::to_owned)
-                                        }
-                                        _ => unreachable!(),
-                                    }
-                                    .unwrap_or_default()
-                                }
-                                "post_id" => metadata.post_id.clone(),
-                                "media_id" => metadata.media_id.clone(),
-                                "shortcode" => metadata.shortcode.clone(),
-                                "username" => {
-                                    metadata.username.as_deref().unwrap_or_default().to_owned()
-                                }
-                                "timestamp" => metadata
-                                    .timestamp
-                                    .map(|v| v.to_string())
-                                    .unwrap_or_default(),
-                                "index" if metadata.index > 0 => {
-                                    format!("{:0width$}", metadata.index, width = *width)
-                                }
-                                "index" => String::new(),
-                                _ => unreachable!("validated at parse time"),
-                            }
+                Part::Field(field) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    let value = field.render(|name| lookup(media, context, name))?;
+                    let Some(value) = value else {
+                        let name = field.names().next().unwrap_or("literal");
+                        if media.metadata.is_none()
+                            && !matches!(name, "filename" | "name" | "extension" | "category")
+                        {
+                            return Err(error(format!(
+                                "filename field {name} requires post metadata"
+                            )));
                         }
-                    };
-                    if value.is_empty() {
                         return Err(error(format!("filename field {name} is missing")));
-                    }
+                    };
                     // Sanitize each substitution independently so metadata can
                     // never introduce paths, drive prefixes, or control bytes.
                     output.extend(value.chars().map(safe_char));
+                    if output.len() > 65536 {
+                        return Err(error("filename template output exceeds limits"));
+                    }
                 }
             }
         }
@@ -282,8 +236,9 @@ impl DirectoryTemplate {
     pub fn render(&self, media: &Media) -> Result<PathBuf> {
         let mut output = PathBuf::new();
         let mut bytes = 0;
+        let mut context = None;
         for component in &self.components {
-            let component = component.render(media)?;
+            let component = component.render_with(media, &mut context)?;
             bytes += component.len() + 1;
             if bytes > 3072 {
                 return Err(error("rendered directory exceeds 3072 bytes"));
@@ -292,4 +247,52 @@ impl DirectoryTemplate {
         }
         Ok(output)
     }
+}
+
+fn convert(value: &crate::filter::Value, key: &str) -> Value {
+    use crate::filter::Value as Source;
+    match value {
+        Source::None => Value::None,
+        Source::Bool(value) => Value::Bool(*value),
+        // Upstream exposes these as datetimes; native metadata stores seconds.
+        Source::Int(value) if matches!(key, "date" | "date_updated") => format::timestamp(*value),
+        Source::Int(value) => Value::Int(*value),
+        Source::Float(value) => Value::Float(*value),
+        Source::String(value) => Value::Str(value.to_string()),
+        Source::List(values) | Source::Tuple(values) => {
+            Value::List(values.iter().map(|value| convert(value, "")).collect())
+        }
+        Source::Map(values) => Value::Map(
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), convert(value, key)))
+                .collect(),
+        ),
+    }
+}
+
+fn lookup(
+    media: &Media,
+    context: &BTreeMap<String, crate::filter::Value>,
+    name: &str,
+) -> Option<Value> {
+    let (stem, extension) = media
+        .filename
+        .rsplit_once('.')
+        .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
+        .unwrap_or((&media.filename, ""));
+    let metadata = media.metadata.as_ref();
+    Some(match name {
+        // Unlike upstream, `filename` includes the extension here.
+        "filename" => Value::Str(media.filename.clone()),
+        "name" => Value::Str(stem.into()),
+        "extension" => Value::Str(extension.into()),
+        "index" | "num" => match metadata?.index {
+            0 => Value::None,
+            index => Value::Int(index as i128),
+        },
+        "community_id" => Value::Str(metadata?.community.as_ref()?.id.clone()),
+        "community_name" => Value::Str(metadata?.community.as_ref()?.name.as_deref()?.into()),
+        name => convert(context.get(name)?, name),
+    })
 }
