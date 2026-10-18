@@ -411,6 +411,7 @@ async fn run(args: Args) -> Result<()> {
                     | "imgbox"
                     | "postimg"
                     | "tumblr"
+                    | "pixiv"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -589,6 +590,7 @@ struct Extractors {
     kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
     imagehosts: OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>,
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
+    pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
 }
 
 impl Extractors {
@@ -826,6 +828,23 @@ fn extract_input<'a>(
                         .map_err(|e| error(format!("native Tumblr initialization failed: {e}")))?;
                     native.events(&url)
                 }
+                Extractor::Native if category == "pixiv" => {
+                    let native = extractors
+                        .pixiv
+                        .get_or_init(|| async {
+                            gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_refresh_token(options.refresh_token.as_deref())
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Pixiv initialization failed: {e}")))?;
+                    native.events(&url)
+                }
                 Extractor::Native
                     if gallery_dl_rs::imagehosts::Site::from_category(category).is_some() =>
                 {
@@ -1031,6 +1050,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         search_limit: None,
         search_stop: None,
         api_key: None,
+        refresh_token: None,
         proxy: args.proxy.clone(),
         user_agent: args.user_agent.clone(),
         archive: args.download_archive.clone(),
@@ -1059,6 +1079,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "imgbox",
         "postimg",
         "tumblr",
+        "pixiv",
         "direct",
     ] {
         let options = defaults

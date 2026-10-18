@@ -25,6 +25,7 @@ pub mod mastodon;
 mod messages;
 pub mod naming;
 pub mod network;
+pub mod pixiv;
 pub mod post_selection;
 mod range;
 pub mod reddit;

@@ -87,6 +87,8 @@ pub struct Options {
     pub search_stop: Option<u8>,
     /// Tumblr API v2 key; only accepted in the `tumblr` category.
     pub api_key: Option<String>,
+    /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
+    pub refresh_token: Option<String>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     /// Ordered `(filter, components)` pairs from an object-valued `directory`.
@@ -177,6 +179,10 @@ impl Options {
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
+            refresh_token: overrides
+                .refresh_token
+                .clone()
+                .or_else(|| self.refresh_token.clone()),
             directory: if overrides.directory_conditions.is_some() {
                 overrides.directory.clone()
             } else {
@@ -336,6 +342,7 @@ struct RawExtractor {
     imgbox: Box<RawOptions>,
     postimg: Box<RawOptions>,
     tumblr: Box<RawOptions>,
+    pixiv: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
 
@@ -375,6 +382,7 @@ struct RawOptions {
     search_limit: Field,
     search_stop: Field,
     api_key: Field,
+    refresh_token: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -465,6 +473,7 @@ impl Config {
                 "imgbox",
                 "postimg",
                 "tumblr",
+                "pixiv",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -509,6 +518,7 @@ impl Config {
             search_limit: root.search_limit,
             search_stop: root.search_stop,
             api_key: Field::default(),
+            refresh_token: Field::default(),
             directory: root.directory,
             cookies: root.cookies,
             proxy: root.proxy,
@@ -555,6 +565,7 @@ impl Config {
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
             api_key: Field::default(),
+            refresh_token: Field::default(),
             directory: extractor.directory,
             cookies: extractor.cookies,
             proxy: extractor.proxy,
@@ -586,11 +597,17 @@ impl Config {
             ("imgbox", extractor.imgbox),
             ("postimg", extractor.postimg),
             ("tumblr", extractor.tumblr),
+            ("pixiv", extractor.pixiv),
             ("direct", extractor.direct),
         ] {
             if name != "tumblr" && settings.api_key.0.is_some() {
                 return Err(error(
                     "native configuration api-key is only supported for tumblr",
+                ));
+            }
+            if name != "pixiv" && settings.refresh_token.0.is_some() {
+                return Err(error(
+                    "native configuration refresh-token is only supported for pixiv",
                 ));
             }
             // Boxed: unoptimized builds overflow the stack with inline settings.
@@ -624,6 +641,7 @@ impl Config {
                 | "imgbox"
                 | "postimg"
                 | "tumblr"
+                | "pixiv"
                 | "direct"
         ) {
             return Err(error("unsupported native configuration category"));
@@ -881,6 +899,22 @@ impl RawOptions {
                 ));
             }
         };
+        let refresh_token = match self.refresh_token.0 {
+            None => None,
+            Some(Value::String(token))
+                if (1..=256).contains(&token.len())
+                    && token
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) =>
+            {
+                Some(token)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration refresh-token must be 1-256 ASCII letters, digits, '-', '_' or '.'",
+                ));
+            }
+        };
         let file_range = range_spec(self.file_range, "file-range")?;
         let (filename, filename_conditions) = match self.filename.0 {
             None => (None, None),
@@ -1017,6 +1051,7 @@ impl RawOptions {
             search_limit,
             search_stop,
             api_key,
+            refresh_token,
             directory: templates,
             directory_conditions,
             filesize_min: size(self.filesize_min)?,

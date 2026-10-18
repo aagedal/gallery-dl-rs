@@ -359,8 +359,10 @@ fn context_parts(
                 values.insert("instance".into(), text(instance.as_str()));
             }
         }
-        if matches!(category, "facebook" | "mastodon" | "kemono" | "coomer")
-            || crate::booru::Site::from_category(category).is_some()
+        if matches!(
+            category,
+            "facebook" | "mastodon" | "kemono" | "coomer" | "pixiv"
+        ) || crate::booru::Site::from_category(category).is_some()
         {
             values.insert("id".into(), identifier(&post.post_id));
         }

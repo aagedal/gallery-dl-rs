@@ -172,7 +172,7 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"secret-key":"secret-value"}}"#,
         r#"{"extractor":{"instagram":{"secret-key":"secret-value"}}}"#,
         r#"{"extractor":{"instagram":{"post":{"cookies":"secret-value"}}}}"#,
-        r#"{"extractor":{"pixiv":{"cookies":"secret-value"}}}"#,
+        r#"{"extractor":{"deviantart":{"cookies":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
@@ -1840,6 +1840,26 @@ fn api_key_is_tumblr_only_and_never_echoed() {
         r#"{"extractor":{"reddit":{"api-key":"abc123"}}}"#,
         r#"{"extractor":{"tumblr":{"api-key":"abc 123!"}}}"#,
         r#"{"extractor":{"tumblr":{"api-key":7}}}"#,
+    ] {
+        let error = parse(json).err().unwrap().to_string();
+        assert!(!error.contains("abc"), "{error}");
+    }
+}
+
+#[test]
+fn refresh_token_is_pixiv_only_and_never_echoed() {
+    let config = parse(r#"{"extractor":{"pixiv":{"refresh-token":"abc_123-x"}}}"#).unwrap();
+    assert_eq!(
+        config.resolve("pixiv").unwrap().refresh_token.as_deref(),
+        Some("abc_123-x")
+    );
+    assert_eq!(config.resolve("tumblr").unwrap().refresh_token, None);
+    for json in [
+        r#"{"refresh-token":"abc123"}"#,
+        r#"{"extractor":{"refresh-token":"abc123"}}"#,
+        r#"{"extractor":{"tumblr":{"refresh-token":"abc123"}}}"#,
+        r#"{"extractor":{"pixiv":{"refresh-token":"abc 123!"}}}"#,
+        r#"{"extractor":{"pixiv":{"refresh-token":7}}}"#,
     ] {
         let error = parse(json).err().unwrap().to_string();
         assert!(!error.contains("abc"), "{error}");

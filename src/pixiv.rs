@@ -1,0 +1,1061 @@
+//! Experimental native Pixiv illustration and user-works extraction.
+//!
+//! Mirrors gallery_dl/extractor/pixiv.py using the iOS App API. Requests are
+//! authorized with an access token obtained from the `refresh-token` setting
+//! through the OAuth refresh-token grant; the token is cached in memory for the
+//! run and refreshed once when the API reports `invalid_grant`. Single-page
+//! works yield `meta_single_page.original_image_url`, multi-page works
+//! `meta_pages[].image_urls.original`. Ugoira animations are not supported
+//! (upstream downloads a frame ZIP plus frame delays). Files are served from
+//! `i.pximg.net`, which requires the App API `Referer` header.
+use crate::{
+    Result, error,
+    event::{ExtractionEvent, group},
+    extract::{Media, MediaJob, PostMetadata},
+    file_metadata::FileMetadata,
+    network::NetworkOptions,
+    transport::{RateLimits, retry_after},
+};
+use futures_util::{
+    StreamExt,
+    stream::{self, BoxStream},
+};
+use reqwest::{Client, RequestBuilder, StatusCode};
+use serde_json::Value;
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
+use url::Url;
+
+/// Upstream gallery-dl's public iOS app constants.
+const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
+const CLIENT_SECRET: &str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj";
+const HASH_SECRET: &str = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c";
+const APP_USER_AGENT: &str = "PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)";
+const APP_OS_VERSION: &str = "14.6";
+pub const REFERER: &str = "https://app-api.pixiv.net/";
+const MAX_RESPONSE: usize = 32 * 1024 * 1024;
+const MAX_PAGES: usize = 200;
+
+pub fn valid_id(id: &str) -> bool {
+    (1..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit()) && !id.starts_with('0')
+}
+
+/// Media IDs are `ILLUST_pN` for the given illustration ID.
+pub fn valid_media_id(post_id: &str, media_id: &str) -> bool {
+    valid_id(post_id)
+        && media_id
+            .strip_prefix(post_id)
+            .and_then(|rest| rest.strip_prefix("_p"))
+            .is_some_and(|page| {
+                (1..=4).contains(&page.len())
+                    && page.bytes().all(|b| b.is_ascii_digit())
+                    && (page == "0" || !page.starts_with('0'))
+            })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Illust,
+    Manga,
+}
+
+impl Kind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Illust => "illust",
+            Self::Manga => "manga",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Illust(String),
+    User { id: String, kinds: Vec<Kind> },
+}
+
+fn segments(url: &Url) -> Vec<&str> {
+    url.path_segments()
+        .map(|s| s.filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+/// Whether a URL is a Pixiv page handled by this extractor.
+pub fn is_pixiv_url(url: &Url) -> bool {
+    matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net")) && target(url).is_ok()
+}
+
+pub fn target(url: &Url) -> Result<Target> {
+    let unsupported = || {
+        error(
+            "unsupported Pixiv URL; expected https://www.pixiv.net/artworks/ID or https://www.pixiv.net/users/ID[/illustrations|/manga]",
+        )
+    };
+    if !matches!(url.scheme(), "http" | "https")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net"))
+    {
+        return Err(unsupported());
+    }
+    let all = segments(url);
+    let rest = match all.as_slice() {
+        ["en", rest @ ..] => rest,
+        rest => rest,
+    };
+    let id = |id: &str| valid_id(id).then(|| id.to_owned()).ok_or_else(unsupported);
+    let user = |raw: &str, kinds: Vec<Kind>| {
+        Ok(Target::User {
+            id: id(raw)?,
+            kinds,
+        })
+    };
+    match rest {
+        ["artworks", raw] => Ok(Target::Illust(id(raw)?)),
+        ["member_illust.php"] => {
+            let raw = url
+                .query_pairs()
+                .find(|(key, _)| key == "illust_id")
+                .map(|(_, value)| value.into_owned())
+                .ok_or_else(unsupported)?;
+            Ok(Target::Illust(id(&raw)?))
+        }
+        ["users", raw] | ["users", raw, "artworks"] => user(raw, vec![Kind::Illust, Kind::Manga]),
+        ["users", raw, "illustrations"] => user(raw, vec![Kind::Illust]),
+        ["users", raw, "manga"] => user(raw, vec![Kind::Manga]),
+        _ => Err(unsupported()),
+    }
+}
+
+fn string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn id_of(value: &Value) -> Option<String> {
+    match value.get("id")? {
+        Value::Number(n) => Some(n.to_string()),
+        Value::String(s) => Some(s.trim().to_owned()),
+        _ => None,
+    }
+    .filter(|id| valid_id(id))
+}
+
+/// HTTPS files on `i.pximg.net` only.
+fn media_url(raw: &str) -> Option<Url> {
+    let url = Url::parse(raw.trim()).ok()?;
+    (url.scheme() == "https"
+        && url.host_str() == Some("i.pximg.net")
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none())
+    .then_some(url)
+}
+
+fn extension(url: &Url) -> String {
+    url.path_segments()
+        .and_then(|mut s| s.next_back())
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .filter(|ext| {
+            (1..=5).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+        .map(|ext| if ext == "jpeg" { "jpg".into() } else { ext })
+        .unwrap_or_else(|| "jpg".into())
+}
+
+/// Why an illustration produced no files.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Skip {
+    Ugoira,
+    NoMedia,
+}
+
+/// Parse one App API illustration object into its page files.
+pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
+    let id = id_of(illust).ok_or(Skip::NoMedia)?;
+    if string(illust, "type") == Some("ugoira") {
+        return Err(Skip::Ugoira);
+    }
+    let mut urls = Vec::new();
+    let pages = illust
+        .get("meta_pages")
+        .and_then(Value::as_array)
+        .filter(|pages| !pages.is_empty());
+    match pages {
+        Some(pages) => {
+            for page in pages {
+                let url = page
+                    .get("image_urls")
+                    .and_then(|urls| string(urls, "original"))
+                    .and_then(media_url)
+                    .ok_or(Skip::NoMedia)?;
+                urls.push(url);
+            }
+        }
+        None => urls.push(
+            illust
+                .get("meta_single_page")
+                .and_then(|page| string(page, "original_image_url"))
+                .and_then(media_url)
+                .ok_or(Skip::NoMedia)?,
+        ),
+    }
+    let username = illust
+        .get("user")
+        .and_then(|user| string(user, "account"))
+        .map(Arc::<str>::from);
+    let title = string(illust, "title");
+    let caption = string(illust, "caption")
+        .map(crate::mastodon::strip_html)
+        .filter(|text| !text.trim().is_empty());
+    let caption = match (title, caption) {
+        (Some(title), Some(caption)) => Some(format!("{title}\n\n{}", caption.trim())),
+        (Some(title), None) => Some(title.to_owned()),
+        (None, caption) => caption.map(|c| c.trim().to_owned()),
+    }
+    .map(Arc::<str>::from);
+    let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
+    let dimension = |key| illust.get(key).and_then(Value::as_u64).filter(|v| *v > 0);
+    let headers = BTreeMap::from([("Referer".to_owned(), REFERER.to_owned())]);
+    Ok(urls
+        .into_iter()
+        .enumerate()
+        .map(|(page, url)| {
+            let ext = extension(&url);
+            let (width, height) = if page == 0 {
+                (dimension("width"), dimension("height"))
+            } else {
+                (None, None)
+            };
+            Media {
+                filename: format!("{id}_p{page}.{ext}"),
+                job: MediaJob::DirectHttp,
+                category: "pixiv".into(),
+                metadata: Some(PostMetadata {
+                    file: Some(FileMetadata {
+                        width,
+                        height,
+                        ..FileMetadata::default()
+                    }),
+                    post_id: id.clone(),
+                    media_id: format!("{id}_p{page}"),
+                    username: username.clone(),
+                    caption: caption.clone(),
+                    timestamp,
+                    index: page + 1,
+                    ..PostMetadata::default()
+                }),
+                url,
+                headers: headers.clone(),
+                handoff: BTreeMap::new(),
+            }
+        })
+        .collect())
+}
+
+fn json(bytes: &[u8]) -> Result<Value> {
+    serde_json::from_slice(bytes).map_err(|_| error("Pixiv returned invalid JSON"))
+}
+
+/// Parse an `illust/detail` response.
+pub fn parse_detail(bytes: &[u8]) -> Result<Vec<Media>> {
+    let body = json(bytes)?;
+    let illust = body
+        .get("illust")
+        .ok_or_else(|| error("Pixiv response contains no illustration"))?;
+    parse_illust(illust).map_err(|skip| match skip {
+        Skip::Ugoira => error(
+            "Pixiv ugoira animations are not supported natively; use --extractor compatibility",
+        ),
+        Skip::NoMedia => error("Pixiv illustration contains no supported media"),
+    })
+}
+
+/// One user-works page: per-illustration media and the raw `next_url`.
+pub struct Page {
+    pub works: Vec<Vec<Media>>,
+    pub next: Option<String>,
+}
+
+pub fn parse_page(bytes: &[u8]) -> Result<Page> {
+    let body = json(bytes)?;
+    let entries = body
+        .get("illusts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| error("Pixiv response contains no illustration list"))?;
+    Ok(Page {
+        // Ugoira and restricted works are skipped in listings.
+        works: entries
+            .iter()
+            .filter_map(|illust| parse_illust(illust).ok())
+            .collect(),
+        next: string(&body, "next_url").map(str::to_owned),
+    })
+}
+
+/// Lowercase hex MD5 (RFC 1321), used only for upstream's `X-Client-Hash`.
+pub fn md5_hex(input: &[u8]) -> String {
+    const S: [u32; 64] = [
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
+        9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10,
+        15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+    ];
+    let k: Vec<u32> = (0..64)
+        .map(|i| ((i as f64 + 1.0).sin().abs() * 4294967296.0) as u32)
+        .collect();
+    let mut state: [u32; 4] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
+    let mut message = input.to_vec();
+    message.push(0x80);
+    while message.len() % 64 != 56 {
+        message.push(0);
+    }
+    message.extend_from_slice(&((input.len() as u64).wrapping_mul(8)).to_le_bytes());
+    for chunk in message.chunks(64) {
+        let m: Vec<u32> = chunk
+            .chunks(4)
+            .map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+            .collect();
+        let [mut a, mut b, mut c, mut d] = state;
+        for i in 0..64 {
+            let (f, g) = match i / 16 {
+                0 => ((b & c) | (!b & d), i),
+                1 => ((d & b) | (!d & c), (5 * i + 1) % 16),
+                2 => (b ^ c ^ d, (3 * i + 5) % 16),
+                _ => (c ^ (b | !d), (7 * i) % 16),
+            };
+            let f = f.wrapping_add(a).wrapping_add(k[i]).wrapping_add(m[g]);
+            a = d;
+            d = c;
+            c = b;
+            b = b.wrapping_add(f.rotate_left(S[i]));
+        }
+        for (word, value) in state.iter_mut().zip([a, b, c, d]) {
+            *word = word.wrapping_add(value);
+        }
+    }
+    state
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Upstream's `X-Client-Time` format: UTC `%Y-%m-%dT%H:%M:%S+00:00`.
+fn client_time(now: SystemTime) -> String {
+    let seconds = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let time = time::OffsetDateTime::from_unix_timestamp(seconds)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
+        time.year(),
+        u8::from(time.month()),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second()
+    )
+}
+
+pub struct Pixiv {
+    client: Client,
+    network: NetworkOptions,
+    api_root: Url,
+    oauth_root: Url,
+    refresh_token: Option<String>,
+    access_token: tokio::sync::Mutex<Option<String>>,
+    timeout: Duration,
+    request_timeout: Duration,
+    retries: u8,
+    rate_limits: RateLimits,
+}
+
+struct ListingState {
+    kinds: VecDeque<Kind>,
+    user: String,
+    next: Option<Url>,
+    pages: usize,
+    pending: VecDeque<ExtractionEvent>,
+}
+
+impl Pixiv {
+    pub fn new(timeout: Duration) -> Result<Self> {
+        Ok(Self {
+            client: NetworkOptions::default().client(APP_USER_AGENT, timeout)?,
+            network: NetworkOptions::default(),
+            api_root: Url::parse("https://app-api.pixiv.net/").expect("static URL"),
+            oauth_root: Url::parse("https://oauth.secure.pixiv.net/").expect("static URL"),
+            refresh_token: None,
+            access_token: tokio::sync::Mutex::new(None),
+            timeout,
+            request_timeout: timeout,
+            retries: 0,
+            rate_limits: RateLimits::default(),
+        })
+    }
+
+    /// Apply proxy and user-agent settings to API requests and emitted media.
+    pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
+        self.client = network.client(APP_USER_AGENT, self.timeout)?;
+        self.network = network.clone();
+        Ok(self)
+    }
+
+    pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
+        self.refresh_token = token.map(str::to_owned);
+        self
+    }
+
+    /// Additional attempts for HTTP 429/5xx and transport failures.
+    pub fn with_retries(mut self, retries: u8) -> Self {
+        self.retries = retries;
+        self
+    }
+
+    /// Bound each HTTP request separately from the per-call deadline.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
+    }
+
+    /// Override the App API origin; intended for local tests.
+    pub fn with_api_root(mut self, root: Url) -> Self {
+        self.api_root = root;
+        self
+    }
+
+    /// Override the OAuth origin; intended for local tests.
+    pub fn with_oauth_root(mut self, root: Url) -> Self {
+        self.oauth_root = root;
+        self
+    }
+
+    fn app_headers(&self, request: RequestBuilder) -> RequestBuilder {
+        let request = request
+            .header("App-OS", "ios")
+            .header("App-OS-Version", APP_OS_VERSION)
+            .timeout(self.request_timeout);
+        if self.network.user_agent().is_some() {
+            request
+        } else {
+            request.header("User-Agent", APP_USER_AGENT)
+        }
+    }
+
+    async fn authenticate(&self) -> Result<String> {
+        let token = self.refresh_token.as_deref().ok_or_else(missing_token)?;
+        let endpoint = self.oauth_root.join("auth/token").expect("static path");
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("client_id", CLIENT_ID)
+            .append_pair("client_secret", CLIENT_SECRET)
+            .append_pair("grant_type", "refresh_token")
+            .append_pair("refresh_token", token)
+            .append_pair("get_secure_url", "1")
+            .append_pair("include_policy", "true")
+            .finish();
+        let response = self
+            .request(&endpoint, |time, hash| {
+                self.app_headers(self.client.post(endpoint.clone()))
+                    .header("X-Client-Time", time)
+                    .header("X-Client-Hash", hash)
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .body(body.clone())
+            })
+            .await?;
+        match response {
+            Reply::Ok(body) => json(&body)?
+                .get("access_token")
+                .and_then(Value::as_str)
+                .filter(|token| !token.is_empty() && token.bytes().all(|b| b.is_ascii_graphic()))
+                .map(str::to_owned)
+                .ok_or_else(|| error("Pixiv OAuth response contains no access token")),
+            Reply::Status(status, _) if status.is_client_error() => Err(error(
+                "Pixiv rejected the refresh-token setting; obtain a new refresh token",
+            )),
+            Reply::Status(status, _) => Err(error(format!("Pixiv OAuth returned HTTP {status}"))),
+        }
+    }
+
+    async fn access_token(&self, stale: Option<&str>) -> Result<String> {
+        let mut cached = self.access_token.lock().await;
+        if let Some(token) = cached.as_deref()
+            && Some(token) != stale
+        {
+            return Ok(token.to_owned());
+        }
+        let token = self.authenticate().await?;
+        *cached = Some(token.clone());
+        Ok(token)
+    }
+
+    /// Authorized App API GET, refreshing the access token once on `invalid_grant`.
+    async fn get(&self, endpoint: &Url) -> Result<Vec<u8>> {
+        tokio::time::timeout(self.timeout, async {
+            let mut token = self.access_token(None).await?;
+            for refreshed in [false, true] {
+                let reply = self
+                    .request(endpoint, |_, _| {
+                        self.app_headers(self.client.get(endpoint.clone()))
+                            .header("Referer", REFERER)
+                            .bearer_auth(&token)
+                    })
+                    .await?;
+                match reply {
+                    Reply::Ok(body) => return Ok(body),
+                    Reply::Status(status, body)
+                        if matches!(status.as_u16(), 400 | 401)
+                            && !refreshed
+                            && String::from_utf8_lossy(&body).contains("invalid_grant") =>
+                    {
+                        token = self.access_token(Some(&token)).await?;
+                    }
+                    Reply::Status(status, _) => return Err(status_error(status)),
+                }
+            }
+            Err(error("Pixiv refused the refreshed access token"))
+        })
+        .await
+        .map_err(|_| error("native Pixiv extraction timed out"))?
+    }
+
+    fn finish(&self, mut media: Vec<Media>) -> VecDeque<ExtractionEvent> {
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        group(media, "pixiv")
+    }
+
+    fn first_page(&self, user: &str, kind: Kind) -> Url {
+        let mut url = self.api_root.join("v1/user/illusts").expect("static path");
+        url.query_pairs_mut()
+            .append_pair("user_id", user)
+            .append_pair("type", kind.as_str());
+        url
+    }
+
+    /// `next_url` must stay on the App API origin and user-works endpoint.
+    fn next_url(&self, raw: &str) -> Result<Url> {
+        let url = Url::parse(raw).map_err(|_| error("Pixiv returned an invalid next page"))?;
+        if url.origin() != self.api_root.origin()
+            || url.path()
+                != self
+                    .api_root
+                    .join("v1/user/illusts")
+                    .expect("static")
+                    .path()
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(error("Pixiv returned an unexpected next page"));
+        }
+        Ok(url)
+    }
+
+    async fn next_page(&self, state: &mut ListingState) -> Result<()> {
+        let endpoint = match state.next.take() {
+            Some(url) => url,
+            None => {
+                let Some(kind) = state.kinds.pop_front() else {
+                    return Ok(());
+                };
+                state.pages = 0;
+                self.first_page(&state.user, kind)
+            }
+        };
+        let page = parse_page(&self.get(&endpoint).await?)?;
+        state.pages += 1;
+        if state.pages < MAX_PAGES
+            && let Some(next) = page.next
+        {
+            state.next = Some(self.next_url(&next)?);
+        }
+        for media in page.works {
+            let events = self.finish(media);
+            state.pending.extend(events);
+        }
+        Ok(())
+    }
+
+    pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
+        crate::event::media_only(self.events(url))
+    }
+
+    /// Emit one post boundary per illustration; user works paginate lazily.
+    pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let target = match target(url) {
+            Ok(_) if self.refresh_token.is_none() => Err(missing_token()),
+            other => other,
+        };
+        let target = match target {
+            Ok(target) => target,
+            Err(e) => return stream::once(async move { Err(e) }).boxed(),
+        };
+        let (user, kinds) = match target {
+            Target::Illust(id) => {
+                return stream::once(async move {
+                    let mut endpoint = self.api_root.join("v1/illust/detail").expect("static");
+                    endpoint.query_pairs_mut().append_pair("illust_id", &id);
+                    let media = parse_detail(&self.get(&endpoint).await?)?;
+                    Ok::<_, crate::Error>(stream::iter(self.finish(media).into_iter().map(Ok)))
+                })
+                .map(|result| match result {
+                    Ok(events) => events.boxed(),
+                    Err(e) => stream::once(async move { Err(e) }).boxed(),
+                })
+                .flatten()
+                .boxed();
+            }
+            Target::User { id, kinds } => (id, kinds),
+        };
+        let state = ListingState {
+            kinds: kinds.into(),
+            user,
+            next: None,
+            pages: 0,
+            pending: VecDeque::new(),
+        };
+        stream::unfold(Some(state), move |state| async move {
+            let mut state = state?;
+            loop {
+                if let Some(event) = state.pending.pop_front() {
+                    return Some((Ok(event), Some(state)));
+                }
+                if state.next.is_none() && state.kinds.is_empty() {
+                    return None;
+                }
+                if let Err(e) = self.next_page(&mut state).await {
+                    return Some((Err(e), None));
+                }
+            }
+        })
+        .boxed()
+    }
+
+    /// Send with retries; `build` receives a fresh client time and hash.
+    async fn request(
+        &self,
+        endpoint: &Url,
+        build: impl Fn(&str, &str) -> RequestBuilder,
+    ) -> Result<Reply> {
+        for attempt in 0..=self.retries {
+            let time = client_time(SystemTime::now());
+            let hash = md5_hex(format!("{time}{HASH_SECRET}").as_bytes());
+            match self.attempt(endpoint, build(&time, &hash), attempt).await {
+                Ok(reply) => return Ok(reply),
+                Err(failure) if failure.retry && attempt < self.retries => {
+                    tokio::time::sleep(backoff(attempt)).await;
+                }
+                Err(failure) => return Err(failure.error),
+            }
+        }
+        unreachable!()
+    }
+
+    async fn attempt(
+        &self,
+        endpoint: &Url,
+        request: RequestBuilder,
+        attempt: u8,
+    ) -> std::result::Result<Reply, Failure> {
+        self.rate_limits.wait(endpoint, self.timeout).await?;
+        let mut response = request
+            .send()
+            .await
+            .map_err(|_| Failure::transient("Pixiv request failed; check network access"))?;
+        let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            let delay = retry_after(response.headers(), SystemTime::now());
+            self.rate_limits
+                .defer(endpoint, delay.unwrap_or_else(|| backoff(attempt)));
+            return Err(Failure::transient(
+                if status == StatusCode::TOO_MANY_REQUESTS {
+                    match delay {
+                        Some(delay) => {
+                            format!("Pixiv rate limit; retry after {} seconds", delay.as_secs())
+                        }
+                        None => "Pixiv rate limit; retry later".into(),
+                    }
+                } else {
+                    format!("Pixiv returned HTTP {status}")
+                },
+            ));
+        }
+        if status.is_redirection() {
+            return Err(error("Pixiv API responded with an unexpected redirect").into());
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| Failure::transient("could not read Pixiv response"))?
+        {
+            if body.len() + chunk.len() > MAX_RESPONSE {
+                return Err(error("Pixiv response exceeded 32 MiB").into());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(if status.is_success() {
+            Reply::Ok(body)
+        } else {
+            Reply::Status(status, body)
+        })
+    }
+}
+
+enum Reply {
+    Ok(Vec<u8>),
+    Status(StatusCode, Vec<u8>),
+}
+
+fn missing_token() -> crate::Error {
+    error(
+        "native Pixiv extraction requires the pixiv refresh-token setting in --native-config; or use --extractor compatibility",
+    )
+}
+
+fn status_error(status: StatusCode) -> crate::Error {
+    match status.as_u16() {
+        404 | 410 => error("Pixiv illustration or user not found"),
+        400 | 401 | 403 => error(format!(
+            "Pixiv refused access (HTTP {status}); the work may be restricted or the refresh-token invalid"
+        )),
+        _ => error(format!("Pixiv returned HTTP {status}")),
+    }
+}
+
+fn backoff(attempt: u8) -> Duration {
+    Duration::from_millis(250 * (1u64 << attempt.min(6)))
+}
+
+struct Failure {
+    error: crate::Error,
+    retry: bool,
+}
+
+impl Failure {
+    fn transient(message: impl Into<String>) -> Self {
+        Self {
+            error: error(message),
+            retry: true,
+        }
+    }
+}
+
+impl From<crate::Error> for Failure {
+    fn from(error: crate::Error) -> Self {
+        Self {
+            error,
+            retry: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread::{self, JoinHandle},
+    };
+
+    fn illust(id: u64, pages: usize) -> Value {
+        let page = |n: usize| {
+            json!({"image_urls": {"original":
+                format!("https://i.pximg.net/img-original/img/2024/01/01/00/00/00/{id}_p{n}.png")}})
+        };
+        json!({"id": id, "title": "Title", "type": "illust",
+            "caption": "Hello <b>world</b>", "create_date": "2024-01-01T09:00:00+09:00",
+            "width": 1000, "height": 2000, "user": {"id": 5, "account": "alice"},
+            "meta_single_page": if pages == 1 { json!({"original_image_url":
+                format!("https://i.pximg.net/img-original/img/2024/01/01/00/00/00/{id}_p0.jpg")}) }
+                else { json!({}) },
+            "meta_pages": (0..if pages == 1 { 0 } else { pages }).map(page).collect::<Vec<_>>()})
+    }
+
+    #[test]
+    fn parses_single_and_multi_page_works() {
+        let single = parse_illust(&illust(42, 1)).unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0].filename, "42_p0.jpg");
+        assert_eq!(single[0].headers["Referer"], REFERER);
+        let meta = single[0].metadata.as_ref().unwrap();
+        assert_eq!(meta.post_id, "42");
+        assert_eq!(meta.media_id, "42_p0");
+        assert_eq!(meta.username.as_deref(), Some("alice"));
+        assert_eq!(meta.caption.as_deref(), Some("Title\n\nHello world"));
+        assert_eq!(meta.timestamp, Some(1704067200));
+        assert_eq!(meta.index, 1);
+        let file = meta.file.as_ref().unwrap();
+        assert_eq!((file.width, file.height), (Some(1000), Some(2000)));
+        let multi = parse_illust(&illust(43, 3)).unwrap();
+        let names: Vec<_> = multi.iter().map(|m| m.filename.as_str()).collect();
+        assert_eq!(names, ["43_p0.png", "43_p1.png", "43_p2.png"]);
+        let second = multi[1].metadata.as_ref().unwrap();
+        assert_eq!(
+            (second.index, second.file.as_ref().unwrap().width),
+            (2, None)
+        );
+        let key = multi[0].archive_key().unwrap();
+        assert!(key.starts_with("pixiv:"), "{key}");
+        assert_ne!(Some(key), multi[1].archive_key());
+        let mut ugoira = illust(44, 1);
+        ugoira["type"] = json!("ugoira");
+        assert_eq!(parse_illust(&ugoira).unwrap_err(), Skip::Ugoira);
+        let mut offsite = illust(45, 1);
+        offsite["meta_single_page"]["original_image_url"] = json!("https://evil.example/x.jpg");
+        assert_eq!(parse_illust(&offsite).unwrap_err(), Skip::NoMedia);
+        let detail = json!({"illust": ugoira}).to_string();
+        let message = parse_detail(detail.as_bytes()).unwrap_err().to_string();
+        assert!(message.contains("ugoira"), "{message}");
+        assert!(valid_media_id("42", "42_p0") && valid_media_id("42", "42_p12"));
+        assert!(!valid_media_id("42", "43_p0") && !valid_media_id("42", "42_p01"));
+    }
+
+    #[test]
+    fn classifies_supported_urls() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap());
+        let work = Target::Illust("123".into());
+        assert_eq!(t("https://www.pixiv.net/artworks/123").unwrap(), work);
+        assert_eq!(t("https://www.pixiv.net/en/artworks/123").unwrap(), work);
+        assert_eq!(
+            t("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=123").unwrap(),
+            work
+        );
+        let user = |kinds| Target::User {
+            id: "9".into(),
+            kinds,
+        };
+        assert_eq!(
+            t("https://www.pixiv.net/users/9").unwrap(),
+            user(vec![Kind::Illust, Kind::Manga])
+        );
+        assert_eq!(
+            t("https://pixiv.net/en/users/9").unwrap(),
+            user(vec![Kind::Illust, Kind::Manga])
+        );
+        assert_eq!(
+            t("https://www.pixiv.net/users/9/illustrations").unwrap(),
+            user(vec![Kind::Illust])
+        );
+        assert_eq!(
+            t("https://www.pixiv.net/users/9/manga").unwrap(),
+            user(vec![Kind::Manga])
+        );
+        for raw in [
+            "https://www.pixiv.net/",
+            "https://www.pixiv.net/artworks/abc",
+            "https://www.pixiv.net/artworks/0123",
+            "https://www.pixiv.net/users/9/bookmarks/artworks",
+            "https://www.pixiv.net/member_illust.php?id=9",
+            "https://i.pximg.net/img-original/img/1_p0.png",
+            "https://www.pixiv.net:444/artworks/1",
+            "https://www.pixiv.net.evil.example/artworks/1",
+        ] {
+            assert!(t(raw).is_err(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn md5_and_client_time_match_reference_values() {
+        assert_eq!(md5_hex(b""), "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(
+            md5_hex(b"The quick brown fox jumps over the lazy dog"),
+            "9e107d9d372bb6826bd81d3542a419d6"
+        );
+        assert_eq!(md5_hex(&[b'a'; 64]), "014842d480b571495a4a0363793f7367");
+        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1704067200);
+        assert_eq!(client_time(time), "2024-01-01T00:00:00+00:00");
+    }
+
+    fn response(status: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nRetry-After: 0\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn serve(responses: Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
+        serve_with(|_| responses)
+    }
+
+    fn serve_with(responses: impl FnOnce(&Url) -> Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let responses = responses(&root);
+        let task = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for reply in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 4096];
+                loop {
+                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                        let length = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length: "))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if request.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert_ne!(count, 0);
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                requests.push(String::from_utf8(request).unwrap());
+                let _ = stream.write_all(&reply);
+            }
+            requests
+        });
+        (root, task)
+    }
+
+    fn pixiv(root: Url) -> Pixiv {
+        Pixiv::new(Duration::from_secs(5))
+            .unwrap()
+            .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
+            .unwrap()
+            .with_api_root(root.clone())
+            .with_oauth_root(root)
+            .with_refresh_token(Some("refresh-secret"))
+    }
+
+    fn token(value: &str) -> Vec<u8> {
+        response(
+            "200 OK",
+            json!({"access_token": value, "expires_in": 3600})
+                .to_string()
+                .as_bytes(),
+        )
+    }
+
+    #[tokio::test]
+    async fn fetches_detail_with_oauth_and_refreshes_once() {
+        let detail = json!({"illust": illust(42, 2)}).to_string();
+        let expired =
+            json!({"error": {"message": "Error occurred at the OAuth process. invalid_grant"}})
+                .to_string();
+        let (root, server) = serve(vec![
+            token("first"),
+            response("400 Bad Request", expired.as_bytes()),
+            token("second"),
+            response("503 Service Unavailable", b""),
+            response("200 OK", detail.as_bytes()),
+        ]);
+        let events: Vec<_> = pixiv(root)
+            .with_retries(1)
+            .events(&Url::parse("https://www.pixiv.net/en/artworks/42").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 4, "{events:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /auth/token "));
+        let lower = requests[0].to_ascii_lowercase();
+        assert!(lower.contains("app-os: ios") && lower.contains("x-client-hash: "));
+        assert!(lower.contains("user-agent: pixiviosapp/7.13.3"));
+        assert!(requests[0].contains(
+            "client_id=MOBrBDS8blbauoSck0ZfDbtuzpyT&client_secret=lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj&grant_type=refresh_token&refresh_token=refresh-secret&get_secure_url=1&include_policy=true"
+        ));
+        assert!(requests[1].starts_with("GET /v1/illust/detail?illust_id=42 "));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer first")
+        );
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("referer: https://app-api.pixiv.net/")
+        );
+        assert!(
+            requests[4]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer second")
+        );
+    }
+
+    #[tokio::test]
+    async fn paginates_user_works_by_type() {
+        let page = |ids: &[u64], next: Option<String>| {
+            response(
+                "200 OK",
+                json!({"illusts": ids.iter().map(|id| illust(*id, 1)).collect::<Vec<_>>(),
+                    "next_url": next})
+                .to_string()
+                .as_bytes(),
+            )
+        };
+        let (root, server) = serve_with(|root| {
+            let next = root.join("v1/user/illusts?user_id=9&type=illust&offset=30");
+            vec![
+                token("t"),
+                page(&[1], Some(next.unwrap().to_string())),
+                page(&[2], None),
+                page(&[3], Some("https://evil.example/v1/user/illusts".into())),
+            ]
+        });
+        let results: Vec<_> = pixiv(root)
+            .stream(&Url::parse("https://www.pixiv.net/users/9").unwrap())
+            .collect()
+            .await;
+        assert_eq!(results.len(), 3, "{results:?}");
+        let error = results[2].as_ref().unwrap_err().to_string();
+        assert!(error.contains("unexpected next page") && !error.contains("evil"));
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
+        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=illust&offset=30 "));
+        assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=manga "));
+    }
+
+    #[tokio::test]
+    async fn requires_refresh_token_without_network() {
+        let error = Pixiv::new(Duration::from_secs(5))
+            .unwrap()
+            .with_api_root(Url::parse("http://127.0.0.1:9/").unwrap())
+            .stream(&Url::parse("https://www.pixiv.net/artworks/1").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("refresh-token"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn rejected_refresh_token_is_not_echoed() {
+        let (root, server) = serve(vec![response(
+            "400 Bad Request",
+            b"{\"error\":\"invalid_grant\"}",
+        )]);
+        let error = pixiv(root)
+            .with_retries(3)
+            .stream(&Url::parse("https://www.pixiv.net/artworks/1").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("refresh-token"), "{error}");
+        assert!(!error.contains("refresh-secret") && !error.contains("127.0.0.1"));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+}

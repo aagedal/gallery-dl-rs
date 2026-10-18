@@ -152,6 +152,17 @@ impl Media {
                     serde_json::json!([blog, post.post_id, post.media_id]).to_string(),
                 )
             }
+            // Pixiv files are identified by illustration ID and page.
+            "pixiv" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::pixiv::valid_media_id(&post.post_id, &post.media_id) {
+                    return None;
+                }
+                (
+                    "pixiv",
+                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                )
+            }
             // Booru files are identified by their site and post ID.
             category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
                 let post = self.metadata.as_ref()?;
@@ -309,6 +320,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if let Some(category) = crate::kemono::category(host) {
         return Some(category);
+    }
+    if crate::pixiv::is_pixiv_url(url) {
+        return Some("pixiv");
     }
     if crate::tumblr::is_blog_url(url) {
         return Some("tumblr");
