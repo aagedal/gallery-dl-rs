@@ -42,6 +42,11 @@ impl Twitter {
             Some(path) => CookieJar::parse(&tokio::fs::read_to_string(path).await?)?,
             None => CookieJar::parse("")?,
         };
+        Self::from_cookie_jar(cookies, timeout)
+    }
+
+    /// Build an extractor from an already scoped in-memory cookie jar.
+    pub fn from_cookie_jar(cookies: CookieJar, timeout: Duration) -> Result<Self> {
         Ok(Self {
             client: Client::builder()
                 .user_agent(USER_AGENT)

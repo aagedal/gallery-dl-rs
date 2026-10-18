@@ -21,9 +21,17 @@ use url::Url;
 const STDERR_LIMIT: usize = 8 * 1024;
 
 pub(crate) fn stream(backend: Backend, url: Url) -> BoxStream<'static, Result<Media>> {
+    stream_with_browser(backend, url, None)
+}
+
+pub(crate) fn stream_with_browser(
+    backend: Backend,
+    url: Url,
+    browser: Option<String>,
+) -> BoxStream<'static, Result<Media>> {
     // Do not start a child until a downstream consumer actually requests an item.
     stream::once(async move {
-        let process = Process::start(backend, url)?;
+        let process = Process::start(backend, url, browser)?;
         Ok::<_, crate::Error>(stream::try_unfold(process, |mut process| async move {
             let item = process.next().await?;
             Ok(item.map(|item| (item, process)))
@@ -44,12 +52,12 @@ struct Process {
 }
 
 impl Process {
-    fn start(backend: Backend, url: Url) -> Result<Self> {
+    fn start(backend: Backend, url: Url, browser: Option<String>) -> Result<Self> {
         let category = extract::social_site(&url).ok_or_else(|| {
             error("unsupported URL; use an Instagram, Facebook, Twitter/X URL or direct media link")
         })?;
         let mut child = backend
-            .command(&url)
+            .command(&url, browser.as_deref())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

@@ -1,5 +1,6 @@
 pub mod archive;
 mod backend;
+pub mod browser;
 pub mod config;
 pub mod cookies;
 pub mod download;

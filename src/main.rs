@@ -6,7 +6,9 @@ use futures_util::{
 use gallery_dl_rs::{
     Result,
     archive::{Archive, ArchiveOutcome},
+    browser::FirefoxProfile,
     config::{Config, Options as ConfigOptions},
+    cookies::CookieJar,
     download::{self, DownloadOptions, Outcome},
     error,
     extract::{self, Backend},
@@ -81,6 +83,9 @@ struct Args {
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
+    /// Browser session: native accepts firefox:PROFILE_PATH; compatibility delegates
+    #[arg(long, conflicts_with = "cookies")]
+    cookies_from_browser: Option<String>,
     /// Social extractor; native supports experimental Instagram feeds/posts, Facebook photos, and X posts
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
@@ -152,7 +157,17 @@ async fn run(args: Args) -> Result<()> {
     }
     let settings = resolved_settings(&args).await?;
     let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
-    let extractors = Extractors::default();
+    let extractors = Extractors {
+        browser: if matches!(args.extractor, Extractor::Native) {
+            args.cookies_from_browser
+                .as_deref()
+                .map(FirefoxProfile::parse)
+                .transpose()?
+        } else {
+            None
+        },
+        ..Default::default()
+    };
     let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
         .values()
         .filter_map(|settings| settings.options.archive.clone())
@@ -180,8 +195,14 @@ async fn run(args: Args) -> Result<()> {
                             .selection
                             .as_ref()
                     });
-                    let input =
-                        extract_input(source, &extractors, &backend, args.extractor, &settings);
+                    let input = extract_input(
+                        source,
+                        &extractors,
+                        &backend,
+                        args.extractor,
+                        &settings,
+                        args.cookies_from_browser.as_deref(),
+                    );
                     match selection {
                         Some(selection) => selection.apply(input),
                         None => input,
@@ -297,9 +318,22 @@ async fn run(args: Args) -> Result<()> {
 
 #[derive(Default)]
 struct Extractors {
+    browser: Option<FirefoxProfile>,
     instagram: OnceCell<Result<Instagram>>,
     twitter: OnceCell<Result<Twitter>>,
     facebook: OnceCell<Result<Facebook>>,
+}
+
+impl Extractors {
+    async fn cookie_jar(&self, options: &ConfigOptions, site: &str) -> Result<CookieJar> {
+        if let Some(browser) = &self.browser {
+            return browser.load(site).await;
+        }
+        match &options.cookies {
+            Some(path) => CookieJar::parse(&tokio::fs::read_to_string(path).await?),
+            None => Ok(CookieJar::default()),
+        }
+    }
 }
 
 fn extract_input<'a>(
@@ -308,6 +342,7 @@ fn extract_input<'a>(
     backend: &'a Backend,
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
+    browser: Option<&'a str>,
 ) -> BoxStream<'a, Result<extract::Media>> {
     stream::once(async move {
         let url = extract::http_url(&source)?;
@@ -320,13 +355,15 @@ fn extract_input<'a>(
                     let native = extractors
                         .instagram
                         .get_or_init(|| async {
-                            Instagram::new(options.cookies.as_deref(), backend.timeout)
-                                .await
-                                .map(|native| {
-                                    native
-                                        .with_retries(options.retries.unwrap())
-                                        .with_request_timeout(options.timeout.unwrap())
-                                })
+                            Instagram::from_cookie_jar(
+                                extractors.cookie_jar(options, "instagram.com").await?,
+                                backend.timeout,
+                            )
+                            .map(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                            })
                         })
                         .await
                         .as_ref()
@@ -339,13 +376,15 @@ fn extract_input<'a>(
                     let native = extractors
                         .twitter
                         .get_or_init(|| async {
-                            Twitter::new(options.cookies.as_deref(), backend.timeout)
-                                .await
-                                .map(|native| {
-                                    native
-                                        .with_retries(options.retries.unwrap())
-                                        .with_request_timeout(options.timeout.unwrap())
-                                })
+                            Twitter::from_cookie_jar(
+                                extractors.cookie_jar(options, "x.com").await?,
+                                backend.timeout,
+                            )
+                            .map(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                            })
                         })
                         .await
                         .as_ref()
@@ -359,13 +398,15 @@ fn extract_input<'a>(
                     let native = extractors
                         .facebook
                         .get_or_init(|| async {
-                            Facebook::new(options.cookies.as_deref(), backend.timeout)
-                                .await
-                                .map(|native| {
-                                    native
-                                        .with_retries(options.retries.unwrap())
-                                        .with_request_timeout(options.timeout.unwrap())
-                                })
+                            Facebook::from_cookie_jar(
+                                extractors.cookie_jar(options, "facebook.com").await?,
+                                backend.timeout,
+                            )
+                            .map(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                            })
                         })
                         .await
                         .as_ref()
@@ -385,7 +426,10 @@ fn extract_input<'a>(
                 Extractor::Compatibility => {
                     let mut backend = backend.clone();
                     backend.cookies = options.cookies.clone();
-                    backend.stream(&url)
+                    match browser {
+                        Some(browser) => backend.stream_with_browser(&url, browser),
+                        None => backend.stream(&url),
+                    }
                 }
             }
         } else if let Some(item) = extract::direct(&url) {

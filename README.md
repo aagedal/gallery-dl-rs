@@ -77,7 +77,7 @@ against a compiled public-suffix list, honor path/expiry rules, and protect secu
 cookies from insecure replacement. Server cookies are limited to 4 KiB each;
 new identities are accepted while the jar has fewer than 256 entries (larger
 input files are still loaded). The input file is never rewritten. This does not
-log in, renew an expired session, or import browser sessions.
+log in or renew an expired session. Explicit Firefox imports are described below.
 It follows up to five redirects within the same origin and
 `/api/` paths, reselecting cookies and the CSRF token for each URL. Redirects to
 login/challenge pages fail explicitly, as do authentication/session failures and
@@ -118,7 +118,8 @@ check on 2026-10-18 returned no identity-bound photo; successful live extraction
 and sanitized real response fixtures remain required. See the
 [Facebook fixture notes](tests/fixtures/facebook/README.md).
 
-Native Twitter/X requires current `x.com` Netscape `auth_token` and `ct0` cookies;
+Native Twitter/X requires current `x.com` `auth_token` and `ct0` cookies from
+a Netscape file or explicit Firefox profile import;
 it does not log in or use a guest session. It requests the exact status through
 GraphQL, selecting original-size photos and the highest-bitrate direct MP4 video
 variants in mixed-media order. IDs, username, caption, UTC timestamp, and one-based
@@ -141,6 +142,40 @@ responses, retries, per-origin cooldowns, cancellation, per-request timeout, and
 overall extraction deadline as the native pipeline. Parser/reference/local HTTP
 tests and the [Twitter fixture notes](tests/fixtures/twitter/README.md) describe
 what is verified and the remaining real-response/manual authenticated gates.
+
+## Browser sessions
+
+Native mode can import an explicitly selected Firefox profile:
+
+```sh
+./target/release/gallery-dl-rs --extractor native \
+  --cookies-from-browser 'firefox:/absolute/path/to/firefox-profile' \
+  -j 'https://www.instagram.com/p/SHORTCODE/'
+```
+
+Log in to the site in that Firefox profile first (use `x.com` for X). Supply the
+profile directory containing `cookies.sqlite`, or that database file itself.
+Relative paths use the working directory; `~` expansion, automatic profile
+search, container selectors, and native imports from other browsers are not
+implemented. Native import selects only the requested site's default,
+unpartitioned cookies; it does not combine container or partitioned logins.
+
+The database is opened read-only, using a consistent transaction that includes
+committed WAL records. Credentials stay in memory and retain domain, path,
+secure, and expiry scope. Native imports are lazy and reused by the site's client;
+response-cookie updates remain in memory. The importer bounds cookie counts and
+sizes, rejects malformed records, and reports failures without profile paths or
+cookie values. It creates no cookie export and does not write browser cookies.
+Synthetic database/WAL tests verify import behavior; a successful live native
+Instagram/X extraction remains unverified.
+
+Compatibility mode forwards the browser specification directly to the installed
+gallery-dl executable, which manages its own supported browsers and profile
+syntax. For example, `--cookies-from-browser chrome` is available there when
+supported by that executable. Rust does not read a browser database on this path.
+The explicit browser flag conflicts with `-C/--cookies` and takes precedence over
+cookie files in native configuration. Browser import is currently a CLI option;
+scoped native `cookies-from-browser` configuration remains unimplemented.
 
 ## URL input files
 
@@ -434,7 +469,7 @@ No companion dependency or video
 adapter is enabled yet. The parser follows the
 [upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
 
-HLS/DASH downloads, video merging, fallback URL handling, browser cookie import,
+HLS/DASH downloads, video merging, fallback URL handling, broader native browser cookie import,
 broader native collection pagination, and full gallery-dl filename/config compatibility are
 not implemented.
 Media downloads follow up to five redirects within the same origin (scheme,
@@ -477,6 +512,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/range.rs` validates resumable HTTP representations and ranges.
 `src/selection.rs` parses file-index ranges and filters streams with early cancellation.
 `src/input.rs` reads bounded URL lines lazily from files and stdin.
+`src/browser.rs` imports explicitly selected Firefox cookies with site/context scoping.
 `src/size.rs` parses binary byte amounts and applies inclusive size limits.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.

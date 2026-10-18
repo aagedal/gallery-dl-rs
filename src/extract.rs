@@ -199,7 +199,17 @@ impl Backend {
         crate::backend::stream(self.clone(), url.clone())
     }
 
-    pub(crate) fn command(&self, url: &Url) -> Command {
+    /// Let the compatibility executable import its own browser session. No
+    /// browser cookie values are read or exported by Rust on this path.
+    pub fn stream_with_browser(
+        &self,
+        url: &Url,
+        specification: &str,
+    ) -> BoxStream<'static, Result<Media>> {
+        crate::backend::stream_with_browser(self.clone(), url.clone(), Some(specification.into()))
+    }
+
+    pub(crate) fn command(&self, url: &Url, browser: Option<&str>) -> Command {
         // Ignore user defaults: extraction must not trigger configured hooks or downloads.
         let mut command = Command::new(&self.executable);
         command.args([
@@ -213,7 +223,9 @@ impl Backend {
         if let Some(config) = &self.config {
             command.arg("--config").arg(config);
         }
-        if let Some(cookies) = &self.cookies {
+        if let Some(browser) = browser {
+            command.arg("--cookies-from-browser").arg(browser);
+        } else if let Some(cookies) = &self.cookies {
             command.arg("--cookies").arg(cookies);
         }
         command.args([

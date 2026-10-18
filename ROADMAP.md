@@ -90,6 +90,18 @@ authentication failure, credential isolation from media jobs, and preservation o
 the input cookie file. Updates are not persisted and cannot renew an expired
 session. A companion adapter will also need cancellation at its library boundary.
 
+**Implemented explicit browser import:** native `--cookies-from-browser
+firefox:PROFILE_PATH` reads a selected Firefox directory or cookie database through
+a read-only SQLite snapshot, including committed WAL rows. Only the requested
+site's default, unpartitioned context is admitted into the existing scoped jar;
+cookie counts/sizes and malformed fields are checked with private diagnostics.
+Native clients can also be constructed from a scoped in-memory jar. Compatibility
+mode forwards browser specifications to the installed backend, avoiding Rust
+cookie export files. Synthetic database and CLI fixtures cover scope, WAL,
+source preservation, precedence, lazy reads, and errors. Live authenticated
+verification, profile discovery, containers, other native browser formats, and
+scoped native browser-cookie configuration remain.
+
 ## 3. Large collections and reliable archives
 
 Stream extraction into a bounded work queue; add pagination, stable site/post/media
