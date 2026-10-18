@@ -6,6 +6,7 @@ use crate::{
     cookies::CookieJar,
     error,
     extract::{Media, PostMetadata, http_url},
+    network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
 use base64::{
@@ -27,6 +28,7 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
 pub struct Twitter {
     client: Client,
+    network: NetworkOptions,
     cookies: Mutex<CookieJar>,
     timeout: Duration,
     request_timeout: Duration,
@@ -53,6 +55,7 @@ impl Twitter {
                 .timeout(timeout)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
+            network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
             request_timeout: timeout,
@@ -61,6 +64,13 @@ impl Twitter {
             transaction: Mutex::new(None),
             initialize: tokio::sync::Mutex::new(()),
         })
+    }
+
+    /// Apply proxy and user-agent settings to API requests and emitted media.
+    pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
+        self.client = network.client(USER_AGENT, self.timeout)?;
+        self.network = network.clone();
+        Ok(self)
     }
 
     /// Configure additional attempts for HTTP 429/5xx and transport failures.
@@ -89,7 +99,11 @@ impl Twitter {
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
         let body = self.fetch(endpoint, code, true).await?;
-        parse_response(&body, code)
+        let mut media = parse_response(&body, code)?;
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        Ok(media)
     }
 
     async fn ensure_transaction(&self, code: &str) -> Result<()> {
@@ -983,6 +997,43 @@ mod tests {
         *native.transaction.lock().unwrap() = Some(Transaction::parse(HOME, SCRIPT).unwrap());
         native
     }
+    #[tokio::test]
+    async fn configured_user_agent_matches_api_and_media_requests() {
+        let (endpoint, server) = serve(vec![(response("200 OK", "", PHOTO), Duration::ZERO)]);
+        let network = NetworkOptions::new(None, Some("gallery-dl-native-test/1".into())).unwrap();
+        let native = native().await.with_network(&network).unwrap();
+        let media = native.extract_endpoint(&endpoint, ID).await.unwrap();
+        assert!(!media.is_empty());
+        for item in media {
+            assert_eq!(
+                item.headers.get("User-Agent").map(String::as_str),
+                Some("gallery-dl-native-test/1")
+            );
+        }
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("user-agent: gallery-dl-native-test/1\r\n")
+        );
+    }
+
+    #[tokio::test]
+    async fn api_requests_use_configured_http_proxy() {
+        let (proxy, server) = serve(vec![(response("200 OK", "", PHOTO), Duration::ZERO)]);
+        let network =
+            NetworkOptions::new(Some(proxy.origin().ascii_serialization()), None).unwrap();
+        let native = native().await.with_network(&network).unwrap();
+        *native.cookies.lock().unwrap() = CookieJar::parse("native-api.invalid\tFALSE\t/\tFALSE\t0\tauth_token\tsession\nnative-api.invalid\tFALSE\t/\tFALSE\t0\tct0\toriginal\n").unwrap();
+        let mut endpoint = proxy;
+        endpoint.set_host(Some("native-api.invalid")).unwrap();
+        endpoint.set_port(None).unwrap();
+        let media = native.extract_endpoint(&endpoint, ID).await.unwrap();
+        assert!(!media.is_empty());
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with(&format!("GET {endpoint} HTTP/1.1\r\n")));
+    }
+
     #[tokio::test]
     async fn scope_rotations_retries_and_media_exclude_session_credentials() {
         let (endpoint, server) = serve(vec![

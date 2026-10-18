@@ -2,7 +2,7 @@
 //! and its array protocol: JSONL mode does not preserve all resolved-child output.
 use crate::{
     Result, error,
-    extract::{self, Backend, Media},
+    extract::{self, Backend, BackendOptions, Media},
     messages::Decoder,
 };
 use futures_util::{
@@ -29,9 +29,24 @@ pub(crate) fn stream_with_browser(
     url: Url,
     browser: Option<String>,
 ) -> BoxStream<'static, Result<Media>> {
+    stream_with_options(
+        backend,
+        url,
+        BackendOptions {
+            browser,
+            ..Default::default()
+        },
+    )
+}
+
+pub(crate) fn stream_with_options(
+    backend: Backend,
+    url: Url,
+    options: BackendOptions,
+) -> BoxStream<'static, Result<Media>> {
     // Do not start a child until a downstream consumer actually requests an item.
     stream::once(async move {
-        let process = Process::start(backend, url, browser)?;
+        let process = Process::start(backend, url, options)?;
         Ok::<_, crate::Error>(stream::try_unfold(process, |mut process| async move {
             let item = process.next().await?;
             Ok(item.map(|item| (item, process)))
@@ -52,12 +67,13 @@ struct Process {
 }
 
 impl Process {
-    fn start(backend: Backend, url: Url, browser: Option<String>) -> Result<Self> {
+    fn start(backend: Backend, url: Url, options: BackendOptions) -> Result<Self> {
         let category = extract::social_site(&url).ok_or_else(|| {
             error("unsupported URL; use an Instagram, Facebook, Twitter/X URL or direct media link")
         })?;
+        crate::network::NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let mut child = backend
-            .command(&url, browser.as_deref())
+            .command(&url, &options)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

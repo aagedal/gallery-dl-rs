@@ -877,3 +877,63 @@ async fn size_limits_filter_validated_416_completion_before_publication() {
     assert!(!download::destination(root.path(), &item).exists());
     assert_eq!(server.requests().len(), 2);
 }
+
+#[tokio::test]
+async fn changed_configured_user_agent_does_not_resume_another_representation() {
+    let server = Server::new(vec![
+        initial("ETag: \"v1\"\r\n"),
+        full(b"new agent".to_vec()),
+    ]);
+    let item = media(&server);
+    let root = tempfile::tempdir().unwrap();
+    server.watch(root.path());
+    let template = FilenameTemplate::parse("same.dat").unwrap();
+    let first = client()
+        .with_network(
+            &gallery_dl_rs::network::NetworkOptions::new(
+                Some(String::new()),
+                Some("first-agent".into()),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let second = client()
+        .with_network(
+            &gallery_dl_rs::network::NetworkOptions::new(
+                Some(String::new()),
+                Some("second-agent".into()),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        download::download_with_template(
+            &first,
+            root.path(),
+            &item,
+            DownloadOptions::default(),
+            Some(&template)
+        )
+        .await
+        .is_err()
+    );
+    let outcome = download::download_with_template(
+        &second,
+        root.path(),
+        &item,
+        DownloadOptions::default(),
+        Some(&template),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read(outcome.saved_path().unwrap()).unwrap(),
+        b"new agent"
+    );
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(header(&requests[0], "User-Agent"), Some("first-agent"));
+    assert_eq!(header(&requests[1], "User-Agent"), Some("second-agent"));
+    assert_full(&requests[1]);
+    assert!(!item.headers.contains_key("User-Agent"));
+}

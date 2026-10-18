@@ -419,3 +419,45 @@ fn date_limits_reject_invalid_private_values_and_duplicate_keys() {
     }
     assert!(parse(r#"{"date-before":1,"date-before":2}"#).is_err());
 }
+
+#[test]
+fn invalid_network_values_fail_privately_in_every_scope() {
+    for (field, value) in [
+        ("proxy", serde_json::json!(null)),
+        ("proxy", serde_json::json!(["private"])),
+        (
+            "proxy",
+            serde_json::json!("http://user:private@proxy.test/path"),
+        ),
+        (
+            "proxy",
+            serde_json::json!("socks5://user:private@proxy.test"),
+        ),
+        ("user-agent", serde_json::json!(false)),
+        ("user-agent", serde_json::json!("")),
+        (
+            "user-agent",
+            serde_json::json!("private\r\nInjected: value"),
+        ),
+    ] {
+        for doc in [
+            serde_json::json!({(field):value}),
+            serde_json::json!({"extractor":{(field):value}}),
+            serde_json::json!({"extractor":{"instagram":{(field):value}}}),
+        ] {
+            assert!(
+                !parse(&doc.to_string())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("private")
+            );
+        }
+    }
+    assert!(parse(r#"{"proxy":"","proxy":"http://proxy.test"}"#).is_err());
+    let options =
+        parse(r#"{"proxy":"http://user:private@proxy.test","user-agent":"private-agent"}"#)
+            .unwrap()
+            .resolve("direct")
+            .unwrap();
+    assert!(!format!("{options:?}").contains("private"));
+}

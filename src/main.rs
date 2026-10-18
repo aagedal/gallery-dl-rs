@@ -12,11 +12,12 @@ use gallery_dl_rs::{
     date::{DateFilter, parse_date},
     download::{self, DownloadOptions, Outcome},
     error,
-    extract::{self, Backend},
+    extract::{self, Backend, BackendOptions},
     facebook::Facebook,
     input::Inputs,
     instagram::Instagram,
     naming::{DirectoryTemplate, FilenameTemplate},
+    network::NetworkOptions,
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
     twitter::Twitter,
@@ -93,6 +94,12 @@ struct Args {
     /// Browser session: native accepts firefox:PROFILE_PATH; compatibility delegates
     #[arg(long, conflicts_with = "cookies")]
     cookies_from_browser: Option<String>,
+    /// HTTP(S) proxy URL; an empty string disables environment proxies
+    #[arg(long)]
+    proxy: Option<String>,
+    /// Override the User-Agent for extraction and media HTTP requests
+    #[arg(short = 'a', long)]
+    user_agent: Option<String>,
     /// Social extractor; native supports experimental Instagram feeds/posts, Facebook photos, and X posts
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
@@ -242,6 +249,12 @@ async fn run(args: Args) -> Result<()> {
                 })
             })
         })
+        .map(|mut item| {
+            settings[item.category.as_str()]
+                .network
+                .apply_media(&mut item);
+            item
+        })
         .filter(|item| {
             // Keep fixed-size digests instead of retaining URLs, headers, or inline manifests.
             let identity: [u8; 32] = Sha256::digest(item.identity().as_bytes()).into();
@@ -263,6 +276,7 @@ async fn run(args: Args) -> Result<()> {
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap());
+                let cell = &settings.download_client;
                 let destination = settings.options.base_directory.as_ref().unwrap();
                 let archive = settings
                     .options
@@ -277,6 +291,13 @@ async fn run(args: Args) -> Result<()> {
                     directory: settings.directory.as_ref(),
                 };
                 async move {
+                    let client = cell
+                        .get_or_init(|| async { client.with_network(&settings.network) })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("media HTTP client initialization failed: {e}"))
+                        })?;
                     match archive {
                         Some((cell, path)) => {
                             let archive = cell
@@ -288,7 +309,7 @@ async fn run(args: Args) -> Result<()> {
                             })?;
                             archive
                                 .download_with_template(
-                                    &client,
+                                    client,
                                     destination,
                                     &item,
                                     options,
@@ -297,7 +318,7 @@ async fn run(args: Args) -> Result<()> {
                                 .await
                         }
                         None => download::download_with_template(
-                            &client,
+                            client,
                             destination,
                             &item,
                             options,
@@ -370,7 +391,8 @@ fn extract_input<'a>(
         let input: BoxStream<'a, Result<extract::Media>> = if let Some(category) =
             extract::social_site(&url)
         {
-            let options = &settings[category].options;
+            let configured = &settings[category];
+            let options = &configured.options;
             match extractor {
                 Extractor::Native if category == "instagram" => {
                     let native = extractors
@@ -380,10 +402,11 @@ fn extract_input<'a>(
                                 extractors.cookie_jar(options, "instagram.com").await?,
                                 backend.timeout,
                             )
-                            .map(|native| {
+                            .and_then(|native| {
                                 native
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
                             })
                         })
                         .await
@@ -401,10 +424,11 @@ fn extract_input<'a>(
                                 extractors.cookie_jar(options, "x.com").await?,
                                 backend.timeout,
                             )
-                            .map(|native| {
+                            .and_then(|native| {
                                 native
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
                             })
                         })
                         .await
@@ -423,10 +447,11 @@ fn extract_input<'a>(
                                 extractors.cookie_jar(options, "facebook.com").await?,
                                 backend.timeout,
                             )
-                            .map(|native| {
+                            .and_then(|native| {
                                 native
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
                             })
                         })
                         .await
@@ -447,10 +472,14 @@ fn extract_input<'a>(
                 Extractor::Compatibility => {
                     let mut backend = backend.clone();
                     backend.cookies = options.cookies.clone();
-                    match browser {
-                        Some(browser) => backend.stream_with_browser(&url, browser),
-                        None => backend.stream(&url),
-                    }
+                    backend.stream_with_options(
+                        &url,
+                        BackendOptions {
+                            browser: browser.map(str::to_owned),
+                            proxy: configured.network.proxy().map(str::to_owned),
+                            user_agent: configured.network.user_agent().map(str::to_owned),
+                        },
+                    )
                 }
             }
         } else if let Some(item) = extract::direct(&url) {
@@ -472,6 +501,8 @@ struct Settings {
     directory: Option<DirectoryTemplate>,
     selection: Option<RangeSelection>,
     dates: DateFilter,
+    network: NetworkOptions,
+    download_client: OnceCell<Result<download::DownloadClient>>,
     limits: SizeLimits,
 }
 
@@ -501,6 +532,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             (!args.directory.is_empty()).then(|| args.directory.clone())
         },
         cookies: args.cookies.clone(),
+        proxy: args.proxy.clone(),
+        user_agent: args.user_agent.clone(),
         archive: args.download_archive.clone(),
         filesize_min: args.filesize_min,
         filesize_max: args.filesize_max,
@@ -527,6 +560,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .as_deref()
             .map(RangeSelection::parse)
             .transpose()?;
+        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
         let dates = DateFilter::new(options.date_before, options.date_after)?;
         settings.insert(
@@ -537,6 +571,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 directory,
                 selection,
                 dates,
+                network,
+                download_client: OnceCell::new(),
                 limits,
             },
         );

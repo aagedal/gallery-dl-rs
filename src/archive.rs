@@ -91,6 +91,8 @@ impl Archive {
         options: DownloadOptions<'_>,
         template: Option<&FilenameTemplate>,
     ) -> Result<ArchiveOutcome> {
+        let effective_media = client.effective_media(media);
+        let media = effective_media.as_ref();
         let identity = media.archive_key();
         // Serialize the same stable identity within this instance, without
         // suppressing a refreshed URL if a previous request failed. Weak entries

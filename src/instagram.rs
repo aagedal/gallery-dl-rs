@@ -4,6 +4,7 @@ use crate::{
     cookies::CookieJar,
     error,
     extract::{Media, PostMetadata, http_url},
+    network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
 use futures_util::{
@@ -26,6 +27,7 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
 pub struct Instagram {
     client: Client,
+    network: NetworkOptions,
     cookies: Mutex<CookieJar>,
     timeout: Duration,
     request_timeout: Duration,
@@ -50,12 +52,20 @@ impl Instagram {
                 .timeout(timeout)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
+            network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
         })
+    }
+
+    /// Apply proxy and user-agent settings to API requests and emitted media.
+    pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
+        self.client = network.client(USER_AGENT, self.timeout)?;
+        self.network = network.clone();
+        Ok(self)
     }
 
     /// Configure additional attempts for HTTP 429/5xx and transport failures.
@@ -82,7 +92,11 @@ impl Instagram {
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
         let data = self.request_json(endpoint, code, self.timeout).await?;
-        parse_value(&data, code)
+        let mut media = parse_value(&data, code)?;
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        Ok(media)
     }
 
     async fn request_json(&self, endpoint: &Url, referer: &str, budget: Duration) -> Result<Value> {
@@ -231,7 +245,11 @@ impl Instagram {
                 .and_then(Value::as_str)
                 .ok_or_else(|| error("Instagram feed post shortcode is missing"))?;
             media_id(code)?;
-            pending.extend(parse_post(post, code)?);
+            let mut media = parse_post(post, code)?;
+            for item in &mut media {
+                self.network.apply_media(item);
+            }
+            pending.extend(media);
         }
         state.pending = pending;
         state.cursor = cursor;
@@ -623,6 +641,84 @@ mod transport_tests {
             .to_string();
         assert!(message.contains("Instagram request failed"), "{message}");
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn configured_user_agent_matches_api_and_media_requests() {
+        let (endpoint, server) = serve_once("200 OK", "", PHOTO, Duration::ZERO);
+        let network = NetworkOptions::new(None, Some("gallery-dl-native-test/1".into())).unwrap();
+        let native = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_network(&network)
+            .unwrap();
+        let media = native.extract_endpoint(&endpoint, "BA").await.unwrap();
+        assert!(!media.is_empty());
+        for item in media {
+            assert_eq!(
+                item.headers.get("User-Agent").map(String::as_str),
+                Some("gallery-dl-native-test/1")
+            );
+        }
+        let request = server.join().unwrap().to_ascii_lowercase();
+        assert!(request.contains("user-agent: gallery-dl-native-test/1\r\n"));
+    }
+
+    #[tokio::test]
+    async fn api_requests_use_configured_http_proxy() {
+        let (proxy, server) = serve_once("200 OK", "", PHOTO, Duration::ZERO);
+        let network =
+            NetworkOptions::new(Some(proxy.origin().ascii_serialization()), None).unwrap();
+        let native = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_network(&network)
+            .unwrap();
+        let mut endpoint = proxy;
+        endpoint.set_host(Some("native-api.invalid")).unwrap();
+        endpoint.set_port(None).unwrap();
+        let media = native.extract_endpoint(&endpoint, "BA").await.unwrap();
+        assert!(!media.is_empty());
+        let request = server.join().unwrap();
+        assert!(request.starts_with(&format!("GET {endpoint} HTTP/1.1\r\n")));
+    }
+
+    #[tokio::test]
+    async fn profile_user_agent_matches_api_and_media_requests() {
+        let profile = serde_json::to_vec(&serde_json::json!({
+            "status": "ok", "data": {"user": {"id": "42", "username": "fixture_user"}}
+        }))
+        .unwrap();
+        let mut feed: Value = serde_json::from_slice(PHOTO).unwrap();
+        feed["items"][0]["user"]["pk"] = Value::String("42".into());
+        feed["more_available"] = Value::Bool(false);
+        let (endpoint, server) = serve_sequence(vec![
+            response("200 OK", "", &profile),
+            response("200 OK", "", &serde_json::to_vec(&feed).unwrap()),
+        ]);
+        let network = NetworkOptions::new(None, Some("gallery-dl-native-test/1".into())).unwrap();
+        let native = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_network(&network)
+            .unwrap();
+        let media: Vec<_> = native
+            .profile_stream("fixture_user".into(), endpoint)
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(media.len(), 1);
+        assert_eq!(
+            media[0].headers.get("User-Agent").map(String::as_str),
+            Some("gallery-dl-native-test/1")
+        );
+        for (_, _, request) in server.join().unwrap() {
+            assert!(
+                request
+                    .to_ascii_lowercase()
+                    .contains("user-agent: gallery-dl-native-test/1\r\n")
+            );
+        }
     }
 
     fn serve_once(

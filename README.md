@@ -177,6 +177,37 @@ The explicit browser flag conflicts with `-C/--cookies` and takes precedence ove
 cookie files in native configuration. Browser import is currently a CLI option;
 scoped native `cookies-from-browser` configuration remains unimplemented.
 
+## Network settings
+
+`--proxy http://127.0.0.1:8080` sets an HTTP(S) proxy for native API/bootstrap and
+media requests, and `-a` / `--user-agent 'My downloader/1'` overrides their HTTP
+User-Agent. Both settings also reach the compatibility executable as individual
+arguments before its URL separator. Native configuration supports `proxy` and
+`user-agent` in the normal root/extractor/category scopes; explicit CLI values win.
+Proxy URLs can include proxy credentials. SOCKS proxies, proxy path/query/fragment
+components, and per-scheme bypass rules are not implemented.
+
+Without a proxy setting, reqwest retains its environment/system proxy behavior.
+An explicit empty value (`--proxy ''` or `"proxy": ""`) disables that discovery.
+Configured proxies replace automatic discovery. TLS verification and the existing
+manual redirect rules remain in effect. User agents must be nonempty ASCII
+headers of at most 1024 bytes; invalid proxy/header settings fail without quoting
+private values. Network configuration Debug output is redacted.
+
+An explicit user agent replaces extracted User-Agent headers regardless of case,
+and becomes part of the effective media request before deduplication, destination
+hashes, direct-link archive IDs, and resume identities. Changing it can therefore
+produce a different default filename or direct-link archive entry. Stable social
+archive IDs retain their existing meaning. Proxy credentials never become media
+headers, inspection data, sidecars, or resume records. Proxy routing itself does
+not change a job's stable identity.
+
+Library callers can use `NetworkOptions`, native `with_network`, and downloader
+`with_network`; `DownloadClient::effective_media` exposes the normalized job for
+matching destination calculations. A category's download clients reuse their
+connection pool and share the origin cooldown scheduler. The setting changes an
+HTTP header; TLS/browser impersonation remains unimplemented.
+
 ## URL input files
 
 Use `-i urls.txt` / `--input-file urls.txt` to read a UTF-8 URL list; repeat the
@@ -323,7 +354,7 @@ Neither configuration file is loaded automatically.
 ```
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
-`date-before`, `date-after`, `filesize-min`, `filesize-max`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
@@ -544,6 +575,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/browser.rs` imports explicitly selected Firefox cookies with site/context scoping.
 `src/size.rs` parses binary byte amounts and applies inclusive size limits.
 `src/date.rs` normalizes date bounds and stops timestamp-ordered collections.
+`src/network.rs` validates private proxy/header settings and builds HTTP clients.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

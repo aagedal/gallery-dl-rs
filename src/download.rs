@@ -2,6 +2,7 @@ use crate::{
     Result, error,
     extract::{Media, MediaJob},
     naming::{DirectoryTemplate, FilenameTemplate},
+    network::NetworkOptions,
     size::{SizeLimits, SizeRejection},
     transport::{RateLimits, Redirects, retry_after},
 };
@@ -12,6 +13,7 @@ use reqwest::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    borrow::Cow,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
@@ -24,9 +26,35 @@ pub struct DownloadClient {
     rate_limits: RateLimits,
     wait_limit: Duration,
     resume: bool,
+    network: NetworkOptions,
 }
 
 impl DownloadClient {
+    /// Apply transport overrides while retaining shared per-origin cooldowns.
+    pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
+        if self.network.proxy() != network.proxy()
+            || self.network.user_agent() != network.user_agent()
+        {
+            self.http = network.client(
+                concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")),
+                self.wait_limit,
+            )?;
+        }
+        self.network = network.clone();
+        Ok(self)
+    }
+
+    /// Include configured request headers in destination and resume identities.
+    pub fn effective_media<'a>(&self, media: &'a Media) -> Cow<'a, Media> {
+        if self.network.user_agent().is_some() {
+            let mut media = media.clone();
+            self.network.apply_media(&mut media);
+            Cow::Owned(media)
+        } else {
+            Cow::Borrowed(media)
+        }
+    }
+
     /// Override the per-attempt deadline while sharing connections and cooldowns.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.wait_limit = timeout;
@@ -50,6 +78,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         rate_limits: RateLimits::default(),
         wait_limit: timeout,
         resume: false,
+        network: NetworkOptions::default(),
     })
 }
 
@@ -176,6 +205,8 @@ pub async fn download_with_template(
     options: DownloadOptions<'_>,
     template: Option<&FilenameTemplate>,
 ) -> Result<Outcome> {
+    let effective_media = client.effective_media(media);
+    let media = effective_media.as_ref();
     let outcome = download_media(
         client,
         root,

@@ -102,6 +102,19 @@ source preservation, precedence, lazy reads, and errors. Live authenticated
 verification, profile discovery, containers, other native browser formats, and
 scoped native browser-cookie configuration remain.
 
+**Implemented network settings:** native configuration and CLI `proxy` /
+`user-agent` options apply across native APIs/bootstrap requests and Rust media
+jobs, and are forwarded to compatibility extraction. Explicit HTTP(S) proxies
+replace environment discovery; an empty value disables it. User-agent overrides
+normalize all extracted header casing before request identity, deduplication,
+destination/resume hashing, and direct-link archive identity. Stable social IDs
+remain unchanged. Clients preserve manual redirects and TLS verification, reuse
+category pools, and share origin cooldowns. Local proxy/transport tests cover all
+three sites, profile pages, effective media headers/paths, credential isolation,
+private diagnostics, scope/CLI precedence, environment disabling, and resume
+separation after user-agent changes. SOCKS, proxy bypass rules, and TLS/browser
+impersonation remain.
+
 ## 3. Large collections and reliable archives
 
 Stream extraction into a bounded work queue; add pagination, stable site/post/media

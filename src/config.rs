@@ -9,6 +9,7 @@ use crate::{
     date::parse_date,
     error,
     naming::{DirectoryTemplate, FilenameTemplate},
+    network::NetworkOptions,
     selection::RangeSelection,
     size::parse_bytes,
 };
@@ -25,7 +26,7 @@ use tokio::io::AsyncReadExt;
 pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
 /// Sparse settings: absent fields leave the caller's defaults unchanged.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Options {
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
@@ -36,12 +37,20 @@ pub struct Options {
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
+    pub proxy: Option<String>,
+    pub user_agent: Option<String>,
     /// Uses gallery-dl-rs's archive identities, not upstream database IDs.
     pub archive: Option<PathBuf>,
     pub filesize_min: Option<u64>,
     pub filesize_max: Option<u64>,
     pub retries: Option<u8>,
     pub timeout: Option<Duration>,
+}
+
+impl std::fmt::Debug for Options {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Options { settings: [redacted] }")
+    }
 }
 
 impl Options {
@@ -65,6 +74,11 @@ impl Options {
                 .clone()
                 .or_else(|| self.directory.clone()),
             cookies: overrides.cookies.clone().or_else(|| self.cookies.clone()),
+            proxy: overrides.proxy.clone().or_else(|| self.proxy.clone()),
+            user_agent: overrides
+                .user_agent
+                .clone()
+                .or_else(|| self.user_agent.clone()),
             archive: overrides.archive.clone().or_else(|| self.archive.clone()),
             filesize_min: overrides.filesize_min.or(self.filesize_min),
             filesize_max: overrides.filesize_max.or(self.filesize_max),
@@ -93,6 +107,8 @@ struct RawRoot {
     date_after: Field,
     directory: Field,
     cookies: Field,
+    proxy: Field,
+    user_agent: Field,
     archive: Field,
     filesize_min: Field,
     filesize_max: Field,
@@ -111,6 +127,8 @@ struct RawExtractor {
     date_after: Field,
     directory: Field,
     cookies: Field,
+    proxy: Field,
+    user_agent: Field,
     archive: Field,
     filesize_min: Field,
     filesize_max: Field,
@@ -132,6 +150,8 @@ struct RawOptions {
     date_after: Field,
     directory: Field,
     cookies: Field,
+    proxy: Field,
+    user_agent: Field,
     archive: Field,
     filesize_min: Field,
     filesize_max: Field,
@@ -216,6 +236,8 @@ impl Config {
             date_after: root.date_after,
             directory: root.directory,
             cookies: root.cookies,
+            proxy: root.proxy,
+            user_agent: root.user_agent,
             archive: root.archive,
             filesize_min: root.filesize_min,
             filesize_max: root.filesize_max,
@@ -232,6 +254,8 @@ impl Config {
             date_after: extractor.date_after,
             directory: extractor.directory,
             cookies: extractor.cookies,
+            proxy: extractor.proxy,
+            user_agent: extractor.user_agent,
             archive: extractor.archive,
             filesize_min: extractor.filesize_min,
             filesize_max: extractor.filesize_max,
@@ -351,7 +375,12 @@ impl RawOptions {
                 Some(timeout)
             }
         };
+        let proxy = network_string(self.proxy)?;
+        let user_agent = network_string(self.user_agent)?;
+        NetworkOptions::new(proxy.clone(), user_agent.clone())?;
         Ok(Options {
+            proxy,
+            user_agent,
             base_directory: path(self.base_directory, directory, "base-directory")?,
             cookies: path(self.cookies, directory, "cookies")?,
             archive: path(self.archive, directory, "archive")?,
@@ -429,5 +458,13 @@ fn date(field: Field) -> Result<Option<i64>> {
         Value::String(value) => parse_date(&value).map(Some).map_err(|_| invalid()),
         Value::Number(value) => value.as_i64().map(Some).ok_or_else(invalid),
         _ => Err(invalid()),
+    }
+}
+
+fn network_string(field: Field) -> Result<Option<String>> {
+    match field.0 {
+        None => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value)),
+        Some(_) => Err(error("native network settings must be strings")),
     }
 }

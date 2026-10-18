@@ -187,6 +187,19 @@ pub fn direct(url: &Url) -> Option<Media> {
     })
 }
 
+/// Runtime overrides passed as individual arguments to the compatibility process.
+#[derive(Clone, Default)]
+pub struct BackendOptions {
+    pub browser: Option<String>,
+    pub proxy: Option<String>,
+    pub user_agent: Option<String>,
+}
+impl std::fmt::Debug for BackendOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BackendOptions { settings: [redacted] }")
+    }
+}
+
 impl Backend {
     /// Collect all results. Use `stream` for bounded per-item consumption.
     pub async fn extract(&self, url: &Url) -> Result<Vec<Media>> {
@@ -209,7 +222,15 @@ impl Backend {
         crate::backend::stream_with_browser(self.clone(), url.clone(), Some(specification.into()))
     }
 
-    pub(crate) fn command(&self, url: &Url, browser: Option<&str>) -> Command {
+    pub fn stream_with_options(
+        &self,
+        url: &Url,
+        options: BackendOptions,
+    ) -> BoxStream<'static, Result<Media>> {
+        crate::backend::stream_with_options(self.clone(), url.clone(), options)
+    }
+
+    pub(crate) fn command(&self, url: &Url, options: &BackendOptions) -> Command {
         // Ignore user defaults: extraction must not trigger configured hooks or downloads.
         let mut command = Command::new(&self.executable);
         command.args([
@@ -223,10 +244,16 @@ impl Backend {
         if let Some(config) = &self.config {
             command.arg("--config").arg(config);
         }
-        if let Some(browser) = browser {
+        if let Some(browser) = &options.browser {
             command.arg("--cookies-from-browser").arg(browser);
         } else if let Some(cookies) = &self.cookies {
             command.arg("--cookies").arg(cookies);
+        }
+        if let Some(proxy) = &options.proxy {
+            command.arg("--proxy").arg(proxy);
+        }
+        if let Some(agent) = &options.user_agent {
+            command.arg("--user-agent").arg(agent);
         }
         command.args([
             "--option",
