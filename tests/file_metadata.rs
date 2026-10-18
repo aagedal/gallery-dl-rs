@@ -108,8 +108,8 @@ fn file_fields_render_in_filename_and_directory_templates_without_inference() {
     let directories =
         DirectoryTemplate::parse(&["{media_type}".into(), "{width}x{height}".into()]).unwrap();
     assert_eq!(
-        directories.render(&media).unwrap().to_str(),
-        Some("video/1920x1080")
+        directories.render(&media).unwrap(),
+        std::path::Path::new("video").join("1920x1080")
     );
     assert!(template.render(&item(json!({}))).is_err());
     assert!(

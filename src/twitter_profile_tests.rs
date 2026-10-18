@@ -436,18 +436,18 @@ async fn active_budget_excludes_consumer_pause_but_accumulates_requests() {
         Response::json(page(vec![tweet("100")], Some("a"))).delayed(20),
         Response::json(page(vec![tweet("101")], None)).delayed(20),
     ]);
-    let native = extractor(Duration::from_millis(250)).await;
+    let native = extractor(Duration::from_millis(1000)).await;
     let mut stream = native.media_stream(input("id:42"), server.base.clone());
     assert!(stream.next().await.unwrap().is_ok());
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
     assert!(stream.next().await.unwrap().is_ok());
     assert!(stream.next().await.is_none());
 
     let server = Server::new(vec![
-        Response::json(page(vec![tweet("100")], Some("a"))).delayed(150),
-        Response::json(page(vec![tweet("101")], None)).delayed(180),
+        Response::json(page(vec![tweet("100")], Some("a"))).delayed(600),
+        Response::json(page(vec![tweet("101")], None)).delayed(720),
     ]);
-    let native = extractor(Duration::from_millis(250)).await;
+    let native = extractor(Duration::from_millis(1000)).await;
     let mut stream = native.media_stream(input("id:42"), server.base.clone());
     assert!(stream.next().await.unwrap().is_ok());
     assert!(
@@ -1811,17 +1811,17 @@ async fn root_fallback_shares_active_budget_while_excluding_consumer_pause() {
         Response::json(page(vec![tweet("100")], None)).delayed(20),
         Response::json(search_page(vec![tweet("99")], None)).delayed(20),
     ]);
-    let native = extractor(Duration::from_millis(250)).await;
+    let native = extractor(Duration::from_millis(1000)).await;
     let mut stream = native.timeline_stream(input("fixture"), server.base.clone());
     assert!(stream.next().await.unwrap().is_ok());
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
     assert!(stream.next().await.unwrap().is_ok());
     assert!(stream.next().await.is_none());
 
     let server = Server::new(vec![
         Response::json(user()),
-        Response::json(page(vec![tweet("100")], None)).delayed(150),
-        Response::json(search_page(vec![tweet("99")], None)).delayed(180),
+        Response::json(page(vec![tweet("100")], None)).delayed(600),
+        Response::json(search_page(vec![tweet("99")], None)).delayed(720),
     ]);
     let mut stream = native.timeline_stream(input("fixture"), server.base.clone());
     assert!(stream.next().await.unwrap().is_ok());
@@ -2258,7 +2258,7 @@ async fn collection_explicit_continue_empty_hint_and_explicit_termination_are_ho
 #[tokio::test]
 async fn collection_active_budget_excludes_pause_but_accumulates_pages_and_quotes() {
     use collections::Collection;
-    let native = extractor(Duration::from_millis(250))
+    let native = extractor(Duration::from_millis(1000))
         .await
         .with_expansion(expansion_options(RetweetMode::Skip));
     let server = Server::new(vec![
@@ -2272,7 +2272,7 @@ async fn collection_active_budget_excludes_pause_but_accumulates_pages_and_quote
     ]);
     let mut stream = native.feed_stream(Collection::Bookmarks, server.base.clone());
     assert!(stream.next().await.unwrap().is_ok());
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
     assert!(stream.next().await.unwrap().is_ok());
     assert!(stream.next().await.is_none());
     let server = Server::new(vec![
@@ -2281,8 +2281,8 @@ async fn collection_active_budget_excludes_pause_but_accumulates_pages_and_quote
             vec![quoted_tweet("100", "101")],
             Some("next"),
         ))
-        .delayed(150),
-        Response::json(post_response(tweet("101"))).delayed(180),
+        .delayed(600),
+        Response::json(post_response(tweet("101"))).delayed(720),
         Response::json(feed_page(&Collection::Bookmarks, vec![tweet("102")], None)),
     ]);
     let mut stream = native.feed_stream(Collection::Bookmarks, server.base.clone());
@@ -2927,7 +2927,7 @@ async fn detail_late_auth_failure_keeps_emitted_context_and_hides_response_data(
 
 #[tokio::test]
 async fn detail_active_budget_excludes_consumer_pause_and_accumulates_quote_requests() {
-    let native = extractor(Duration::from_millis(250))
+    let native = extractor(Duration::from_millis(1000))
         .await
         .with_status_options(conversation_options(ConversationMode::All))
         .with_expansion(expansion_options(RetweetMode::Skip));
@@ -2937,12 +2937,12 @@ async fn detail_active_budget_excludes_consumer_pause_and_accumulates_quote_requ
     ]);
     let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
     assert!(stream.next().await.unwrap().is_ok());
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
     assert!(stream.next().await.unwrap().is_ok());
     assert!(stream.next().await.is_none());
     let server = Server::new(vec![
-        Response::json(detail_page(vec![quoted_tweet("100", "101")], Some("next"))).delayed(150),
-        Response::json(post_response(tweet("101"))).delayed(180),
+        Response::json(detail_page(vec![quoted_tweet("100", "101")], Some("next"))).delayed(600),
+        Response::json(post_response(tweet("101"))).delayed(720),
         Response::json(detail_page(vec![tweet("102")], None)),
     ]);
     let mut stream = native.detail_stream_at(server.base.clone(), "100".into());

@@ -130,8 +130,8 @@ fn community_template_fields_are_sanitized_and_require_metadata() {
     ])
     .unwrap();
     assert_eq!(
-        directory.render(&item).unwrap().to_str(),
-        Some("Communities/Art___Cats_55")
+        directory.render(&item).unwrap(),
+        std::path::Path::new("Communities").join("Art___Cats_55")
     );
     let mut absent = item;
     absent.metadata.as_mut().unwrap().community = None;
