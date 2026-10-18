@@ -222,6 +222,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
         quoted_by_id: None,
         reposted_by_id: None,
         article: None,
+        instance: None,
         post_id: "100".into(),
         media_id: "101".into(),
         shortcode: "Example".into(),

@@ -94,6 +94,20 @@ impl Media {
                     serde_json::json!([post.post_id, post.media_id]).to_string(),
                 )
             }
+            // Mastodon attachment IDs are scoped to their instance.
+            "mastodon" => {
+                let post = self.metadata.as_ref()?;
+                let instance = post.instance.as_deref()?;
+                if !crate::mastodon::INSTANCES.contains(&instance)
+                    || !crate::mastodon::valid_id(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    "mastodon",
+                    serde_json::json!([instance, post.media_id]).to_string(),
+                )
+            }
             // Booru files are identified by their site and post ID.
             category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
                 let post = self.metadata.as_ref()?;
@@ -194,6 +208,9 @@ pub struct PostMetadata {
     pub reposted_by_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub article: Option<crate::twitter::ArticleMetadata>,
+    /// Mastodon instance host the status was fetched from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -242,6 +259,9 @@ pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
 
 pub fn social_site(url: &Url) -> Option<&'static str> {
     let host = url.host_str()?;
+    if crate::mastodon::INSTANCES.contains(&host) {
+        return Some("mastodon");
+    }
     for (domain, category) in [
         ("instagram.com", "instagram"),
         ("facebook.com", "facebook"),
@@ -821,6 +841,7 @@ fn compatibility_metadata(
         quoted_by_id: context_id("quote_id"),
         reposted_by_id: None,
         article: compatibility_article(data.get("article")),
+        instance: None,
         post_id,
         media_id,
         shortcode,

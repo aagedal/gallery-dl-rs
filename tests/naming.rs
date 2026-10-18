@@ -18,6 +18,7 @@ fn media() -> Media {
             quoted_by_id: None,
             reposted_by_id: None,
             article: None,
+            instance: None,
             post_id: "123".into(),
             media_id: "456".into(),
             shortcode: "BA".into(),

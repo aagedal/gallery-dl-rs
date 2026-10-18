@@ -23,6 +23,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         quoted_by_id: None,
         reposted_by_id: None,
         article: None,
+        instance: None,
         post_id: "100".into(),
         media_id: "101".into(),
         shortcode: "Example".into(),

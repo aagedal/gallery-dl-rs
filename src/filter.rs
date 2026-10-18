@@ -349,7 +349,12 @@ fn context_parts(
                     .map_or(Value::Int(0), |value| identifier(value)),
             );
         }
-        if category == "facebook" || crate::booru::Site::from_category(category).is_some() {
+        if let Some(instance) = &post.instance {
+            values.insert("instance".into(), text(instance.as_str()));
+        }
+        if matches!(category, "facebook" | "mastodon")
+            || crate::booru::Site::from_category(category).is_some()
+        {
             values.insert("id".into(), identifier(&post.post_id));
         }
         if matches!(category, "imgur" | "bluesky" | "reddit") {
