@@ -7,6 +7,7 @@ use gallery_dl_rs::{
     error,
     extract::{self, Backend},
     instagram::Instagram,
+    naming::FilenameTemplate,
 };
 use sha2::{Digest, Sha256};
 use std::{cell::Cell, collections::HashSet, path::PathBuf, time::Duration};
@@ -37,6 +38,9 @@ struct Args {
     /// SQLite history of completed media (gallery-dl-rs format)
     #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
     download_archive: Option<PathBuf>,
+    /// Native filename template, e.g. '{post_id}_{index:03}.{extension}'
+    #[arg(short = 'f', long, conflicts_with_all = ["get_urls", "dump_json"])]
+    filename: Option<String>,
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
@@ -92,6 +96,11 @@ async fn run(args: Args) -> Result<()> {
             "--config is only supported with --extractor compatibility",
         ));
     }
+    let filename = args
+        .filename
+        .as_deref()
+        .map(FilenameTemplate::parse)
+        .transpose()?;
     let archive = match &args.download_archive {
         Some(path) => Some(Archive::open(path).await?),
         None => None,
@@ -156,6 +165,7 @@ async fn run(args: Args) -> Result<()> {
                 let client = &client;
                 let destination = &args.destination;
                 let archive = &archive;
+                let filename = filename.as_ref();
                 let options = DownloadOptions {
                     retries: args.retries,
                     write_metadata: args.write_metadata,
@@ -163,13 +173,25 @@ async fn run(args: Args) -> Result<()> {
                 async move {
                     match archive {
                         Some(archive) => {
-                            archive.download(client, destination, &item, options).await
-                        }
-                        None => {
-                            download::download_with_options(client, destination, &item, options)
+                            archive
+                                .download_with_template(
+                                    client,
+                                    destination,
+                                    &item,
+                                    options,
+                                    filename,
+                                )
                                 .await
-                                .map(ArchiveOutcome::Completed)
                         }
+                        None => download::download_with_template(
+                            client,
+                            destination,
+                            &item,
+                            options,
+                            filename,
+                        )
+                        .await
+                        .map(ArchiveOutcome::Completed),
                     }
                 }
             })

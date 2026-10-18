@@ -5,6 +5,7 @@ use crate::{
     download::{self, DownloadClient, DownloadOptions, Outcome},
     error,
     extract::Media,
+    naming::FilenameTemplate,
 };
 use rusqlite::{Connection, OpenFlags, params};
 use std::{
@@ -78,6 +79,18 @@ impl Archive {
         media: &Media,
         options: DownloadOptions,
     ) -> Result<ArchiveOutcome> {
+        self.download_with_template(client, root, media, options, None)
+            .await
+    }
+
+    pub async fn download_with_template(
+        &self,
+        client: &DownloadClient,
+        root: &Path,
+        media: &Media,
+        options: DownloadOptions,
+        template: Option<&FilenameTemplate>,
+    ) -> Result<ArchiveOutcome> {
         let identity = media.archive_key();
         // Serialize the same stable identity within this instance, without
         // suppressing a refreshed URL if a previous request failed. Weak entries
@@ -91,7 +104,8 @@ impl Archive {
         {
             return Ok(ArchiveOutcome::AlreadyArchived);
         }
-        let outcome = download::download_with_options(client, root, media, options).await?;
+        let outcome =
+            download::download_with_template(client, root, media, options, template).await?;
         if let Some(identity) = &identity {
             self.record(identity).await.map_err(|e| {
                 let (Outcome::Downloaded(path) | Outcome::Skipped(path)) = &outcome;

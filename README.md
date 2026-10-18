@@ -37,6 +37,9 @@ cargo build --release --locked
 # Keep completed-media history across runs, including refreshed social media URLs
 ./target/release/gallery-dl-rs --download-archive history.sqlite3 -C cookies.txt 'https://x.com/USERNAME/status/POST_ID'
 
+# Choose native filenames from available post metadata
+./target/release/gallery-dl-rs -f '{post_id}_{media_id}_{index:03}.{extension}' -C cookies.txt --extractor native 'https://www.instagram.com/p/SHORTCODE/'
+
 # Inspect extracted media jobs as JSON; private request options are omitted
 ./target/release/gallery-dl-rs -j 'https://x.com/USERNAME/status/POST_ID'
 
@@ -135,6 +138,20 @@ Instagram session cookies are never copied to media hosts.
   a run are removed, and existing paths are skipped for direct downloads. Bare
   direct links keep their original URL-only digest; media with headers now use a
   different digest and may be downloaded again after upgrading.
+- `-f` / `--filename` replaces the default digest-prefixed basename with a native
+  template under `destination/category/`. Available fields are `{filename}`
+  (including extension), `{name}` (without the final extension), `{extension}`
+  (without the dot), `{category}`, `{post_id}`, `{media_id}`, `{shortcode}`,
+  `{username}`, `{index}`, and `{timestamp}`. Only index supports zero-padding,
+  such as `{index:03}` or `{index:03d}`. `{{` / `}}` escape braces; all output then
+  uses safe ASCII filename characters, so literal braces become underscores.
+  Unknown fields/formats, missing values, and literal directory paths fail
+  explicitly. Substituted values are sanitized; names are limited to 240 bytes
+  while preserving the final extension. Include enough IDs to make names unique:
+  files at colliding paths are assumed complete and skipped without overwriting.
+  Changing the template does not clear archive history. This is a limited native
+  syntax; gallery-dl expressions, conversions, conditionals, and directory
+  templates are not supported. This flag conflicts with `-g` and `-j`.
 - Transport errors, HTTP 429 rate limits, and HTTP 5xx responses have bounded
   retries controlled by `--retries`. Retry-After accepts seconds or an HTTP date;
   missing/invalid values use exponential backoff. Concurrent downloads share
@@ -175,13 +192,15 @@ adapter, including inline manifests and manifest-specific headers. Handoffs
 require an HTTP(S) target/base URL, including synthetic `ytdl:https://…` URLs;
 synthetic non-HTTP identifiers and unknown manifest types fail extraction.
 Video-page and manifest downloads fail explicitly before any request or file
-creation, even if a destination file exists. No companion dependency or video
+creation, even if a destination file exists. A stable archive hit can skip an
+already completed logical media item before download-type validation.
+No companion dependency or video
 adapter is enabled yet. The parser follows the
 [upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
 
 HLS/DASH downloads, video merging, fallback URL handling, browser cookie import,
-profile
-pagination in Rust, and gallery-dl filename/config compatibility are not implemented.
+profile pagination in Rust, and full gallery-dl filename/config compatibility are
+not implemented.
 Media downloads follow up to five redirects within the same origin (scheme,
 host, and effective port), retaining the original destination name and request
 headers. Cross-origin redirects, HTTPS downgrades, URL credentials, malformed
@@ -211,6 +230,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/extract.rs` owns URL dispatch and the compatibility protocol.
 `src/download.rs` owns request headers, downloads, retries, and file publication.
 `src/archive.rs` owns SQLite completed-media history and archive-aware downloads.
+`src/naming.rs` owns native filename template parsing and safe basename rendering.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

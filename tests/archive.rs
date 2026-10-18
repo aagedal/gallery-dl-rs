@@ -419,3 +419,192 @@ fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("downloaded"));
     assert_eq!(records(&path), 1);
 }
+
+#[tokio::test]
+async fn custom_names_publish_metadata_and_use_the_same_stable_archive() {
+    use gallery_dl_rs::naming::FilenameTemplate;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let template = FilenameTemplate::parse("{post_id}_{media_id}_{index:03}.{extension}").unwrap();
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let media = item(&url);
+    let saved = root.path().join("instagram/100_101_001.jpg");
+    assert_eq!(
+        download::destination_with_template(root.path(), &media, &template).unwrap(),
+        saved
+    );
+    let options = DownloadOptions {
+        write_metadata: true,
+        ..Default::default()
+    };
+    let result = archive
+        .download_with_template(&client, root.path(), &media, options, Some(&template))
+        .await
+        .unwrap();
+    handle.join().unwrap();
+    assert_eq!(
+        result,
+        ArchiveOutcome::Completed(Outcome::Downloaded(saved.clone()))
+    );
+    assert_eq!(std::fs::read(&saved).unwrap(), b"abc");
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(saved.with_extension("jpg.json")).unwrap()).unwrap();
+    assert_eq!(sidecar["filename"], "100_101_001.jpg");
+    let other_template = FilenameTemplate::parse("different.jpg").unwrap();
+    let refreshed = item("http://127.0.0.1:1/refreshed.jpg");
+    assert_eq!(
+        archive
+            .download_with_template(
+                &client,
+                root.path(),
+                &refreshed,
+                options,
+                Some(&other_template)
+            )
+            .await
+            .unwrap(),
+        ArchiveOutcome::AlreadyArchived
+    );
+    assert!(!root.path().join("instagram/different.jpg").exists());
+}
+
+#[tokio::test]
+async fn invalid_per_media_names_fail_before_requests_or_archive_records() {
+    use gallery_dl_rs::naming::FilenameTemplate;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let media = item("http://127.0.0.1:1/image.jpg");
+    let template = FilenameTemplate::parse("{username}_{media_id}.jpg").unwrap();
+    let result = archive
+        .download_with_template(
+            &client,
+            root.path(),
+            &media,
+            DownloadOptions::default(),
+            Some(&template),
+        )
+        .await;
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("username is missing")
+    );
+    assert_eq!(records(&path), 0);
+    assert!(!root.path().join("instagram").exists());
+}
+
+#[test]
+fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let saved = root.path().join("direct/picture.jpg");
+    std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+    std::fs::write(&saved, b"keep existing").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .arg("-d")
+        .arg(root.path())
+        .args([
+            "-f",
+            "{name}.{extension}",
+            "--write-metadata",
+            "http://127.0.0.1:1/picture.jpg",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(std::fs::read(&saved).unwrap(), b"keep existing");
+    assert!(saved.with_extension("jpg.json").is_file());
+    let invalid_archive = root.path().join("must-not-exist.sqlite3");
+    let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .arg("--download-archive")
+        .arg(&invalid_archive)
+        .args(["-f", "../{filename}", "http://127.0.0.1:1/picture.jpg"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!invalid_archive.exists());
+    for mode in ["-j", "-g"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .args([mode, "-f", "{filename}", "https://example.com/a.jpg"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+    }
+}
+
+#[tokio::test]
+async fn cancellation_does_not_archive_partial_media_or_keep_its_identity_locked() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("archive.sqlite3");
+    let archive = Archive::open(&path).await.unwrap();
+    let client = download::client(Duration::from_secs(2)).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/image.jpg", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let (ready, received) = tokio::sync::oneshot::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("{e}"),
+            }
+        };
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc")
+            .unwrap();
+        ready.send(()).unwrap();
+        held.recv_timeout(Duration::from_secs(5)).unwrap();
+    });
+    let media = item(&url);
+    let mut pending =
+        Box::pin(archive.download(&client, root.path(), &media, DownloadOptions::default()));
+    tokio::select! {
+        result = &mut pending => panic!("partial response completed: {result:?}"),
+        result = received => result.unwrap(),
+    }
+    // Keep polling while the response is held open to enter the streaming phase.
+    tokio::select! {
+        result = &mut pending => panic!("partial response completed: {result:?}"),
+        _ = tokio::time::sleep(Duration::from_millis(20)) => {},
+    }
+    drop(pending);
+    release.send(()).unwrap();
+    handle.join().unwrap();
+    assert_eq!(records(&path), 0);
+    assert!(!download::destination(root.path(), &media).exists());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("instagram"))
+            .unwrap()
+            .count(),
+        0
+    );
+    let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
+    let refreshed = item(&url);
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        archive.download(&client, root.path(), &refreshed, DownloadOptions::default()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    handle.join().unwrap();
+    assert!(matches!(
+        result,
+        ArchiveOutcome::Completed(Outcome::Downloaded(_))
+    ));
+    assert_eq!(records(&path), 1);
+}

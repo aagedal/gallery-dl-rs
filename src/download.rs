@@ -1,6 +1,7 @@
 use crate::{
     Result, error,
     extract::{Media, MediaJob},
+    naming::FilenameTemplate,
     transport::{RateLimits, Redirects, retry_after},
 };
 use futures_util::StreamExt;
@@ -64,6 +65,18 @@ pub fn destination(root: &Path, media: &Media) -> PathBuf {
         .join(format!("{digest}_{}", safe_component(&media.filename)))
 }
 
+/// Custom names replace the default digest-prefixed basename. Publication still
+/// never overwrites; callers should include post/media identifiers to avoid collisions.
+pub fn destination_with_template(
+    root: &Path,
+    media: &Media,
+    template: &FilenameTemplate,
+) -> Result<PathBuf> {
+    Ok(root
+        .join(safe_component(&media.category))
+        .join(template.render(media)?))
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Downloaded(PathBuf),
@@ -101,7 +114,17 @@ pub async fn download_with_options(
     media: &Media,
     options: DownloadOptions,
 ) -> Result<Outcome> {
-    let outcome = download_media(client, root, media, options.retries).await?;
+    download_with_template(client, root, media, options, None).await
+}
+
+pub async fn download_with_template(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    options: DownloadOptions,
+    template: Option<&FilenameTemplate>,
+) -> Result<Outcome> {
+    let outcome = download_media(client, root, media, options.retries, template).await?;
     if options.write_metadata {
         let (Outcome::Downloaded(path) | Outcome::Skipped(path)) = &outcome;
         write_metadata(path, media).await.map_err(|e| {
@@ -181,6 +204,7 @@ async fn download_media(
     root: &Path,
     media: &Media,
     retries: u8,
+    template: Option<&FilenameTemplate>,
 ) -> Result<Outcome> {
     match &media.job {
         MediaJob::DirectHttp => {
@@ -197,7 +221,10 @@ async fn download_media(
             ));
         }
     }
-    let path = destination(root, media);
+    let path = match template {
+        Some(template) => destination_with_template(root, media, template)?,
+        None => destination(root, media),
+    };
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.is_file() => return Ok(Outcome::Skipped(path)),
         Ok(_) => return Err(error("media destination is not a regular file")),

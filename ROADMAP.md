@@ -119,6 +119,16 @@ Add native configuration and filename templates, then prioritize additional site
 Integrate the companion **yt-dlp-rs** project for video extraction and segmented
 downloads. Document compatibility differences as features land.
 
+**Implemented filename step:** `-f` / `--filename` supports native placeholders
+for filename/name/extension/category and available post IDs, username, shortcode,
+index, and timestamp, with optional index zero-padding. Names remain under the
+category directory, are sanitized to safe ASCII, and are bounded to 240 bytes
+while preserving the final extension. Unsupported syntax and unavailable values
+fail explicitly. Downloads, sidecars, archive recording, and no-overwrite behavior
+share the same rendered destination. Default names remain unchanged. This is a
+documented subset, not full gallery-dl formatting compatibility; native
+configuration, directory templates, expressions, and additional sites remain.
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable
