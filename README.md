@@ -255,6 +255,23 @@ crossposts, deleted posts, and other external sites are skipped. Plain `i.redd.i
 file links stay direct downloads in both modes. OAuth, comment/selftext link
 scanning, searches, multireddits, and upstream's reddit options are not implemented.
 
+Experimental native booru extraction (`--extractor native`) covers categories
+`danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and
+`safebooru` (safebooru.org): single posts (`/posts/ID`,
+`index.php?page=post&s=view&id=ID`), tag searches (`/posts?tags=...`,
+`index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID`).
+Danbooru/e621 page with an id cursor (`page=bID`, 200 per page) and Gelbooru-style
+sites with `pid` (100 per page), both capped at 100 pages; pools are fetched in
+pool order, up to 10,000 posts. Posts without a file URL (deleted, banned,
+restricted) are skipped, and files are accepted only from the site's own HTTPS
+CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
+space-separated tag string, `username` the uploader name when the API provides
+one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{extension}`;
+archive identity is (category, post ID). File size, rating, score and per-category
+tags are not exposed. No API keys or logins are sent, so Gelbooru may refuse
+unauthenticated API requests and restricted content stays hidden. Plain CDN file
+links stay direct downloads.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

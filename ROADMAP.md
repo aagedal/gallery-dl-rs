@@ -519,6 +519,11 @@ options and Retry-After cooldowns. Not yet: user profiles, favorites,
 subreddits, searches, tag listings, and the upstream `mp4` option (animated GIFs
 always use MP4).
 
+**Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
+Safebooru posts and tag searches, plus Danbooru/e621 pools. Remaining: API
+key/login credentials, favorites/popular/artist views, Gelbooru pools, notes,
+`tags`/`metadata` options, and file-size/rating metadata.
+
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
