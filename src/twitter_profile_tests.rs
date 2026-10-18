@@ -4003,3 +4003,238 @@ async fn ytdl_repost_delegate_uses_output_post_identity_and_preserves_quote_pare
         assert_eq!(server.count(), 1);
     }
 }
+
+fn summary_card(mut post: Value, name: &str) -> Value {
+    post["card"] = json!({"legacy":{"name":"summary_large_image","binding_values":{
+        "photo_image_full_size_original":{"image_value":{"url":format!("https://cards.example/{name}.jpg")}}
+    }}});
+    post
+}
+
+fn file_cards() -> CardOptions {
+    CardOptions {
+        mode: CardMode::Files,
+        blacklist: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn card_only_posts_are_extracted_by_rest_id_and_detail_with_original_identity() {
+    for detail in [false, true] {
+        let post = summary_card(text_tweet("100"), "standalone");
+        let body = if detail {
+            detail_page(vec![post], None)
+        } else {
+            post_response(post)
+        };
+        let server = Server::new(vec![Response::json(body)]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_card_options(file_cards());
+        let stream = if detail {
+            native.detail_stream_at(server.base.clone(), "100".into())
+        } else {
+            native.post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        };
+        let items: Vec<_> = stream.try_collect().await.unwrap();
+        assert_eq!(post_ids(&items), ["100"]);
+        assert_eq!(items[0].url.path(), "/standalone.jpg");
+        assert_eq!(items[0].filename, "100_1.jpg");
+        assert!(items[0].archive_key().is_some());
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn cards_follow_ordinary_media_before_lazy_quotes_and_keep_numbering_and_archive_keys() {
+    for cutoff in [false, true] {
+        let mut parent = summary_card(tweet("100"), "parent");
+        parent["legacy"]["quoted_status_id_str"] = json!("101");
+        let server = Server::new(vec![
+            Response::json(post_response(parent)),
+            Response::json(post_response(summary_card(text_tweet("101"), "quoted"))),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_card_options(file_cards())
+            .with_expansion(expansion_options(RetweetMode::Skip));
+        let stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+        let items: Vec<_> = stream
+            .take(if cutoff { 1 } else { 3 })
+            .try_collect()
+            .await
+            .unwrap();
+        if cutoff {
+            assert_eq!(post_ids(&items), ["100"]);
+            assert_eq!(server.count(), 1);
+        } else {
+            assert_eq!(post_ids(&items), ["100", "100", "101"]);
+            assert_eq!(
+                items
+                    .iter()
+                    .map(|item| item.filename.as_str())
+                    .collect::<Vec<_>>(),
+                ["100_1.jpg", "100_2.jpg", "101_1.jpg"]
+            );
+            assert_eq!(items[1].url.path(), "/parent.jpg");
+            assert_eq!(items[2].url.path(), "/quoted.jpg");
+            assert_eq!(
+                items[2].metadata.as_ref().unwrap().quoted_by_id.as_deref(),
+                Some("100")
+            );
+            let keys: std::collections::HashSet<_> = items
+                .iter()
+                .map(|item| item.archive_key().unwrap())
+                .collect();
+            assert_eq!(keys.len(), 3);
+            assert_eq!(server.count(), 2);
+        }
+    }
+}
+
+#[tokio::test]
+async fn cards_select_outer_repost_card_and_original_card_with_effective_ytdl_identity() {
+    for mode in [RetweetMode::Original, RetweetMode::Repost] {
+        for delegate in [false, true] {
+            let mut original = summary_card(text_tweet("101"), "original");
+            let mut outer = summary_card(text_tweet("100"), "outer");
+            if delegate {
+                original["card"]["legacy"]["name"] = json!("unsupported-original");
+                outer["card"]["legacy"]["name"] = json!("unsupported-outer");
+            }
+            outer["legacy"]["retweeted_status_id_str"] = json!("101");
+            outer["retweeted_status_result"] = json!({"result":original});
+            let server = Server::new(vec![Response::json(post_response(outer))]);
+            let native = extractor(Duration::from_secs(3))
+                .await
+                .with_card_options(CardOptions {
+                    mode: if delegate {
+                        CardMode::Ytdl
+                    } else {
+                        CardMode::Files
+                    },
+                    blacklist: Vec::new(),
+                })
+                .with_expansion(expansion_options(mode));
+            let items: Vec<_> = native
+                .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+                .try_collect()
+                .await
+                .unwrap();
+            let (id, image) = if mode == RetweetMode::Original {
+                ("101", "/original.jpg")
+            } else {
+                ("100", "/outer.jpg")
+            };
+            assert_eq!(post_ids(&items), [id]);
+            if delegate {
+                assert_eq!(
+                    items[0].url.as_str(),
+                    format!("ytdl:https://x.com/i/web/status/{id}")
+                );
+                match &items[0].job {
+                    crate::extract::MediaJob::VideoPage { page_url } => assert_eq!(
+                        page_url.as_str(),
+                        format!("https://x.com/i/web/status/{id}")
+                    ),
+                    _ => panic!("card fallback must remain a typed adapter job"),
+                }
+            } else {
+                assert_eq!(items[0].url.path(), image);
+            }
+            assert!(items[0].archive_key().is_some());
+            assert_eq!(server.count(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn expanded_child_threads_apply_card_options_and_range_prevents_later_child_pages() {
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![in_thread(tweet("100"), json!("90"))],
+            Some("parent-next"),
+        )),
+        Response::json(detail_page(
+            vec![summary_card(text_tweet("90"), "child")],
+            Some("child-next"),
+        )),
+        Response::json(detail_page(
+            vec![summary_card(text_tweet("101"), "later")],
+            None,
+        )),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_card_options(file_cards())
+        .with_thread_options(expanded_threads(true));
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .take(1)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["90"]);
+    assert_eq!(items[0].url.path(), "/child.jpg");
+    assert_eq!(server.count(), 2);
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![in_thread(
+                summary_card(text_tweet("100"), "fallback"),
+                json!("90"),
+            )],
+            None,
+        )),
+        Response::json(json!({"errors":[{"code":89,"message":"private card child failure"}]})),
+    ]);
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(items[0].url.path(), "/fallback.jpg");
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn card_blacklist_and_default_skip_ignore_malformed_payloads_while_enabled_errors_are_private()
+ {
+    for case in ["default", "name", "domain", "combined", "enabled"] {
+        let mut post = tweet("100");
+        post["card"] = json!({"name":"unified_card","binding_values":{
+            "vanity_url":{"string_value":"cards.example"},
+            "unified_card":{"string_value":"private malformed card payload"}
+        }});
+        let options = match case {
+            "default" => CardOptions::default(),
+            "name" => CardOptions {
+                mode: CardMode::Files,
+                blacklist: vec!["unified_card".into()],
+            },
+            "domain" => CardOptions {
+                mode: CardMode::Files,
+                blacklist: vec!["cards.example".into()],
+            },
+            "combined" => CardOptions {
+                mode: CardMode::Files,
+                blacklist: vec!["unified_card:cards.example".into()],
+            },
+            _ => file_cards(),
+        };
+        let server = Server::new(vec![Response::json(post_response(post))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_card_options(options);
+        let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+        if case == "enabled" {
+            let error = stream.next().await.unwrap().unwrap_err().to_string();
+            assert!(!error.contains("private malformed card payload"));
+        } else {
+            let item = stream.next().await.unwrap().unwrap();
+            assert_eq!(item.filename, "100_1.jpg");
+        }
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 1);
+    }
+}

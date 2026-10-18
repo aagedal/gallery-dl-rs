@@ -31,9 +31,27 @@ pub fn parse_response_with_media_options(
     options: ExpansionOptions,
     media_options: MediaOptions,
 ) -> Result<Vec<Media>> {
+    parse_response_with_card_options(
+        bytes,
+        requested_id,
+        options,
+        media_options,
+        CardOptions::default(),
+    )
+}
+
+/// Parse explicit linked posts with shared video, preview, and card selection.
+pub fn parse_response_with_card_options(
+    bytes: &[u8],
+    requested_id: &str,
+    options: ExpansionOptions,
+    media_options: MediaOptions,
+    card_options: CardOptions,
+) -> Result<Vec<Media>> {
     let value = response_root(bytes, requested_id)?;
-    let mut engine =
-        Engine::new(value, requested_id.into(), options, false).with_media_options(media_options);
+    let mut engine = Engine::new(value, requested_id.into(), options, false)
+        .with_media_options(media_options)
+        .with_card_options(card_options);
     let mut result = Vec::new();
     loop {
         match engine.next()? {
@@ -165,6 +183,7 @@ pub(super) struct Engine {
     options: ExpansionOptions,
     allow_empty: bool,
     media_options: MediaOptions,
+    card_options: CardOptions,
     replies: ReplyMode,
     profile_owner: Option<String>,
 }
@@ -190,6 +209,7 @@ impl Engine {
             options,
             allow_empty,
             media_options: MediaOptions::default(),
+            card_options: CardOptions::default(),
             replies: ReplyMode::All,
             profile_owner: None,
         }
@@ -197,6 +217,11 @@ impl Engine {
 
     pub(super) fn with_media_options(mut self, options: MediaOptions) -> Self {
         self.media_options = options;
+        self
+    }
+
+    pub(super) fn with_card_options(mut self, options: CardOptions) -> Self {
+        self.card_options = options;
         self
     }
 
@@ -331,6 +356,8 @@ impl Engine {
                 output_id,
                 self.allow_empty || has_quote,
                 self.media_options,
+                &self.card_options,
+                job.repost.as_ref().unwrap_or(tweet),
             )?;
             for item in &mut media {
                 let metadata = item.metadata.as_mut().unwrap();

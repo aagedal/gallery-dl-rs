@@ -25,7 +25,11 @@ pub(super) fn parse_tweet_media(
     requested_post_id: &str,
     allow_empty: bool,
     options: MediaOptions,
+    card_options: &CardOptions,
+    card_source: &Value,
 ) -> Result<Vec<Media>> {
+    let has_card = card_options.mode != CardMode::Skip && card_source.get("card").is_some();
+    let empty = Vec::new();
     let legacy = &tweet["legacy"];
     let items = match legacy.get("extended_entities") {
         Some(extended) => extended
@@ -39,13 +43,13 @@ pub(super) fn parse_tweet_media(
             {
                 return Err(error("Twitter post extended media missing"));
             }
-            if allow_empty {
-                return Ok(Vec::new());
+            if !allow_empty && !has_card {
+                return Err(error("Twitter post has no downloadable media"));
             }
-            return Err(error("Twitter post has no downloadable media"));
+            &empty
         }
     };
-    if items.is_empty() && !allow_empty {
+    if items.is_empty() && !allow_empty && !has_card {
         return Err(error("Twitter post has no downloadable media"));
     }
     let username = tweet
@@ -62,6 +66,50 @@ pub(super) fn parse_tweet_media(
         .get("created_at")
         .and_then(Value::as_str)
         .and_then(timestamp);
+    let mut selected = select_entities(items.iter(), requested_post_id, options)?;
+    selected.extend(cards::select(
+        card_source,
+        requested_post_id,
+        options,
+        card_options,
+    )?);
+    // gallery-dl numbers files after selection, including previews after their video.
+    Ok(selected
+        .into_iter()
+        .enumerate()
+        .map(|(i, (url, extension, job))| Media {
+            url,
+            job,
+            handoff: BTreeMap::new(),
+            category: "twitter".into(),
+            filename: format!("{requested_post_id}_{}.{extension}", i + 1),
+            metadata: Some(PostMetadata {
+                retweet_id: None,
+                quoted_by_id: None,
+                reposted_by_id: None,
+                post_id: requested_post_id.into(),
+                media_id: (i + 1).to_string(),
+                shortcode: String::new(),
+                username: username.clone(),
+                caption: caption.clone(),
+                timestamp,
+                index: i + 1,
+            }),
+            headers: BTreeMap::from([
+                ("User-Agent".into(), USER_AGENT.into()),
+                ("Referer".into(), "https://x.com/".into()),
+            ]),
+        })
+        .collect())
+}
+
+pub(super) type SelectedFile = (Url, String, MediaJob);
+
+pub(super) fn select_entities<'a>(
+    items: impl IntoIterator<Item = &'a Value>,
+    requested_post_id: &str,
+    options: MediaOptions,
+) -> Result<Vec<SelectedFile>> {
     let mut selected = Vec::new();
     for item in items {
         let video = match item.get("type").and_then(Value::as_str) {
@@ -103,34 +151,7 @@ pub(super) fn parse_tweet_media(
         let (url, extension) = image_url(item)?;
         selected.push((url, extension, MediaJob::DirectHttp));
     }
-    // gallery-dl numbers files after selection, including previews after their video.
-    Ok(selected
-        .into_iter()
-        .enumerate()
-        .map(|(i, (url, extension, job))| Media {
-            url,
-            job,
-            handoff: BTreeMap::new(),
-            category: "twitter".into(),
-            filename: format!("{requested_post_id}_{}.{extension}", i + 1),
-            metadata: Some(PostMetadata {
-                retweet_id: None,
-                quoted_by_id: None,
-                reposted_by_id: None,
-                post_id: requested_post_id.into(),
-                media_id: (i + 1).to_string(),
-                shortcode: String::new(),
-                username: username.clone(),
-                caption: caption.clone(),
-                timestamp,
-                index: i + 1,
-            }),
-            headers: BTreeMap::from([
-                ("User-Agent".into(), USER_AGENT.into()),
-                ("Referer".into(), "https://x.com/".into()),
-            ]),
-        })
-        .collect())
+    Ok(selected)
 }
 
 fn video_url(item: &Value) -> Result<Url> {

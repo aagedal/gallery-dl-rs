@@ -73,7 +73,7 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Original and quoted media preserve direct-post archive identities; repost mode
   retains the repost identity. Parser, scoped configuration, compatibility
   forwarding, and local HTTP tests cover these paths. Live authenticated
-  expansion remains unverified. Cards/articles remain outside native coverage.
+  expansion remains unverified. Articles remain outside native coverage.
   **Implemented experimental profile tabs:** `/USER/media`, `/USER/tweets`,
   `/USER/with_replies`, `/USER/highlights`, and numeric ID forms stream their
   operation-specific pages. Username lookup uses identity-bound `UserByScreenName`;
@@ -150,6 +150,21 @@ shared extraction interface that emits media, post metadata, and child URLs.
   `ytdl` video setting emits typed fixed-first-party video-page jobs for inspection;
   downloading those jobs still requires the unimplemented companion adapter.
   Authenticated live verification and real response captures remain required.
+
+
+  **Implemented experimental card media:** scoped cards false/true/ytdl and exact
+  card-name/domain/name-domain blacklists apply across statuses, quotes, retweets,
+  and expanded thread/collection streams. Summary image priority, both binding
+  formats, ordered unified media, component previews, shared video/poster choices,
+  and combined file/archive numbering have parser/local HTTP coverage. Repost
+  cards use the outer post; original mode uses the original card. Unhandled cards
+  can emit typed fixed-first-party video-page jobs. Disabled/blacklisted payloads
+  are ignored, while enabled malformed cards fail atomically and privately;
+  upstream instead warns and can retain partial output. Duplicate component
+  references are rejected to prevent output amplification. Strict scoped config,
+  JSON-safe compatibility forwarding, cancellation, and identities are tested.
+  Image-size fallback chains, richer metadata, real authenticated captures, and
+  companion-adapter downloads remain unfinished.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and

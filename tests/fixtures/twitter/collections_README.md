@@ -47,4 +47,5 @@ request signatures, cookie/CSRF rotation, API credential isolation from media,
 range/drop cancellation, unordered dates, and late private failures. One budget
 includes all requests and linked-post expansion while excluding consumer pauses.
 Bookmark-specific timestamps/metadata, membership/follow routes, communities,
-resume cursors, configurable uniqueness, and further options remain unfinished.
+resume cursors and further options remain unfinished. Scoped uniqueness and card
+selection share the native traversal pipeline; see the main Twitter fixture notes.

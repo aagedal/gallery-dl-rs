@@ -1160,3 +1160,108 @@ fn twitter_media_settings_reject_malformed_and_duplicate_values_privately() {
         }
     }
 }
+
+#[test]
+fn twitter_card_settings_resolve_scopes_and_clear_inherited_blacklists() {
+    use gallery_dl_rs::twitter::CardMode;
+    let config = parse(r#"{"extractor":{"cards":true,"cards-blacklist":["summary","player"],"twitter":{"cards":"ytdl","cards-blacklist":[]},"instagram":{"cards":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.cards, Some(CardMode::Ytdl));
+    assert_eq!(twitter.cards_blacklist, Some(vec![]));
+    let inherited = config.resolve("facebook").unwrap();
+    assert_eq!(inherited.cards, Some(CardMode::Files));
+    assert_eq!(
+        inherited.cards_blacklist,
+        Some(vec!["summary".into(), "player".into()])
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().cards,
+        Some(CardMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = inherited.overlay(&Options {
+        cards: Some(CardMode::Skip),
+        cards_blacklist: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(disabled.cards, Some(CardMode::Skip));
+    assert_eq!(disabled.cards_blacklist, Some(vec![]));
+    let root = parse(r#"{"cards":false,"cards-blacklist":[],"extractor":{"cards":true,"cards-blacklist":["summary"],"twitter":{"cards":"ytdl","cards-blacklist":["player"]}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!(options.cards, Some(CardMode::Skip));
+        assert_eq!(options.cards_blacklist, Some(vec![]));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.cards, None);
+    assert_eq!(absent.cards_blacklist, None);
+    let duplicate_values = parse(r#"{"cards-blacklist":["summary","summary"]}"#)
+        .unwrap()
+        .resolve("twitter")
+        .unwrap();
+    assert_eq!(
+        duplicate_values.cards_blacklist.unwrap(),
+        ["summary", "summary"]
+    );
+    let max = serde_json::json!({"cards-blacklist":vec!["x".repeat(2048); 256]});
+    assert!(parse(&max.to_string()).is_ok());
+}
+
+#[test]
+fn twitter_card_settings_reject_private_malformed_values_and_duplicate_keys() {
+    use serde_json::json;
+    let bad_cards = [
+        json!(null),
+        json!(0),
+        json!("true"),
+        json!("Ytdl"),
+        json!([]),
+        json!({"private-key":"private-value"}),
+        json!("private-value"),
+    ];
+    let bad_blacklists = [
+        json!(null),
+        json!(false),
+        json!("private-value"),
+        json!({"private-key":"private-value"}),
+        json!(["valid", 1]),
+        json!([""]),
+        json!(["private-value\n"]),
+        json!(["private-value\u{7f}"]),
+        json!(["x".repeat(2049)]),
+        json!(vec!["private-value"; 257]),
+    ];
+    for (field, values) in [
+        ("cards", bad_cards.as_slice()),
+        ("cards-blacklist", bad_blacklists.as_slice()),
+    ] {
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let value = if field == "cards" { "false" } else { "[]" };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}

@@ -64,8 +64,8 @@ configured user agents, cookie/CSRF rotation, and API credential isolation from
 media. Transaction tests regenerate each request's token using its actual API
 path, decoded timestamp, and mask rather than checking only header presence.
 
-Other collection routes, configurable uniqueness, arbitrary root profile
-dispatch, resume cursors, text-only output, cards/articles,
+Other collection routes, arbitrary root profile
+dispatch, resume cursors, text-only output, articles,
 unknown timeline variants, dynamic operation-ID refresh, and real authenticated
 verification remain unfinished. Compatibility remains the default.
 

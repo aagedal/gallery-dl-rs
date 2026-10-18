@@ -25,7 +25,7 @@ Posts/replies/highlights tabs have synthetic/local coverage described in
 [the profile timeline notes](media_README.md). Root-profile search fallback and standalone search/hashtags also have synthetic
 coverage there. Likes, bookmarks, lists, and home feeds have separate
 [collection protocol notes](collections_README.md). TweetDetail and conversation modes have separate
-[detail protocol notes](detail_README.md). Cards/articles, playlists, and other
+[detail protocol notes](detail_README.md). Articles, playlists, and other
 collections remain unsupported natively. Compatibility remains the default.
 
 `tests/twitter_media.rs` and local HTTP cases in `src/twitter_profile_tests.rs`
@@ -38,6 +38,19 @@ parameters and use original size. `videos: "ytdl"` emits the existing typed
 video-page job for the validated post; no response-provided delegation URL is
 trusted. The Rust downloader still rejects these jobs pending the companion
 adapter. Parser/HTTP success is not evidence of a live authenticated download.
+
+`tests/twitter_cards.rs` and local HTTP cases in `src/twitter_profile_tests.rs`
+add synthetic card derivatives. Primary upstream sources above supply summary
+prefix/size priority, card-name normalization, blacklist matching, unified media
+and component order, and typed Ytdl fallback behavior. Both binding formats,
+card-only posts, inherited video/preview choices, original/repost card ownership,
+quote/thread traversal, numbering, archives, and cancellation are checked.
+Unified media use a custom ordered JSON visitor so map sorting cannot reorder
+files. Duplicate keys/references and malformed enabled fields fail privately and
+atomically, including repeated components that could amplify output. This differs
+from upstream's warning/partial-output behavior. Image-size fallbacks, richer
+metadata, delegated downloads, and live authenticated card verification remain
+unimplemented or unverified. No card fixture contains a captured private session.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol

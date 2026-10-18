@@ -205,6 +205,8 @@ pub struct BackendOptions {
     pub unique: Option<bool>,
     pub videos: Option<crate::twitter::VideoMode>,
     pub previews: Option<bool>,
+    pub cards: Option<crate::twitter::CardMode>,
+    pub cards_blacklist: Option<Vec<String>>,
     pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
     pub conversations: Option<crate::twitter::ConversationMode>,
     pub pinned: Option<bool>,
@@ -304,6 +306,19 @@ impl Backend {
         }
         if let Some(previews) = options.previews {
             command.arg("--option").arg(format!("previews={previews}"));
+        }
+        if let Some(cards) = options.cards {
+            let value = match cards {
+                crate::twitter::CardMode::Files => "true",
+                crate::twitter::CardMode::Skip => "false",
+                crate::twitter::CardMode::Ytdl => "ytdl",
+            };
+            command.arg("--option").arg(format!("cards={value}"));
+        }
+        if let Some(blacklist) = &options.cards_blacklist {
+            command
+                .arg("--option")
+                .arg(format!("cards-blacklist={}", serde_json::json!(blacklist)));
         }
         if let Some(endpoint) = options.tweet_endpoint {
             let value = match endpoint {

@@ -21,8 +21,8 @@ use gallery_dl_rs::{
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
     twitter::{
-        ConversationMode, ExpansionOptions, MediaOptions, ProfileOptions, StatusOptions,
-        ThreadOptions, TimelineOptions, Twitter,
+        CardOptions, ConversationMode, ExpansionOptions, MediaOptions, ProfileOptions,
+        StatusOptions, ThreadOptions, TimelineOptions, Twitter,
     },
 };
 use sha2::{Digest, Sha256};
@@ -447,6 +447,13 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_card_options(CardOptions {
+                                        mode: options.cards.unwrap_or_default(),
+                                        blacklist: options
+                                            .cards_blacklist
+                                            .clone()
+                                            .unwrap_or_default(),
+                                    })
                                     .with_media_options(MediaOptions {
                                         videos: options.videos.unwrap_or_default(),
                                         previews: options.previews.unwrap_or(false),
@@ -525,6 +532,10 @@ fn extract_input<'a>(
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
                             expand: (category == "twitter").then_some(options.expand).flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
+                            cards: (category == "twitter").then_some(options.cards).flatten(),
+                            cards_blacklist: (category == "twitter")
+                                .then(|| options.cards_blacklist.clone())
+                                .flatten(),
                             videos: (category == "twitter").then_some(options.videos).flatten(),
                             previews: (category == "twitter")
                                 .then_some(options.previews)
@@ -616,6 +627,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         unique: None,
         videos: None,
         previews: None,
+        cards: None,
+        cards_blacklist: None,
         tweet_endpoint: None,
         conversations: None,
         pinned: None,

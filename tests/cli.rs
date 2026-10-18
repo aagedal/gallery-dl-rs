@@ -1352,3 +1352,96 @@ fn social_dedup_preserves_distinct_files_and_request_context_across_inputs() {
         assert_eq!(names, expected, "{category}");
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn twitter_cards_forward_sparse_scopes_and_json_blacklists_privately() {
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$CARD_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let blacklist = json!(["summary", "player\"quote", "path\\name", "unicode-é"]);
+    for (settings, expected) in [
+        (json!({}), vec![]),
+        (
+            json!({"extractor":{"twitter":{"cards":"ytdl","cards-blacklist":blacklist}}}),
+            vec!["cards=ytdl".into(), format!("cards-blacklist={blacklist}")],
+        ),
+        (
+            json!({"extractor":{"cards":true,"cards-blacklist":["summary"],"twitter":{"cards":false,"cards-blacklist":[]}}}),
+            vec!["cards=false".into(), "cards-blacklist=[]".into()],
+        ),
+        (
+            json!({"cards":true,"cards-blacklist":["summary","summary"],"extractor":{"twitter":{"cards":false,"cards-blacklist":[]}}}),
+            vec![
+                "cards=true".into(),
+                "cards-blacklist=[\"summary\",\"summary\"]".into(),
+            ],
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/person/status/1", true),
+            ("https://instagram.com/p/example/", false),
+            ("https://facebook.com/photo/?fbid=1", false),
+        ] {
+            let output = binary()
+                .env("CARD_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1].to_string())
+                .filter(|value| {
+                    value.starts_with("cards=") || value.starts_with("cards-blacklist=")
+                })
+                .collect();
+            assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    for settings in [
+        json!({"cards":"PRIVATE-CARD-VALUE"}),
+        json!({"extractor":{"twitter":{"cards-blacklist":["PRIVATE-CARD-VALUE\n"]}}}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let output = binary()
+            .env("CARD_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&backend)
+            .args(["-g", "https://x.com/person/status/1"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-CARD-VALUE"));
+        assert!(!log.exists());
+    }
+}

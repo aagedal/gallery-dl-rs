@@ -46,6 +46,10 @@ pub struct Options {
     pub videos: Option<crate::twitter::VideoMode>,
     /// Include video and animated-GIF preview images.
     pub previews: Option<bool>,
+    /// Select embedded Twitter card media or delegated video pages.
+    pub cards: Option<crate::twitter::CardMode>,
+    /// Card names excluded from extraction; an empty list clears inherited entries.
+    pub cards_blacklist: Option<Vec<String>>,
     /// Endpoint used to resolve a single Twitter post.
     pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
     /// Include posts from the requested status conversation.
@@ -106,6 +110,11 @@ impl Options {
             unique: overrides.unique.or(self.unique),
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
+            cards: overrides.cards.or(self.cards),
+            cards_blacklist: overrides
+                .cards_blacklist
+                .clone()
+                .or_else(|| self.cards_blacklist.clone()),
             tweet_endpoint: overrides.tweet_endpoint.or(self.tweet_endpoint),
             conversations: overrides.conversations.or(self.conversations),
             pinned: overrides.pinned.or(self.pinned),
@@ -169,6 +178,8 @@ struct RawRoot {
     unique: Field,
     videos: Field,
     previews: Field,
+    cards: Field,
+    cards_blacklist: Field,
     tweet_endpoint: Field,
     conversations: Field,
     pinned: Field,
@@ -205,6 +216,8 @@ struct RawExtractor {
     unique: Field,
     videos: Field,
     previews: Field,
+    cards: Field,
+    cards_blacklist: Field,
     tweet_endpoint: Field,
     conversations: Field,
     pinned: Field,
@@ -244,6 +257,8 @@ struct RawOptions {
     unique: Field,
     videos: Field,
     previews: Field,
+    cards: Field,
+    cards_blacklist: Field,
     tweet_endpoint: Field,
     conversations: Field,
     pinned: Field,
@@ -346,6 +361,8 @@ impl Config {
             unique: root.unique,
             videos: root.videos,
             previews: root.previews,
+            cards: root.cards,
+            cards_blacklist: root.cards_blacklist,
             tweet_endpoint: root.tweet_endpoint,
             conversations: root.conversations,
             pinned: root.pinned,
@@ -380,6 +397,8 @@ impl Config {
             unique: extractor.unique,
             videos: extractor.videos,
             previews: extractor.previews,
+            cards: extractor.cards,
+            cards_blacklist: extractor.cards_blacklist,
             tweet_endpoint: extractor.tweet_endpoint,
             conversations: extractor.conversations,
             pinned: extractor.pinned,
@@ -474,6 +493,42 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration previews must be a boolean")),
+        };
+        let cards = match self.cards.0 {
+            None => None,
+            Some(Value::Bool(true)) => Some(crate::twitter::CardMode::Files),
+            Some(Value::Bool(false)) => Some(crate::twitter::CardMode::Skip),
+            Some(Value::String(value)) if value == "ytdl" => Some(crate::twitter::CardMode::Ytdl),
+            Some(_) => {
+                return Err(error(
+                    "native configuration cards must be a boolean or ytdl",
+                ));
+            }
+        };
+        let cards_blacklist = match self.cards_blacklist.0 {
+            None => None,
+            Some(Value::Array(values)) if values.len() <= 256 => {
+                let mut names = Vec::with_capacity(values.len());
+                for value in values {
+                    let Value::String(name) = value else {
+                        return Err(error(
+                            "native configuration cards-blacklist must contain card names",
+                        ));
+                    };
+                    if name.is_empty() || name.len() > 2048 || name.chars().any(char::is_control) {
+                        return Err(error(
+                            "native configuration cards-blacklist contains an invalid card name",
+                        ));
+                    }
+                    names.push(name);
+                }
+                Some(names)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration cards-blacklist must be a bounded array of card names",
+                ));
+            }
         };
         let tweet_endpoint = match self.tweet_endpoint.0 {
             None => None,
@@ -670,6 +725,8 @@ impl RawOptions {
             unique,
             videos,
             previews,
+            cards,
+            cards_blacklist,
             tweet_endpoint,
             conversations,
             pinned,

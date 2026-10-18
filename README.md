@@ -294,6 +294,28 @@ downloading them still fails explicitly because the companion video adapter is
 not implemented. Direct MP4 downloads do not need that adapter. Library callers
 can use `Twitter::with_media_options` and `parse_response_with_media_options`.
 
+Scoped X `"cards": true` extracts summary-card images and unified-card media.
+Cards default to false. Summary cards choose the first usable image by upstream
+prefix/size priority; an existing image size parameter becomes `orig`. Unified
+cards retain embedded media order, then component and conversation-preview order.
+Their videos and posters follow the same `videos`/`previews` settings. Card files
+follow ordinary post media and share consecutive file/archive positions.
+Repost mode uses the repost's card; original mode uses the original post's card.
+
+`"cards-blacklist": ["summary", "youtube.com", "player:twitch.tv"]` skips exact
+card names, vanity domains, or `name:domain` pairs. An empty list clears inherited
+entries. Both options support normal configuration scopes and forward only for X
+when explicit. `"cards": "ytdl"` handles recognized summary/unified cards directly,
+then emits a typed first-party video-page job for an unhandled card. The companion
+adapter is still required to download delegated or manifest jobs.
+
+Enabled malformed cards fail the current post atomically with private diagnostics;
+this is stricter than upstream's warning and partial-output behavior. Repeated
+binding-array keys, unified-media keys, and component references are rejected.
+Disabled/blacklisted payloads are skipped. Image-size fallback chains, richer card
+metadata, and real authenticated card captures remain unfinished. Library callers
+can use `Twitter::with_card_options` and `parse_response_with_card_options`.
+
 Experimental X profile timelines use `Twitter::stream` and the native CLI at
 `/USERNAME/media`, `/USERNAME/tweets`, `/USERNAME/with_replies`, and
 `/USERNAME/highlights`, with equivalent `/id:USER_ID/TAB` forms on X/Twitter hosts.
@@ -385,9 +407,9 @@ date filtering preserves source order because bookmark, like, list, and ranked
 feed order need not match original post dates. No collection request credentials
 are copied to media requests.
 
-Cards/articles, communities, list membership/follow relations, arbitrary
-root-profile dispatch selection, cursor-resume configuration, configurable
-duplicate handling, text-only output, and other collection routes remain
+Articles, communities, list membership/follow relations, arbitrary
+root-profile dispatch selection, cursor-resume configuration,
+text-only output, and other collection routes remain
 unfinished. New collection behavior has synthetic/local coverage; successful
 live authenticated traversal remains unverified. See the
 [collection protocol notes](tests/fixtures/twitter/collections_README.md).
