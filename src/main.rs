@@ -457,6 +457,7 @@ fn extract_input<'a>(
                                     .with_media_options(MediaOptions {
                                         videos: options.videos.unwrap_or_default(),
                                         previews: options.previews.unwrap_or(false),
+                                        unavailable: options.unavailable.unwrap_or(false),
                                     })
                                     .with_thread_options(ThreadOptions {
                                         expand: options.expand.unwrap_or(false),
@@ -532,6 +533,9 @@ fn extract_input<'a>(
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
                             expand: (category == "twitter").then_some(options.expand).flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
+                            unavailable: (category == "twitter")
+                                .then_some(options.unavailable)
+                                .flatten(),
                             cards: (category == "twitter").then_some(options.cards).flatten(),
                             cards_blacklist: (category == "twitter")
                                 .then(|| options.cards_blacklist.clone())
@@ -627,6 +631,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         unique: None,
         videos: None,
         previews: None,
+        unavailable: None,
         cards: None,
         cards_blacklist: None,
         tweet_endpoint: None,

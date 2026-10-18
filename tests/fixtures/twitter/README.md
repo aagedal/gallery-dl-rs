@@ -52,6 +52,15 @@ from upstream's warning/partial-output behavior. Image-size fallbacks, richer
 metadata, delegated downloads, and live authenticated card verification remain
 unimplemented or unverified. No card fixture contains a captured private session.
 
+Unavailable-media cases are also synthetic. Upstream's `unavailable` option and
+`ext_media_availability.status` field define the default skip and explicit-attempt
+behavior. Parser/runtime tests cover photos, videos, GIFs, previews, unified cards,
+quotes, threads, all-unavailable posts, remaining-file numbering, and private
+malformed-field failures. Pages containing only unavailable media still advance
+profile, search, and bookmark cursors. An opt-in cannot bypass protected-post identity/session
+checks or permit unsafe media URLs. No authenticated marked-media attempt has
+been verified.
+
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol
 seconds 1000, mask 164, and the specified API path. Its animation and token were

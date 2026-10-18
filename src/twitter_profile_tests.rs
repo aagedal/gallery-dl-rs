@@ -3757,6 +3757,7 @@ async fn media_previews_number_mixed_siblings_consecutively_and_deduplicate_whol
         .with_media_options(MediaOptions {
             videos: VideoMode::Files,
             previews: true,
+            ..Default::default()
         });
     let items: Vec<_> = native
         .media_stream(input("id:42"), server.base.clone())
@@ -3806,6 +3807,7 @@ async fn skipped_video_preview_range_stops_before_fetching_missing_quote() {
         .with_media_options(MediaOptions {
             videos: VideoMode::Skip,
             previews: true,
+            ..Default::default()
         })
         .with_expansion(expansion_options(RetweetMode::Skip));
     let items: Vec<_> = native
@@ -3837,6 +3839,7 @@ async fn original_and_repost_expansion_apply_video_preview_options_and_keep_arch
             .with_media_options(MediaOptions {
                 videos: VideoMode::Files,
                 previews: true,
+                ..Default::default()
             })
             .with_expansion(expansion_options(mode));
         let items: Vec<_> = native
@@ -3895,6 +3898,7 @@ async fn ytdl_video_jobs_apply_to_quotes_and_expanded_threads_without_parsing_va
             .with_media_options(MediaOptions {
                 videos: VideoMode::Ytdl,
                 previews: false,
+                ..Default::default()
             })
             .with_expansion(expansion_options(RetweetMode::Skip))
             .with_thread_options(ThreadOptions {
@@ -3936,6 +3940,7 @@ async fn invalid_video_poster_is_ignored_when_disabled_and_errors_privately_when
             .with_media_options(MediaOptions {
                 videos: VideoMode::Files,
                 previews,
+                ..Default::default()
             });
         let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
         if previews {
@@ -3969,6 +3974,7 @@ async fn ytdl_repost_delegate_uses_output_post_identity_and_preserves_quote_pare
             .with_media_options(MediaOptions {
                 videos: VideoMode::Ytdl,
                 previews: false,
+                ..Default::default()
             })
             .with_expansion(expansion_options(mode));
         let items: Vec<_> = native
@@ -4236,5 +4242,201 @@ async fn card_blacklist_and_default_skip_ignore_malformed_payloads_while_enabled
         }
         assert!(stream.next().await.is_none());
         assert_eq!(server.count(), 1);
+    }
+}
+
+fn unavailable_media(mut media: Value) -> Value {
+    media["ext_media_availability"] =
+        json!({"status":"Unavailable","reason":"private unavailable media reason"});
+    media
+}
+
+#[tokio::test]
+async fn unavailable_only_pages_do_not_stop_profile_search_or_collection_pagination() {
+    for source in ["profile", "search", "bookmarks"] {
+        let mut hidden = tweet("100");
+        hidden["legacy"]["extended_entities"]["media"] = json!([unavailable_media(
+            json!({"type":"private malformed unavailable type"})
+        )]);
+        let kind = collections::Collection::Bookmarks;
+        let build_page = |tweets, cursor| match source {
+            "profile" => page(tweets, cursor),
+            "search" => search_page(tweets, cursor),
+            _ => feed_page(&kind, tweets, cursor),
+        };
+        let server = Server::new(vec![
+            Response::json(build_page(vec![hidden], Some("next"))),
+            Response::json(build_page(vec![tweet("99")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_timeline_options(TimelineOptions {
+                search_pagination: SearchPagination::Cursor,
+                ..Default::default()
+            });
+        let stream = match source {
+            "profile" => native.media_stream(input("id:42"), server.base.clone()),
+            "search" => native.search_stream("fixture".into(), server.base.clone()),
+            _ => native.feed_stream(kind, server.base.clone()),
+        };
+        let items: Vec<_> = stream.try_collect().await.unwrap();
+        assert_eq!(post_ids(&items), ["99"], "{source}");
+        assert_eq!(server.count(), 2, "{source}");
+        assert_eq!(variables(&server.urls()[1])["cursor"], "next", "{source}");
+    }
+}
+
+#[tokio::test]
+async fn unavailable_media_default_skips_malformed_items_and_numbers_only_remaining_files() {
+    let mut post = tweet("100");
+    let mut first = post["legacy"]["extended_entities"]["media"][0].clone();
+    first["media_url_https"] = json!("https://cdn.example/first.jpg");
+    let mut last = first.clone();
+    last["media_url_https"] = json!("https://cdn.example/last.jpg");
+    post["legacy"]["extended_entities"]["media"] = json!([
+        unavailable_media(json!({"type":"private unknown media type","video_info":"malformed"})),
+        first,
+        unavailable_media(json!({"type":"photo","media_url_https":{"private":"invalid URL"}})),
+        last
+    ]);
+    let server = Server::new(vec![Response::json(post_response(post))]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "100"]);
+    assert_eq!(
+        items.iter().map(|item| item.url.path()).collect::<Vec<_>>(),
+        ["/first.jpg", "/last.jpg"]
+    );
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.filename.as_str())
+            .collect::<Vec<_>>(),
+        ["100_1.jpg", "100_2.jpg"]
+    );
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.metadata.as_ref().unwrap().index)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    assert_ne!(items[0].archive_key(), items[1].archive_key());
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn unavailable_flag_attempts_supplied_links_and_keeps_enabled_errors_atomic_and_private() {
+    for malformed in [false, true] {
+        let mut post = tweet("100");
+        let mut video = video_post("100")["legacy"]["extended_entities"]["media"][0].clone();
+        if malformed {
+            video["video_info"] = json!({"variants":"private unavailable variants"});
+        }
+        post["legacy"]["extended_entities"]["media"]
+            .as_array_mut()
+            .unwrap()
+            .push(unavailable_media(video));
+        let server = Server::new(vec![Response::json(post_response(post))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_media_options(MediaOptions {
+                unavailable: true,
+                ..Default::default()
+            });
+        let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+        if malformed {
+            let error = stream.next().await.unwrap().unwrap_err().to_string();
+            assert!(!error.contains("private unavailable"));
+            assert!(stream.next().await.is_none());
+        } else {
+            let items: Vec<_> = stream.by_ref().try_collect().await.unwrap();
+            assert_eq!(post_ids(&items), ["100", "100"]);
+            assert_eq!(
+                items[1].url.as_str(),
+                "https://video.example/high.mp4?tag=1"
+            );
+            assert_eq!(items[1].filename, "100_2.mp4");
+        }
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn unavailable_selection_propagates_to_quoted_and_threaded_unified_cards_without_extra_fetches()
+ {
+    for thread in [false, true] {
+        for unavailable in [false, true] {
+            let hidden = unavailable_media(
+                json!({"type":"photo","media_url_https":"https://cdn.example/unavailable.jpg"}),
+            );
+            let encoded = json!({"media_entities":{
+                "a":hidden,
+                "b":{"type":"photo","media_url_https":"https://cdn.example/available.jpg"}
+            }})
+            .to_string();
+            let mut child = text_tweet("101");
+            child["card"] = json!({"name":"unified_card","binding_values":{"unified_card":{"string_value":encoded}}});
+            child["legacy"]["quoted_status_id_str"] = json!("102");
+            let responses = if thread {
+                vec![
+                    Response::json(page(vec![in_thread(tweet("100"), json!("90"))], None)),
+                    Response::json(detail_page(vec![child], Some("child-next"))),
+                    Response::json(detail_page(vec![tweet("102")], None)),
+                ]
+            } else {
+                let mut parent = text_tweet("100");
+                parent["legacy"]["quoted_status_id_str"] = json!("101");
+                vec![
+                    Response::json(post_response(parent)),
+                    Response::json(post_response(child)),
+                    Response::json(post_response(tweet("102"))),
+                ]
+            };
+            let server = Server::new(responses);
+            let native = extractor(Duration::from_secs(3))
+                .await
+                .with_media_options(MediaOptions {
+                    unavailable,
+                    ..Default::default()
+                })
+                .with_card_options(file_cards())
+                .with_expansion(expansion_options(RetweetMode::Skip))
+                .with_thread_options(ThreadOptions {
+                    expand: thread,
+                    unique: true,
+                });
+            let stream = if thread {
+                native.media_stream(input("id:42"), server.base.clone())
+            } else {
+                native.post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+            };
+            let items: Vec<_> = stream
+                .take(if unavailable { 2 } else { 1 })
+                .try_collect()
+                .await
+                .unwrap();
+            assert_eq!(
+                post_ids(&items),
+                vec!["101"; if unavailable { 2 } else { 1 }]
+            );
+            assert_eq!(
+                items[0].url.path(),
+                if unavailable {
+                    "/unavailable.jpg"
+                } else {
+                    "/available.jpg"
+                }
+            );
+            assert_eq!(items[0].filename, "101_1.jpg");
+            if unavailable {
+                assert_eq!(items[1].filename, "101_2.jpg");
+            }
+            assert_eq!(server.count(), 2);
+        }
     }
 }

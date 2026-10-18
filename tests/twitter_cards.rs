@@ -177,7 +177,11 @@ fn unified_videos_use_shared_video_and_preview_selection_without_parsing_disable
             &data,
             CardMode::Files,
             &[],
-            MediaOptions { videos, previews },
+            MediaOptions {
+                videos,
+                previews,
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(items.len(), expected);
@@ -205,7 +209,8 @@ fn unified_videos_use_shared_video_and_preview_selection_without_parsing_disable
             &[],
             MediaOptions {
                 videos: VideoMode::Skip,
-                previews: false
+                previews: false,
+                ..Default::default()
             }
         )
         .unwrap()

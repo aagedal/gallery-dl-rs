@@ -18,6 +18,8 @@ pub struct MediaOptions {
     pub videos: VideoMode,
     /// Append a video's poster after its file, or emit only the poster when skipped.
     pub previews: bool,
+    /// Attempt supplied media URLs even when the API marks the media unavailable.
+    pub unavailable: bool,
 }
 
 pub(super) fn parse_tweet_media(
@@ -112,6 +114,14 @@ pub(super) fn select_entities<'a>(
 ) -> Result<Vec<SelectedFile>> {
     let mut selected = Vec::new();
     for item in items {
+        if !options.unavailable
+            && item
+                .pointer("/ext_media_availability/status")
+                .and_then(Value::as_str)
+                == Some("Unavailable")
+        {
+            continue;
+        }
         let video = match item.get("type").and_then(Value::as_str) {
             Some("video" | "animated_gif") => true,
             Some("photo") => false,
@@ -119,13 +129,6 @@ pub(super) fn select_entities<'a>(
         };
         if video && options.videos == VideoMode::Skip && !options.previews {
             continue;
-        }
-        if item
-            .pointer("/ext_media_availability/status")
-            .and_then(Value::as_str)
-            == Some("Unavailable")
-        {
-            return Err(error("Twitter media is unavailable"));
         }
         if video {
             match options.videos {

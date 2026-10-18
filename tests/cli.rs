@@ -1201,6 +1201,18 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             json!({"videos":true,"previews":true,"extractor":{"videos":false,"previews":false,"twitter":{"videos":"ytdl","previews":false}}}),
             vec!["videos=true", "previews=true"],
         ),
+        (
+            json!({"extractor":{"twitter":{"unavailable":true}}}),
+            vec!["unavailable=true"],
+        ),
+        (
+            json!({"extractor":{"unavailable":true,"twitter":{"unavailable":false}}}),
+            vec!["unavailable=false"],
+        ),
+        (
+            json!({"unavailable":false,"extractor":{"twitter":{"unavailable":true}}}),
+            vec!["unavailable=false"],
+        ),
     ] {
         std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
         for (url, twitter) in [
@@ -1228,7 +1240,11 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .windows(2)
                 .filter(|pair| pair[0] == "--option")
                 .map(|pair| pair[1])
-                .filter(|value| value.starts_with("videos=") || value.starts_with("previews="))
+                .filter(|value| {
+                    value.starts_with("videos=")
+                        || value.starts_with("previews=")
+                        || value.starts_with("unavailable=")
+                })
                 .collect();
             assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
             assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
@@ -1237,6 +1253,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
     std::fs::remove_file(&log).unwrap();
     for settings in [
         json!({"videos":"PRIVATE-MEDIA-VALUE"}),
+        json!({"unavailable":"PRIVATE-MEDIA-VALUE"}),
         json!({"extractor":{"twitter":{"previews":"PRIVATE-MEDIA-VALUE"}}}),
     ] {
         std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();

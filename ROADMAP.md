@@ -166,6 +166,17 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Image-size fallback chains, richer metadata, real authenticated captures, and
   companion-adapter downloads remain unfinished.
 
+
+  **Implemented unavailable-media selection:** native X now skips individually
+  marked unavailable media by default, matching upstream, instead of failing the
+  whole post. Scoped `unavailable: true` retains those media for normal validated
+  file/preview selection; protected posts and transport failures remain errors.
+  Shared selection covers ordinary media and unified cards across quotes,
+  retweets, conversations, and threads. Parser/local HTTP/configuration/CLI tests
+  verify skipped malformed fields, consecutive numbering, private errors,
+  explicit opt-in, compatibility forwarding, and cancellation. Live authenticated
+  attempts of marked media remain unverified.
+
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and
 rate limits, plus a documented manual check against a real accessible post.

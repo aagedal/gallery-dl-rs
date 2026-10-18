@@ -205,6 +205,7 @@ pub struct BackendOptions {
     pub unique: Option<bool>,
     pub videos: Option<crate::twitter::VideoMode>,
     pub previews: Option<bool>,
+    pub unavailable: Option<bool>,
     pub cards: Option<crate::twitter::CardMode>,
     pub cards_blacklist: Option<Vec<String>>,
     pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
@@ -306,6 +307,11 @@ impl Backend {
         }
         if let Some(previews) = options.previews {
             command.arg("--option").arg(format!("previews={previews}"));
+        }
+        if let Some(unavailable) = options.unavailable {
+            command
+                .arg("--option")
+                .arg(format!("unavailable={unavailable}"));
         }
         if let Some(cards) = options.cards {
             let value = match cards {

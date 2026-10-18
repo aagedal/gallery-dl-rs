@@ -1265,3 +1265,55 @@ fn twitter_card_settings_reject_private_malformed_values_and_duplicate_keys() {
         }
     }
 }
+
+#[test]
+fn twitter_unavailable_is_sparse_strict_and_preserves_false_precedence() {
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().unavailable,
+        None
+    );
+    let config =
+        parse(r#"{"extractor":{"unavailable":true,"twitter":{"unavailable":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.unavailable, Some(false));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.unavailable, Some(true));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        inherited
+            .overlay(&Options {
+                unavailable: Some(false),
+                ..Default::default()
+            })
+            .unavailable,
+        Some(false)
+    );
+    assert_eq!(parse(r#"{"unavailable":false,"extractor":{"unavailable":true,"twitter":{"unavailable":true}}}"#).unwrap().resolve("twitter").unwrap().unavailable, Some(false));
+    for value in [
+        json!(null),
+        json!(1),
+        json!("false"),
+        json!([]),
+        json!({"private-key":"private-value"}),
+    ] {
+        for document in [
+            json!({"unavailable":value}),
+            json!({"extractor":{"unavailable":value}}),
+            json!({"extractor":{"twitter":{"unavailable":value}}}),
+            json!({"extractor":{"instagram":{"unavailable":value}}}),
+            json!({"extractor":{"facebook":{"unavailable":value}}}),
+            json!({"extractor":{"direct":{"unavailable":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key") && !message.contains("private-value"));
+        }
+    }
+    for document in [
+        r#"{"unavailable":false,"unavailable":true}"#,
+        r#"{"extractor":{"unavailable":false,"unavailable":true}}"#,
+        r#"{"extractor":{"twitter":{"unavailable":false,"unavailable":true}}}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}

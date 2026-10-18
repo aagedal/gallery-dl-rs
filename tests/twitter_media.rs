@@ -16,7 +16,11 @@ fn parse(value: &Value, videos: VideoMode, previews: bool) -> gallery_dl_rs::Res
         &serde_json::to_vec(value).unwrap(),
         ID,
         ExpansionOptions::default(),
-        MediaOptions { videos, previews },
+        MediaOptions {
+            videos,
+            previews,
+            ..Default::default()
+        },
     )
 }
 fn entries(value: &mut Value) -> &mut Vec<Value> {
@@ -168,4 +172,121 @@ fn preview_images_preserve_signed_query_and_normalize_only_size() {
     );
     assert!(!poster.headers.contains_key("Cookie"));
     assert!(!serde_json::to_string(poster).unwrap().contains("headers"));
+}
+
+#[test]
+fn unavailable_media_are_skipped_before_validation_and_remaining_files_are_renumbered() {
+    let mut data = mixed();
+    entries(&mut data)[1] =
+        json!({"ext_media_availability":{"status":"Unavailable","reason":"private marker"}});
+    let options = MediaOptions::default();
+    let items = parse_response_with_media_options(
+        &serde_json::to_vec(&data).unwrap(),
+        ID,
+        ExpansionOptions::default(),
+        options,
+    )
+    .unwrap();
+    assert_eq!(items.len(), 2);
+    for (i, item) in items.iter().enumerate() {
+        let metadata = item.metadata.as_ref().unwrap();
+        assert_eq!(metadata.index, i + 1);
+        assert_eq!(metadata.media_id, (i + 1).to_string());
+        assert_eq!(item.filename, format!("{ID}_{}.jpg", i + 1));
+        assert!(item.archive_key().is_some());
+    }
+    let error = parse_response_with_media_options(
+        &serde_json::to_vec(&data).unwrap(),
+        ID,
+        ExpansionOptions::default(),
+        MediaOptions {
+            unavailable: true,
+            ..options
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(!error.contains("private"));
+    // A post whose entire media list is unavailable is an empty successful selection.
+    entries(&mut data).remove(2);
+    entries(&mut data).remove(0);
+    assert!(parse(&data, VideoMode::Files, false).unwrap().is_empty());
+}
+
+#[test]
+fn unavailable_opt_in_attempts_valid_photo_video_and_gif_urls_with_shared_preview_selection() {
+    for kind in ["photo", "video", "animated_gif"] {
+        let mut data = mixed();
+        let mut item = entries(&mut data)[if kind == "photo" { 0 } else { 1 }].clone();
+        item["type"] = json!(kind);
+        item["ext_media_availability"] = json!({"status":"Unavailable","reason":"private marker"});
+        *entries(&mut data) = vec![item];
+        for videos in [VideoMode::Files, VideoMode::Skip, VideoMode::Ytdl] {
+            for previews in [false, true] {
+                assert!(parse(&data, videos, previews).unwrap().is_empty());
+                let options = MediaOptions {
+                    videos,
+                    previews,
+                    unavailable: true,
+                };
+                let items = parse_response_with_media_options(
+                    &serde_json::to_vec(&data).unwrap(),
+                    ID,
+                    ExpansionOptions::default(),
+                    options,
+                )
+                .unwrap();
+                let count = if kind == "photo" {
+                    1
+                } else {
+                    usize::from(videos != VideoMode::Skip) + usize::from(previews)
+                };
+                assert_eq!(items.len(), count, "{kind}, {videos:?}, {previews}");
+                if kind != "photo" && previews {
+                    assert_eq!(items.last().unwrap().url.path(), "/thumbnail.jpg");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn unavailable_opt_in_does_not_replace_missing_variants_or_allow_unsafe_urls_or_protected_posts() {
+    for kind in ["photo", "video"] {
+        let mut data = mixed();
+        let mut item = entries(&mut data)[if kind == "photo" { 0 } else { 1 }].clone();
+        item["ext_media_availability"] = json!({"status":"Unavailable","reason":"private marker"});
+        if kind == "photo" {
+            item["media_url_https"] = json!("file:///private/photo.jpg");
+        } else {
+            item["video_info"] = json!({"variants":[]});
+        }
+        *entries(&mut data) = vec![item];
+        assert!(parse(&data, VideoMode::Files, false).unwrap().is_empty());
+        let error = parse_response_with_media_options(
+            &serde_json::to_vec(&data).unwrap(),
+            ID,
+            ExpansionOptions::default(),
+            MediaOptions {
+                unavailable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(!error.contains("private"));
+    }
+    let data = json!({"data":{"tweetResult":{"result":{"__typename":"TweetUnavailable","reason":"Protected"}}}});
+    let error = parse_response_with_media_options(
+        &serde_json::to_vec(&data).unwrap(),
+        ID,
+        ExpansionOptions::default(),
+        MediaOptions {
+            unavailable: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("protected"));
 }

@@ -238,7 +238,7 @@ Original-size photos, highest-bitrate direct MP4 variants, mixed-media order,
 metadata, and stable archive keys use the existing shared parser. Retweets are
 skipped and quoted posts are not expanded by default. Same-response explicit
 quote targets are reused; missing targets are fetched lazily through the fixed
-post API. Invalid media fails instead of returning thumbnails, and API/session
+post API. Invalid selected media fails instead of returning thumbnails, and API/session
 failures remain private explicit errors.
 
 Scoped `"conversations": false` (default) selects only the requested post and its
@@ -287,6 +287,15 @@ change filename and archive positions. Disabled video variants and previews are
 not parsed; an invalid enabled video still fails instead of silently returning
 its poster. Statuses, quotes, retweets, conversations, and collection streams use
 the same selection. Explicit settings forward only for X in compatibility mode.
+
+Scoped X `"unavailable": false` (default) skips individual media whose API
+availability status is `Unavailable`, before parsing their media fields. Other
+files continue in source order and are numbered consecutively. `true` keeps those
+media eligible for normal video/preview selection and URL validation. It does not
+make a protected post accessible or guarantee that its media server will serve
+the file. The setting also applies inside unified cards, quotes, retweets, and
+expanded threads; explicit values forward to compatibility mode for X. Changing
+this selection can change file/archive positions.
 
 `"videos": "ytdl"` emits a typed video-page job targeting the validated first-party
 post, optionally followed by its preview. Inspection output supports these jobs;

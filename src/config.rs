@@ -46,6 +46,8 @@ pub struct Options {
     pub videos: Option<crate::twitter::VideoMode>,
     /// Include video and animated-GIF preview images.
     pub previews: Option<bool>,
+    /// Attempt explicitly unavailable Twitter media when a URL is provided.
+    pub unavailable: Option<bool>,
     /// Select embedded Twitter card media or delegated video pages.
     pub cards: Option<crate::twitter::CardMode>,
     /// Card names excluded from extraction; an empty list clears inherited entries.
@@ -110,6 +112,7 @@ impl Options {
             unique: overrides.unique.or(self.unique),
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
+            unavailable: overrides.unavailable.or(self.unavailable),
             cards: overrides.cards.or(self.cards),
             cards_blacklist: overrides
                 .cards_blacklist
@@ -178,6 +181,7 @@ struct RawRoot {
     unique: Field,
     videos: Field,
     previews: Field,
+    unavailable: Field,
     cards: Field,
     cards_blacklist: Field,
     tweet_endpoint: Field,
@@ -216,6 +220,7 @@ struct RawExtractor {
     unique: Field,
     videos: Field,
     previews: Field,
+    unavailable: Field,
     cards: Field,
     cards_blacklist: Field,
     tweet_endpoint: Field,
@@ -257,6 +262,7 @@ struct RawOptions {
     unique: Field,
     videos: Field,
     previews: Field,
+    unavailable: Field,
     cards: Field,
     cards_blacklist: Field,
     tweet_endpoint: Field,
@@ -361,6 +367,7 @@ impl Config {
             unique: root.unique,
             videos: root.videos,
             previews: root.previews,
+            unavailable: root.unavailable,
             cards: root.cards,
             cards_blacklist: root.cards_blacklist,
             tweet_endpoint: root.tweet_endpoint,
@@ -397,6 +404,7 @@ impl Config {
             unique: extractor.unique,
             videos: extractor.videos,
             previews: extractor.previews,
+            unavailable: extractor.unavailable,
             cards: extractor.cards,
             cards_blacklist: extractor.cards_blacklist,
             tweet_endpoint: extractor.tweet_endpoint,
@@ -493,6 +501,11 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration previews must be a boolean")),
+        };
+        let unavailable = match self.unavailable.0 {
+            None => None,
+            Some(Value::Bool(value)) => Some(value),
+            Some(_) => return Err(error("native configuration unavailable must be a boolean")),
         };
         let cards = match self.cards.0 {
             None => None,
@@ -725,6 +738,7 @@ impl RawOptions {
             unique,
             videos,
             previews,
+            unavailable,
             cards,
             cards_blacklist,
             tweet_endpoint,
