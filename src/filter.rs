@@ -364,7 +364,10 @@ fn context_parts(
         {
             values.insert("id".into(), identifier(&post.post_id));
         }
-        if matches!(category, "imgur" | "bluesky" | "reddit") {
+        if matches!(
+            category,
+            "imgur" | "bluesky" | "reddit" | "pixeldrain" | "catbox" | "imgbox" | "postimg"
+        ) {
             // Upstream `id` is the image ID for files and the post ID otherwise.
             let id = if media.is_some() {
                 &post.media_id

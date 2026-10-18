@@ -328,6 +328,10 @@ struct RawExtractor {
     mastodon: Box<RawOptions>,
     kemono: Box<RawOptions>,
     coomer: Box<RawOptions>,
+    pixeldrain: Box<RawOptions>,
+    catbox: Box<RawOptions>,
+    imgbox: Box<RawOptions>,
+    postimg: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
 
@@ -451,6 +455,10 @@ impl Config {
                 "mastodon",
                 "kemono",
                 "coomer",
+                "pixeldrain",
+                "catbox",
+                "imgbox",
+                "postimg",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -565,6 +573,10 @@ impl Config {
             ("mastodon", extractor.mastodon),
             ("kemono", extractor.kemono),
             ("coomer", extractor.coomer),
+            ("pixeldrain", extractor.pixeldrain),
+            ("catbox", extractor.catbox),
+            ("imgbox", extractor.imgbox),
+            ("postimg", extractor.postimg),
             ("direct", extractor.direct),
         ] {
             // Boxed: unoptimized builds overflow the stack with inline settings.
@@ -593,6 +605,10 @@ impl Config {
                 | "mastodon"
                 | "kemono"
                 | "coomer"
+                | "pixeldrain"
+                | "catbox"
+                | "imgbox"
+                | "postimg"
                 | "direct"
         ) {
             return Err(error("unsupported native configuration category"));

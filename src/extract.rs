@@ -126,6 +126,17 @@ impl Media {
                     serde_json::json!([service, user, post.post_id, post.media_id]).to_string(),
                 )
             }
+            // Image host file IDs are global per site.
+            category @ ("pixeldrain" | "catbox" | "imgbox" | "postimg") => {
+                let post = self.metadata.as_ref()?;
+                let site = crate::imagehosts::Site::from_category(category)?;
+                if !site.media_host(&self.url)
+                    || !crate::imagehosts::valid_media_id(site, &post.media_id)
+                {
+                    return None;
+                }
+                (category, serde_json::json!([post.media_id]).to_string())
+            }
             // Booru files are identified by their site and post ID.
             category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
                 let post = self.metadata.as_ref()?;
@@ -283,6 +294,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if let Some(category) = crate::kemono::category(host) {
         return Some(category);
+    }
+    if let Some(site) = crate::imagehosts::Site::from_host(host) {
+        return Some(site.category());
     }
     for (domain, category) in [
         ("instagram.com", "instagram"),

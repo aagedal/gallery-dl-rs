@@ -222,7 +222,16 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
             && file
             || *site == "reddit" && url.host_str() == Some("i.redd.it") && file
             || (gallery_dl_rs::booru::Site::from_category(site).is_some()
-                || matches!(*site, "mastodon" | "kemono" | "coomer"))
+                || matches!(
+                    *site,
+                    "mastodon"
+                        | "kemono"
+                        | "coomer"
+                        | "pixeldrain"
+                        | "catbox"
+                        | "imgbox"
+                        | "postimg"
+                ))
                 && file)
     })
 }
@@ -397,6 +406,10 @@ async fn run(args: Args) -> Result<()> {
                     | "mastodon"
                     | "kemono"
                     | "coomer"
+                    | "pixeldrain"
+                    | "catbox"
+                    | "imgbox"
+                    | "postimg"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -573,6 +586,7 @@ struct Extractors {
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
     mastodon: OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>,
     kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
+    imagehosts: OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>,
 }
 
 impl Extractors {
@@ -794,6 +808,28 @@ fn extract_input<'a>(
                     native.events(&url)
                 }
                 Extractor::Native
+                    if gallery_dl_rs::imagehosts::Site::from_category(category).is_some() =>
+                {
+                    let native = extractors
+                        .imagehosts
+                        .get_or_init(|| async {
+                            gallery_dl_rs::imagehosts::ImageHosts::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native image host initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native
                     if let Some(site) = gallery_dl_rs::booru::Site::from_category(category) =>
                 {
                     let native = extractors.booru[site as usize]
@@ -998,6 +1034,10 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "mastodon",
         "kemono",
         "coomer",
+        "pixeldrain",
+        "catbox",
+        "imgbox",
+        "postimg",
         "direct",
     ] {
         let options = defaults
