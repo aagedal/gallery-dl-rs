@@ -1717,6 +1717,7 @@ fn fallback_configuration_controls_actual_download_attempts() {
                     }
                     Err(error) => panic!("fallback fixture accept: {error}"),
                 };
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(1)))
                     .unwrap();

@@ -121,17 +121,26 @@ struct State {
     user_id: Option<String>,
     cursor: Option<String>,
     seen: HashSet<[u8; 32]>,
-    pending: VecDeque<Media>,
+    pending: VecDeque<ExtractionEvent>,
     done: bool,
     budget: Duration,
 }
 
 impl Instagram {
+    #[cfg(test)]
     pub(super) fn collection_stream(
         &self,
         input: CollectionInput,
         base: Url,
     ) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.collection_events(input, base))
+    }
+
+    pub(super) fn collection_events(
+        &self,
+        input: CollectionInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         let user_id = match &input.source {
             Source::Posts(User::Id(id))
             | Source::Reels(User::Id(id))
@@ -315,7 +324,7 @@ impl Instagram {
             for item in &mut media {
                 self.network.apply_media(item);
             }
-            pending.extend(media);
+            pending.extend(event::group(media, "instagram"));
         }
         state.pending = pending;
         state.cursor = cursor.map(|(cursor, digest)| {

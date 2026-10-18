@@ -709,8 +709,58 @@ optimizations; native extractors still parse a whole response page or post.
 Compatibility positions count the resolved media stream for an entire input,
 including flattened child extractors; counters do not yet reset at nested child
 boundaries. The separate compatibility configuration can apply its own selection
-before Rust receives media. Post/child ranges and their expression filters remain
+before Rust receives media. Child ranges and child expression filters remain
 unimplemented.
+
+## Post selection
+
+`--post-range '2-5'` selects whole posts, and repeated `--post-filter EXPR`
+clauses require all expressions to match a post. Both work with native and
+compatibility extraction, downloads, and inspection. For example:
+
+```sh
+gallery-dl-rs --post-filter "count >= 2" --post-range '1-3' URL
+```
+
+Scoped `post-range` accepts the same string/list syntax and limits as
+`file-range`; scoped `post-filter` accepts the same string/list expressions and
+limits as `file-filter`. Empty strings/lists clear inherited settings. Explicit
+CLI values replace configured values. Counters start at one for each input URL.
+
+With post selection enabled, dates apply to post timestamps, followed by post
+filters, post ranges, file filters, file ranges, global deduplication, and archive
+checks. Rejected posts do not occupy post-range positions. All files in a selected
+post remain eligible for file selection; their original indices and archive
+identities stay unchanged. Rejected posts create no media, sidecars, or archive
+entries. Missing timestamps pass date selection. Without post selection, dates
+retain their existing per-file behavior.
+
+Post expressions use the file-filter expression language and normalized public
+post fields, including available IDs, caption, username, timestamp, community,
+article, and declared `count`. File-specific fields such as `url`, `extension`,
+dimensions, `metadata.file`, `media_id`, and `index`/`num` are absent. Missing keys
+and evaluation errors reject the current post; invalid syntax fails before
+extraction. A declared count is descriptive and never truncates a post.
+
+Explicit extractor events define posts rather than changes in IDs. An Instagram
+carousel is one post, as is a whole story/highlight reel. A returned empty reel
+occupies a position; an absent/expired reel does not. Each accepted X tweet batch
+is a post; quotes and thread tweets have separate boundaries. X text-only tweets
+skipped by extraction do not occupy positions. Each Facebook album photo is a
+post, while a single video's video/audio files share one post. Direct URLs each
+form one post. Empty compatibility directory events also occupy positions.
+
+Empty ranges start no extraction. Finite native post ranges stop at the selected
+post's end, without requesting later posts. Compatibility output has no explicit
+end marker: Rust must read the next directory event or validated EOF to finish a
+post, which can require upstream work for the next post. Compatibility counters
+cover flattened child extractors for the whole input; nested child boundaries
+and child predicates remain unimplemented.
+
+Library callers can consume `ExtractionEvent::Post`, `Media`, and `EndPost`
+through native `events` methods or `Backend::events_with_options`. Existing
+media-only stream methods remain available; `event::media_only` adapts event
+streams without inferring boundaries from file identities.
 
 ## Metadata file filters
 
@@ -730,7 +780,7 @@ Normal root/category/default precedence applies; explicit CLI clauses replace
 configured clauses. Rust applies the filter itself; it does not forward another
 filter to the compatibility executable.
 
-Dates are selected first, then metadata filters, then file ranges, global
+Dates and any post selection run first, then metadata file filters, file ranges, global
 deduplication, and archive checks. Rejected files do not consume `--range`
 positions. Original per-post `index`/`num` metadata and archive identities stay
 unchanged. Reaching the final selected range position drops upstream immediately;
@@ -862,7 +912,7 @@ Neither configuration file is loaded automatically.
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
-`file-filter`, `image-filter`,
+`file-filter`, `image-filter`, `post-range`, `post-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
 `expand`, `unique`, `videos`, `previews`, `unavailable`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,

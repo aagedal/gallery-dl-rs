@@ -347,3 +347,84 @@ async fn failed_backend_without_json_preserves_its_failure_diagnostic() {
     );
     assert!(items.next().await.is_none());
 }
+
+#[tokio::test]
+async fn explicit_post_events_keep_empty_posts_and_treat_count_only_as_metadata() {
+    use gallery_dl_rs::{event::ExtractionEvent, extract::BackendOptions};
+    use serde_json::json;
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(root.path(), "cat \"$0.data\"", Duration::from_secs(3));
+    let data = json!([
+        [2,{"tweet_id":"100","count":0,"author":{"name":"owner"},"width":999,"_http_headers":{"Authorization":"PRIVATE_SECRET"}}],
+        [3,"https://cdn.example/a.jpg",{"tweet_id":"100","num":1,"filename":"a","extension":"jpg"}],
+        [3,"https://cdn.example/b.jpg",{"tweet_id":"100","num":2,"filename":"b","extension":"jpg"}],
+        [2,"",{"tweet_id":"200","count":0}]
+    ]);
+    std::fs::write(
+        root.path().join("backend.data"),
+        serde_json::to_vec(&data).unwrap(),
+    )
+    .unwrap();
+    let events = backend
+        .events_with_options(&social_url(), BackendOptions::default())
+        .collect::<Vec<_>>()
+        .await;
+    let events = events
+        .into_iter()
+        .collect::<gallery_dl_rs::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(events.len(), 6);
+    let ExtractionEvent::Post(post) = &events[0] else {
+        panic!("missing post");
+    };
+    assert_eq!(post.count, Some(0));
+    assert_eq!(post.metadata.as_ref().unwrap().post_id, "100");
+    assert!(post.metadata.as_ref().unwrap().file.is_none());
+    assert!(post.metadata.as_ref().unwrap().media_id.is_empty());
+    assert!(!format!("{post:?}").contains("PRIVATE_SECRET"));
+    assert!(matches!(&events[1], ExtractionEvent::Media(_)));
+    assert!(matches!(&events[2], ExtractionEvent::Media(_)));
+    assert!(matches!(&events[3], ExtractionEvent::EndPost));
+    assert!(matches!(&events[4], ExtractionEvent::Post(_)));
+    assert!(matches!(&events[5], ExtractionEvent::EndPost));
+}
+
+#[tokio::test]
+async fn directory_only_events_succeed_while_legacy_media_api_keeps_no_media_error() {
+    use gallery_dl_rs::{event::ExtractionEvent, extract::BackendOptions};
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(
+        root.path(),
+        "printf '%s' '[[2,{\"count\":0}]]'",
+        Duration::from_secs(3),
+    );
+    let events = backend
+        .events_with_options(&social_url(), BackendOptions::default())
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(events.len(), 2);
+    assert!(matches!(&events[0], Ok(ExtractionEvent::Post(_))));
+    assert!(matches!(&events[1], Ok(ExtractionEvent::EndPost)));
+    let legacy = backend.stream(&social_url()).collect::<Vec<_>>().await;
+    assert_eq!(legacy.len(), 1);
+    assert!(legacy[0].is_err());
+}
+
+#[tokio::test]
+async fn terminal_process_errors_never_publish_a_successful_end_post() {
+    use gallery_dl_rs::{event::ExtractionEvent, extract::BackendOptions};
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(
+        root.path(),
+        "printf '%s' '[[2,{\"tweet_id\":\"100\"}],[3,\"https://cdn.example/a.jpg\",{}]]'\nexit 7",
+        Duration::from_secs(3),
+    );
+    let events = backend
+        .events_with_options(&social_url(), BackendOptions::default())
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(events.len(), 3);
+    assert!(matches!(&events[0], Ok(ExtractionEvent::Post(_))));
+    assert!(matches!(&events[1], Ok(ExtractionEvent::Media(_))));
+    assert!(events[2].is_err());
+}

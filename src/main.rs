@@ -12,6 +12,7 @@ use gallery_dl_rs::{
     date::{DateFilter, parse_date},
     download::{self, DownloadOptions, Outcome},
     error,
+    event::{self, ExtractionEvent},
     extract::{self, Backend, BackendOptions},
     facebook::Facebook,
     filter::FilterExpression,
@@ -19,6 +20,7 @@ use gallery_dl_rs::{
     instagram::Instagram,
     naming::{DirectoryTemplate, FilenameTemplate},
     network::NetworkOptions,
+    post_selection::PostSelection,
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
     twitter::{
@@ -62,6 +64,12 @@ struct Args {
     /// Select files with a metadata expression; repeat to require all expressions
     #[arg(long = "filter", value_name = "EXPR", allow_hyphen_values = true)]
     file_filter: Vec<String>,
+    /// Select one-based post positions per input
+    #[arg(long = "post-range", allow_hyphen_values = true)]
+    post_range: Option<String>,
+    /// Select posts before file filtering; repeat to require all expressions
+    #[arg(long = "post-filter", value_name = "EXPR", allow_hyphen_values = true)]
+    post_filter: Vec<String>,
     /// Process posts created before this UTC date or Unix timestamp (exclusive)
     #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
     date_before: Option<i64>,
@@ -230,16 +238,26 @@ async fn run(args: Args) -> Result<()> {
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
                         Some(settings) => {
-                            let input = if settings.options.date_before.is_some()
-                                || settings.options.date_after.is_some()
-                            {
-                                if unordered_dates {
-                                    settings.dates.apply_unordered(input)
-                                } else {
-                                    settings.dates.apply(input)
-                                }
+                            let input = if let Some(selection) = &settings.post_selection {
+                                selection.apply(
+                                    input,
+                                    settings.options.date_before,
+                                    settings.options.date_after,
+                                    unordered_dates,
+                                )
                             } else {
-                                input
+                                let input = event::media_only(input);
+                                if settings.options.date_before.is_some()
+                                    || settings.options.date_after.is_some()
+                                {
+                                    if unordered_dates {
+                                        settings.dates.apply_unordered(input)
+                                    } else {
+                                        settings.dates.apply(input)
+                                    }
+                                } else {
+                                    input
+                                }
                             };
                             let input = match &settings.filter {
                                 Some(filter) => filter.apply(input),
@@ -250,7 +268,7 @@ async fn run(args: Args) -> Result<()> {
                                 None => input,
                             }
                         }
-                        None => input,
+                        None => event::media_only(input),
                     }
                 }
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
@@ -411,10 +429,10 @@ fn extract_input<'a>(
     backend: &'a Backend,
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
-) -> BoxStream<'a, Result<extract::Media>> {
+) -> BoxStream<'a, Result<ExtractionEvent>> {
     stream::once(async move {
         let url = extract::http_url(&source)?;
-        let input: BoxStream<'a, Result<extract::Media>> = if let Some(category) =
+        let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             extract::social_site(&url)
         {
             let configured = &settings[category];
@@ -440,7 +458,7 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Instagram initialization failed: {e}"))
                         })?;
-                    native.stream(&url)
+                    native.events(&url)
                 }
                 Extractor::Native if category == "twitter" => {
                     let native = extractors
@@ -500,7 +518,7 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Twitter initialization failed: {e}")))?;
-                    native.stream(&url)
+                    native.events(&url)
                 }
                 Extractor::Native if category == "facebook" => {
                     let native = extractors
@@ -522,7 +540,7 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Facebook initialization failed: {e}"))
                         })?;
-                    native.stream(&url)
+                    native.events(&url)
                 }
                 Extractor::Native => {
                     return Err(error(
@@ -532,7 +550,7 @@ fn extract_input<'a>(
                 Extractor::Compatibility => {
                     let mut backend = backend.clone();
                     backend.cookies = options.cookies.clone();
-                    backend.stream_with_options(
+                    backend.events_with_options(
                         &url,
                         BackendOptions {
                             browser: configured.browser_spec.clone(),
@@ -591,7 +609,7 @@ fn extract_input<'a>(
                 }
             }
         } else if let Some(item) = extract::direct(&url) {
-            stream::once(async move { Ok(item) }).boxed()
+            stream::iter(event::group(vec![item], "direct").into_iter().map(Ok)).boxed()
         } else {
             return Err(error(
                 "unsupported URL; expected a social URL or direct media file",
@@ -611,6 +629,7 @@ struct Settings {
     directory: Option<DirectoryTemplate>,
     selection: Option<RangeSelection>,
     filter: Option<FilterExpression>,
+    post_selection: Option<PostSelection>,
     dates: DateFilter,
     network: NetworkOptions,
     download_client: OnceCell<Result<download::DownloadClient>>,
@@ -636,6 +655,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         filename: args.filename.clone(),
         file_range: args.file_range.clone(),
         file_filter: (!args.file_filter.is_empty()).then(|| args.file_filter.clone()),
+        post_range: args.post_range.clone(),
+        post_filter: (!args.post_filter.is_empty()).then(|| args.post_filter.clone()),
         date_before: args.date_before,
         date_after: args.date_after,
         directory: if args.exact_directory.is_some() {
@@ -714,6 +735,20 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .as_deref()
             .map(FilterExpression::parse_all)
             .transpose()?;
+        let post_range = options
+            .post_range
+            .as_deref()
+            .map(RangeSelection::parse)
+            .transpose()
+            .map_err(|_| error("invalid post range"))?;
+        let post_filter = options
+            .post_filter
+            .as_deref()
+            .filter(|clauses| !clauses.is_empty())
+            .map(FilterExpression::parse_all)
+            .transpose()?;
+        let post_selection = (post_range.is_some() || post_filter.is_some())
+            .then(|| PostSelection::new(post_range, post_filter));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
         let dates = DateFilter::new(options.date_before, options.date_after)?;
@@ -727,6 +762,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 directory,
                 selection,
                 filter,
+                post_selection,
                 dates,
                 network,
                 download_client: OnceCell::new(),

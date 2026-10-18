@@ -512,3 +512,30 @@ async fn dropping_pending_collection_request_prevents_next_page() {
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert_eq!(server.count(), 1);
 }
+
+#[tokio::test]
+async fn collection_events_use_each_parsed_post_boundary_instead_of_media_id_changes() {
+    // Repeated source posts remain separate upstream directories even when their
+    // stable file IDs happen to match. Selection must not infer boundaries.
+    let server = Server::new(vec![wrapped(
+        vec![post("64", "BA", "42"), post("64", "BA", "42")],
+        None,
+    )]);
+    let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+    let events: Vec<_> = native
+        .collection_events(input("fixture/saved/"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 6);
+    for chunk in events.chunks(3) {
+        let ExtractionEvent::Post(post) = &chunk[0] else {
+            panic!("expected parsed post boundary")
+        };
+        assert_eq!(post.count, Some(1));
+        assert_eq!(post.metadata.as_ref().unwrap().post_id, "64");
+        assert!(matches!(chunk[1], ExtractionEvent::Media(_)));
+        assert!(matches!(chunk[2], ExtractionEvent::EndPost));
+    }
+    assert_eq!(server.count(), 1);
+}

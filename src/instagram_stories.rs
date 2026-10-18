@@ -126,17 +126,26 @@ struct State {
     base: Url,
     initialized: bool,
     reels: VecDeque<Reel>,
-    pending: VecDeque<Media>,
+    pending: VecDeque<ExtractionEvent>,
     done: bool,
     budget: Duration,
 }
 
 impl Instagram {
+    #[cfg(test)]
     pub(super) fn story_stream(
         &self,
         input: StoryInput,
         base: Url,
     ) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.story_events(input, base))
+    }
+
+    pub(super) fn story_events(
+        &self,
+        input: StoryInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         let state = State {
             input,
             base,
@@ -298,13 +307,61 @@ impl Instagram {
         let data = self.request_json(&endpoint, "", state.budget).await?;
         validate_response(&data)?;
         let mut items = parse_reel(&data, &reel)?;
+        state.done = state.reels.is_empty();
+        if data
+            .get("reels_media")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        {
+            // An absent/expired reel is not an upstream directory. A returned
+            // reel whose items array is empty still emits its post boundary.
+            return Ok(());
+        }
         for item in &mut items {
             self.network.apply_media(item);
         }
-        state.pending = items.into();
-        state.done = state.reels.is_empty();
+        let metadata = reel_metadata(&data, &reel)?;
+        state.pending = event::group(items, "instagram");
+        if let Some(ExtractionEvent::Post(post)) = state.pending.front_mut() {
+            post.metadata = Some(metadata);
+        }
         Ok(())
     }
+}
+
+fn reel_metadata(data: &Value, expected: &Reel) -> Result<PostMetadata> {
+    // Reel IDs and dates belong to the upstream directory event. Story file IDs
+    // remain independent, including when selecting one item inside a reel.
+    let id = expected.id.rsplit(':').next().unwrap();
+    let numeric_id = id
+        .parse::<u64>()
+        .map_err(|_| error("invalid Instagram reel identifier"))?;
+    let reel = data
+        .get("reels_media")
+        .and_then(Value::as_array)
+        .and_then(|reels| reels.first());
+    let timestamp = reel.and_then(|reel| {
+        ["taken_at", "created_at", "seen"]
+            .into_iter()
+            .filter_map(|field| reel.get(field).and_then(Value::as_i64))
+            .find(|timestamp| *timestamp != 0)
+            .or_else(|| {
+                reel.get("expiring_at")
+                    .and_then(Value::as_i64)
+                    .and_then(|expires| expires.checked_sub(86400))
+            })
+    });
+    Ok(PostMetadata {
+        post_id: id.into(),
+        shortcode: shortcode_from_id(numeric_id),
+        username: reel
+            .and_then(|reel| reel.pointer("/user/username"))
+            .and_then(Value::as_str)
+            .map(std::sync::Arc::from)
+            .or_else(|| expected.username.as_deref().map(std::sync::Arc::from)),
+        timestamp,
+        ..Default::default()
+    })
 }
 
 fn tray(data: &Value) -> Result<&Vec<Value>> {

@@ -1,5 +1,10 @@
 # Native album parser protocol fixtures
 
+Local runtime tests also cover explicit post events: every album photo has one
+post/media/end group, and downstream post-range termination avoids the next
+navigation request. Single-photo/video transport tests check one group for a
+photo or a video's video/audio siblings, with unchanged file/archive identities.
+
 These are **synthetic minimal protocol examples**, not captured authenticated Facebook responses. The JSON envelope and the nesting of the ordered collection are not live verified. They exercise conservative accepted structures and error behavior; they do not establish production album support.
 
 Primary upstream references:

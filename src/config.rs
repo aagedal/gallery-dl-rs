@@ -34,6 +34,10 @@ pub struct Options {
     pub file_range: Option<String>,
     /// AND-combined media filters, with an empty list clearing inherited clauses.
     pub file_filter: Option<Vec<String>>,
+    /// One-based explicit post ranges, independent of file positions.
+    pub post_range: Option<String>,
+    /// AND-combined post metadata filters.
+    pub post_filter: Option<Vec<String>>,
     pub date_before: Option<i64>,
     pub date_after: Option<i64>,
     /// Whether to include reposts, optionally under the original author.
@@ -116,6 +120,14 @@ impl Options {
                 .file_filter
                 .clone()
                 .or_else(|| self.file_filter.clone()),
+            post_range: overrides
+                .post_range
+                .clone()
+                .or_else(|| self.post_range.clone()),
+            post_filter: overrides
+                .post_filter
+                .clone()
+                .or_else(|| self.post_filter.clone()),
             date_before: overrides.date_before.or(self.date_before),
             date_after: overrides.date_after.or(self.date_after),
             retweets: overrides.retweets.or(self.retweets),
@@ -190,6 +202,8 @@ struct RawRoot {
     file_range: Field,
     file_filter: Field,
     image_filter: Field,
+    post_range: Field,
+    post_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -234,6 +248,8 @@ struct RawExtractor {
     file_range: Field,
     file_filter: Field,
     image_filter: Field,
+    post_range: Field,
+    post_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -281,6 +297,8 @@ struct RawOptions {
     file_range: Field,
     file_filter: Field,
     image_filter: Field,
+    post_range: Field,
+    post_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -391,6 +409,8 @@ impl Config {
             file_range: root.file_range,
             file_filter: root.file_filter,
             image_filter: root.image_filter,
+            post_range: root.post_range,
+            post_filter: root.post_filter,
             date_before: root.date_before,
             date_after: root.date_after,
             retweets: root.retweets,
@@ -433,6 +453,8 @@ impl Config {
             file_range: extractor.file_range,
             file_filter: extractor.file_filter,
             image_filter: extractor.image_filter,
+            post_range: extractor.post_range,
+            post_filter: extractor.post_filter,
             date_before: extractor.date_before,
             date_after: extractor.date_after,
             retweets: extractor.retweets,
@@ -498,12 +520,14 @@ impl Config {
 
 impl RawOptions {
     fn resolve(self, directory: &Path) -> Result<Options> {
-        let primary_filter = filter_clauses(self.file_filter)?;
-        let alias_filter = filter_clauses(self.image_filter)?;
+        let primary_filter = filter_clauses(self.file_filter, "file-filter")?;
+        let alias_filter = filter_clauses(self.image_filter, "image-filter")?;
         let file_filter = match primary_filter {
             Some(primary) if !primary.is_empty() => Some(primary),
             primary => alias_filter.or(primary),
         };
+        let post_filter = filter_clauses(self.post_filter, "post-filter")?;
+        let post_range = range_spec(self.post_range, "post-range")?;
         let retweets = match self.retweets.0 {
             None => None,
             Some(Value::Bool(false)) => Some(crate::twitter::RetweetMode::Skip),
@@ -720,29 +744,7 @@ impl RawOptions {
             Some(Value::String(value)) if value == "auto" => Some(3),
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
-        let file_range = match self.file_range.0 {
-            None => None,
-            Some(value) => {
-                let invalid = || {
-                    error(
-                        "native configuration file-range must be a supported range string or list of strings",
-                    )
-                };
-                let spec = match value {
-                    Value::String(spec) if spec.is_empty() => ":".into(),
-                    Value::String(spec) => spec,
-                    Value::Array(values) if values.is_empty() => ":".into(),
-                    Value::Array(values) if !values.is_empty() && values.len() <= 256 => values
-                        .iter()
-                        .map(|v| v.as_str().ok_or_else(invalid))
-                        .collect::<Result<Vec<_>>>()?
-                        .join(","),
-                    _ => return Err(invalid()),
-                };
-                RangeSelection::parse(&spec).map_err(|_| invalid())?;
-                Some(spec)
-            }
-        };
+        let file_range = range_spec(self.file_range, "file-range")?;
         let filename = match self.filename.0 {
             None => None,
             Some(Value::String(value)) => {
@@ -816,6 +818,8 @@ impl RawOptions {
             filename,
             file_range,
             file_filter,
+            post_range,
+            post_filter,
             date_before: date(self.date_before)?,
             date_after: date(self.date_after)?,
             retweets,
@@ -849,9 +853,35 @@ impl RawOptions {
     }
 }
 
-fn filter_clauses(field: Field) -> Result<Option<Vec<String>>> {
+fn range_spec(field: Field, name: &str) -> Result<Option<String>> {
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
     let invalid = || {
-        error("native configuration file-filter or image-filter requires valid bounded expressions")
+        error(format!(
+            "native configuration {name} must be a supported range string or list of strings"
+        ))
+    };
+    let spec = match value {
+        Value::String(spec) if spec.is_empty() => ":".into(),
+        Value::String(spec) => spec,
+        Value::Array(values) if values.is_empty() => ":".into(),
+        Value::Array(values) if values.len() <= 256 => values
+            .iter()
+            .map(|value| value.as_str().ok_or_else(invalid))
+            .collect::<Result<Vec<_>>>()?
+            .join(","),
+        _ => return Err(invalid()),
+    };
+    RangeSelection::parse(&spec).map_err(|_| invalid())?;
+    Ok(Some(spec))
+}
+
+fn filter_clauses(field: Field, name: &str) -> Result<Option<Vec<String>>> {
+    let invalid = || {
+        error(format!(
+            "native configuration {name} requires valid bounded expressions"
+        ))
     };
     let Some(value) = field.0 else {
         return Ok(None);

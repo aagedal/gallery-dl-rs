@@ -1611,3 +1611,111 @@ fn file_filter_aliases_reject_private_invalid_syntax_types_bounds_and_duplicate_
         }
     }
 }
+
+#[test]
+fn post_selection_scopes_replace_and_clear_independently_from_file_selection() {
+    let config = parse(r#"{"extractor":{"post-range":"1-3","post-filter":"post_id > 100","file-range":"5","file-filter":"width > 1000","twitter":{"post-range":["2","4-6"],"post-filter":["post_id > 200","count > 0"]}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.post_range.as_deref(), Some("2,4-6"));
+    assert_eq!(
+        twitter.post_filter,
+        Some(vec!["post_id > 200".into(), "count > 0".into()])
+    );
+    assert_eq!(twitter.file_range.as_deref(), Some("5"));
+    assert_eq!(twitter.file_filter, Some(vec!["width > 1000".into()]));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.post_range.as_deref(), Some("1-3"));
+    assert_eq!(inherited.post_filter, Some(vec!["post_id > 100".into()]));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let explicit = twitter.overlay(&Options {
+        post_range: Some("7:".into()),
+        post_filter: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(explicit.post_range.as_deref(), Some("7:"));
+    assert_eq!(explicit.post_filter, Some(vec![]));
+    assert_eq!(explicit.file_filter, twitter.file_filter);
+    for empty in [serde_json::json!(""), serde_json::json!([])] {
+        let root = serde_json::json!({"post-range":empty,"post-filter":empty,"extractor":{"post-range":"0","post-filter":"False","twitter":{"post-range":"2","post-filter":"True"}}});
+        for category in ["twitter", "instagram", "facebook", "direct"] {
+            let resolved = parse(&root.to_string()).unwrap().resolve(category).unwrap();
+            assert_eq!(resolved.post_range.as_deref(), Some(":"));
+            assert_eq!(resolved.post_filter, Some(vec![]));
+        }
+    }
+    let absent = parse("{}").unwrap().resolve("direct").unwrap();
+    assert_eq!(absent.post_range, None);
+    assert_eq!(absent.post_filter, None);
+    assert!(
+        parse(
+            &serde_json::json!({"post-range":vec!["1";256],"post-filter":vec!["count > 0";32]})
+                .to_string()
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn post_selection_invalid_types_syntax_and_bounds_fail_privately_in_all_scopes() {
+    use serde_json::json;
+    let ranges = [
+        json!(null),
+        json!(false),
+        json!(1),
+        json!({"private-key":"private-value"}),
+        json!([1]),
+        json!("PRIVATE-POST-VALUE"),
+        json!("1::0"),
+        json!("1".repeat(4097)),
+        json!(vec!["1"; 257]),
+    ];
+    let filters = [
+        json!(null),
+        json!(false),
+        json!(1),
+        json!({"private-key":"private-value"}),
+        json!([1]),
+        json!([""]),
+        json!("PRIVATE-POST-VALUE > )"),
+        json!(vec!["True"; 33]),
+        json!(format!("True{}", " ".repeat(16 * 1024))),
+        json!(vec![format!("True{}", " ".repeat(16 * 1024 - 4)); 5]),
+    ];
+    for (field, values) in [
+        ("post-range", ranges.as_slice()),
+        ("post-filter", filters.as_slice()),
+    ] {
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(message.contains(field), "{message}");
+                for private in ["private-key", "private-value", "PRIVATE-POST-VALUE"] {
+                    assert!(!message.contains(private));
+                }
+            }
+        }
+        let value = if field == "post-range" {
+            "\"1\""
+        } else {
+            "\"True\""
+        };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}

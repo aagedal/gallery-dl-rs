@@ -4972,3 +4972,277 @@ async fn community_feeds_cancel_active_pages_and_report_late_authentication_priv
         assert_eq!(server.count(), 2);
     }
 }
+
+fn event_shape(events: &[crate::event::ExtractionEvent]) -> Vec<(char, String, usize)> {
+    use crate::event::ExtractionEvent;
+    events
+        .iter()
+        .map(|event| match event {
+            ExtractionEvent::Post(post) => {
+                ('P', post.metadata.as_ref().unwrap().post_id.clone(), 0)
+            }
+            ExtractionEvent::Media(media) => {
+                let metadata = media.metadata.as_ref().unwrap();
+                ('M', metadata.post_id.clone(), metadata.index)
+            }
+            ExtractionEvent::EndPost => ('E', String::new(), 0),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn explicit_events_skip_empty_posts_and_group_all_media_siblings_once() {
+    let mut siblings = tweet("100");
+    let photo = siblings["legacy"]["extended_entities"]["media"][0].clone();
+    siblings["legacy"]["extended_entities"]["media"] = json!([photo.clone(), photo]);
+    let mut skipped_retweet = tweet("98");
+    skipped_retweet["legacy"]["retweeted_status_id_str"] = json!("99");
+    let server = Server::new(vec![Response::json(page(
+        vec![
+            text_tweet("97"),
+            skipped_retweet,
+            siblings,
+            text_tweet("101"),
+            tweet("102"),
+        ],
+        None,
+    ))]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let events: Vec<_> = native
+        .profile_events(
+            input("id:42"),
+            timeline::ProfileTab::Media,
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        event_shape(&events),
+        vec![
+            ('P', "100".into(), 0),
+            ('M', "100".into(), 1),
+            ('M', "100".into(), 2),
+            ('E', String::new(), 0),
+            ('P', "102".into(), 0),
+            ('M', "102".into(), 1),
+            ('E', String::new(), 0)
+        ]
+    );
+    if let crate::event::ExtractionEvent::Post(post) = &events[0] {
+        assert_eq!(post.category, "twitter");
+        assert_eq!(post.count, Some(2));
+        let metadata = post.metadata.as_ref().unwrap();
+        assert!(metadata.file.is_none());
+        assert!(metadata.media_id.is_empty());
+        assert_eq!(metadata.index, 0);
+    } else {
+        panic!("expected first explicit post boundary");
+    }
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn explicit_quote_events_preserve_backpressure_and_parent_end_without_fetching_next_post() {
+    use crate::event::ExtractionEvent;
+    for stop_after_parent in [false, true] {
+        let server = Server::new(vec![
+            Response::json(post_response(quoted_tweet("100", "101"))),
+            Response::json(post_response(tweet("101"))),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_expansion(expansion_options(RetweetMode::Skip));
+        let mut stream = native.post_events_at(local_post_endpoint(&server, "100"), "100".into());
+        assert_eq!(server.count(), 0);
+        let post = stream.next().await.unwrap().unwrap();
+        assert!(
+            matches!(post,ExtractionEvent::Post(ref post) if post.count==Some(1)&&post.metadata.as_ref().unwrap().post_id=="100")
+        );
+        assert_eq!(server.count(), 1);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(server.count(), 1);
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap(),
+            ExtractionEvent::Media(_)
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap(),
+            ExtractionEvent::EndPost
+        ));
+        assert_eq!(server.count(), 1);
+        if stop_after_parent {
+            drop(stream);
+            assert_eq!(server.count(), 1);
+        } else {
+            let rest: Vec<_> = stream.try_collect().await.unwrap();
+            assert_eq!(
+                event_shape(&rest),
+                vec![
+                    ('P', "101".into(), 0),
+                    ('M', "101".into(), 1),
+                    ('E', String::new(), 0)
+                ]
+            );
+            assert_eq!(server.count(), 2);
+        }
+    }
+}
+
+#[tokio::test]
+async fn explicit_event_boundaries_survive_repeated_post_ids_when_unique_is_disabled() {
+    for unique in [false, true] {
+        let server = Server::new(vec![
+            Response::json(page(vec![tweet("100")], Some("next"))),
+            Response::json(page(vec![tweet("100"), tweet("101")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_thread_options(ThreadOptions {
+                expand: false,
+                unique,
+            });
+        let events: Vec<_> = native
+            .profile_events(
+                input("id:42"),
+                timeline::ProfileTab::Media,
+                server.base.clone(),
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        let ids: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                crate::event::ExtractionEvent::Post(post) => {
+                    Some(post.metadata.as_ref().unwrap().post_id.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            if unique {
+                vec!["100", "101"]
+            } else {
+                vec!["100", "100", "101"]
+            }
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, crate::event::ExtractionEvent::EndPost))
+                .count(),
+            ids.len()
+        );
+        assert_eq!(events.len(), ids.len() * 3);
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn explicit_events_are_produced_by_every_native_source_without_followup_after_end() {
+    for source in [
+        "profile",
+        "root",
+        "search",
+        "bookmarks",
+        "community",
+        "detail",
+        "rest",
+    ] {
+        let mut responses = Vec::new();
+        if source == "root" {
+            responses.push(Response::json(user()));
+        }
+        let body = match source {
+            "search" => search_page(vec![tweet("100")], None),
+            "bookmarks" => feed_page(
+                &collections::Collection::Bookmarks,
+                vec![tweet("100")],
+                None,
+            ),
+            "community" => feed_page(
+                &collections::Collection::Community("55".into()),
+                vec![tweet("100")],
+                None,
+            ),
+            "detail" => detail_page(vec![tweet("100")], None),
+            "rest" => post_response(tweet("100")),
+            _ => page(vec![tweet("100")], None),
+        };
+        responses.push(Response::json(body));
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3)).await;
+        let stream = match source {
+            "profile" => native.profile_events(
+                input("id:42"),
+                timeline::ProfileTab::Media,
+                server.base.clone(),
+            ),
+            "root" => native.timeline_events(input("id:42"), server.base.clone()),
+            "search" => native.search_events("fixture".into(), server.base.clone()),
+            "bookmarks" => {
+                native.feed_events(collections::Collection::Bookmarks, server.base.clone())
+            }
+            "community" => native.feed_events(
+                collections::Collection::Community("55".into()),
+                server.base.clone(),
+            ),
+            "detail" => native.detail_events_at(server.base.clone(), "100".into()),
+            _ => native.post_events_at(local_post_endpoint(&server, "100"), "100".into()),
+        };
+        let events: Vec<_> = stream.take(3).try_collect().await.unwrap();
+        assert_eq!(
+            event_shape(&events),
+            vec![
+                ('P', "100".into(), 0),
+                ('M', "100".into(), 1),
+                ('E', String::new(), 0)
+            ],
+            "{source}"
+        );
+        assert_eq!(
+            server.count(),
+            if source == "root" { 2 } else { 1 },
+            "{source}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn expanded_thread_events_end_before_requesting_another_child_page_or_parent() {
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![
+                in_thread(tweet("100"), json!("90")),
+                in_thread(tweet("101"), json!("80")),
+            ],
+            Some("parent-next"),
+        )),
+        Response::json(detail_page(vec![tweet("90")], Some("child-next"))),
+        Response::json(detail_page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true));
+    let events: Vec<_> = native
+        .profile_events(
+            input("id:42"),
+            timeline::ProfileTab::Media,
+            server.base.clone(),
+        )
+        .take(3)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        event_shape(&events),
+        vec![
+            ('P', "90".into(), 0),
+            ('M', "90".into(), 1),
+            ('E', String::new(), 0)
+        ]
+    );
+    assert_eq!(server.count(), 2);
+}

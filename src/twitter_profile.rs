@@ -1,5 +1,6 @@
 //! Lazy authenticated profile tab traversal. Query IDs are upstream snapshots.
 use super::*;
+use crate::event::{self, ExtractionEvent};
 use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
 use timeline::{ProfileInput, ProfileTab};
@@ -31,7 +32,7 @@ struct State {
     cursors: HashSet<[u8; 32]>,
     empty_pages: u16,
     seen: HashSet<[u8; 32]>,
-    pending: VecDeque<Media>,
+    pending: VecDeque<ExtractionEvent>,
     posts: VecDeque<(String, Value)>,
     expansion: Option<expansion::Engine>,
     thread: Option<threads::Frame>,
@@ -45,29 +46,34 @@ impl Twitter {
     /// Extract a status or lazily traverse experimental profile tabs.
     /// Downstream pauses do not consume the cumulative active extraction budget.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.events(url))
+    }
+
+    /// Explicit post boundaries from accepted native expansion batches.
+    pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         if let Ok(id) = post_id(url) {
-            return self.status_stream(id);
+            return self.status_events(id);
         }
         match search::input(url) {
             Ok(Some(query)) => {
                 return self
-                    .search_stream(query, Url::parse("https://x.com/i/api/graphql/").unwrap());
+                    .search_events(query, Url::parse("https://x.com/i/api/graphql/").unwrap());
             }
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
             Ok(None) => {}
         }
         match collections::input(url) {
             Ok(Some(kind)) => {
-                return self.feed_stream(kind, Url::parse("https://x.com/i/api/graphql/").unwrap());
+                return self.feed_events(kind, Url::parse("https://x.com/i/api/graphql/").unwrap());
             }
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
             Ok(None) => {}
         }
         match timeline::profile_input(url) {
             Ok((input, ProfileTab::Timeline)) => {
-                self.timeline_stream(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
+                self.timeline_events(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
             }
-            Ok((input, tab)) => self.profile_stream(
+            Ok((input, tab)) => self.profile_events(
                 input,
                 tab,
                 Url::parse("https://x.com/i/api/graphql/").unwrap(),
@@ -76,21 +82,25 @@ impl Twitter {
         }
     }
 
-    pub(super) fn status_stream(&self, id: String) -> BoxStream<'_, Result<Media>> {
+    pub(super) fn status_events(&self, id: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         if self.status_options.conversations != ConversationMode::Off
             || self.status_options.endpoint != TweetEndpoint::RestId
         {
-            self.detail_stream_at(Url::parse("https://x.com/i/api/graphql/").unwrap(), id)
+            self.detail_events_at(Url::parse("https://x.com/i/api/graphql/").unwrap(), id)
         } else {
             match endpoint(&id) {
-                Ok(target) => self.post_stream_at(target, id),
+                Ok(target) => self.post_events_at(target, id),
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             }
         }
     }
 
-    pub(super) fn detail_stream_at(&self, base: Url, id: String) -> BoxStream<'_, Result<Media>> {
-        self.collection_stream(
+    pub(super) fn detail_events_at(
+        &self,
+        base: Url,
+        id: String,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        self.collection_events(
             None,
             Source::Detail(detail::Selection::new(
                 id,
@@ -101,16 +111,20 @@ impl Twitter {
         )
     }
 
-    pub(super) fn post_stream_at(&self, endpoint: Url, id: String) -> BoxStream<'_, Result<Media>> {
+    pub(super) fn post_events_at(
+        &self,
+        endpoint: Url,
+        id: String,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         if self.thread_options.expand {
-            return self.restid_stream_at(endpoint, id);
+            return self.restid_events_at(endpoint, id);
         }
         struct PostState {
             endpoint: Url,
             id: String,
             engine: Option<expansion::Engine>,
             known: BTreeMap<String, Value>,
-            pending: VecDeque<Media>,
+            pending: VecDeque<ExtractionEvent>,
             done: bool,
             seen: HashSet<[u8; 32]>,
             budget: Duration,
@@ -239,26 +253,68 @@ impl Twitter {
         input: ProfileInput,
         base: Url,
     ) -> BoxStream<'_, Result<Media>> {
-        self.profile_stream(input, ProfileTab::Media, base)
+        event::media_only(self.profile_events(input, ProfileTab::Media, base))
     }
 
+    pub(super) fn status_stream(&self, id: String) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.status_events(id))
+    }
+
+    #[cfg(test)]
+    pub(super) fn detail_stream_at(&self, base: Url, id: String) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.detail_events_at(base, id))
+    }
+    #[cfg(test)]
+    pub(super) fn post_stream_at(&self, endpoint: Url, id: String) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.post_events_at(endpoint, id))
+    }
+    #[cfg(test)]
     pub(super) fn profile_stream(
         &self,
         input: ProfileInput,
         tab: ProfileTab,
         base: Url,
     ) -> BoxStream<'_, Result<Media>> {
-        if tab == ProfileTab::Timeline {
-            return self.timeline_stream(input, base);
-        }
-        self.collection_stream(Some(input), Source::Profile(tab), None, base)
+        event::media_only(self.profile_events(input, tab, base))
     }
-
+    #[cfg(test)]
     pub(super) fn timeline_stream(
         &self,
         input: ProfileInput,
         base: Url,
     ) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.timeline_events(input, base))
+    }
+    #[cfg(test)]
+    pub(super) fn search_stream(&self, query: String, base: Url) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.search_events(query, base))
+    }
+    #[cfg(test)]
+    pub(super) fn feed_stream(
+        &self,
+        kind: collections::Collection,
+        base: Url,
+    ) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.feed_events(kind, base))
+    }
+
+    pub(super) fn profile_events(
+        &self,
+        input: ProfileInput,
+        tab: ProfileTab,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        if tab == ProfileTab::Timeline {
+            return self.timeline_events(input, base);
+        }
+        self.collection_events(Some(input), Source::Profile(tab), None, base)
+    }
+
+    pub(super) fn timeline_events(
+        &self,
+        input: ProfileInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         let tab = match self.timeline_options.strategy {
             TimelineStrategy::Auto if self.expansion.retweets == RetweetMode::Skip => {
                 ProfileTab::Media
@@ -267,7 +323,7 @@ impl Twitter {
             TimelineStrategy::Media => ProfileTab::Media,
             TimelineStrategy::Replies => ProfileTab::Replies,
         };
-        self.collection_stream(
+        self.collection_events(
             Some(input),
             Source::Profile(tab),
             Some(RootStage::Initial { last: None }),
@@ -275,14 +331,18 @@ impl Twitter {
         )
     }
 
-    pub(super) fn search_stream(&self, query: String, base: Url) -> BoxStream<'_, Result<Media>> {
+    pub(super) fn search_events(
+        &self,
+        query: String,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         if let Err(e) = search::validate_query(&query) {
             return stream::once(async move { Err(e) }).boxed();
         }
         let input = (self.profile_options.replies == ReplyMode::SelfOnly)
             .then(|| search::query_owner(&query))
             .flatten();
-        self.collection_stream(
+        self.collection_events(
             input,
             Source::Search(search::Paging::new(query)),
             None,
@@ -290,26 +350,30 @@ impl Twitter {
         )
     }
 
-    pub(super) fn feed_stream(
+    pub(super) fn feed_events(
         &self,
         kind: collections::Collection,
         base: Url,
-    ) -> BoxStream<'_, Result<Media>> {
-        self.collection_stream(None, Source::Feed(kind), None, base)
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        self.collection_events(None, Source::Feed(kind), None, base)
     }
 
-    pub(super) fn restid_stream_at(&self, target: Url, id: String) -> BoxStream<'_, Result<Media>> {
+    pub(super) fn restid_events_at(
+        &self,
+        target: Url,
+        id: String,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         // Keep the exact initial endpoint for fixture injection and request scoping.
-        self.collection_stream(None, Source::RestId(id), None, target)
+        self.collection_events(None, Source::RestId(id), None, target)
     }
 
-    fn collection_stream(
+    fn collection_events(
         &self,
         input: Option<ProfileInput>,
         source: Source,
         root: Option<RootStage>,
         base: Url,
-    ) -> BoxStream<'_, Result<Media>> {
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         let owner = match &input {
             Some(ProfileInput::Id(id)) => Some(id.clone()),
             _ => None,
@@ -957,7 +1021,7 @@ fn search_endpoint(base: &Url, paging: &search::Paging, options: TimelineOptions
 // first occurrence, then suppress the complete post on overlapping pages/pins.
 fn queue_unique(
     media: Vec<Media>,
-    pending: &mut VecDeque<Media>,
+    pending: &mut VecDeque<ExtractionEvent>,
     seen: &mut HashSet<[u8; 32]>,
     unique: bool,
 ) -> bool {
@@ -965,7 +1029,7 @@ fn queue_unique(
         return false;
     };
     if !unique {
-        pending.extend(media);
+        pending.extend(event::group(media, "twitter"));
         return true;
     }
     let metadata = first.metadata.as_ref().unwrap();
@@ -973,7 +1037,7 @@ fn queue_unique(
     if !seen.insert(digest) {
         return false;
     }
-    pending.extend(media);
+    pending.extend(event::group(media, "twitter"));
     true
 }
 

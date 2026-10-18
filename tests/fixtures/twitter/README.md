@@ -146,3 +146,9 @@ source attribution, disabled malformed fields, and unchanged request/archive
 identities. Raw component URLs do not acquire inferred dimensions. Fallback URLs
 retain the original declared metadata; actual returned image dimensions are not
 probed. Shared compatibility/naming/sidecar cases are in `tests/file_metadata.rs`.
+
+Local runtime tests in `src/twitter_profile_tests.rs` cover explicit post events
+across native source variants, mixed-file siblings, quotes, and thread expansion.
+Accepted expansion batches each emit one post/end pair; repeated IDs with
+uniqueness disabled retain separate boundaries. Dropping at a selected end avoids
+later quote/thread requests. These synthetic checks do not verify live schemas.

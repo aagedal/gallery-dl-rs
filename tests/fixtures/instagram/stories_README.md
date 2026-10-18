@@ -28,7 +28,14 @@ errors. Date tests verify ascending/mixed-order story filtering through the CLI
 and the library, with strict boundaries and cooperative cancellation.
 
 Native metadata treats each story item as its own `post_id`/`media_id`, retaining
-the same archive identity through stories and highlights. Upstream's complete
+the same archive identity through stories and highlights. Explicit post events
+group the whole reel with independent reel ID, owner, and available timestamp;
+file identities remain unchanged. Runtime tests cover selected story items,
+returned empty reels, absent reels, and post-range request cutoffs. An absent
+reel emits no boundary, while a returned reel with no items occupies a position.
+Profile and collection runtime tests also cover carousel boundaries, repeated
+IDs, and dropping at the selected post end. These are synthetic local checks.
+Upstream's complete
 reel-level metadata model is not yet ported. Highlight titles/expiry, optional
 music/sticker audio, split/order options, segmented video, real schema variants,
 and authenticated live verification remain.

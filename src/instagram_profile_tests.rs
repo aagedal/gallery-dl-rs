@@ -436,3 +436,67 @@ async fn date_after_stops_native_profile_without_following_older_cursor() {
     assert_eq!(items[0].metadata.as_ref().unwrap().post_id, "64");
     assert_eq!(server.count(), 2);
 }
+
+#[tokio::test]
+async fn profile_events_preserve_carousel_boundaries_and_file_identity() {
+    let mut carousel: Value =
+        serde_json::from_slice(include_bytes!("../tests/fixtures/instagram/carousel.json"))
+            .unwrap();
+    let mut carousel = carousel["items"][0].take();
+    carousel["user"]["pk"] = "42".into();
+    let server = Server::new(vec![
+        profile(),
+        page(vec![carousel.clone(), post("65", "BB")], None),
+    ]);
+    let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+    let events: Vec<_> = native
+        .profile_events("fixture_user".into(), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 8);
+    let ExtractionEvent::Post(first) = &events[0] else {
+        panic!("expected explicit carousel post")
+    };
+    assert_eq!(first.count, Some(3));
+    let metadata = first.metadata.as_ref().unwrap();
+    assert_eq!(metadata.post_id, "64");
+    assert_eq!(metadata.username.as_deref(), Some("fixture_user"));
+    assert!(metadata.file.is_none());
+    assert!(metadata.media_id.is_empty());
+    assert_eq!(metadata.index, 0);
+    assert!(matches!(events[4], ExtractionEvent::EndPost));
+    let ExtractionEvent::Post(second) = &events[5] else {
+        panic!("expected next post boundary")
+    };
+    assert_eq!(second.count, Some(1));
+    assert!(matches!(events[7], ExtractionEvent::EndPost));
+    let expected = parse_post(&carousel, "BA").unwrap();
+    for (event, expected) in events[1..4].iter().zip(expected) {
+        let ExtractionEvent::Media(media) = event else {
+            panic!("expected carousel file")
+        };
+        assert_eq!(media.identity(), expected.identity());
+        assert_eq!(media.archive_key(), expected.archive_key());
+    }
+}
+
+#[tokio::test]
+async fn profile_events_are_lazy_and_dropping_after_post_avoids_next_page() {
+    let server = Server::new(vec![
+        profile(),
+        page(vec![post("64", "BA")], Some("unused")),
+        page(vec![post("65", "BB")], None),
+    ]);
+    let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+    let mut events = native.profile_events("fixture_user".into(), server.base.clone());
+    assert_eq!(server.count(), 0);
+    assert!(matches!(
+        events.next().await.unwrap().unwrap(),
+        ExtractionEvent::Post(_)
+    ));
+    assert_eq!(server.count(), 2);
+    drop(events);
+    tokio::time::sleep(Duration::from_millis(15)).await;
+    assert_eq!(server.count(), 2);
+}

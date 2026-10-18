@@ -427,3 +427,178 @@ async fn dropping_pending_story_request_prevents_remaining_tray_requests() {
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert_eq!(server.count(), 2);
 }
+
+#[tokio::test]
+async fn story_events_group_the_entire_reel_with_its_own_metadata() {
+    let mut response = reel("123", "123", vec![image("101"), video("102")]);
+    response["reels_media"][0]["seen"] = 444.into();
+    let server = Server::new(vec![Response::json(response)]);
+    let native = extractor(Duration::from_secs(3));
+    let events: Vec<_> = native
+        .story_events(input("/stories/id:123/"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 4);
+    let ExtractionEvent::Post(post) = &events[0] else {
+        panic!("expected one reel directory")
+    };
+    assert_eq!(post.count, Some(2));
+    let metadata = post.metadata.as_ref().unwrap();
+    assert_eq!(metadata.post_id, "123");
+    assert_eq!(metadata.username.as_deref(), Some("fixture"));
+    assert_eq!(metadata.timestamp, Some(444));
+    assert_eq!(metadata.index, 0);
+    assert!(metadata.media_id.is_empty());
+    assert!(metadata.file.is_none());
+    for (event, id) in events[1..3].iter().zip(["101", "102"]) {
+        let ExtractionEvent::Media(media) = event else {
+            panic!("expected story file")
+        };
+        assert_eq!(media.metadata.as_ref().unwrap().media_id, id);
+        assert_eq!(media.metadata.as_ref().unwrap().post_id, id);
+        assert!(media.archive_key().is_some());
+    }
+    assert!(matches!(events[3], ExtractionEvent::EndPost));
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn story_events_preserve_empty_reels_and_selected_item_boundaries() {
+    {
+        let response = reel("123", "123", vec![]);
+        let server = Server::new(vec![Response::json(response)]);
+        let native = extractor(Duration::from_secs(3));
+        let events: Vec<_> = native
+            .story_events(input("/stories/id:123/"), server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("empty reel still counts as a post")
+        };
+        assert_eq!(post.count, Some(0));
+        assert_eq!(post.metadata.as_ref().unwrap().post_id, "123");
+        assert!(matches!(events[1], ExtractionEvent::EndPost));
+    }
+    let server = Server::new(vec![Response::json(reel(
+        "123",
+        "123",
+        vec![image("101"), video("102")],
+    ))]);
+    let native = extractor(Duration::from_secs(3));
+    let events: Vec<_> = native
+        .story_events(input("/stories/id:123/102/"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 3);
+    let ExtractionEvent::Post(post) = &events[0] else {
+        panic!("selected story belongs to reel directory")
+    };
+    assert_eq!(post.count, Some(1));
+    assert_eq!(post.metadata.as_ref().unwrap().post_id, "123");
+    let ExtractionEvent::Media(media) = &events[1] else {
+        panic!("expected selected file")
+    };
+    assert_eq!(media.metadata.as_ref().unwrap().media_id, "102");
+    assert_eq!(media.metadata.as_ref().unwrap().index, 2);
+}
+
+#[tokio::test]
+async fn highlight_events_emit_one_directory_per_reel_and_remain_lazy() {
+    let tray = json!({"status":"ok","tray":[{"id":"highlight:12"},{"id":"highlight:13"}]});
+    let mut first = reel("highlight:12", "123", vec![image("101"), video("102")]);
+    first["reels_media"][0]["created_at"] = 555.into();
+    let server = Server::new(vec![
+        Response::json(tray),
+        Response::json(first),
+        Response::json(reel("highlight:13", "123", vec![])),
+    ]);
+    let native = extractor(Duration::from_secs(3));
+    let mut events = native.story_events(input("/id:123/highlights/"), server.base.clone());
+    assert_eq!(server.count(), 0);
+    let ExtractionEvent::Post(post) = events.next().await.unwrap().unwrap() else {
+        panic!("expected highlight directory")
+    };
+    assert_eq!(post.count, Some(2));
+    assert_eq!(post.metadata.as_ref().unwrap().post_id, "12");
+    assert_eq!(post.metadata.as_ref().unwrap().timestamp, Some(555));
+    assert_eq!(server.count(), 2);
+    for _ in 0..2 {
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::Media(_)
+        ));
+    }
+    assert!(matches!(
+        events.next().await.unwrap().unwrap(),
+        ExtractionEvent::EndPost
+    ));
+    assert_eq!(
+        server.count(),
+        2,
+        "directory and its files cannot prefetch another reel"
+    );
+    drop(events);
+    tokio::time::sleep(Duration::from_millis(15)).await;
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn absent_reels_do_not_consume_post_range_slots_but_returned_empty_reels_do() {
+    let absent = json!({"status":"ok","reels_media":[]});
+    let server = Server::new(vec![Response::json(absent.clone())]);
+    let native = extractor(Duration::from_secs(3));
+    let events: Vec<_> = native
+        .story_events(input("/stories/id:123/"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(
+        events.is_empty(),
+        "a missing reel must not manufacture a directory"
+    );
+
+    for missing in [false, true] {
+        let first = if missing {
+            absent.clone()
+        } else {
+            reel("highlight:12", "123", vec![])
+        };
+        let server = Server::new(vec![
+            Response::json(
+                json!({"status":"ok","tray":[{"id":"highlight:12"},{"id":"highlight:13"}]}),
+            ),
+            Response::json(first),
+            Response::json(reel("highlight:13", "123", vec![image("102")])),
+        ]);
+        let selection = crate::post_selection::PostSelection::new(
+            Some(crate::selection::RangeSelection::parse("1").unwrap()),
+            None,
+        );
+        let selected: Vec<_> = selection
+            .apply(
+                native.story_events(input("/id:123/highlights/"), server.base.clone()),
+                None,
+                None,
+                true,
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        if missing {
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected[0].metadata.as_ref().unwrap().media_id, "102");
+            assert_eq!(server.count(), 3);
+        } else {
+            assert!(selected.is_empty());
+            assert_eq!(
+                server.count(),
+                2,
+                "a returned empty first reel occupies the range slot and stops before the next request"
+            );
+        }
+    }
+}

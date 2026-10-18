@@ -418,7 +418,25 @@ and drops upstream immediately at the last matching index. Empty selections do
 not start extraction or open archives. Cooperative skips preserve cancellation.
 Parser, CLI, process-lifecycle, native-pagination, sidecar, and archive tests cover
 selection behavior. Site-specific offset skipping, counters at flattened child
-boundaries, post/child ranges, and their metadata filters remain.
+boundaries, child ranges, and child metadata filters remain.
+
+**Implemented explicit post selection:** native extractors and the compatibility
+decoder expose post/media/end events, while media-only library APIs remain
+available. `--post-range` and repeated `--post-filter`, plus scoped string/list
+configuration, select whole posts before file selection. Post dates precede
+post expressions and ranges; file predicates and ranges follow. Post expressions
+exclude file-specific fields and include declared count when available. Counts
+never delimit a post. Empty real posts occupy positions, repeated IDs do not
+merge boundaries, and selected siblings retain source indices and identities.
+Instagram carousels and whole reels, X tweet/quote/thread batches, and Facebook
+photo or video/audio groups have explicit boundaries. Missing reels and skipped
+X text-only tweets do not create posts. Empty ranges start no extraction; finite
+native ranges drop at the selected end. Compatibility must read the next
+directory or validated EOF, potentially doing upstream work for the next post.
+Parser, runtime, CLI, cancellation, selected-only archive/sidecar, configuration,
+and error-ordering tests cover these paths. Nested child counters, queue events,
+child selection, complete upstream metadata, and live authenticated verification
+remain.
 
 **Implemented native file metadata expressions:** repeated `--filter` and scoped
 `file-filter` / `image-filter` string/list settings select normalized public fields
@@ -433,7 +451,7 @@ requests. Filters do not mutate filenames, source indices, or stable identities.
 Scoped replacement/clearing, aliases, selected-only sidecars/archives, streaming
 errors, and cancellation have CLI coverage; recorded CPython reference vectors
 exercise accepted expression semantics. Full Python syntax, integer precision,
-helpers, datetime/regex, arbitrary upstream fields, and post/child filters remain.
+helpers, datetime/regex, arbitrary upstream fields, and child filters remain.
 
 **Implemented file-size selection:** CLI and scoped native `filesize-min` /
 `filesize-max` settings support byte amounts and binary suffixes, inclusive

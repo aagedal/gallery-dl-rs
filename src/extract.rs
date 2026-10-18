@@ -121,7 +121,7 @@ impl Media {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<crate::file_metadata::FileMetadata>,
@@ -304,6 +304,15 @@ impl Backend {
         options: BackendOptions,
     ) -> BoxStream<'static, Result<Media>> {
         crate::backend::stream_with_options(self.clone(), url.clone(), options)
+    }
+
+    /// Preserve upstream Directory boundaries, including posts without files.
+    pub fn events_with_options(
+        &self,
+        url: &Url,
+        options: BackendOptions,
+    ) -> BoxStream<'static, Result<crate::event::ExtractionEvent>> {
+        crate::backend::events_with_options(self.clone(), url.clone(), options, false)
     }
 
     pub(crate) fn command(&self, url: &Url, options: &BackendOptions) -> Command {
@@ -514,6 +523,32 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
         ));
     }
     Ok(items)
+}
+
+pub(crate) fn parse_post_message(message: &Value, category: &str) -> Result<crate::event::Post> {
+    let row = message
+        .as_array()
+        .ok_or_else(|| error("invalid post message"))?;
+    let data = match row.as_slice() {
+        [kind, data] if kind.as_i64() == Some(2) => data.as_object(),
+        [kind, _, data] if kind.as_i64() == Some(2) => data.as_object(),
+        _ => None,
+    }
+    .ok_or_else(|| error("backend post message has no metadata"))?;
+    let mut metadata = compatibility_metadata(data, category);
+    if let Some(metadata) = &mut metadata {
+        metadata.file = None;
+        metadata.media_id.clear();
+        metadata.index = 0;
+    }
+    Ok(crate::event::Post {
+        category: category.into(),
+        metadata,
+        count: data
+            .get("count")
+            .and_then(Value::as_u64)
+            .and_then(|count| usize::try_from(count).ok()),
+    })
 }
 
 pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Media>> {

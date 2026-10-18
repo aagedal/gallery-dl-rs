@@ -16,7 +16,7 @@ use futures_util::{
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
     path::Path,
     sync::Mutex,
     time::{Duration, SystemTime},
@@ -132,27 +132,66 @@ impl Facebook {
         .map_err(|_| error("native Facebook extraction timed out"))?
     }
 
-    /// Lazily extract a photo/video or traverse an experimental album. Downstream
-    /// pauses do not consume the cumulative active extraction timeout.
+    /// Lazily extract media while preserving the existing media-only API.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
-        if photo_id(url).is_ok() || video_id(url).is_ok() {
-            let url = url.clone();
-            return stream::once(async move { self.extract(&url).await })
-                .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
-                .try_flatten()
-                .boxed();
+        crate::event::media_only(self.events(url))
+    }
+
+    /// Emit an explicit post boundary before each photo or video and its files.
+    /// Album navigation preserves one photo group per page without prefetching.
+    pub fn events(&self, url: &Url) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        if let Ok(id) = video_id(url) {
+            let mut endpoint = Url::parse("https://www.facebook.com/watch/").unwrap();
+            endpoint.query_pairs_mut().append_pair("v", &id);
+            return self.post_events_endpoint(endpoint, id, true);
+        }
+        if let Ok(id) = photo_id(url) {
+            let mut endpoint = Url::parse("https://www.facebook.com/photo/").unwrap();
+            endpoint
+                .query_pairs_mut()
+                .append_pair("fbid", &id)
+                .append_pair("set", "");
+            return self.post_events_endpoint(endpoint, id, false);
         }
         match album_input(url) {
-            Ok(input) => self.album_stream(input, Url::parse("https://www.facebook.com/").unwrap()),
+            Ok(input) => self.album_events(input, Url::parse("https://www.facebook.com/").unwrap()),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
     }
 
+    fn post_events_endpoint(
+        &self,
+        endpoint: Url,
+        id: String,
+        video: bool,
+    ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        stream::once(async move {
+            let media = if video {
+                self.extract_video_endpoint(&endpoint, &id).await?
+            } else {
+                self.extract_endpoint(&endpoint, &id).await?
+            };
+            Ok::<_, crate::Error>(crate::event::group(media, "facebook"))
+        })
+        .map_ok(|events| stream::iter(events.into_iter().map(Ok)))
+        .try_flatten()
+        .boxed()
+    }
+
+    #[cfg(test)]
     fn album_stream(
         &self,
         input: crate::facebook_album::AlbumInput,
         base: Url,
     ) -> BoxStream<'_, Result<Media>> {
+        crate::event::media_only(self.album_events(input, base))
+    }
+
+    fn album_events(
+        &self,
+        input: crate::facebook_album::AlbumInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
         let state = AlbumState {
             base,
             set: input.set,
@@ -160,22 +199,30 @@ impl Facebook {
             first: None,
             seen: HashSet::new(),
             index: 0,
+            pending: VecDeque::new(),
             done: false,
             budget: self.timeout,
         };
         stream::unfold(state, move |mut state| async move {
-            if state.done {
-                return None;
+            loop {
+                if let Some(event) = state.pending.pop_front() {
+                    return Some((Ok(event), state));
+                }
+                if state.done {
+                    return None;
+                }
+                let started = tokio::time::Instant::now();
+                let result = tokio::time::timeout(state.budget, self.album_photo(&mut state)).await;
+                state.budget = state.budget.saturating_sub(started.elapsed());
+                match result.unwrap_or_else(|_| Err(error("native Facebook extraction timed out")))
+                {
+                    Ok(media) => state.pending = crate::event::group(vec![media], "facebook"),
+                    Err(error) => {
+                        state.done = true;
+                        return Some((Err(error), state));
+                    }
+                }
             }
-            let started = tokio::time::Instant::now();
-            let result = tokio::time::timeout(state.budget, self.album_photo(&mut state)).await;
-            state.budget = state.budget.saturating_sub(started.elapsed());
-            let result =
-                result.unwrap_or_else(|_| Err(error("native Facebook extraction timed out")));
-            if result.is_err() {
-                state.done = true;
-            }
-            Some((result, state))
         })
         .boxed()
     }
@@ -324,6 +371,7 @@ struct AlbumState {
     first: Option<String>,
     seen: HashSet<String>,
     index: usize,
+    pending: VecDeque<crate::event::ExtractionEvent>,
     done: bool,
     budget: Duration,
 }
@@ -619,6 +667,61 @@ mod transport_tests {
 
     const PHOTO: &[u8] = include_bytes!("../tests/fixtures/facebook/photo.html");
     const VIDEO: &[u8] = include_bytes!("../tests/fixtures/facebook/video.json");
+
+    #[tokio::test]
+    async fn native_post_events_group_video_audio_once_and_preserve_photo_media() {
+        use crate::event::ExtractionEvent;
+        use futures_util::StreamExt;
+        for (body, id, video, count) in [
+            (VIDEO, "123456789", true, 2),
+            (PHOTO, "10160743390456729", false, 1),
+        ] {
+            let (endpoint, server) = serve_once("200 OK", "", body, Duration::ZERO);
+            let native = Facebook::new(None, Duration::from_secs(3)).await.unwrap();
+            let mut events = native.post_events_endpoint(endpoint, id.into(), video);
+            let ExtractionEvent::Post(post) = events.next().await.unwrap().unwrap() else {
+                panic!("native post boundary missing");
+            };
+            assert_eq!(post.category, "facebook");
+            assert_eq!(post.count, Some(count));
+            let metadata = post.metadata.unwrap();
+            assert_eq!(metadata.post_id, id);
+            assert_eq!(metadata.media_id, "");
+            assert_eq!(metadata.index, 0);
+            assert!(metadata.file.is_none());
+            let mut media = Vec::new();
+            for _ in 0..count {
+                let ExtractionEvent::Media(item) = events.next().await.unwrap().unwrap() else {
+                    panic!("native post media missing");
+                };
+                assert_eq!(item.metadata.as_ref().unwrap().post_id, id);
+                assert!(item.metadata.as_ref().unwrap().file.is_some());
+                media.push(item);
+            }
+            assert!(matches!(
+                events.next().await.unwrap().unwrap(),
+                ExtractionEvent::EndPost
+            ));
+            assert!(events.next().await.is_none());
+            let expected = if video {
+                parse_video(body, id)
+            } else {
+                parse_photo(body, id)
+            }
+            .unwrap();
+            assert_eq!(
+                media
+                    .iter()
+                    .map(|item| (&item.url, &item.filename, item.archive_key()))
+                    .collect::<Vec<_>>(),
+                expected
+                    .iter()
+                    .map(|item| (&item.url, &item.filename, item.archive_key()))
+                    .collect::<Vec<_>>()
+            );
+            assert!(server.join().unwrap().starts_with("GET "));
+        }
+    }
 
     #[tokio::test]
     async fn video_requests_retry_rotate_cookies_and_apply_network_identity_to_both_files() {

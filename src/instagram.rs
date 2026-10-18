@@ -7,6 +7,7 @@ use crate::{
     Result,
     cookies::CookieJar,
     error,
+    event::{self, ExtractionEvent},
     extract::{Media, PostMetadata, http_url},
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
@@ -144,27 +145,32 @@ impl Instagram {
     /// Lazily traverse posts and collections. Only the current response page is
     /// buffered; downstream pauses do not consume the active extraction budget.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.events(url))
+    }
+
+    /// Post boundaries are explicit even when a reel contains no available files.
+    pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         if shortcode(url).is_ok() {
             let url = url.clone();
             return stream::once(async move { self.extract(&url).await })
-                .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
+                .map_ok(|items| stream::iter(event::group(items, "instagram").into_iter().map(Ok)))
                 .try_flatten()
                 .boxed();
         }
         if let Ok(input) = stories::input(url) {
-            return self.story_stream(
+            return self.story_events(
                 input,
                 Url::parse("https://www.instagram.com/api/v1/").unwrap(),
             );
         }
         if let Ok(input) = collections::input(url) {
-            return self.collection_stream(
+            return self.collection_events(
                 input,
                 Url::parse("https://www.instagram.com/api/v1/").unwrap(),
             );
         }
         match profile_username(url) {
-            Ok(username) => self.profile_stream(
+            Ok(username) => self.profile_events(
                 username,
                 Url::parse("https://www.instagram.com/api/v1/").unwrap(),
             ),
@@ -172,7 +178,16 @@ impl Instagram {
         }
     }
 
+    #[cfg(test)]
     fn profile_stream(&self, username: String, base: Url) -> BoxStream<'_, Result<Media>> {
+        event::media_only(self.profile_events(username, base))
+    }
+
+    fn profile_events(
+        &self,
+        username: String,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         let state = ProfileState {
             username,
             base,
@@ -286,7 +301,7 @@ impl Instagram {
             for item in &mut media {
                 self.network.apply_media(item);
             }
-            pending.extend(media);
+            pending.extend(event::group(media, "instagram"));
         }
         state.pending = pending;
         state.cursor = cursor;
@@ -419,7 +434,7 @@ struct ProfileState {
     user_id: Option<String>,
     cursor: Option<String>,
     seen: HashSet<[u8; 32]>,
-    pending: VecDeque<Media>,
+    pending: VecDeque<ExtractionEvent>,
     done: bool,
     budget: Duration,
 }

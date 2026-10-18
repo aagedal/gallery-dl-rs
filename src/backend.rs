@@ -2,6 +2,7 @@
 //! and its array protocol: JSONL mode does not preserve all resolved-child output.
 use crate::{
     Result, error,
+    event::{self, ExtractionEvent},
     extract::{self, Backend, BackendOptions, Media},
     messages::Decoder,
 };
@@ -9,7 +10,7 @@ use futures_util::{
     StreamExt, TryStreamExt,
     stream::{self, BoxStream},
 };
-use std::{process::Stdio, time::Duration};
+use std::{collections::VecDeque, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::{Child, ChildStdout},
@@ -44,9 +45,18 @@ pub(crate) fn stream_with_options(
     url: Url,
     options: BackendOptions,
 ) -> BoxStream<'static, Result<Media>> {
+    event::media_only(events_with_options(backend, url, options, true))
+}
+
+pub(crate) fn events_with_options(
+    backend: Backend,
+    url: Url,
+    options: BackendOptions,
+    require_media: bool,
+) -> BoxStream<'static, Result<ExtractionEvent>> {
     // Do not start a child until a downstream consumer actually requests an item.
     stream::once(async move {
-        let process = Process::start(backend, url, options)?;
+        let process = Process::start(backend, url, options, require_media)?;
         Ok::<_, crate::Error>(stream::try_unfold(process, |mut process| async move {
             let item = process.next().await?;
             Ok(item.map(|item| (item, process)))
@@ -64,10 +74,20 @@ struct Process {
     category: &'static str,
     remaining: Duration,
     had_media: bool,
+    had_post: bool,
+    in_post: bool,
+    done: bool,
+    require_media: bool,
+    pending: VecDeque<ExtractionEvent>,
 }
 
 impl Process {
-    fn start(backend: Backend, url: Url, options: BackendOptions) -> Result<Self> {
+    fn start(
+        backend: Backend,
+        url: Url,
+        options: BackendOptions,
+        require_media: bool,
+    ) -> Result<Self> {
         let category = extract::social_site(&url).ok_or_else(|| {
             error("unsupported URL; use an Instagram, Facebook, Twitter/X URL or direct media link")
         })?;
@@ -114,10 +134,21 @@ impl Process {
             category,
             remaining: backend.timeout,
             had_media: false,
+            had_post: false,
+            in_post: false,
+            done: false,
+            require_media,
+            pending: VecDeque::new(),
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Media>> {
+    async fn next(&mut self) -> Result<Option<ExtractionEvent>> {
+        if let Some(event) = self.pending.pop_front() {
+            return Ok(Some(event));
+        }
+        if self.done {
+            return Ok(None);
+        }
         if self.remaining.is_zero() {
             return Err(error("social extraction timed out"));
         }
@@ -129,7 +160,13 @@ impl Process {
         result.map_err(|_| error("social extraction timed out"))?
     }
 
-    async fn next_inner(&mut self) -> Result<Option<Media>> {
+    async fn next_inner(&mut self) -> Result<Option<ExtractionEvent>> {
+        if let Some(event) = self.pending.pop_front() {
+            return Ok(Some(event));
+        }
+        if self.done {
+            return Ok(None);
+        }
         loop {
             let bytes = self.stdout.fill_buf().await?;
             if bytes.is_empty() {
@@ -144,20 +181,41 @@ impl Process {
                     )));
                 }
                 self.decoder.finish()?;
-                if !self.had_media {
+                if !self.had_media && (self.require_media || !self.had_post) {
                     return Err(error(
                         "no downloadable media found; the post may require login or be unsupported",
                     ));
+                }
+                self.done = true;
+                if self.in_post {
+                    self.in_post = false;
+                    return Ok(Some(ExtractionEvent::EndPost));
                 }
                 return Ok(None);
             }
             let (count, message) = self.decoder.feed(bytes)?;
             self.stdout.consume(count);
-            if let Some(message) = message
-                && let Some(media) = extract::parse_message(message, self.category)?
-            {
-                self.had_media = true;
-                return Ok(Some(media));
+            if let Some(message) = message {
+                if message
+                    .as_array()
+                    .and_then(|row| row.first())
+                    .and_then(serde_json::Value::as_i64)
+                    == Some(2)
+                {
+                    let post = extract::parse_post_message(&message, self.category)?;
+                    self.had_post = true;
+                    if self.in_post {
+                        self.pending
+                            .push_back(ExtractionEvent::Post(Box::new(post)));
+                        return Ok(Some(ExtractionEvent::EndPost));
+                    }
+                    self.in_post = true;
+                    return Ok(Some(ExtractionEvent::Post(Box::new(post))));
+                }
+                if let Some(media) = extract::parse_message(message, self.category)? {
+                    self.had_media = true;
+                    return Ok(Some(ExtractionEvent::Media(Box::new(media))));
+                }
             }
         }
     }

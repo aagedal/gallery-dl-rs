@@ -353,3 +353,66 @@ async fn range_and_date_cutoffs_stop_before_the_next_photo_request() {
     assert!(stream.next().await.is_none());
     assert_eq!(server.count(), 1);
 }
+
+#[tokio::test]
+async fn album_events_preserve_photo_boundaries_and_defer_navigation_until_group_drains() {
+    use crate::event::ExtractionEvent;
+    use futures_util::StreamExt;
+    let server = Server::new(vec![
+        Response::json(photo("1", Some("2"))),
+        Response::json(photo("2", None)),
+    ]);
+    let facebook = Facebook::new(None, Duration::from_secs(3)).await.unwrap();
+    let mut events = facebook.album_events(input(Some("1")), server.base.clone());
+    assert_eq!(server.count(), 0);
+    for (position, id) in [(1, "1"), (2, "2")] {
+        let ExtractionEvent::Post(post) = events.next().await.unwrap().unwrap() else {
+            panic!("album post missing")
+        };
+        assert_eq!(post.count, Some(1));
+        assert_eq!(post.category, "facebook");
+        let metadata = post.metadata.unwrap();
+        assert_eq!(metadata.post_id, id);
+        assert!(metadata.file.is_none());
+        assert_eq!(metadata.index, 0);
+        assert_eq!(server.count(), position);
+        let ExtractionEvent::Media(item) = events.next().await.unwrap().unwrap() else {
+            panic!("album media missing")
+        };
+        assert_eq!(item.metadata.as_ref().unwrap().post_id, id);
+        assert_eq!(item.metadata.as_ref().unwrap().index, position);
+        assert_eq!(server.count(), position);
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::EndPost
+        ));
+        assert_eq!(server.count(), position);
+    }
+    assert!(events.next().await.is_none());
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn stopping_after_album_post_boundary_does_not_fetch_next_photo() {
+    use crate::event::ExtractionEvent;
+    use futures_util::StreamExt;
+    for cutoff in [1, 3] {
+        let server = Server::new(vec![
+            Response::json(photo("1", Some("2"))),
+            Response::json(photo("2", None)),
+        ]);
+        let facebook = Facebook::new(None, Duration::from_secs(3)).await.unwrap();
+        let events: Vec<_> = facebook
+            .album_events(input(Some("1")), server.base.clone())
+            .take(cutoff)
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(matches!(events.first(), Some(ExtractionEvent::Post(_))));
+        if cutoff == 3 {
+            assert!(matches!(events.last(), Some(ExtractionEvent::EndPost)));
+        }
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert_eq!(server.count(), 1);
+    }
+}

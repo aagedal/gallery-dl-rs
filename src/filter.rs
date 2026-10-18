@@ -145,6 +145,22 @@ impl FilterExpression {
         }
         Ok(true)
     }
+    /// Evaluate post metadata before any file-specific fields are available.
+    pub fn matches_post(&self, post: &crate::event::Post) -> Result<bool> {
+        if self.expressions.is_empty() {
+            return Ok(true);
+        }
+        let mut context = context_parts(&post.category, post.metadata.as_ref(), None);
+        if let Some(count) = post.count {
+            context.insert("count".into(), Value::Int(count as i128));
+        }
+        for expression in self.expressions.iter() {
+            if !eval::truthy(&eval::evaluate(expression, &context)?) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     /// Like upstream's default expression mode, missing keys and evaluation
     /// errors reject the current file. Extraction errors still pass through.
     pub fn apply<'a>(&self, input: BoxStream<'a, Result<Media>>) -> BoxStream<'a, Result<Media>> {
@@ -231,18 +247,27 @@ fn identifier(value: &str) -> Value {
         .unwrap_or_else(|| text(value))
 }
 fn context(media: &Media) -> BTreeMap<String, Value> {
-    let (stem, extension) = media
-        .filename
-        .rsplit_once('.')
-        .unwrap_or((&media.filename, ""));
-    let mut values = BTreeMap::from([
-        ("category".into(), text(media.category.as_str())),
-        ("filename".into(), text(stem)),
-        ("name".into(), text(stem)),
-        ("extension".into(), text(extension)),
-        ("url".into(), text(media.url.as_str())),
-        ("_url".into(), text(media.url.as_str())),
-    ]);
+    context_parts(&media.category, media.metadata.as_ref(), Some(media))
+}
+fn context_parts(
+    category: &str,
+    post: Option<&crate::extract::PostMetadata>,
+    media: Option<&Media>,
+) -> BTreeMap<String, Value> {
+    let mut values = BTreeMap::from([("category".into(), text(category))]);
+    if let Some(media) = media {
+        let (stem, extension) = media
+            .filename
+            .rsplit_once('.')
+            .unwrap_or((&media.filename, ""));
+        values.extend(BTreeMap::from([
+            ("filename".into(), text(stem)),
+            ("name".into(), text(stem)),
+            ("extension".into(), text(extension)),
+            ("url".into(), text(media.url.as_str())),
+            ("_url".into(), text(media.url.as_str())),
+        ]));
+    }
     for (name, extensions) in [
         (
             "exts_image",
@@ -267,7 +292,7 @@ fn context(media: &Media) -> BTreeMap<String, Value> {
             Value::List(extensions.iter().map(|value| text(*value)).collect()),
         );
     }
-    if let Some(post) = &media.metadata {
+    if let Some(post) = post {
         let mut metadata = BTreeMap::from([
             ("post_id".into(), identifier(&post.post_id)),
             ("media_id".into(), identifier(&post.media_id)),
@@ -300,9 +325,15 @@ fn context(media: &Media) -> BTreeMap<String, Value> {
                 metadata.insert(key.into(), identifier(value));
             }
         }
+        if media.is_none() {
+            metadata.remove("media_id");
+            metadata.remove("index");
+        }
         values.extend(metadata.clone());
-        values.insert("num".into(), Value::Int(post.index as i128));
-        if media.category == "twitter" {
+        if media.is_some() {
+            values.insert("num".into(), Value::Int(post.index as i128));
+        }
+        if category == "twitter" {
             values.insert("tweet_id".into(), identifier(&post.post_id));
             values.insert(
                 "retweet_id".into(),
@@ -317,7 +348,7 @@ fn context(media: &Media) -> BTreeMap<String, Value> {
                     .map_or(Value::Int(0), |value| identifier(value)),
             );
         }
-        if media.category == "facebook" {
+        if category == "facebook" {
             values.insert("id".into(), identifier(&post.post_id));
         }
         values.insert(
@@ -331,7 +362,9 @@ fn context(media: &Media) -> BTreeMap<String, Value> {
                 .as_ref()
                 .map_or(Value::None, |value| text(value.clone())),
         );
-        if let Some(file) = &post.file {
+        if let Some(file) = &post.file
+            && media.is_some()
+        {
             let mut fields = BTreeMap::new();
             for (key, value) in [
                 ("width", file.width),
@@ -400,7 +433,7 @@ fn context(media: &Media) -> BTreeMap<String, Value> {
             metadata.insert("file".into(), map(fields));
         }
         // Instagram's description is its post caption; X descriptions are file alt text.
-        if media.category == "instagram" {
+        if category == "instagram" {
             values.insert(
                 "description".into(),
                 post.caption
