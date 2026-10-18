@@ -300,6 +300,16 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://redd.it/abc12", Some("reddit")),
         ("https://reddit.com.evil.example/r/pics", None),
         ("https://notreddit.com/r/pics", None),
+        ("https://danbooru.donmai.us/posts/1", Some("danbooru")),
+        ("https://e621.net/posts/1", Some("e621")),
+        ("https://e926.net/pools/1", Some("e621")),
+        (
+            "https://gelbooru.com/index.php?page=post&s=view&id=1",
+            Some("gelbooru"),
+        ),
+        ("https://safebooru.org/index.php", Some("safebooru")),
+        ("https://gelbooru.com.evil.example/index.php", None),
+        ("https://note621.net/posts/1", None),
         ("https://x.com/user/status/123", Some("twitter")),
         ("https://twitter.com/user/status/123", Some("twitter")),
         ("https://notinstagram.com/p/abc", None),
@@ -823,4 +833,28 @@ fn plain_reddit_image_links_download_directly_in_both_modes() {
             "https://i.redd.it/abcdefg.jpg"
         );
     }
+}
+
+#[test]
+fn plain_booru_file_links_download_directly() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .args([
+            "--extractor-command",
+            "/nonexistent/gallery-dl",
+            "--extractor",
+            "native",
+            "-g",
+        ])
+        .arg("https://safebooru.org/images/1/abc.png")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "https://safebooru.org/images/1/abc.png"
+    );
 }

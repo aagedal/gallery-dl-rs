@@ -94,6 +94,14 @@ impl Media {
                     serde_json::json!([post.post_id, post.media_id]).to_string(),
                 )
             }
+            // Booru files are identified by their site and post ID.
+            category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
+                let post = self.metadata.as_ref()?;
+                if !crate::booru::valid_id(&post.post_id) {
+                    return None;
+                }
+                (category, serde_json::json!([post.post_id]).to_string())
+            }
             category @ ("instagram" | "twitter" | "facebook") => {
                 let post = self.metadata.as_ref()?;
                 if !decimal_id(&post.post_id) {
@@ -242,6 +250,11 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("imgur.com", "imgur"),
         ("reddit.com", "reddit"),
         ("redd.it", "reddit"),
+        ("danbooru.donmai.us", "danbooru"),
+        ("e621.net", "e621"),
+        ("e926.net", "e621"),
+        ("gelbooru.com", "gelbooru"),
+        ("safebooru.org", "safebooru"),
         ("imgur.io", "imgur"),
         ("twitter.com", "twitter"),
         ("x.com", "twitter"),

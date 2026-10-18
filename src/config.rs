@@ -321,6 +321,10 @@ struct RawExtractor {
     imgur: RawOptions,
     bluesky: RawOptions,
     reddit: RawOptions,
+    danbooru: RawOptions,
+    e621: RawOptions,
+    gelbooru: RawOptions,
+    safebooru: RawOptions,
     direct: RawOptions,
 }
 
@@ -437,6 +441,10 @@ impl Config {
                 "imgur",
                 "bluesky",
                 "reddit",
+                "danbooru",
+                "e621",
+                "gelbooru",
+                "safebooru",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -544,6 +552,10 @@ impl Config {
             ("imgur", extractor.imgur),
             ("bluesky", extractor.bluesky),
             ("reddit", extractor.reddit),
+            ("danbooru", extractor.danbooru),
+            ("e621", extractor.e621),
+            ("gelbooru", extractor.gelbooru),
+            ("safebooru", extractor.safebooru),
             ("direct", extractor.direct),
         ] {
             categories.insert(name.into(), settings.resolve(directory)?);
@@ -558,7 +570,17 @@ impl Config {
     pub fn resolve(&self, category: &str) -> Result<Options> {
         if !matches!(
             category,
-            "instagram" | "twitter" | "facebook" | "imgur" | "bluesky" | "reddit" | "direct"
+            "instagram"
+                | "twitter"
+                | "facebook"
+                | "imgur"
+                | "bluesky"
+                | "reddit"
+                | "danbooru"
+                | "e621"
+                | "gelbooru"
+                | "safebooru"
+                | "direct"
         ) {
             return Err(error("unsupported native configuration category"));
         }

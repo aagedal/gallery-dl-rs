@@ -220,7 +220,8 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
             && matches!(extractor, Extractor::Compatibility)
             && url.host_str() == Some("i.imgur.com")
             && file
-            || *site == "reddit" && url.host_str() == Some("i.redd.it") && file)
+            || *site == "reddit" && url.host_str() == Some("i.redd.it") && file
+            || gallery_dl_rs::booru::Site::from_category(site).is_some() && file)
     })
 }
 
@@ -381,7 +382,16 @@ async fn run(args: Args) -> Result<()> {
             // Distinct social files can share a URL and request context.
             if matches!(
                 item.category.as_str(),
-                "instagram" | "twitter" | "facebook" | "imgur" | "bluesky" | "reddit"
+                "instagram"
+                    | "twitter"
+                    | "facebook"
+                    | "imgur"
+                    | "bluesky"
+                    | "reddit"
+                    | "danbooru"
+                    | "e621"
+                    | "gelbooru"
+                    | "safebooru"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -555,6 +565,7 @@ struct Extractors {
     imgur: OnceCell<Result<gallery_dl_rs::imgur::Imgur>>,
     bluesky: OnceCell<Result<gallery_dl_rs::bluesky::Bluesky>>,
     reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
+    booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
 }
 
 impl Extractors {
@@ -739,6 +750,25 @@ fn extract_input<'a>(
                         .map_err(|e| error(format!("native Reddit initialization failed: {e}")))?;
                     native.events(&url)
                 }
+                Extractor::Native
+                    if let Some(site) = gallery_dl_rs::booru::Site::from_category(category) =>
+                {
+                    let native = extractors.booru[site as usize]
+                        .get_or_init(|| async {
+                            gallery_dl_rs::booru::Booru::new(site, backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native booru initialization failed: {e}")))?;
+                    native.events(&url)
+                }
                 Extractor::Native => {
                     return Err(error(
                         "native extractor unavailable; use --extractor compatibility",
@@ -918,6 +948,10 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "imgur",
         "bluesky",
         "reddit",
+        "danbooru",
+        "e621",
+        "gelbooru",
+        "safebooru",
         "direct",
     ] {
         let options = defaults
