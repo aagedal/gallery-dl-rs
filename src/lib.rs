@@ -7,6 +7,7 @@ pub mod date;
 pub mod download;
 pub mod extract;
 pub mod facebook;
+mod facebook_album;
 pub mod input;
 pub mod instagram;
 mod messages;

@@ -1,16 +1,21 @@
-//! Experimental native Facebook photo extraction from identity-bound Relay JSON.
+//! Experimental native Facebook photo and album extraction from identity-bound JSON.
 use crate::{
     Result,
     cookies::CookieJar,
     error,
     extract::{Media, PostMetadata, http_url},
+    facebook_album::{album_input, parse_navigation, parse_seed},
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
+};
+use futures_util::{
+    StreamExt, TryStreamExt,
+    stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     path::Path,
     sync::Mutex,
     time::{Duration, SystemTime},
@@ -87,13 +92,20 @@ impl Facebook {
     }
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
-        tokio::time::timeout(self.timeout, async {
+        let body = self.request_body(endpoint, self.timeout).await?;
+        let mut media = parse_photo(&body, code)?;
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        Ok(media)
+    }
+
+    async fn request_body(&self, endpoint: &Url, budget: Duration) -> Result<Vec<u8>> {
+        tokio::time::timeout(budget, async {
             for attempt in 0..=self.retries {
-                match self.attempt(endpoint, code, attempt).await {
-                    Ok(media) => return Ok(media),
+                match self.attempt(endpoint, attempt).await {
+                    Ok(body) => return Ok(body),
                     Err(failure) if failure.retry && attempt < self.retries => {
-                        // Transport failures have no response to establish a cooldown.
-                        // Also yield between attempts when Retry-After is zero.
                         tokio::time::sleep(backoff(attempt)).await;
                     }
                     Err(failure) => return Err(failure.error),
@@ -105,12 +117,100 @@ impl Facebook {
         .map_err(|_| error("native Facebook extraction timed out"))?
     }
 
-    async fn attempt(
+    /// Lazily traverse a single photo or an experimental album. Downstream
+    /// pauses do not consume the cumulative active extraction timeout.
+    pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
+        if photo_id(url).is_ok() {
+            let url = url.clone();
+            return stream::once(async move { self.extract(&url).await })
+                .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
+                .try_flatten()
+                .boxed();
+        }
+        match album_input(url) {
+            Ok(input) => self.album_stream(input, Url::parse("https://www.facebook.com/").unwrap()),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        }
+    }
+
+    fn album_stream(
         &self,
-        endpoint: &Url,
-        code: &str,
-        attempt: u8,
-    ) -> std::result::Result<Vec<Media>, Failure> {
+        input: crate::facebook_album::AlbumInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<Media>> {
+        let state = AlbumState {
+            base,
+            set: input.set,
+            next: input.start,
+            first: None,
+            seen: HashSet::new(),
+            index: 0,
+            done: false,
+            budget: self.timeout,
+        };
+        stream::unfold(state, move |mut state| async move {
+            if state.done {
+                return None;
+            }
+            let started = tokio::time::Instant::now();
+            let result = tokio::time::timeout(state.budget, self.album_photo(&mut state)).await;
+            state.budget = state.budget.saturating_sub(started.elapsed());
+            let result =
+                result.unwrap_or_else(|_| Err(error("native Facebook extraction timed out")));
+            if result.is_err() {
+                state.done = true;
+            }
+            Some((result, state))
+        })
+        .boxed()
+    }
+
+    async fn album_photo(&self, state: &mut AlbumState) -> Result<Media> {
+        if state.next.is_none() {
+            let mut endpoint = state.base.join("media/set/")?;
+            endpoint.query_pairs_mut().append_pair("set", &state.set);
+            let body = self.request_body(&endpoint, state.budget).await?;
+            state.next = Some(parse_seed(&body, &state.set)?);
+        }
+        let id = state.next.as_deref().unwrap();
+        if !state.seen.insert(id.to_owned()) {
+            return Err(error("Facebook album navigation repeated a photo"));
+        }
+        if state.first.is_none() {
+            state.first = Some(id.to_owned());
+        }
+        let mut endpoint = state.base.join("photo/")?;
+        endpoint
+            .query_pairs_mut()
+            .append_pair("fbid", id)
+            .append_pair("set", &state.set);
+        let body = self.request_body(&endpoint, state.budget).await?;
+        let mut media = parse_photo(&body, id)?;
+        let next = parse_navigation(&body, id, &state.set)?;
+        match next.as_deref() {
+            None => state.done = true,
+            Some(next) if Some(next) == state.first.as_deref() => state.done = true,
+            Some(next) if state.seen.contains(next) => {
+                return Err(error("Facebook album navigation looped before completion"));
+            }
+            Some(_) => {}
+        }
+        state.next = next;
+        state.index = state
+            .index
+            .checked_add(1)
+            .ok_or_else(|| error("Facebook album index overflow"))?;
+        let mut item = media
+            .pop()
+            .ok_or_else(|| error("Facebook album photo has no media"))?;
+        if let Some(metadata) = &mut item.metadata {
+            metadata.index = state.index;
+        }
+        self.network.apply_media(&mut item);
+        Ok(item)
+    }
+
+    async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
@@ -140,9 +240,12 @@ impl Facebook {
                     ) {
                         return Err(error("Facebook authentication required or session challenge; refresh --cookies").into());
                     }
-                    if !matches!(next.path().trim_end_matches('/'), "/photo" | "/photo.php") {
+                    if !matches!(
+                        next.path().trim_end_matches('/'),
+                        "/photo" | "/photo.php" | "/media/set"
+                    ) {
                         return Err(error(
-                            "Facebook redirected outside the photo endpoint; login may be required",
+                            "Facebook redirected outside the album/photo endpoints; login may be required",
                         )
                         .into());
                     }
@@ -194,12 +297,19 @@ impl Facebook {
             }
             body.extend_from_slice(&chunk);
         }
-        let mut media = parse_photo(&body, code)?;
-        for item in &mut media {
-            self.network.apply_media(item);
-        }
-        Ok(media)
+        Ok(body)
     }
+}
+
+struct AlbumState {
+    base: Url,
+    set: String,
+    next: Option<String>,
+    first: Option<String>,
+    seen: HashSet<String>,
+    index: usize,
+    done: bool,
+    budget: Duration,
 }
 
 fn backoff(attempt: u8) -> Duration {
@@ -229,7 +339,7 @@ impl From<crate::Error> for Failure {
     }
 }
 
-/// Accept single-photo permalinks only. Collection URLs must remain explicit.
+/// Parse single-photo permalinks. Album inputs are handled by `Facebook::stream`.
 pub fn photo_id(url: &Url) -> Result<String> {
     if !matches!(url.scheme(), "http" | "https")
         || !matches!(
@@ -244,7 +354,7 @@ pub fn photo_id(url: &Url) -> Result<String> {
     }
     if url.query_pairs().any(|(key, _)| key == "setextract") {
         return Err(error(
-            "native Facebook album traversal is not supported; use --extractor compatibility",
+            "Facebook URL selects album traversal; use Facebook::stream or --extractor compatibility",
         ));
     }
     let path = url.path().trim_end_matches('/');
@@ -282,42 +392,8 @@ fn validate_id(id: &str) -> Result<()> {
 /// A photo must identify the exact requested ID and own its `image.uri`.
 pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
     validate_id(requested_id)?;
-    if bytes.len() > MAX_RESPONSE {
-        return Err(error("Facebook response exceeded 16 MiB"));
-    }
+    let payloads = embedded_payloads(bytes)?;
     let page = std::str::from_utf8(bytes).map_err(|_| error("Facebook returned invalid UTF-8"))?;
-    let mut payloads = Vec::new();
-    if let Ok(value) = serde_json::from_str::<Value>(page) {
-        payloads.push(value);
-    } else {
-        // Script contents are raw text in HTML. JSON escapes (including slash
-        // and surrogate pairs) are decoded exactly once by serde_json.
-        let lower = page.to_ascii_lowercase();
-        let mut offset = 0;
-        while let Some(start) = lower[offset..].find("<script") {
-            let start = offset + start + 7;
-            if !lower
-                .as_bytes()
-                .get(start)
-                .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
-            {
-                offset = start;
-                continue;
-            }
-            let Some(open) = lower[start..].find('>') else {
-                break;
-            };
-            let content = start + open + 1;
-            let Some(end) = lower[content..].find("</script") else {
-                break;
-            };
-            let end = content + end;
-            if let Ok(value) = serde_json::from_str::<Value>(page[content..end].trim()) {
-                payloads.push(value);
-            }
-            offset = end + 8;
-        }
-    }
     let mut photos = Vec::new();
     for payload in &payloads {
         find_photos(payload, requested_id, &mut photos, 0);
@@ -416,6 +492,46 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
         ));
     }
     Ok(vec![chosen.clone()])
+}
+
+pub(crate) fn embedded_payloads(bytes: &[u8]) -> Result<Vec<Value>> {
+    if bytes.len() > MAX_RESPONSE {
+        return Err(error("Facebook response exceeded 16 MiB"));
+    }
+    let page = std::str::from_utf8(bytes).map_err(|_| error("Facebook returned invalid UTF-8"))?;
+    let mut payloads = Vec::new();
+    if let Ok(value) = serde_json::from_str::<Value>(page) {
+        payloads.push(value);
+    } else {
+        // Script contents are raw text in HTML. JSON escapes (including slash
+        // and surrogate pairs) are decoded exactly once by serde_json.
+        let lower = page.to_ascii_lowercase();
+        let mut offset = 0;
+        while let Some(start) = lower[offset..].find("<script") {
+            let start = offset + start + 7;
+            if !lower
+                .as_bytes()
+                .get(start)
+                .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
+            {
+                offset = start;
+                continue;
+            }
+            let Some(open) = lower[start..].find('>') else {
+                break;
+            };
+            let content = start + open + 1;
+            let Some(end) = lower[content..].find("</script") else {
+                break;
+            };
+            let end = content + end;
+            if let Ok(value) = serde_json::from_str::<Value>(page[content..end].trim()) {
+                payloads.push(value);
+            }
+            offset = end + 8;
+        }
+    }
+    Ok(payloads)
 }
 
 fn has_error_root(value: &Value) -> bool {
@@ -928,3 +1044,7 @@ mod transport_tests {
         assert_eq!(server.join().unwrap().len(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "facebook_album_tests.rs"]
+mod album_tests;

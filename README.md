@@ -8,7 +8,7 @@ An early Rust implementation of a gallery downloader, inspired by
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
 its JSON messages. Experimental native Instagram posts/profile feeds, Facebook
-photos, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
+photos/albums, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
 extraction has not yet been verified.
 
 ## Build and run
@@ -64,8 +64,9 @@ it is invoked directly, without a shell.
 `--extractor compatibility` is the default. `--extractor native` experimentally
 supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
 `/USERNAME/feed/` profiles, Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
-`/USER/photos/ALBUM/ID` photo permalinks, and Twitter/X single-status URLs.
-Other profiles, stories, threads, albums, and Facebook videos still need the
+`/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
+`/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, and Twitter/X single-status URLs.
+Other profiles, stories, threads, album listings, and Facebook videos still need the
 compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
@@ -113,10 +114,34 @@ own `image.uri`, never a global image or Open Graph preview. It selects the larg
 identity-bound image and emits available metadata plus stable archive identities.
 Cookies remain scoped to Facebook page requests; media receives user-agent and
 referer only. Requests have bounded redirects, retries, cooldowns, response size,
-and deadlines. Albums and videos are not implemented. An anonymous public page
+and deadlines. Videos and profile album listings are not implemented. An anonymous public page
 check on 2026-10-18 returned no identity-bound photo; successful live extraction
 and sanitized real response fixtures remain required. See the
 [Facebook fixture notes](tests/fixtures/facebook/README.md).
+
+Experimental Facebook album traversal uses `Facebook::stream` and the native CLI.
+It resolves the first photo only from an ordered collection tied to the requested
+set token, then follows each requested Photo's own set-bound navigation. A
+`/photo/?fbid=ID&set=TOKEN&setextract` URL starts directly at that photo. Plain
+photo permalinks keep their single-photo behavior; the collecting `extract`
+library method also remains single-photo. Album output follows viewer navigation
+and assigns a one-based album index while preserving photo/archive identity.
+
+Only the current bounded HTML response and parsed photo are retained, plus a set
+of visited IDs. No next-photo request occurs during downstream backpressure.
+Cumulative extraction time excludes consumer pauses. Explicit null navigation or
+a return to the starting photo completes traversal; other repeated IDs, ambiguous
+identity, missing navigation, and unsupported seed envelopes fail explicitly.
+Earlier photos survive late failures. Range/date cutoffs drop traversal before
+later requests. A starting-photo URL follows navigation until an explicit end or
+wrap to that starting photo; it does not use upstream's numeric jump heuristic.
+
+Public album/photo checks on 2026-10-18 returned logged-out shells with no usable
+Photo, token, or navigation data. Accepted seed/navigation nesting is covered by
+synthetic protocol fixtures and local HTTP tests and remains unverified against
+an authenticated response. Empty albums and additional live envelope variants
+are not yet recognized. Compatibility remains the default. See the
+[album fixture notes](tests/fixtures/facebook/album_README.md).
 
 Native Twitter/X requires current `x.com` `auth_token` and `ct0` cookies from
 a Netscape file or explicit Firefox profile import;
@@ -420,7 +445,7 @@ conditional directory templates, automatic discovery, and postprocessors remain 
 - `--write-metadata` saves `<media filename>.json` beside completed media, including
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,
-  shortcode, username, caption, timestamp, and carousel index). Post metadata is
+  shortcode, username, caption, timestamp, and carousel/album index). Post metadata is
   provided by native Instagram/Facebook/Twitter and allowlisted compatibility Instagram,
   Twitter/X, and Facebook fields when available. Compatibility timestamps are
   normalized from numeric epochs or recognized ISO calendar date-times; unsupported

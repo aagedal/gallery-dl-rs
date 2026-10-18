@@ -100,7 +100,7 @@ struct Args {
     /// Override the User-Agent for extraction and media HTTP requests
     #[arg(short = 'a', long)]
     user_agent: Option<String>,
-    /// Social extractor; native supports experimental Instagram feeds/posts, Facebook photos, and X posts
+    /// Social extractor; native supports experimental Instagram feeds/posts, Facebook photos/albums, and X posts
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
@@ -459,10 +459,7 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Facebook initialization failed: {e}"))
                         })?;
-                    stream::once(async move { native.extract(&url).await })
-                        .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
-                        .try_flatten()
-                        .boxed()
+                    native.stream(&url)
                 }
                 Extractor::Native => {
                     return Err(error(

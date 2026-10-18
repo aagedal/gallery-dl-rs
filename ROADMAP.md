@@ -25,7 +25,7 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Synthetic parser and local HTTP fixtures cover identity validation and errors.
   Anonymous public check on 2026-10-18 returned no identity-bound photo; it did
   not verify successful extraction. Real response fixtures, successful live
-  extraction, albums, and videos remain required.
+  extraction, album response verification, and videos remain required.
 - Twitter/X: single-post photos and direct video variants, including mixed-media
   posts and explicit unavailable/protected-post errors.
   **Implemented experimentally:** authenticated single-status GraphQL extraction,
@@ -174,6 +174,18 @@ Tests cover stdin before EOF, pending-read Ctrl-C, malformed/oversized lines,
 source preservation, configuration, archives/metadata, and failure continuation.
 Input-file configuration directives, configured input-files, and successful-item
 comment/delete modes remain.
+
+**Implemented experimental Facebook traversal:** native album/set roots and
+explicit starting-photo `setextract` URLs now stream one photo response at a time
+through existing authenticated transport. Seeds require a token-bound ordered
+first edge; photo navigation requires the exact photo/set identity and explicit
+next/end state. Null/first-photo wrap ends traversal; other cycles/incomplete
+navigation fail, retaining earlier results. Backpressure, cumulative active
+budgets, stable IDs, per-album indices, and range/date cancellation are covered by
+synthetic parser and local transport tests. Anonymous upstream public album and
+photo checks returned logged-out shells; accepted object nesting and successful
+live authenticated traversal remain unverified. Empty albums, more response
+variants, profile album listings, and upstream jump heuristics remain.
 
 **Implemented file selection:** `--range` and scoped native `file-range` strings
 or lists select one-based media positions using comma unions, inclusive hyphen
