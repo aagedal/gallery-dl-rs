@@ -99,8 +99,8 @@ shared extraction interface that emits media, post metadata, and child URLs.
   continuation. One cumulative active budget, deduplication set, lazy request
   scope, and range/date pipeline span all stages. Synthetic/local tests cover
   these behaviors; live authenticated search and real response fixtures remain
-  unverified. Resume cursors, arbitrary root dispatch, text-only output, and
-  other collection routes remain unfinished.
+  unverified. Resume cursors, arbitrary root dispatch, and other collection
+  routes remain unfinished.
   **Implemented experimental account collections:** Likes profile tabs, bookmarks,
   numeric list timelines, and latest/ranked home feeds share the native pipeline.
   Exact response envelopes and present list ID aliases validate before output;
@@ -112,13 +112,13 @@ shared extraction interface that emits media, post metadata, and child URLs.
   bounded empty pages, cursor loops, expansion/dedup, dates/ranges, late errors,
   consumer pauses, and cancellation. Authenticated live collection traversal,
   real fixtures, bookmark-specific metadata, membership/follow traversal,
-  text-only output, and other routes/options remain unfinished.
+  and other routes/options remain unfinished.
   **Implemented experimental community feeds:** explicit `/i/communities/ID`
   media timelines and the session's followed-community feed at `/i/communities`
   or `/USER/communities` share lazy traversal, limits, media options, expansion,
   source-order dates, cancellation, and signing. Exact operation envelopes and
-  present community identity aliases are validated. `text-tweets` and the
-  CommunityTweetsTimeline text variant remain unsupported. Post-owned community
+  present community identity aliases are validated. Scoped `text-tweets`
+  emits file-less post events and selects the CommunityTweetsTimeline variant. Post-owned community
   metadata uses a public allowlist, with validated IDs and optional typed fields;
   malformed optional metadata cannot supply a community archive identity. Native
   and transformed compatibility community fields support `{community_id}` and
@@ -430,7 +430,7 @@ never delimit a post. Empty real posts occupy positions, repeated IDs do not
 merge boundaries, and selected siblings retain source indices and identities.
 Instagram carousels and whole reels, X tweet/quote/thread batches, and Facebook
 photo or video/audio groups have explicit boundaries. Missing reels and skipped
-X text-only tweets do not create posts. Empty ranges start no extraction; finite
+X text-only tweets create posts only with `text-tweets`. Empty ranges start no extraction; finite
 native ranges drop at the selected end. Compatibility must read the next
 directory or validated EOF, potentially doing upstream work for the next post.
 Parser, runtime, CLI, cancellation, selected-only archive/sidecar, configuration,

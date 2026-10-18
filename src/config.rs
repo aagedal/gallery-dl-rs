@@ -54,7 +54,7 @@ pub struct Options {
     pub previews: Option<bool>,
     /// Attempt explicitly unavailable Twitter media when a URL is provided.
     pub unavailable: Option<bool>,
-    /// Include Twitter text posts as explicit text files.
+    /// Emit Twitter posts without selected media as file-less post events.
     pub text_tweets: Option<bool>,
     /// Ordered Twitter image sizes.
     pub size: Option<crate::twitter::ImageOptions>,

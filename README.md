@@ -316,6 +316,16 @@ not parsed; an invalid enabled video still fails instead of silently returning
 its poster. Statuses, quotes, retweets, conversations, and collection streams use
 the same selection. Explicit settings forward only for X in compatibility mode.
 
+Scoped X `"text-tweets": false` (default) skips accepted posts with no selected
+files. `true` (or `--text-tweets`; `--no-text-tweets` overrides configuration)
+emits those posts as file-less post events carrying their IDs, caption, author,
+timestamp, community, and attribution metadata, matching upstream's metadata-only
+output. They can satisfy post filters (with `count == 0`) and occupy post-range
+positions, but create no media or archive entries. Per-post metadata sidecars
+for these posts (upstream's post-event metadata output) are not yet written. It also selects
+`CommunityTweetsTimeline` instead of `CommunityMediaTimeline` for community
+feeds. Explicit values forward to compatibility mode for X.
+
 Scoped X `"unavailable": false` (default) skips individual media whose API
 availability status is `Unavailable`, before parsing their media fields. Other
 files continue in source order and are numbered consecutively. `true` keeps those
@@ -405,7 +415,7 @@ continue. A well-formed entries response without a Bottom cursor, or explicit
 Bottom termination, completes traversal. Missing instructions, conflicting or
 repeated cursors, unavailable posts, inconsistent identities, and unsupported
 entries fail explicitly; emitted media survive a later failure. Known promotions,
-recommendations, and valid text-only posts are skipped.
+recommendations, and valid text-only posts are skipped unless `text-tweets` is enabled.
 
 Scoped Twitter settings include `"pinned": false` (default) or `true`, and
 `"replies": true` (default), `false`, or `"self"`. Pins are opt-in and precede
@@ -469,8 +479,8 @@ feed uses `/i/communities` or `/USER/communities`; the latter is an alias for th
 current session's feed, not another user's followed communities. Requests use
 `CommunityMediaTimeline` and `CommunitiesMainPageTimeline`, respectively. They
 share lazy pagination, media selection, quote/thread expansion, limits, and
-source-order dates with other collection feeds. These routes emit media; upstream
-`text-tweets` and `CommunityTweetsTimeline` text output are not implemented.
+source-order dates with other collection feeds. With `text-tweets`, explicit
+community feeds request `CommunityTweetsTimeline` and require its envelope.
 Community response identity aliases, when present, must match the requested ID;
 an unrelated nested timeline cannot replace the required envelope.
 
@@ -506,7 +516,7 @@ are copied to media requests.
 
 List membership/follow relations, arbitrary
 root-profile dispatch selection, cursor-resume configuration,
-text-only output, and other collection routes remain
+and other collection routes remain
 unfinished. New collection behavior has synthetic/local coverage; successful
 live authenticated traversal remains unverified. See the
 [collection protocol notes](tests/fixtures/twitter/collections_README.md).
@@ -746,7 +756,7 @@ Explicit extractor events define posts rather than changes in IDs. An Instagram
 carousel is one post, as is a whole story/highlight reel. A returned empty reel
 occupies a position; an absent/expired reel does not. Each accepted X tweet batch
 is a post; quotes and thread tweets have separate boundaries. X text-only tweets
-skipped by extraction do not occupy positions. Each Facebook album photo is a
+occupy positions only with `text-tweets`; otherwise they are skipped. Each Facebook album photo is a
 post, while a single video's video/audio files share one post. Direct URLs each
 form one post. Empty compatibility directory events also occupy positions.
 
@@ -914,7 +924,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `file-filter`, `image-filter`, `post-range`, `post-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
-`expand`, `unique`, `videos`, `previews`, `unavailable`, `articles`, `cards`,
+`expand`, `unique`, `videos`, `previews`, `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,

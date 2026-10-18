@@ -70,7 +70,7 @@ struct Args {
     /// Select posts before file filtering; repeat to require all expressions
     #[arg(long = "post-filter", value_name = "EXPR", allow_hyphen_values = true)]
     post_filter: Vec<String>,
-    /// Include native X text posts as text files
+    /// Emit metadata for native X posts without media
     #[arg(long, conflicts_with = "no_text_tweets")]
     text_tweets: bool,
     /// Disable configured X text-post output
