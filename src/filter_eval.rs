@@ -1186,7 +1186,7 @@ fn float_divmod(a: f64, b: f64) -> (f64, f64) {
     (floor, remainder)
 }
 
-fn float_repr(value: f64) -> String {
+pub(crate) fn float_repr(value: f64) -> String {
     let absolute = value.abs();
     if absolute != 0.0 && !(1e-4..1e16).contains(&absolute) {
         let scientific = format!("{value:e}");

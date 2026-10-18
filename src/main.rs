@@ -100,7 +100,7 @@ struct Args {
     /// SQLite history of completed media (gallery-dl-rs format)
     #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
     download_archive: Option<PathBuf>,
-    /// Native filename template, e.g. '{post_id}_{index:03}.{extension}'
+    /// Filename template, e.g. '{date:%Y%m%d}_{post_id}_{index:>02}.{extension}'
     #[arg(short = 'f', long, conflicts_with_all = ["get_urls", "dump_json"])]
     filename: Option<String>,
     /// Folder component template; repeat for nested folders (replaces category)

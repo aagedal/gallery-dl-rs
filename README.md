@@ -1054,19 +1054,35 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   template under `destination/category/`. Available fields are `{filename}`
   (including extension), `{name}` (without the final extension), `{extension}`
   (without the dot), `{category}`, `{post_id}`, `{media_id}`, `{shortcode}`,
-  `{username}`, `{index}`, `{timestamp}`, `{community_id}`, and `{community_name}`.
-  File properties also support `{width}`, `{height}`, `{width_original}`,
-  `{height_original}`, `{duration}`, `{bitrate}`, and `{media_type}` in filename
-  and directory templates. Missing values fail explicitly.
-  Only index supports zero-padding,
-  such as `{index:03}` or `{index:03d}`. `{{` / `}}` escape braces; all output then
+  `{username}`, `{index}`/`{num}`, `{timestamp}`, `{date}` (a UTC datetime),
+  `{caption}`/`{content}`, `{description}`, `{community_id}`, `{community_name}`,
+  and the nested `{community}`, `{article}`, `{source_user}`, and `{metadata}`
+  maps. File properties also support `{width}`, `{height}`, `{width_original}`,
+  `{height_original}`, `{duration}`, `{bitrate}`, `{media_type}`/`{type}`,
+  `{sensitive_flags}`, and `{source_id}`/`{source_username}`; X adds
+  `{tweet_id}`, `{retweet_id}`, and `{quote_id}`, and Facebook adds `{id}`.
+  Unlike upstream, `{filename}` includes the extension, and `{url}` is
+  unavailable so signed transport URLs cannot leak into paths.
+  Fields use gallery-dl's replacement-field syntax: `.key`/`[key]`, `[index]`,
+  and `[start:stop]` accessors; `{a|b|'literal'}` alternatives; the `!l`, `!u`,
+  `!c`, `!C`, `!t`, `!s`, `!S`, `!r`, `!j`, `!d`, `!D`, `!T`, `!i`, `!f`, `!g`,
+  `!U`, `!H`, and `!W` conversions; chained `?before/after/`, `L<max>/<text>/`,
+  `J<sep>/`, `R<old>/<new>/`, `A<+|-|*><n>/`, `C<conversions>/`, `S<a|r>/`, and
+  `O<+HH:MM>/` specifiers; then a Python format specification (fill, alignment,
+  sign, `#`, zero padding, width, grouping, precision, and `s d x X o b f F e E %`
+  types) or, for dates, a `strftime` pattern such as `{date:%Y-%m-%d}`.
+  Missing or empty values fail explicitly unless an alternative supplies one or
+  a `?` specifier makes the field optional. Widths are limited to 240 and
+  intermediate values to 64 KiB; nothing evaluates arbitrary code.
+  `{{` / `}}` escape braces; all output then
   uses safe ASCII filename characters, so literal braces become underscores.
-  Unknown fields/formats, missing values, and literal directory paths fail
-  explicitly. Substituted values are sanitized; names are limited to 240 bytes
+  Unknown fields/conversions/specifiers and literal directory paths fail when
+  the template is parsed. Substituted values are sanitized; names are limited to 240 bytes
   while preserving the final extension. Include enough IDs to make names unique:
   files at colliding paths are assumed complete and skipped without overwriting.
-  Changing the template does not clear archive history. This is a limited native
-  syntax; gallery-dl expressions, conversions, and conditionals are not supported.
+  Changing the template does not clear archive history. Upstream's `D`, `X`,
+  `M`, and `I` specifiers, byte slices, `{_now}`/`{_env}` globals, and Python
+  expression (`\f`) templates are not supported.
   This flag conflicts with `-g` and `-j`.
 - `--directory-template '{category}' --directory-template '{username}'` replaces
   the default category folder with ordered component templates under the output
