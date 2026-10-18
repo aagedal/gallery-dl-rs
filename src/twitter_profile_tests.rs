@@ -3485,7 +3485,7 @@ async fn thread_range_cutoff_and_dropped_pending_child_stop_all_followup_work() 
 
 #[tokio::test]
 async fn thread_expansion_shares_parent_active_budget_and_excludes_consumer_pause() {
-    let native = extractor(Duration::from_millis(250))
+    let native = extractor(Duration::from_millis(1000))
         .await
         .with_thread_options(expanded_threads(true));
     let server = Server::new(vec![
@@ -3510,7 +3510,7 @@ async fn thread_expansion_shares_parent_active_budget_and_excludes_consumer_paus
             .post_id,
         "90"
     );
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
     let rest: Vec<_> = stream.try_collect().await.unwrap();
     assert_eq!(post_ids(&rest), ["100", "101"]);
     let server = Server::new(vec![
@@ -3518,9 +3518,9 @@ async fn thread_expansion_shares_parent_active_budget_and_excludes_consumer_paus
             vec![in_thread(tweet("100"), json!("90"))],
             Some("parent"),
         ))
-        .delayed(100),
-        Response::json(detail_page(vec![tweet("90")], Some("child"))).delayed(100),
-        Response::json(detail_page(vec![tweet("100")], None)).delayed(100),
+        .delayed(400),
+        Response::json(detail_page(vec![tweet("90")], Some("child"))).delayed(400),
+        Response::json(detail_page(vec![tweet("100")], None)).delayed(400),
         Response::json(page(vec![in_thread(tweet("101"), json!(false))], None)),
     ]);
     let mut stream = native.media_stream(input("id:42"), server.base.clone());
