@@ -567,6 +567,12 @@ uploads and collections via the API (optional `api-key`). Remaining: per-item
 `w/ID` metadata (tags/uploader) for listings, collection lists, upstream's
 `{category}_{id}_{resolution}` filenames and `metadata` option.
 
+**Implemented experimental native Pinterest:** pins, boards, user pins and
+`pin.it` links via the resource API. Remaining: login/cookies and CSRF token,
+board sections, secret boards, search, related pins, created/saved/all-pins
+listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
+`videos` and `domain` options.
+
 **Implemented experimental native ArtStation:** projects and user portfolios
 via site JSON with browser-like headers. Remaining: Cloudflare challenges,
 video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,

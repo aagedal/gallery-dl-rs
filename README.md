@@ -407,6 +407,22 @@ title, timestamp `published_at`, index 1-based per project, with width/height.
 Default filenames are `{post_id}_{media_id}.{extension}`; archive identity is
 the asset ID. Plain CDN links stay direct.
 
+Experimental native Pinterest extraction (`--extractor native`, `pinterest`
+category) uses the web resource API (`resource/NAME/get/?source_url=..&data=..`
+with upstream's XHR headers, including a pinned `X-APP-VERSION` that Pinterest
+may eventually reject). Supported on `pinterest.com` and an explicit list of
+country domains/subdomains: `/pin/ID/` (`PinResource`), `/USER/BOARD/`
+(`BoardResource` then `BoardFeedResource`), `/USER/pins/` (`UserPinsResource`)
+and `pin.it/CODE` (resolved via the `url_shortener` redirect). Feeds follow the
+bookmark until `-end-`, capped at 200 pages. Media are story-pin image/video
+blocks, else the largest MP4 in `videos.video_list` (HLS-only videos are
+skipped), else `images.orig`; HTTPS on `i.pinimg.com`/`v*.pinimg.com` only.
+Promoted pins and pins without media are skipped. `post_id`/`id` is the pin
+ID, `media_id` the pin ID (`ID_N` for multi-block story pins), `username` the
+pinner, caption title/grid title/description, timestamp `created_at`, index
+1-based, with width/height. Default filenames are `{post_id}_{index}.{extension}`;
+archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.
