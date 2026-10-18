@@ -65,6 +65,22 @@ impl Media {
                 }
                 ("imgur", serde_json::json!([id]).to_string())
             }
+            // Blob CIDs are content addresses scoped to the author's repository.
+            "bluesky" => {
+                let post = self.metadata.as_ref()?;
+                let did = self
+                    .url
+                    .query_pairs()
+                    .find(|(key, _)| key == "did")
+                    .map(|(_, did)| did.into_owned())?;
+                if !crate::bluesky::valid_did(&did) || !crate::bluesky::valid_cid(&post.media_id) {
+                    return None;
+                }
+                (
+                    "bluesky",
+                    serde_json::json!([did, post.media_id]).to_string(),
+                )
+            }
             category @ ("instagram" | "twitter" | "facebook") => {
                 let post = self.metadata.as_ref()?;
                 if !decimal_id(&post.post_id) {
@@ -209,6 +225,7 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("instagram.com", "instagram"),
         ("facebook.com", "facebook"),
         ("fb.watch", "facebook"),
+        ("bsky.app", "bluesky"),
         ("imgur.com", "imgur"),
         ("imgur.io", "imgur"),
         ("twitter.com", "twitter"),

@@ -352,7 +352,7 @@ fn context_parts(
         if category == "facebook" {
             values.insert("id".into(), identifier(&post.post_id));
         }
-        if category == "imgur" {
+        if category == "imgur" || category == "bluesky" {
             // Upstream `id` is the image ID for files and the post ID otherwise.
             let id = if media.is_some() {
                 &post.media_id

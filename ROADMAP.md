@@ -519,6 +519,12 @@ options and Retry-After cooldowns. Not yet: user profiles, favorites,
 subreddits, searches, tag listings, and the upstream `mp4` option (animated GIFs
 always use MP4).
 
+**Implemented experimental native Bluesky:** single posts and author
+media/posts feeds via the public AppView, with full-size `getBlob` images and
+videos. Not yet: likes, custom feeds, lists, searches, quoted-post media,
+authentication, PDS-specific blob hosts (blobs always use `bsky.social`), and
+upstream's `include`, `reposts`, `quoted` and `videos` options.
+
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook
 selections retain available file dimensions, original dimensions, seconds-based
 duration, bitrate, media type, description/alt text, sensitivity, and source

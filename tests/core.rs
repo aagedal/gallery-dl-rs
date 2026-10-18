@@ -288,6 +288,11 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://fb.watch/abc/", Some("facebook")),
         ("https://i.imgur.com/21yMxCS.png", Some("imgur")),
         ("https://imgur.com.evil.example/a/TcBmP", None),
+        (
+            "https://bsky.app/profile/a.bsky.social/post/3kabc",
+            Some("bluesky"),
+        ),
+        ("https://bsky.app.evil.example/profile/a.bsky.social", None),
         ("https://x.com/user/status/123", Some("twitter")),
         ("https://twitter.com/user/status/123", Some("twitter")),
         ("https://notinstagram.com/p/abc", None),

@@ -227,6 +227,23 @@ filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. User
 profiles, favorites, subreddit listings, searches and tag listings are rejected
 as unsupported. Compatibility mode sends Imgur URLs to the backend.
 
+Experimental native Bluesky extraction (`--extractor native`, category
+`bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
+feeds (`bsky.app/profile/NAME`, `/media`, `/posts`), where NAME is a handle or
+DID. It reads the public, unauthenticated AppView (`public.api.bsky.app`):
+handles resolve via `com.atproto.identity.resolveHandle`, posts via
+`getPostThread` and feeds via `getAuthorFeed` (`posts_with_media` for the bare
+profile and `/media`, `posts_no_replies` for `/posts`; cursor pagination capped
+at 1,000 pages of 100). Images and videos (also inside `recordWithMedia`) are
+downloaded as full-size blobs from
+`https://bsky.social/xrpc/com.atproto.sync.getBlob?did=DID&cid=CID`, built from
+validated identifiers only. Reposts, pinned entries and media-free posts are
+skipped in feeds; quoted posts are not followed. `post_id` is the record key,
+`media_id`/`id` the blob CID, `username` the handle, `caption` the post text,
+`timestamp` from `createdAt`; files carry aspect-ratio width/height, alt text
+and MIME type. Default filenames are `{post_id}_{index}.{extension}`; archive
+identity is (DID, CID). Compatibility mode sends Bluesky URLs to the backend.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.
