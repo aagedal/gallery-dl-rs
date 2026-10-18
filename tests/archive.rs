@@ -651,3 +651,31 @@ fn terminate_stops_after_consecutive_skipped_files() {
     assert!(!run(&["-T", "3"]).status.success());
     assert_eq!(run(&["-T", "0"]).status.code(), Some(2));
 }
+
+#[test]
+fn abort_stops_only_the_input_with_consecutive_skips() {
+    let root = tempfile::tempdir().unwrap();
+    let existing = "http://127.0.0.1:1/existing.jpg";
+    let media = extract::direct(&extract::http_url(existing).unwrap()).unwrap();
+    let saved = download::destination(root.path(), &media);
+    std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+    std::fs::write(&saved, b"existing").unwrap();
+    let run = |flag: &str| {
+        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .args(["--jobs", "1", "--retries", "0", flag, "1", "-d"])
+            .arg(root.path())
+            .args([existing, "http://127.0.0.1:1/missing.jpg"])
+            .output()
+            .unwrap()
+    };
+    let output = run("-A");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("stopping input 1 after 1 consecutive skipped files"),
+        "{stderr}"
+    );
+    // The second input still runs and fails against the unreachable server.
+    assert!(!output.status.success());
+    assert!(stderr.contains("download failed"), "{stderr}");
+    assert!(run("-T").status.success());
+}

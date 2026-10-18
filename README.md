@@ -1014,8 +1014,9 @@ unimplemented.
   before each network download, after archive and existing-file checks, outside
   the per-attempt timeout.
 - `-T N`/`--terminate N` stops all inputs successfully after N consecutive files
-  were skipped as existing or archived (counted in completion order). Upstream's
-  per-input `-A`/`--abort` is not yet implemented.
+  were skipped as existing or archived (counted in completion order). `-A N`/`--abort N`
+  stops only the current input: its extraction ends and queued, unstarted
+  downloads are dropped, while later inputs continue.
 - `--write-metadata` saves `<media filename>.json` beside completed media, including
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,

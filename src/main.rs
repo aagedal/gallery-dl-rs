@@ -106,6 +106,9 @@ struct Args {
     /// Seconds to wait before each download, as SECONDS or MIN-MAX
     #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
     sleep: Option<gallery_dl_rs::sleep::SleepRange>,
+    /// Stop the current input after N consecutive skipped (existing or archived) files
+    #[arg(short = 'A', long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+    abort: Option<u64>,
     /// Stop all inputs after N consecutive skipped (existing or archived) files
     #[arg(short = 'T', long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
     terminate: Option<u64>,
@@ -253,6 +256,9 @@ async fn run(args: Args) -> Result<()> {
         timeout: Duration::from_secs(args.extraction_timeout),
     };
     let failed = Cell::new(0);
+    // Inputs stopped by -A/--abort; their remaining media are neither
+    // extracted nor downloaded.
+    let aborted = std::cell::RefCell::new(HashSet::<usize>::new());
     let mut seen = HashSet::new();
     // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
@@ -261,6 +267,7 @@ async fn run(args: Args) -> Result<()> {
         .enumerate()
         .flat_map(|(index, source)| {
             let failed = &failed;
+            let aborted = &aborted;
             let input = match source {
                 Ok(source) => {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
@@ -323,24 +330,26 @@ async fn run(args: Args) -> Result<()> {
                 }
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
-            input.filter_map(move |result| {
-                std::future::ready(match result {
-                    Ok(item) => Some(item),
-                    Err(e) => {
-                        eprintln!("extraction failed for input {}: {e}", index + 1);
-                        failed.set(failed.get() + 1);
-                        None
-                    }
+            input
+                .take_while(move |_| std::future::ready(!aborted.borrow().contains(&index)))
+                .filter_map(move |result| {
+                    std::future::ready(match result {
+                        Ok(item) => Some((index, item)),
+                        Err(e) => {
+                            eprintln!("extraction failed for input {}: {e}", index + 1);
+                            failed.set(failed.get() + 1);
+                            None
+                        }
+                    })
                 })
-            })
         })
-        .map(|mut item| {
+        .map(|(index, mut item)| {
             settings[item.category.as_str()]
                 .network
                 .apply_media(&mut item);
-            item
+            (index, item)
         })
-        .filter(|item| {
+        .filter(|(_, item)| {
             if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
                 return std::future::ready(true);
             }
@@ -357,10 +366,10 @@ async fn run(args: Args) -> Result<()> {
         });
     tokio::pin!(media);
     if args.dump_json {
-        let media: Vec<_> = media.collect().await;
+        let media: Vec<_> = media.map(|(_, item)| item).collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
     } else if args.get_urls {
-        while let Some(item) = media.next().await {
+        while let Some((_, item)) = media.next().await {
             println!("{}", item.url);
         }
     } else {
@@ -369,8 +378,9 @@ async fn run(args: Args) -> Result<()> {
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep);
+        let aborted = &aborted;
         let results = media
-            .map(|item| {
+            .map(|(index, item)| {
                 let settings = &settings[item.category.as_str()];
                 let client = client
                     .clone()
@@ -391,59 +401,81 @@ async fn run(args: Args) -> Result<()> {
                     directory: settings.directory.as_ref(),
                 };
                 async move {
-                    let client = cell
-                        .get_or_init(|| async { client.with_network(&settings.network) })
-                        .await
-                        .as_ref()
-                        .map_err(|e| {
-                            error(format!("media HTTP client initialization failed: {e}"))
-                        })?;
-                    match archive {
-                        Some((cell, path)) => {
-                            let archive = cell
-                                .get_or_init(|| Archive::open(path))
-                                .await
-                                .as_ref()
-                                .map_err(|e| {
-                                error(format!("download archive initialization failed: {e}"))
-                            })?;
-                            archive
-                                .download_with_template(
-                                    client,
-                                    destination,
-                                    &item,
-                                    options,
-                                    filename,
-                                )
-                                .await
-                        }
-                        None => download::download_with_template(
-                            client,
-                            destination,
-                            &item,
-                            options,
-                            filename,
-                        )
-                        .await
-                        .map(ArchiveOutcome::Completed),
+                    // Downloads queued before an abort are dropped unstarted.
+                    if aborted.borrow().contains(&index) {
+                        return (index, None);
                     }
+                    let result: Result<ArchiveOutcome> = async {
+                        let client = cell
+                            .get_or_init(|| async { client.with_network(&settings.network) })
+                            .await
+                            .as_ref()
+                            .map_err(|e| {
+                                error(format!("media HTTP client initialization failed: {e}"))
+                            })?;
+                        match archive {
+                            Some((cell, path)) => {
+                                let archive = cell
+                                    .get_or_init(|| Archive::open(path))
+                                    .await
+                                    .as_ref()
+                                    .map_err(|e| {
+                                        error(format!(
+                                            "download archive initialization failed: {e}"
+                                        ))
+                                    })?;
+                                archive
+                                    .download_with_template(
+                                        client,
+                                        destination,
+                                        &item,
+                                        options,
+                                        filename,
+                                    )
+                                    .await
+                            }
+                            None => download::download_with_template(
+                                client,
+                                destination,
+                                &item,
+                                options,
+                                filename,
+                            )
+                            .await
+                            .map(ArchiveOutcome::Completed),
+                        }
+                    }
+                    .await;
+                    (index, Some(result))
                 }
             })
             .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
         let mut skipped = 0u64;
-        while let Some(result) = results.next().await {
+        let mut input_skipped = BTreeMap::<usize, u64>::new();
+        while let Some((index, result)) = results.next().await {
+            let Some(result) = result else { continue };
+            let input = input_skipped.entry(index).or_default();
             if matches!(
                 result,
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
                     | ArchiveOutcome::AlreadyArchived)
             ) {
                 skipped += 1;
+                *input += 1;
             } else if matches!(
                 result,
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(_)))
             ) {
                 skipped = 0;
+                *input = 0;
+            }
+            if args.abort.is_some_and(|limit| *input >= limit) && aborted.borrow_mut().insert(index)
+            {
+                eprintln!(
+                    "stopping input {} after {input} consecutive skipped files",
+                    index + 1
+                );
             }
             match result {
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
