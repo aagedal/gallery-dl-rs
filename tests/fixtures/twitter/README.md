@@ -17,7 +17,7 @@ web-client Bearer authorization, CSRF, and a generated client transaction ID.
 Homepage verification metadata/loading SVG and the referenced abs.twimg.com
 ondemand script supply the transaction inputs. Script requests carry no cookies,
 CSRF, or Authorization. Single-post media order and the requested root tweet ID
-are checked; quote/retweet expansion, profiles, threads, cards/articles, playlists,
+are checked; quote/retweet expansion, other profile tabs, threads, cards/articles, playlists,
 and collections remain unsupported natively. Compatibility remains the default.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
@@ -44,3 +44,8 @@ four indices and the Rust bootstrap generated a transaction successfully. This
 verifies public bootstrap only, **not authenticated extraction**. The retained
 module fixture is a minimal sanitized HTML shape with a replaced bundle hash;
 full downloaded public pages/assets are kept outside the repository.
+
+Experimental native profile media now has separate
+[synthetic timeline protocol notes](media_README.md). Local HTTP tests exercise
+lazy traversal and account/transaction identity. Successful authenticated media
+timeline extraction and sanitized real response fixtures remain unverified.

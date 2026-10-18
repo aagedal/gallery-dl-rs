@@ -66,8 +66,17 @@ shared extraction interface that emits media, post metadata, and child URLs.
   shell required a first-party `/i/jf/` fallback. Reference vectors, parser fixtures,
   and local HTTP tests cover protocol behavior. **Still required:** sanitized real
   GraphQL photo/video/mixed responses and a successful live authenticated download.
-  Compatibility remains the default. Profiles, threads, retweet/quote expansion,
-  and cards/articles remain outside native coverage.
+  Compatibility remains the default. Other profile tabs, threads, retweet/quote
+  expansion, and cards/articles remain outside native coverage.
+  **Implemented experimental profile media:** `/USER/media` and numeric ID forms
+  stream `UserMedia` pages after identity-bound `UserByScreenName` resolution when
+  needed. Structured items/grid/module/pin/cursor instructions, owner validation,
+  unchanged post/archive identities, advancing empty pages, source-order dates,
+  cursor-loop errors, page atomicity, backpressure, active budgets, and cancellation
+  have synthetic/local coverage. Operation-specific signing, scoped cookie/CSRF
+  updates, and configured API/media user agents are tested. Authenticated live
+  traversal, real response fixtures, dynamic operation refresh, broader timeline
+  variants/tabs, and configurable timeline expansion remain.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and

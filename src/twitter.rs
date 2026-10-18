@@ -1,4 +1,4 @@
-//! Experimental authenticated X single-post extraction.
+//! Experimental authenticated X posts and profile media timelines.
 //! GraphQL operation IDs/features are upstream snapshots, not a stable API.
 //! Transaction bootstrap follows the upstream web client and may change without notice.
 use crate::{
@@ -9,9 +9,17 @@ use crate::{
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
+#[path = "twitter_profile.rs"]
+mod profile;
+#[path = "twitter_timeline.rs"]
+mod timeline;
 use base64::{
     Engine,
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+};
+use futures_util::{
+    StreamExt, TryStreamExt,
+    stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
@@ -21,6 +29,7 @@ use std::{
     sync::Mutex,
     time::{Duration, SystemTime},
 };
+pub use timeline::is_media_timeline_url;
 use url::Url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -107,6 +116,10 @@ impl Twitter {
     }
 
     async fn ensure_transaction(&self, code: &str) -> Result<()> {
+        self.ensure_transaction_at(code, &endpoint(code)?).await
+    }
+
+    async fn ensure_transaction_at(&self, code: &str, auth_endpoint: &Url) -> Result<()> {
         let _guard = self.initialize.lock().await;
         if self
             .transaction
@@ -121,7 +134,7 @@ impl Twitter {
             .cookies
             .lock()
             .unwrap()
-            .header(&endpoint(code)?)
+            .header(auth_endpoint)
             .unwrap_or_default();
         for name in ["auth_token=", "ct0="] {
             if !scoped
@@ -210,7 +223,11 @@ impl Twitter {
                 )
                 .header(
                     header::REFERER,
-                    format!("https://x.com/i/web/status/{code}"),
+                    if code.is_empty() {
+                        "https://x.com/".to_owned()
+                    } else {
+                        format!("https://x.com/i/web/status/{code}")
+                    },
                 );
             if api {
                 request = request
@@ -346,6 +363,14 @@ fn endpoint(id: &str) -> Result<Url> {
     let mut url =
         http_url("https://x.com/i/api/graphql/qxWQxcMLiTPcavz9Qy5hwQ/TweetResultByRestId")?;
     let variables = serde_json::json!({"tweetId":id,"withCommunity":false,"includePromotedContent":false,"withVoice":false});
+    url.query_pairs_mut()
+        .append_pair("variables", &variables.to_string())
+        .append_pair("features", &tweet_features().to_string())
+        .append_pair("fieldToggles", &serde_json::json!({"withArticleRichContentState":true,"withArticlePlainText":false,"withGrokAnalyze":false,"withDisallowedReplyControls":false}).to_string());
+    Ok(url)
+}
+
+fn tweet_features() -> Value {
     let mut features = serde_json::Map::new();
     for name in [
         "profile_label_improvements_pcf_label_in_post_enabled",
@@ -389,11 +414,7 @@ fn endpoint(id: &str) -> Result<Url> {
     ] {
         features.insert(name.into(), false.into());
     }
-    url.query_pairs_mut()
-        .append_pair("variables", &variables.to_string())
-        .append_pair("features", &Value::Object(features).to_string())
-        .append_pair("fieldToggles", &serde_json::json!({"withArticleRichContentState":true,"withArticlePlainText":false,"withGrokAnalyze":false,"withDisallowedReplyControls":false}).to_string());
-    Ok(url)
+    Value::Object(features)
 }
 
 fn valid_id(id: &str) -> bool {
@@ -404,7 +425,7 @@ fn valid_id(id: &str) -> bool {
         && !id.starts_with('0')
 }
 
-/// Only first-party single-post URLs; profile/timeline URLs need compatibility.
+/// Parse first-party single-post URLs. `Twitter::stream` also handles media tabs.
 pub fn post_id(url: &Url) -> Result<String> {
     if !matches!(url.scheme(), "http" | "https")
         || !matches!(
@@ -449,16 +470,7 @@ pub fn post_id(url: &Url) -> Result<String> {
     Ok(id.into())
 }
 
-/// Read only the requested root result, never quoted/retweeted/nested tweets.
-/// Public metadata is deliberately allowlisted and raw API errors are redacted.
-pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media>> {
-    if bytes.len() > MAX_RESPONSE {
-        return Err(error("Twitter response exceeded 16 MiB"));
-    }
-    if !valid_id(requested_post_id) {
-        return Err(error("invalid Twitter post identifier"));
-    }
-    let data: Value = serde_json::from_slice(bytes).map_err(|_| error("Twitter returned a web page or invalid JSON; login or a client transaction challenge may be required"))?;
+fn check_errors(data: &Value) -> Result<()> {
     if let Some(errors) = data
         .get("errors")
         .and_then(Value::as_array)
@@ -483,6 +495,20 @@ pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media
             "Twitter API rejected this request; session or client transaction challenge may be required"
         }));
     }
+    Ok(())
+}
+
+/// Read only the requested root result, never quoted/retweeted/nested tweets.
+/// Public metadata is deliberately allowlisted and raw API errors are redacted.
+pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media>> {
+    if bytes.len() > MAX_RESPONSE {
+        return Err(error("Twitter response exceeded 16 MiB"));
+    }
+    if !valid_id(requested_post_id) {
+        return Err(error("invalid Twitter post identifier"));
+    }
+    let data: Value = serde_json::from_slice(bytes).map_err(|_| error("Twitter returned a web page or invalid JSON; login or a client transaction challenge may be required"))?;
+    check_errors(&data)?;
     let mut tweet = data
         .pointer("/data/tweetResult/result")
         .ok_or_else(|| error("Twitter post unavailable or unexpected GraphQL response"))?;
@@ -1338,3 +1364,7 @@ mod tests {
         assert!(err.contains("auth_token"), "{err}");
     }
 }
+
+#[cfg(test)]
+#[path = "twitter_profile_tests.rs"]
+mod profile_tests;

@@ -100,7 +100,7 @@ struct Args {
     /// Override the User-Agent for extraction and media HTTP requests
     #[arg(short = 'a', long)]
     user_agent: Option<String>,
-    /// Social extractor; native supports experimental Instagram collections/stories/posts, Facebook media/albums, and X posts
+    /// Social extractor; native supports experimental Instagram collections/stories/posts, Facebook media/albums, and X posts/media
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
@@ -201,6 +201,7 @@ async fn run(args: Args) -> Result<()> {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
                         gallery_dl_rs::instagram::is_story_url(&url)
                             || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
+                            || gallery_dl_rs::twitter::is_media_timeline_url(&url)
                     });
                     let selected_settings = extract::http_url(&source)
                         .ok()
@@ -424,10 +425,7 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Twitter initialization failed: {e}")))?;
-                    stream::once(async move { native.extract(&url).await })
-                        .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
-                        .try_flatten()
-                        .boxed()
+                    native.stream(&url)
                 }
                 Extractor::Native if category == "facebook" => {
                     let native = extractors

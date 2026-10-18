@@ -98,6 +98,7 @@ async fn source_order_dates_skip_old_entries_in_stories_reels_tagged_and_saved_f
         "https://instagram.com/fixture/tagged/",
         "https://instagram.com/fixture/saved/",
         "https://instagram.com/fixture/saved/collection/123/",
+        "https://x.com/fixture/media",
     ] {
         let result = output(binary(root.path(), &backend).args([
             "-g",

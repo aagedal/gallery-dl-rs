@@ -8,7 +8,7 @@ An early Rust implementation of a gallery downloader, inspired by
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
 its JSON messages. Experimental native Instagram posts/collections/stories/highlights, Facebook
-photos/albums/videos, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
+photos/albums/videos, and Twitter/X posts/media timelines are available with `--extractor native`; authenticated live post
 extraction has not yet been verified.
 
 ## Build and run
@@ -67,7 +67,7 @@ supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
 stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
 `/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
 `/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
-`/USER/videos/ID` videos, and Twitter/X single-status URLs.
+`/USER/videos/ID` videos, and Twitter/X single-status and `/USER/media` URLs.
 Other profiles, threads, and album listings still need the
 compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
@@ -232,6 +232,32 @@ as compatibility extraction. The response must match the requested root tweet;
 quoted posts and retweets are not silently substituted or expanded. Missing video
 variants fail instead of returning thumbnails. Protected, missing, expired-session,
 rate-limit, and challenge responses fail explicitly.
+
+Experimental X media timelines use `Twitter::stream` and the native CLI at
+`/USERNAME/media` or `/id:USER_ID/media` on X/Twitter hosts. Username lookup uses
+`UserByScreenName`; an explicit numeric ID skips that lookup. The `UserMedia`
+response must identify the requested account, and every non-promoted post must
+belong to it. Structured timeline entries, grid modules, appended module items,
+pins, replacement cursors, and explicit termination preserve media source order.
+Each post uses the same media parser and archive identity as single-post extraction.
+
+Only the current bounded page and parsed jobs are retained, plus fixed-size
+cursor-history digests. Later pages wait until the current jobs drain; dropping
+the stream or reaching a file range stops later requests. Active extraction time
+includes profile lookup, transaction bootstrap, requests, and retries, excluding
+consumer pauses. Empty pages with an advancing Bottom cursor continue. A
+well-formed entries response without a Bottom cursor, or explicit Bottom
+termination, completes traversal. Missing instructions, conflicting/repeated
+cursors, unavailable/foreign posts, and unsupported entries fail explicitly;
+earlier pages survive a late failure. Known promotions/recommendations and valid
+text-only posts are skipped. Retweets, quotes, cards/articles, and other profile
+tabs are not expanded.
+
+Timeline API IDs/features are upstream snapshots. Synthetic parser and local HTTP
+tests cover traversal, signing paths, cookie rotation, user-agent propagation,
+date/range selection, deadlines, and cancellation. Real response fixtures and
+successful authenticated timeline traversal remain unverified. The collecting
+`Twitter::extract` API remains single-post. See the [media timeline fixture notes](tests/fixtures/twitter/media_README.md).
 
 The native X client generates transaction headers from verification/SVG data and
 the current signing asset, with a first-party `/i/jf/` bootstrap fallback for newer
@@ -410,7 +436,7 @@ bound, drops the extractor, and proceeds to the next input. This assumes newest
 first ordering; an older pinned or out-of-order post can end traversal early.
 Already selected downloads finish normally.
 
-Recognized Instagram story, highlight, story-tray, reels, tagged, and saved-collection URLs use source-order date
+Recognized Instagram story, highlight, story-tray, reels, tagged, and saved-collection URLs, plus X media timelines, use source-order date
 filtering with either extractor backend: `--date-after` skips older items and
 continues scanning. This avoids dropping newer items later in an ascending or
 mixed-order source. Library users can select the same behavior with

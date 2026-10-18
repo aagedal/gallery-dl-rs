@@ -601,29 +601,35 @@ mod cancellation {
 
 #[test]
 fn native_twitter_reports_authentication_without_launching_backend_and_continues_inputs() {
-    let output = binary()
-        .args([
-            "--extractor",
-            "native",
-            "--extractor-command",
-            "/missing/backend",
-            "-g",
-            "https://x.com/person/status/123",
-            "https://example.com/image.jpg",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "https://example.com/image.jpg\n"
-    );
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("auth_token") && stderr.contains("ct0"),
-        "{stderr}"
-    );
-    assert!(!stderr.contains("could not run"));
+    for source in [
+        "https://x.com/person/status/123",
+        "https://x.com/person/media",
+        "https://x.com/id:42/media",
+    ] {
+        let output = binary()
+            .args([
+                "--extractor",
+                "native",
+                "--extractor-command",
+                "/missing/backend",
+                "-g",
+                source,
+                "https://example.com/image.jpg",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "https://example.com/image.jpg\n"
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("auth_token") && stderr.contains("ct0"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("could not run"));
+    }
 }
 
 #[test]
@@ -631,6 +637,7 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
     let root = tempfile::tempdir().unwrap();
     for url in [
         "https://x.com/person/status/123",
+        "https://x.com/person/media",
         "https://instagram.com/p/BA/",
         "https://instagram.com/person/",
         "https://facebook.com/photo/?fbid=1",
