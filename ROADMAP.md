@@ -93,9 +93,22 @@ input’s pending media and active jobs, plus fixed-size identity digests for gl
 deduplication. URL listing emits results incrementally in input order; JSON
 inspection still buffers one array. CLI regressions cover publication during
 blocked extraction, backpressure at capacity, deduplication/order, failure
-continuation, and simultaneous extraction/download cancellation. Each social
-input still buffers its complete result; true per-item extraction streaming,
-native pagination remains; range resume is described below.
+continuation, and simultaneous extraction/download cancellation.
+
+**Implemented message-streaming step:** compatibility results now flow through
+an incremental resolved-array parser rather than buffering a whole Rust vector.
+Only the current encoded message (up to 16 MiB, bounded nesting), stdout buffer,
+and active media jobs are retained. A full download pipeline pauses reads;
+diagnostics drain concurrently into an 8 KiB tail. Completed media survive late
+JSON/process errors, later inputs continue, and URL listing emits each item as
+received. Compatibility timeout budgets count cumulative active parsing/reading
+and process waits, excluding downstream backpressure. The collecting library API
+remains, alongside `Backend::stream`. Tests cover chunk boundaries, parser bounds,
+early output, producer backpressure, diagnostics, failed exits/trailers, timeouts,
+and lazy startup/drop cancellation. Upstream's resolved-array job still collects
+internally before writing; native collection traversal/pagination is still needed
+for end-to-end streaming without that external memory cost. Native single-post
+extractors still buffer one post. Range resume is described below.
 
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and

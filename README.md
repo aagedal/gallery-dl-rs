@@ -150,10 +150,18 @@ directory templates, automatic discovery, and postprocessors remain unimplemente
   depend on the installed gallery-dl version and the account's access.
 - Direct media links use a native extractor. Arbitrary HTML galleries are not
   implemented in this milestone.
-- Download mode pulls extraction results one input at a time and feeds at most
-  `--jobs` active downloads. Downloads can finish while the next input is being
-  extracted; a full download pipeline pauses extraction of later inputs.
-  `-g` emits deduplicated URLs as inputs finish; `-j` retains one ordered JSON array.
+- Download mode pulls one input at a time and incrementally parses compatibility
+  messages into at most `--jobs` active downloads. A full pipeline pauses further
+  stdout reads, applying backpressure to the process. Downloads can finish while
+  extraction waits for more output. `-g` emits deduplicated URLs as individual
+  media arrive, including before an input finishes; `-j` retains one ordered array.
+  A later malformed message, truncated result, failed process exit, or timeout
+  returns a nonzero status while keeping completed media and processing later
+  inputs. Each encoded message is limited to 16 MiB with bounded nesting, and
+  stderr drains concurrently while retaining only its final 8 KiB for diagnostics.
+  Compatibility `--extraction-timeout` counts cumulative active reading/parsing
+  and process-wait time; pauses caused by full download capacity do not count.
+  Native extraction retains its overall per-input deadline.
 - Media bodies stream to disk with bounded download concurrency. Each completed
   file is published from a temporary file without overwriting an existing file.
 - `--resume` retains partial direct HTTP media in a hidden `.gallery-dl-rs`
@@ -284,13 +292,16 @@ forwards per-item `_http_headers`, but does not import the backend's session coo
 jar or TLS/browser impersonation. Media requiring those features may fail even
 when extraction succeeds.
 
-Each social input still buffers its entire extraction result before handing media
-to the download pipeline. Very large profiles can exhaust memory or hit
-`--extraction-timeout`; start with individual posts. Download mode retains at most
-one input’s pending media plus active jobs, while the deduplication set keeps a
-fixed-size SHA-256 digest per unique job across all inputs. `-j` additionally buffers
-all unique media for its JSON array. True per-item extraction streaming and native
-pagination remain planned. Signed URL changes produce new filenames; use the
+Rust incrementally decodes the compatibility backend's resolved JSON array,
+preserving its child-extractor handling. The external backend still collects
+results internally before dumping that array; very large profiles can exhaust
+its memory or hit `--extraction-timeout` before any output arrives. Native
+single-post extraction still buffers one complete post. The Rust download
+pipeline retains one message buffer plus active jobs, while deduplication keeps
+a fixed-size SHA-256 digest per unique job across all inputs. `-j` additionally
+buffers all unique media for its JSON array. Native collection pagination and
+end-to-end streaming remain planned. Library callers can use `Backend::stream`;
+`Backend::extract` deliberately collects a complete vector. Signed URL changes produce new filenames; use the
 download archive to skip previously saved social media by stable IDs. Existing files are assumed complete,
 without revalidation.
 
@@ -303,6 +314,8 @@ cargo clippy --locked --all-targets -- -D warnings
 ```
 
 `src/extract.rs` owns URL dispatch and the compatibility protocol.
+`src/backend.rs` owns bounded compatibility process streaming and active timeouts;
+`src/messages.rs` incrementally decodes individual resolved messages.
 `src/download.rs` owns request headers, downloads, retries, and file publication.
 `src/archive.rs` owns SQLite completed-media history and archive-aware downloads.
 `src/naming.rs` owns native filename template parsing and safe basename rendering.

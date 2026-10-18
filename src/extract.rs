@@ -1,5 +1,6 @@
 //! Native direct-link extraction and a temporary social-site compatibility layer.
 use crate::{Result, error};
+use futures_util::{TryStreamExt, stream::BoxStream};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -187,10 +188,18 @@ pub fn direct(url: &Url) -> Option<Media> {
 }
 
 impl Backend {
+    /// Collect all results. Use `stream` for bounded per-item consumption.
     pub async fn extract(&self, url: &Url) -> Result<Vec<Media>> {
-        let category = social_site(url).ok_or_else(|| {
-            error("unsupported URL; use an Instagram, Facebook, Twitter/X URL or direct media link")
-        })?;
+        self.stream(url).try_collect().await
+    }
+
+    /// Incrementally parse the resolved JSON array without buffering a collection.
+    /// Dropping the stream stops the directly owned compatibility process.
+    pub fn stream(&self, url: &Url) -> BoxStream<'static, Result<Media>> {
+        crate::backend::stream(self.clone(), url.clone())
+    }
+
+    pub(crate) fn command(&self, url: &Url) -> Command {
         // Ignore user defaults: extraction must not trigger configured hooks or downloads.
         let mut command = Command::new(&self.executable);
         command.args([
@@ -215,23 +224,7 @@ impl Backend {
         ]);
         command.arg("--").arg(url.as_str());
         command.stdin(Stdio::null()).kill_on_drop(true);
-        let output = tokio::time::timeout(self.timeout, command.output())
-            .await
-            .map_err(|_| error("social extraction timed out"))?
-            .map_err(|e| {
-                error(format!(
-                    "could not run {}: {e}. Install gallery-dl or set --extractor-command",
-                    self.executable.display(),
-                ))
-            })?;
-        if !output.status.success() {
-            return Err(error(format!(
-                "{category} extraction failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-        parse_messages(&output.stdout, category)
+        command
     }
 }
 
@@ -241,103 +234,9 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
         .map_err(|e| error(format!("invalid gallery-dl JSON: {e}")))?;
     let mut items = Vec::new();
     for message in messages {
-        let row = message
-            .as_array()
-            .ok_or_else(|| error("invalid extractor message"))?;
-        match row.first().and_then(Value::as_i64) {
-            Some(2) => continue, // Directory metadata; Rust controls local paths.
-            Some(3) => {}
-            Some(6) => return Err(error("backend returned an unresolved child URL")),
-            Some(-1) => {
-                return Err(error(format!(
-                    "backend extraction error: {}",
-                    row.get(1).unwrap_or(&Value::Null)
-                )));
-            }
-            _ => return Err(error("unsupported extractor message type")),
+        if let Some(item) = parse_message(message, category)? {
+            items.push(item);
         }
-        let source = row
-            .get(1)
-            .and_then(Value::as_str)
-            .ok_or_else(|| error("media message has no URL"))?;
-        let metadata = row
-            .get(2)
-            .and_then(Value::as_object)
-            .ok_or_else(|| error("media message has no metadata"))?;
-        let delegated = source.strip_prefix("ytdl:");
-        let target = http_url(delegated.unwrap_or(source)).map_err(|_| {
-            error("backend media and video handoffs require an HTTP(S) target/base URL")
-        })?;
-        let url = if delegated.is_some() {
-            Url::parse(source)?
-        } else {
-            target.clone()
-        };
-        let marker = metadata.get("_ytdl_manifest").filter(|v| !v.is_null());
-        let inline_data = metadata.get("_ytdl_manifest_data").filter(|v| !v.is_null());
-        if marker.is_none() && inline_data.is_some() {
-            return Err(error("inline manifest data requires _ytdl_manifest"));
-        }
-        let job = if let Some(marker) = marker {
-            let protocol = match marker.as_str() {
-                Some("hls") => ManifestProtocol::Hls,
-                Some("dash") => ManifestProtocol::Dash,
-                _ => return Err(error("unsupported backend manifest type")),
-            };
-            let inline_data = inline_data
-                .map(|data| {
-                    data.as_str()
-                        .map(str::to_owned)
-                        .ok_or_else(|| error("backend inline manifest data must be a string"))
-                })
-                .transpose()?;
-            MediaJob::Manifest {
-                protocol,
-                base_url: target,
-                inline_data,
-            }
-        } else if delegated.is_some() {
-            MediaJob::VideoPage { page_url: target }
-        } else if let Some(protocol) = manifest_protocol(&target) {
-            MediaJob::Manifest {
-                protocol,
-                base_url: target,
-                inline_data: None,
-            }
-        } else {
-            MediaJob::DirectHttp
-        };
-        let handoff = metadata
-            .iter()
-            .filter(|(key, _)| key.starts_with("_ytdl_") || key.as_str() == "_fallback")
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        let mut filename = metadata
-            .get("filename")
-            .and_then(Value::as_str)
-            .unwrap_or("media")
-            .to_owned();
-        if let Some(extension) = metadata.get("extension").and_then(Value::as_str) {
-            filename.push('.');
-            filename.push_str(extension);
-        }
-        let mut headers = BTreeMap::new();
-        if let Some(values) = metadata.get("_http_headers").and_then(Value::as_object) {
-            for (key, value) in values {
-                if let Some(value) = value.as_str() {
-                    headers.insert(key.clone(), value.to_owned());
-                }
-            }
-        }
-        items.push(Media {
-            url,
-            job,
-            category: category.into(),
-            filename,
-            metadata: compatibility_metadata(metadata, category),
-            headers,
-            handoff,
-        });
     }
     if items.is_empty() {
         return Err(error(
@@ -345,6 +244,101 @@ pub fn parse_messages(bytes: &[u8], category: &str) -> Result<Vec<Media>> {
         ));
     }
     Ok(items)
+}
+
+pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Media>> {
+    let row = message
+        .as_array()
+        .ok_or_else(|| error("invalid extractor message"))?;
+    match row.first().and_then(Value::as_i64) {
+        Some(2) => return Ok(None), // Directory metadata; Rust controls local paths.
+        Some(3) => {}
+        Some(6) => return Err(error("backend returned an unresolved child URL")),
+        Some(-1) => return Err(error("backend reported an extraction error")),
+        _ => return Err(error("unsupported extractor message type")),
+    }
+    let source = row
+        .get(1)
+        .and_then(Value::as_str)
+        .ok_or_else(|| error("media message has no URL"))?;
+    let metadata = row
+        .get(2)
+        .and_then(Value::as_object)
+        .ok_or_else(|| error("media message has no metadata"))?;
+    let delegated = source.strip_prefix("ytdl:");
+    let target = http_url(delegated.unwrap_or(source)).map_err(|_| {
+        error("backend media and video handoffs require an HTTP(S) target/base URL")
+    })?;
+    let url = if delegated.is_some() {
+        Url::parse(source)?
+    } else {
+        target.clone()
+    };
+    let marker = metadata.get("_ytdl_manifest").filter(|v| !v.is_null());
+    let inline_data = metadata.get("_ytdl_manifest_data").filter(|v| !v.is_null());
+    if marker.is_none() && inline_data.is_some() {
+        return Err(error("inline manifest data requires _ytdl_manifest"));
+    }
+    let job = if let Some(marker) = marker {
+        let protocol = match marker.as_str() {
+            Some("hls") => ManifestProtocol::Hls,
+            Some("dash") => ManifestProtocol::Dash,
+            _ => return Err(error("unsupported backend manifest type")),
+        };
+        let inline_data = inline_data
+            .map(|data| {
+                data.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| error("backend inline manifest data must be a string"))
+            })
+            .transpose()?;
+        MediaJob::Manifest {
+            protocol,
+            base_url: target,
+            inline_data,
+        }
+    } else if delegated.is_some() {
+        MediaJob::VideoPage { page_url: target }
+    } else if let Some(protocol) = manifest_protocol(&target) {
+        MediaJob::Manifest {
+            protocol,
+            base_url: target,
+            inline_data: None,
+        }
+    } else {
+        MediaJob::DirectHttp
+    };
+    let handoff = metadata
+        .iter()
+        .filter(|(key, _)| key.starts_with("_ytdl_") || key.as_str() == "_fallback")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let mut filename = metadata
+        .get("filename")
+        .and_then(Value::as_str)
+        .unwrap_or("media")
+        .to_owned();
+    if let Some(extension) = metadata.get("extension").and_then(Value::as_str) {
+        filename.push('.');
+        filename.push_str(extension);
+    }
+    let mut headers = BTreeMap::new();
+    if let Some(values) = metadata.get("_http_headers").and_then(Value::as_object) {
+        for (key, value) in values {
+            if let Some(value) = value.as_str() {
+                headers.insert(key.clone(), value.to_owned());
+            }
+        }
+    }
+    Ok(Some(Media {
+        url,
+        job,
+        category: category.into(),
+        filename,
+        metadata: compatibility_metadata(metadata, category),
+        headers,
+        handoff,
+    }))
 }
 
 pub fn manifest_protocol(url: &Url) -> Option<ManifestProtocol> {

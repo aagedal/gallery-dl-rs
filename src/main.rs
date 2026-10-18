@@ -1,5 +1,8 @@
 use clap::{Parser, ValueEnum};
-use futures_util::{StreamExt, stream};
+use futures_util::{
+    StreamExt, TryStreamExt,
+    stream::{self, BoxStream},
+};
 use gallery_dl_rs::{
     Result,
     archive::{Archive, ArchiveOutcome},
@@ -65,7 +68,7 @@ struct Args {
     native_config: Option<PathBuf>,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
-    /// Total seconds allowed for each social URL's extraction
+    /// Seconds for native extraction or active compatibility reading (excludes backpressure)
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
     /// Seconds per media attempt/native HTTP request (default: 60)
@@ -147,28 +150,24 @@ async fn run(args: Args) -> Result<()> {
     };
     let failed = Cell::new(0);
     let mut seen = HashSet::new();
-    // Pull one input at a time, retaining only its results and active downloads.
+    // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
     let media = stream::iter(args.urls.iter().enumerate())
-        .then(|(index, source)| {
-            let native = &native;
-            let backend = &backend;
+        .flat_map(|(index, source)| {
             let failed = &failed;
-            let settings = &settings;
-            async move {
-                let result =
-                    extract_input(source, native.as_ref(), backend, args.extractor, settings).await;
-                match result {
-                    Ok(items) => items,
-                    Err(e) => {
-                        eprintln!("extraction failed for input {}: {e}", index + 1);
-                        failed.set(failed.get() + 1);
-                        Vec::new()
-                    }
-                }
-            }
+            extract_input(source, native.as_ref(), &backend, args.extractor, &settings).filter_map(
+                move |result| {
+                    std::future::ready(match result {
+                        Ok(item) => Some(item),
+                        Err(e) => {
+                            eprintln!("extraction failed for input {}: {e}", index + 1);
+                            failed.set(failed.get() + 1);
+                            None
+                        }
+                    })
+                },
+            )
         })
-        .flat_map(stream::iter)
         .filter(|item| {
             // Keep fixed-size digests instead of retaining URLs, headers, or inline manifests.
             let identity: [u8; 32] = Sha256::digest(item.identity().as_bytes()).into();
@@ -248,39 +247,46 @@ async fn run(args: Args) -> Result<()> {
     }
 }
 
-async fn extract_input(
-    source: &str,
-    native: Option<&Instagram>,
-    backend: &Backend,
+fn extract_input<'a>(
+    source: &'a str,
+    native: Option<&'a Instagram>,
+    backend: &'a Backend,
     extractor: Extractor,
-    settings: &BTreeMap<&str, Settings>,
-) -> Result<Vec<extract::Media>> {
-    let url = extract::http_url(source)?;
-    // Social pages always go through their extractor, even if their path
-    // happens to end with a media extension.
-    if let Some(category) = extract::social_site(&url) {
-        match extractor {
-            Extractor::Native if category == "instagram" => {
-                native
-                    .ok_or_else(|| error("native Instagram extractor was not initialized"))?
-                    .extract(&url)
-                    .await
+    settings: &'a BTreeMap<&str, Settings>,
+) -> BoxStream<'a, Result<extract::Media>> {
+    let build = || -> Result<BoxStream<'a, Result<extract::Media>>> {
+        let url = extract::http_url(source)?;
+        // Social pages use their extractor even when the path has a media suffix.
+        if let Some(category) = extract::social_site(&url) {
+            match extractor {
+                Extractor::Native if category == "instagram" => {
+                    let native = native
+                        .ok_or_else(|| error("native Instagram extractor was not initialized"))?;
+                    Ok(stream::once(async move { native.extract(&url).await })
+                        .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
+                        .try_flatten()
+                        .boxed())
+                }
+                Extractor::Native => Err(error(
+                    "native extraction currently supports Instagram single posts only; use --extractor compatibility",
+                )),
+                Extractor::Compatibility => {
+                    let mut backend = backend.clone();
+                    backend.cookies = settings[category].options.cookies.clone();
+                    Ok(backend.stream(&url))
+                }
             }
-            Extractor::Native => Err(error(
-                "native extraction currently supports Instagram single posts only; use --extractor compatibility",
-            )),
-            Extractor::Compatibility => {
-                let mut backend = backend.clone();
-                backend.cookies = settings[category].options.cookies.clone();
-                backend.extract(&url).await
-            }
+        } else if let Some(item) = extract::direct(&url) {
+            Ok(stream::once(async move { Ok(item) }).boxed())
+        } else {
+            Err(error(
+                "unsupported URL; expected a social URL or direct media file",
+            ))
         }
-    } else if let Some(item) = extract::direct(&url) {
-        Ok(vec![item])
-    } else {
-        Err(error(
-            "unsupported URL; expected a social URL or direct media file",
-        ))
+    };
+    match build() {
+        Ok(items) => items,
+        Err(e) => stream::once(async move { Err(e) }).boxed(),
     }
 }
 
