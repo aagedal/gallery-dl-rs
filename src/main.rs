@@ -417,6 +417,7 @@ async fn run(args: Args) -> Result<()> {
                     | "wallhaven"
                     | "artstation"
                     | "pinterest"
+                    | "newgrounds"
                     | "vsco"
             ) && let Some(file_key) = item.archive_key()
             {
@@ -602,6 +603,7 @@ struct Extractors {
     wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
     artstation: OnceCell<Result<gallery_dl_rs::artstation::ArtStation>>,
     pinterest: OnceCell<Result<gallery_dl_rs::pinterest::Pinterest>>,
+    newgrounds: OnceCell<Result<gallery_dl_rs::newgrounds::Newgrounds>>,
     vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
 }
 
@@ -891,6 +893,26 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "newgrounds" => {
+                    let native = extractors
+                        .newgrounds
+                        .get_or_init(|| async {
+                            gallery_dl_rs::newgrounds::Newgrounds::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Newgrounds initialization failed: {e}"))
+                        })?;
                     native.events(&url)
                 }
                 Extractor::Native if category == "pinterest" => {
@@ -1217,6 +1239,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "wallhaven",
         "artstation",
         "pinterest",
+        "newgrounds",
         "vsco",
         "direct",
     ] {

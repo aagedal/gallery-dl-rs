@@ -360,6 +360,7 @@ struct RawExtractor {
     wallhaven: Box<RawOptions>,
     artstation: Box<RawOptions>,
     pinterest: Box<RawOptions>,
+    newgrounds: Box<RawOptions>,
     vsco: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
@@ -499,6 +500,7 @@ impl Config {
                 "wallhaven",
                 "artstation",
                 "pinterest",
+                "newgrounds",
                 "vsco",
                 "direct",
             ] {
@@ -633,6 +635,7 @@ impl Config {
             ("wallhaven", extractor.wallhaven),
             ("artstation", extractor.artstation),
             ("pinterest", extractor.pinterest),
+            ("newgrounds", extractor.newgrounds),
             ("vsco", extractor.vsco),
             ("direct", extractor.direct),
         ] {
@@ -690,6 +693,7 @@ impl Config {
                 | "wallhaven"
                 | "artstation"
                 | "pinterest"
+                | "newgrounds"
                 | "vsco"
                 | "direct"
         ) {

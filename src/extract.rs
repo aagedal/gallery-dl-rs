@@ -171,6 +171,14 @@ impl Media {
                 }
                 ("vsco", serde_json::json!([post.media_id]).to_string())
             }
+            // Newgrounds files are identified by media ID.
+            "newgrounds" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::newgrounds::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("newgrounds", serde_json::json!([post.media_id]).to_string())
+            }
             // ArtStation files are identified by asset ID.
             "artstation" => {
                 let post = self.metadata.as_ref()?;
@@ -374,6 +382,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if crate::vsco::is_vsco_url(url) {
         return Some("vsco");
+    }
+    if crate::newgrounds::is_newgrounds_url(url) {
+        return Some("newgrounds");
     }
     if crate::pinterest::is_pinterest_url(url) {
         return Some("pinterest");
