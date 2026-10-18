@@ -28,6 +28,35 @@ pub struct DownloadClient {
     resume: bool,
     fallback: bool,
     network: NetworkOptions,
+    mtime_http: bool,
+    mtime_field: Option<String>,
+}
+
+/// Modification time policy for newly published files.
+#[derive(Clone, Copy)]
+struct Mtime {
+    /// A metadata-derived time, which takes precedence over HTTP headers.
+    fixed: Option<SystemTime>,
+    http: bool,
+}
+
+impl Mtime {
+    fn select(self, headers: &HeaderMap) -> Option<SystemTime> {
+        self.fixed.or_else(|| {
+            self.http
+                .then(|| headers.get(reqwest::header::LAST_MODIFIED))
+                .flatten()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| httpdate::parse_http_date(value).ok())
+        })
+    }
+}
+
+fn set_mtime(file: &std::fs::File, time: Option<SystemTime>) -> std::io::Result<()> {
+    match time {
+        Some(time) => file.set_modified(time),
+        None => Ok(()),
+    }
 }
 
 impl DownloadClient {
@@ -67,6 +96,38 @@ impl DownloadClient {
         self
     }
 
+    /// Set new files' modification times from HTTP `Last-Modified` (default).
+    pub fn with_http_mtime(mut self, enabled: bool) -> Self {
+        self.mtime_http = enabled;
+        self
+    }
+
+    /// Set new files' modification times from a metadata date field, such as
+    /// `date`, overriding `Last-Modified`. Absent or non-numeric values are ignored.
+    pub fn with_metadata_mtime(mut self, field: Option<String>) -> Self {
+        self.mtime_field = field;
+        self
+    }
+
+    fn mtime(&self, media: &Media) -> Mtime {
+        let fixed = self.mtime_field.as_ref().and_then(|field| {
+            let seconds = match crate::filter::context(media).get(field.as_str())? {
+                crate::filter::Value::Int(value) => i64::try_from(*value).ok()?,
+                crate::filter::Value::Float(value) if value.is_finite() => *value as i64,
+                _ => return None,
+            };
+            if seconds >= 0 {
+                SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds as u64))
+            } else {
+                SystemTime::UNIX_EPOCH.checked_sub(Duration::from_secs(seconds.unsigned_abs()))
+            }
+        });
+        Mtime {
+            fixed,
+            http: self.mtime_http,
+        }
+    }
+
     /// Retain validated partial HTTP downloads for retries and later invocations.
     pub fn with_resume(mut self, enabled: bool) -> Self {
         self.resume = enabled;
@@ -87,6 +148,8 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         resume: false,
         fallback: true,
         network: NetworkOptions::default(),
+        mtime_http: true,
+        mtime_field: None,
     })
 }
 
@@ -340,7 +403,7 @@ async fn download_media(
         }
         let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
         tokio::fs::create_dir_all(parent).await?;
-        return write_inline_text(parent, &path, data).await;
+        return write_inline_text(parent, &path, data, client.mtime(media).fixed).await;
     }
     let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
     let mut candidate = Cow::Borrowed(media);
@@ -351,6 +414,7 @@ async fn download_media(
     // Keep the primary checkpoint's reservation until the whole logical job ends.
     let mut _primary_reservation = None;
     let mut first = true;
+    let mtime = client.mtime(media);
     loop {
         if !first {
             match std::fs::symlink_metadata(&path) {
@@ -394,6 +458,7 @@ async fn download_media(
                     retries,
                     limits,
                     &mut partial,
+                    mtime,
                 )
                 .await
             }
@@ -502,6 +567,7 @@ fn next_fallback(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_candidate(
     client: &DownloadClient,
     media: &Media,
@@ -510,6 +576,7 @@ async fn download_candidate(
     retries: u8,
     limits: SizeLimits,
     partial: &mut Option<crate::resume::Partial>,
+    mtime: Mtime,
 ) -> std::result::Result<Outcome, Failure> {
     let parent = path.parent().ok_or_else(|| Failure {
         error: error("invalid destination"),
@@ -530,13 +597,23 @@ async fn download_candidate(
                         path,
                         partial,
                         limits,
+                        mtime,
                         &mut remote_io,
                     )
                     .await
                 }
                 None => {
-                    attempt_download(client, media, headers, parent, path, limits, &mut remote_io)
-                        .await
+                    attempt_download(
+                        client,
+                        media,
+                        headers,
+                        parent,
+                        path,
+                        limits,
+                        mtime,
+                        &mut remote_io,
+                    )
+                    .await
                 }
             }
         })
@@ -559,7 +636,12 @@ async fn download_candidate(
     unreachable!()
 }
 
-async fn write_inline_text(parent: &Path, path: &Path, data: &str) -> Result<Outcome> {
+async fn write_inline_text(
+    parent: &Path,
+    path: &Path,
+    data: &str,
+    mtime: Option<SystemTime>,
+) -> Result<Outcome> {
     // TempPath removes an incomplete file if this future is cancelled.
     let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
     let mut file = tokio::fs::OpenOptions::new()
@@ -569,7 +651,9 @@ async fn write_inline_text(parent: &Path, path: &Path, data: &str) -> Result<Out
         .await?;
     file.write_all(data.as_bytes()).await?;
     file.flush().await?;
-    file.sync_all().await?;
+    let file = file.into_std().await;
+    set_mtime(&file, mtime)?;
+    file.sync_all()?;
     drop(file);
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
@@ -614,6 +698,7 @@ impl From<reqwest::Error> for Failure {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn attempt_download(
     client: &DownloadClient,
     media: &Media,
@@ -621,6 +706,7 @@ async fn attempt_download(
     parent: &Path,
     path: &Path,
     limits: SizeLimits,
+    mtime: Mtime,
     remote_io: &mut bool,
 ) -> std::result::Result<Outcome, Failure> {
     *remote_io = true;
@@ -635,6 +721,7 @@ async fn attempt_download(
         return Err(terminal("unexpected Content-Range in full media response"));
     }
     let expected = response.content_length();
+    let modified = mtime.select(response.headers());
     validate_media(&response)?;
     if let Some(rejection) = expected.and_then(|size| limits.check(size)) {
         return Ok(Outcome::Filtered(rejection));
@@ -677,7 +764,9 @@ async fn attempt_download(
         return Ok(Outcome::Filtered(rejection));
     }
     file.flush().await?;
-    file.sync_all().await?;
+    let file = file.into_std().await;
+    set_mtime(&file, modified)?;
+    file.sync_all()?;
     drop(file);
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
@@ -798,6 +887,7 @@ fn terminal(message: &str) -> Failure {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn attempt_resume(
     client: &DownloadClient,
     media: &Media,
@@ -805,6 +895,7 @@ async fn attempt_resume(
     path: &Path,
     partial: &mut crate::resume::Partial,
     limits: SizeLimits,
+    mtime: Mtime,
     remote_io: &mut bool,
 ) -> std::result::Result<Outcome, Failure> {
     let mut restarted = false;
@@ -888,11 +979,23 @@ async fn attempt_resume(
                 if let Some(rejection) = limits.check(offset) {
                     return filter_partial(partial, rejection).await;
                 }
-                return partial.publish(path).await.map_err(|error| Failure {
-                    error,
-                    retry: false,
-                    fallback: false,
-                });
+                // A 416 completion carries no representation headers; use
+                // the saved date validator when it is the only source.
+                let saved = match partial.checkpoint().map(|c| &c.validator) {
+                    Some(crate::resume::Validator::Modified(value)) if mtime.http => {
+                        httpdate::parse_http_date(value).ok()
+                    }
+                    _ => None,
+                };
+                let modified = mtime.fixed.or(saved);
+                return partial
+                    .publish(path, modified)
+                    .await
+                    .map_err(|error| Failure {
+                        error,
+                        retry: false,
+                        fallback: false,
+                    });
             }
             crate::range::Plan::Full(checkpoint) => {
                 validate_media(&response)?;
@@ -927,6 +1030,7 @@ async fn attempt_resume(
                 (offset, Some(end - offset + 1), Some(total))
             }
         };
+        let modified = mtime.select(response.headers());
         let mut stream = response.bytes_stream();
         let mut received = 0u64;
         loop {
@@ -967,11 +1071,14 @@ async fn attempt_resume(
             if let Some(rejection) = limits.check(completed) {
                 return filter_partial(partial, rejection).await;
             }
-            return partial.publish(path).await.map_err(|error| Failure {
-                error,
-                retry: false,
-                fallback: false,
-            });
+            return partial
+                .publish(path, modified)
+                .await
+                .map_err(|error| Failure {
+                    error,
+                    retry: false,
+                    fallback: false,
+                });
         }
         // Some servers return only part of an open-ended range. Continue within
         // this attempt's existing deadline; never publish a truncated segment.

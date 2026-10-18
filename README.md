@@ -1000,6 +1000,10 @@ unimplemented.
   Remove an unused checkpoint directory only while no downloads are running.
   Without `--resume`, failed or cancelled partials are removed as before.
   This flag conflicts with `-g` and `-j`.
+- Like upstream, newly downloaded files take their modification time from HTTP
+  `Last-Modified`; `--no-mtime` disables this. `--mtime [NAME]` (default `date`)
+  instead uses a numeric metadata timestamp, falling back to `Last-Modified` when
+  absent. Times are applied before atomic publication; existing files are untouched.
 - `--write-metadata` saves `<media filename>.json` beside completed media, including
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,

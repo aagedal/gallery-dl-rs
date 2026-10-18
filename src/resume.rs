@@ -219,7 +219,11 @@ impl Partial {
         .await?
     }
 
-    pub(crate) async fn publish(&mut self, destination: &Path) -> Result<Outcome> {
+    pub(crate) async fn publish(
+        &mut self,
+        destination: &Path,
+        modified: Option<std::time::SystemTime>,
+    ) -> Result<Outcome> {
         let destination = destination.to_owned();
         let (part, state) = (self.part.clone(), self.state.clone());
         let lock = self.lock.clone();
@@ -232,6 +236,9 @@ impl Partial {
             let file = OpenOptions::new().read(true).write(true).open(&part)?;
             if !file.metadata()?.is_file() {
                 return Err(error("resume partial is not a regular file"));
+            }
+            if let Some(modified) = modified {
+                file.set_modified(modified)?;
             }
             file.sync_all()?;
             let outcome = match fs::hard_link(&part, &destination) {
@@ -427,7 +434,7 @@ mod tests {
         assert_eq!(partial.checkpoint().unwrap().total, Some(6));
         partial.append(b"def").await.unwrap();
         assert_eq!(
-            partial.publish(&destination).await.unwrap(),
+            partial.publish(&destination, None).await.unwrap(),
             Outcome::Downloaded(destination.clone())
         );
         assert_eq!(fs::read(&destination).unwrap(), b"abcdef");
@@ -465,7 +472,7 @@ mod tests {
         assert_eq!(partial.len().await.unwrap(), 3);
         partial.set_total(6).await.unwrap();
         partial.append(b"def").await.unwrap();
-        partial.publish(&destination).await.unwrap();
+        partial.publish(&destination, None).await.unwrap();
         assert_eq!(fs::read(destination).unwrap(), b"abcdef");
     }
 
@@ -511,7 +518,7 @@ mod tests {
         partial.append(b"new").await.unwrap();
         fs::write(&destination, b"existing").unwrap();
         assert_eq!(
-            partial.publish(&destination).await.unwrap(),
+            partial.publish(&destination, None).await.unwrap(),
             Outcome::Skipped(destination.clone())
         );
         assert_eq!(fs::read(destination).unwrap(), b"existing");
@@ -569,7 +576,7 @@ mod tests {
         let mut partial = Partial::open(&destination, "identity").await.unwrap();
         partial.append(b"new").await.unwrap();
         symlink(&target, &destination).unwrap();
-        assert!(partial.publish(&destination).await.is_err());
+        assert!(partial.publish(&destination, None).await.is_err());
         assert!(part.exists());
         assert_eq!(fs::read(&target).unwrap(), b"safe");
         drop(partial);
@@ -603,7 +610,7 @@ mod tests {
                     release_rx.recv().unwrap();
                 });
                 started_rx.await.unwrap();
-                let mut publication = Box::pin(partial.publish(&destination));
+                let mut publication = Box::pin(partial.publish(&destination, None));
                 std::future::poll_fn(|cx| {
                     assert!(publication.as_mut().poll(cx).is_pending());
                     Poll::Ready(())
@@ -673,7 +680,7 @@ mod tests {
             blocker.await.unwrap();
             assert_eq!(partial.len().await.unwrap(), 0);
             partial.append(b"new bytes").await.unwrap();
-            partial.publish(&destination).await.unwrap();
+            partial.publish(&destination, None).await.unwrap();
             assert_eq!(fs::read(destination).unwrap(), b"new bytes");
         });
     }

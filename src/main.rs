@@ -97,6 +97,12 @@ struct Args {
     /// Save post metadata in a JSON sidecar beside each completed media file
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
     write_metadata: bool,
+    /// Do not set new files' modification times from HTTP Last-Modified
+    #[arg(long)]
+    no_mtime: bool,
+    /// Set new files' modification times from a metadata date field, e.g. date
+    #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "date")]
+    mtime: Option<String>,
     /// SQLite history of completed media (gallery-dl-rs format)
     #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
     download_archive: Option<PathBuf>,
@@ -320,7 +326,10 @@ async fn run(args: Args) -> Result<()> {
             println!("{}", item.url);
         }
     } else {
-        let client = download::client(Duration::from_secs(60))?.with_resume(args.resume);
+        let client = download::client(Duration::from_secs(60))?
+            .with_resume(args.resume)
+            .with_http_mtime(!args.no_mtime)
+            .with_metadata_mtime(args.mtime.clone());
         let results = media
             .map(|item| {
                 let settings = &settings[item.category.as_str()];

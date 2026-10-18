@@ -580,6 +580,12 @@ folder as the final fallback. Conditions share the `--filter` evaluator and fail
 the file on evaluation errors. Plain values in narrower scopes or CLI flags
 replace inherited conditional settings as a whole.
 
+**Implemented modification times:** new files take HTTP `Last-Modified` times by
+default (`--no-mtime` disables), and `--mtime [NAME]` mirrors upstream's mtime
+postprocessor using a metadata date field. Times are set on the temporary or
+resume file before publication, including resumed 416 completions via the saved
+date validator and inline text from metadata.
+
 Native Instagram, Facebook, and Twitter session initialization failures now remain local to
 their inputs, allowing unrelated direct links and other inputs to proceed.
 
