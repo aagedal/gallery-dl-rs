@@ -4632,3 +4632,81 @@ async fn default_articles_ignore_null_and_malformed_optional_data_and_continue_l
             .all(|item| item.metadata.as_ref().unwrap().article.is_none())
     );
 }
+
+fn assert_image_chain(item: &Media, sizes: &[&str]) {
+    assert_eq!(
+        item.url
+            .query_pairs()
+            .find(|(key, _)| key == "name")
+            .unwrap()
+            .1,
+        sizes[0]
+    );
+    let fallback = item.handoff["_fallback"].as_array().unwrap();
+    assert_eq!(fallback.len(), sizes.len() - 1);
+    for (value, size) in fallback.iter().zip(&sizes[1..]) {
+        let url = Url::parse(value.as_str().unwrap()).unwrap();
+        assert_eq!(
+            url.query_pairs().find(|(key, _)| key == "name").unwrap().1,
+            *size
+        );
+    }
+}
+
+#[tokio::test]
+async fn image_options_follow_lazy_quote_fetches_without_prefetching_the_target() {
+    let server = Server::new(vec![
+        Response::json(post_response(quoted_tweet("100", "101"))),
+        Response::json(post_response(tweet("101"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip))
+        .with_image_options(ImageOptions::new(vec!["large".into(), "small".into()]).unwrap());
+    let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+    let parent = stream.next().await.unwrap().unwrap();
+    assert_image_chain(&parent, &["large", "small"]);
+    assert_eq!(server.count(), 1);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 1);
+    let quoted = stream.next().await.unwrap().unwrap();
+    assert_image_chain(&quoted, &["large", "small"]);
+    assert_eq!(
+        quoted.metadata.as_ref().unwrap().quoted_by_id.as_deref(),
+        Some("100")
+    );
+    assert_eq!(server.count(), 2);
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+async fn expanded_threads_inherit_image_sizes_for_posters_and_range_avoids_later_pages() {
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![in_thread(tweet("100"), json!("90"))],
+            Some("parent-next"),
+        )),
+        Response::json(detail_page(vec![video_post("90")], Some("child-next"))),
+        Response::json(detail_page(vec![tweet("101")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true))
+        .with_media_options(MediaOptions {
+            previews: true,
+            ..Default::default()
+        })
+        .with_image_options(ImageOptions::new(vec!["medium".into(), "small".into()]).unwrap());
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .take(2)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["90", "90"]);
+    assert!(items[0].url.path().ends_with(".mp4"));
+    assert!(items[0].handoff.is_empty());
+    assert_image_chain(&items[1], &["medium", "small"]);
+    assert_eq!(items[1].filename, "90_2.jpg");
+    assert_eq!(server.count(), 2);
+}

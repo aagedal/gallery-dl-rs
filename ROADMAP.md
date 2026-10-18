@@ -163,8 +163,8 @@ shared extraction interface that emits media, post metadata, and child URLs.
   upstream instead warns and can retain partial output. Duplicate component
   references are rejected to prevent output amplification. Strict scoped config,
   JSON-safe compatibility forwarding, cancellation, and identities are tested.
-  Image-size fallback chains, richer metadata, real authenticated captures, and
-  companion-adapter downloads remain unfinished.
+  Richer metadata, real authenticated captures, and companion-adapter downloads
+  remain unfinished.
 
 
   **Implemented unavailable-media selection:** native X now skips individually
@@ -190,8 +190,20 @@ shared extraction interface that emits media, post metadata, and child URLs.
   metadata survive later article failures; null/malformed optional envelopes do
   not abort normal media or later pagination. Large metadata strings use shared
   storage to avoid per-file amplification. Strict configuration and canonical
-  compatibility forwarding are tested. Real authenticated captures, image-size
-  fallbacks, broader content variants, and recovered-error warnings remain.
+  compatibility forwarding are tested. Real authenticated captures, broader
+  content variants, and recovered-error warnings remain.
+
+  **Implemented image sizes and shared direct HTTP fallbacks:** native X image
+  requests default to orig/4096x4096/large/medium/small. Scoped string/list `size`
+  replaces the ordered list for photos, posters, unified-card and article images;
+  summary-card URLs are normalized only when they already carry a size parameter.
+  Component/conversation-preview URLs remain raw without size chains; article
+  HTML uses only the primary size. Remaining candidates are private
+  `_fallback` URLs. Strict bounded configuration and Twitter-only compatibility
+  size forwarding have parser, runtime, and CLI coverage. Native image request
+  hashes/default paths and resume keys change because default fallback context is
+  now present; no old paths/checkpoints are migrated. Stable social archive keys
+  and file positions remain unchanged, including when fallback execution is off.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and
@@ -243,6 +255,23 @@ Local HTTP tests cover rotation through redirects/retries, deletion on an
 authentication failure, credential isolation from media jobs, and preservation of
 the input cookie file. Updates are not persisted and cannot renew an expired
 session. A companion adapter will also need cancellation at its library boundary.
+
+**Implemented direct HTTP fallback execution:** the shared downloader consumes
+bounded private `_fallback` arrays in order after remote/request failures and
+configured retries. Invalid/repeated/manifest candidates are skipped. Scoped
+`fallback` defaults to true; explicit false prevents further candidates, and
+explicit values forward for every social compatibility category. Unsupported
+video-page/manifest jobs can use a direct fallback while segmented downloads
+remain unsupported. Local filesystem failures and size filtering do not trigger
+fallback. Original destination/metadata/archive identity and atomic publication
+are preserved, including the original filename extension without MIME adjustment.
+Failed candidate partials are discarded before switching URLs; resume keys remain
+request-bound, and the final failed candidate checkpoint survives with resume
+enabled. Every per-item header is cleared across explicit cross-origin
+fallbacks, while HTTP-client defaults remain; cross-origin redirects remain
+rejected. Local HTTP and CLI regressions cover order, retries, headers, validation,
+resume/publication, and configuration precedence. Authenticated live X fallback
+verification remains pending.
 
 **Implemented explicit browser import:** native `--cookies-from-browser
 firefox:PROFILE_PATH` reads a selected Firefox directory or cookie database through
@@ -310,7 +339,8 @@ Repeated copies of the same file/request still collapse across inputs; changed
 URLs or headers remain distinct. Missing/invalid social IDs retain request-based
 fallback, and X `unique: false` still bypasses suppression. CLI regressions cover
 Instagram, X, and Facebook, including a demonstrated pre-fix loss of media siblings.
-Download naming and resume request identities are unchanged.
+That deduplication fix does not itself alter naming or resume identities; new
+request context, including image fallback chains, can still change their hashes.
 
 **Implemented message-streaming step:** compatibility results now flow through
 an incremental resolved-array parser rather than buffering a whole Rust vector.
@@ -512,7 +542,8 @@ non-HTTP identifiers are rejected because no usable base URL can be established.
 **Remaining integration:** select a stable companion release and implement the
 library adapter contract, scoped segment authentication, cancellation/progress,
 format selection, completed-path publication, and the segmented-download/merge
-fixture suite. Retained fallback URLs and opaque options are not executed yet.
+fixture suite. Direct HTTP fallback URLs now execute through the shared downloader;
+opaque `_ytdl_*` options still await the companion adapter.
 
 The inspected local yt-dlp-rs prototype exposes `YoutubeDl`, `VideoInfo`,
 `VideoFormat`, and an `Extractor` interface for direct media and limited HTML5

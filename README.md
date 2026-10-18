@@ -71,7 +71,9 @@ stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fb
 and `/USER/highlights` URLs, root profiles, search, hashtags, likes, bookmarks,
 lists, and home feeds.
 X conversation extraction is also available through scoped settings. Other
-unsupported profiles and album listings still need the compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
+unsupported profiles and album listings still need the compatibility backend.
+Native extraction does not fall back to that backend automatically. Native mode
+rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
 The native Instagram extractor reads Netscape cookies scoped to the API URL's domain, path,
@@ -234,7 +236,7 @@ of endpoint selection. API operation IDs/features remain experimental snapshots.
 
 Normal status selection requires the exact requested post ID among structured
 detail entries. Other conversation posts cannot replace a missing focal post.
-Original-size photos, highest-bitrate direct MP4 variants, mixed-media order,
+Ordered photo sizes, highest-bitrate direct MP4 variants, mixed-media order,
 metadata, and stable archive keys use the existing shared parser. Retweets are
 skipped and quoted posts are not expanded by default. Same-response explicit
 quote targets are reused; missing targets are fetched lazily through the fixed
@@ -278,6 +280,32 @@ apply when downloading. Both options forward to compatibility mode when explicit
 Synthetic and local HTTP tests cover these settings; authenticated live thread
 expansion remains unverified.
 
+Native X photos use the ordered sizes `orig`, `4096x4096`, `large`, `medium`,
+and `small` by default. Scoped `size` replaces that list, preserving order; it
+accepts a comma-separated string or an array of 1–32 names, each 1–32 ASCII
+letters/digits, `_`, or `-`. Names are trimmed; empty names and control characters
+are rejected. For example:
+
+```json
+{"extractor": {"twitter": {"size": ["orig", "large", "medium"], "fallback": true}}}
+```
+
+The first size is the primary URL; later sizes become private fallback URLs.
+Non-size query parameters are preserved. The same setting applies to video
+posters, unified-card images, and article images. Summary-card images use it
+when their supplied URL already has a `name` parameter; otherwise that URL is
+preserved. Component and conversation-preview image URLs also remain unchanged
+and do not receive size chains. Article HTML references only the first size and
+does not perform browser-side fallback. Explicit `size` settings forward only for X in
+compatibility mode. Library callers can use `Twitter::with_image_options` and
+`parse_response_with_image_options`.
+
+Adding the default private fallback chain changes request identities for native
+X images, including default digest-prefixed paths and resume checkpoint names.
+Existing paths/checkpoints are not migrated automatically. Social archive keys
+and post/file numbering are unchanged. `fallback: false` disables attempts but
+leaves the extracted fallback context in the request identity.
+
 Scoped X `"videos": true` (default) selects direct MP4 video and animated-GIF
 files. `false` skips them. `"previews": true` additionally selects their poster
 images; combine it with `"videos": false` for posters only. Previews default to
@@ -305,8 +333,9 @@ can use `Twitter::with_media_options` and `parse_response_with_media_options`.
 
 Scoped X `"cards": true` extracts summary-card images and unified-card media.
 Cards default to false. Summary cards choose the first usable image by upstream
-prefix/size priority; an existing image size parameter becomes `orig`. Unified
-cards retain embedded media order, then component and conversation-preview order.
+prefix/size priority; an existing image size parameter uses the configured first
+size. Unified cards retain embedded media order, then component and
+conversation-preview order.
 Their videos and posters follow the same `videos`/`previews` settings. Card files
 follow ordinary post media and share consecutive file/archive positions.
 Repost mode uses the repost's card; original mode uses the original post's card.
@@ -315,15 +344,14 @@ Repost mode uses the repost's card; original mode uses the original post's card.
 card names, vanity domains, or `name:domain` pairs. An empty list clears inherited
 entries. Both options support normal configuration scopes and forward only for X
 when explicit. `"cards": "ytdl"` handles recognized summary/unified cards directly,
-then emits a typed first-party video-page job for an unhandled card. The companion
-adapter is still required to download delegated or manifest jobs.
+then emits a typed first-party video-page job for an unhandled card. Delegated
+or manifest jobs without a direct HTTP fallback require the companion adapter.
 
 Enabled malformed cards fail the current post atomically with private diagnostics;
 this is stricter than upstream's warning and partial-output behavior. Repeated
 binding-array keys, unified-media keys, and component references are rejected.
-Disabled/blacklisted payloads are skipped. Image-size fallback chains, richer card
-metadata, and real authenticated card captures remain unfinished. Library callers
-can use `Twitter::with_card_options` and `parse_response_with_card_options`.
+Disabled/blacklisted payloads are skipped. Richer card metadata and real
+authenticated card captures remain unfinished. Library callers can use `Twitter::with_card_options` and `parse_response_with_card_options`.
 
 X articles default to `"articles": true`, selecting article metadata, cover,
 and embedded images after ordinary post/card media. Metadata includes the article
@@ -351,8 +379,8 @@ Inspection URLs percent-encode inline content; the job retains its exact origina
 bytes. Article HTML is omitted from metadata sidecars so referenced media URLs
 are not copied there; article ID/title/dates remain. Native and compatibility
 settings forward only for X when explicit. Live authenticated article verification,
-image-size fallbacks, broader content variants, and upstream-style warning output
-for recovered article errors remain unfinished. Library callers can use
+broader content variants, and upstream-style warning output for recovered article
+errors remain unfinished. Library callers can use
 `Twitter::with_article_options` and `parse_response_with_article_options`.
 
 Experimental X profile timelines use `Twitter::stream` and the native CLI at
@@ -743,7 +771,8 @@ Neither configuration file is loaded automatically.
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
-`strategy`, `search-pagination`,
+`expand`, `unique`, `videos`, `previews`, `unavailable`, `articles`, `cards`,
+`cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
@@ -913,20 +942,47 @@ The JSON output is for inspection, not a lossless job export. Different inline
 manifests with the same source can therefore look identical in inspection output.
 
 Manifest links (`.m3u8`/`.mpd`, case insensitive) can be inspected directly.
-Compatibility extraction retains `_ytdl_*` and `_fallback` options for a future
-adapter, including inline manifests and manifest-specific headers. Handoffs
+Compatibility extraction retains `_ytdl_*` options for a future adapter, including
+inline manifests and manifest-specific headers. `_fallback` URL arrays are used
+by the shared Rust downloader for direct HTTP fallbacks. Handoffs
 require an HTTP(S) target/base URL, including synthetic `ytdl:https://…` URLs;
 synthetic non-HTTP identifiers and unknown manifest types fail extraction.
-Video-page and manifest downloads fail explicitly before any request or file
-creation, even if a destination file exists. A stable archive hit can skip an
-already completed logical media item before download-type validation.
+Without a direct HTTP fallback, video-page and manifest downloads fail explicitly
+before any request or file creation, even if a destination file exists. A stable
+archive hit can skip an already completed logical media item before download-type
+validation.
 No companion dependency or video
 adapter is enabled yet. The parser follows the
 [upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
 
-HLS/DASH downloads, video merging, fallback URL handling, broader native browser cookie import,
+HLS/DASH downloads, video merging, broader native browser cookie import,
 broader native collection pagination, and full gallery-dl filename/config compatibility are
 not implemented.
+
+Direct HTTP fallback attempts are enabled by default. Scoped `"fallback": false`
+disables them for Rust downloads; explicit values also forward to compatibility
+extraction for all social categories. After a remote/request failure and its
+configured retries, the downloader tries the next distinct valid HTTP(S) URL in
+`_fallback` order. Lists are limited to 128 entries and URLs to 16 KiB; invalid,
+repeated, credentialed,
+and manifest targets are skipped. A delegated/manifest job can also use a direct
+fallback without enabling the companion adapter. Local filesystem errors and
+size-filtered results do not advance the fallback chain.
+
+All attempts publish to the original job's destination and retain its metadata
+and archive identity, including the original filename extension; fallback MIME
+types do not adjust that extension. Failed candidate partials are discarded
+before changing URLs; resume state is bound to each candidate's request identity.
+With `--resume`, the final failed candidate's checkpoint is retained for a later
+run. Explicit
+cross-origin fallbacks clear every per-item header, including authorization,
+referer, user-agent, and custom headers. Configured HTTP-client defaults still
+apply. This does not enable cross-origin redirects or import browser/session
+cookies into media requests. Fallback URLs remain private in inspection output
+and metadata sidecars. Signed-URL/header changes and changed fallback context
+can create separate request paths/checkpoints while stable social archive keys
+remain unchanged.
+
 Media downloads follow up to five redirects within the same origin (scheme,
 host, and effective port), retaining the original destination name and request
 headers. Cross-origin redirects, HTTPS downgrades, URL credentials, malformed

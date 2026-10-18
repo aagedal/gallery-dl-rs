@@ -48,6 +48,10 @@ pub struct Options {
     pub previews: Option<bool>,
     /// Attempt explicitly unavailable Twitter media when a URL is provided.
     pub unavailable: Option<bool>,
+    /// Ordered Twitter image sizes.
+    pub size: Option<crate::twitter::ImageOptions>,
+    /// Try media fallback URLs after the primary URL fails.
+    pub fallback: Option<bool>,
     /// Select article metadata, cover, media, and generated documents.
     pub articles: Option<crate::twitter::ArticleOptions>,
     /// Select embedded Twitter card media or delegated video pages.
@@ -115,6 +119,8 @@ impl Options {
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
             unavailable: overrides.unavailable.or(self.unavailable),
+            size: overrides.size.clone().or_else(|| self.size.clone()),
+            fallback: overrides.fallback.or(self.fallback),
             articles: overrides.articles.or(self.articles),
             cards: overrides.cards.or(self.cards),
             cards_blacklist: overrides
@@ -185,6 +191,8 @@ struct RawRoot {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    size: Field,
+    fallback: Field,
     articles: Field,
     cards: Field,
     cards_blacklist: Field,
@@ -225,6 +233,8 @@ struct RawExtractor {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    size: Field,
+    fallback: Field,
     articles: Field,
     cards: Field,
     cards_blacklist: Field,
@@ -268,6 +278,8 @@ struct RawOptions {
     videos: Field,
     previews: Field,
     unavailable: Field,
+    size: Field,
+    fallback: Field,
     articles: Field,
     cards: Field,
     cards_blacklist: Field,
@@ -374,6 +386,8 @@ impl Config {
             videos: root.videos,
             previews: root.previews,
             unavailable: root.unavailable,
+            size: root.size,
+            fallback: root.fallback,
             articles: root.articles,
             cards: root.cards,
             cards_blacklist: root.cards_blacklist,
@@ -412,6 +426,8 @@ impl Config {
             videos: extractor.videos,
             previews: extractor.previews,
             unavailable: extractor.unavailable,
+            size: extractor.size,
+            fallback: extractor.fallback,
             articles: extractor.articles,
             cards: extractor.cards,
             cards_blacklist: extractor.cards_blacklist,
@@ -514,6 +530,44 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration unavailable must be a boolean")),
+        };
+        let fallback = match self.fallback.0 {
+            None => None,
+            Some(Value::Bool(value)) => Some(value),
+            Some(_) => return Err(error("native configuration fallback must be a boolean")),
+        };
+        let image_size = match self.size.0 {
+            None => None,
+            Some(value) => {
+                let invalid = || error("native configuration size requires image size names");
+                let names = match value {
+                    Value::String(value) if value.len() <= 32 * 33 => {
+                        value.split(',').map(str::to_owned).collect()
+                    }
+                    Value::Array(values) if values.len() <= 32 => values
+                        .into_iter()
+                        .map(|value| {
+                            if let Value::String(value) = value {
+                                Ok(value)
+                            } else {
+                                Err(invalid())
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                    _ => return Err(invalid()),
+                };
+                let names = names
+                    .into_iter()
+                    .map(|name| {
+                        if name.chars().any(char::is_control) {
+                            Err(invalid())
+                        } else {
+                            Ok(name.trim().to_owned())
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Some(crate::twitter::ImageOptions::new(names).map_err(|_| invalid())?)
+            }
         };
         let articles = article_options(self.articles)?;
         let cards = match self.cards.0 {
@@ -748,6 +802,8 @@ impl RawOptions {
             videos,
             previews,
             unavailable,
+            size: image_size,
+            fallback,
             articles,
             cards,
             cards_blacklist,

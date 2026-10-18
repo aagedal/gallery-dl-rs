@@ -34,10 +34,10 @@ These verify direct video, skipped video, poster-only and video-plus-poster
 ordering, consecutive file/archive positions, animated GIFs, disabled malformed
 fields, atomic/private enabled-field failures, quote/retweet/thread propagation,
 deduplication, and range/drop cancellation. Poster URLs preserve non-size query
-parameters and use original size. `videos: "ytdl"` emits the existing typed
+parameters and use the configured primary image size. `videos: "ytdl"` emits the existing typed
 video-page job for the validated post; no response-provided delegation URL is
-trusted. The Rust downloader still rejects these jobs pending the companion
-adapter. Parser/HTTP success is not evidence of a live authenticated download.
+trusted. Without an explicit direct HTTP fallback, the Rust downloader still
+rejects these jobs pending the companion adapter. Parser/HTTP success is not evidence of a live authenticated download.
 
 `tests/twitter_cards.rs` and local HTTP cases in `src/twitter_profile_tests.rs`
 add synthetic card derivatives. Primary upstream sources above supply summary
@@ -48,8 +48,8 @@ quote/thread traversal, numbering, archives, and cancellation are checked.
 Unified media use a custom ordered JSON visitor so map sorting cannot reorder
 files. Duplicate keys/references and malformed enabled fields fail privately and
 atomically, including repeated components that could amplify output. This differs
-from upstream's warning/partial-output behavior. Image-size fallbacks, richer
-metadata, delegated downloads, and live authenticated card verification remain
+from upstream's warning/partial-output behavior. Richer metadata, delegated
+downloads, and live authenticated card verification remain
 unimplemented or unverified. No card fixture contains a captured private session.
 
 Unavailable-media cases are also synthetic. Upstream's `unavailable` option and
@@ -72,7 +72,30 @@ cover lists, entities, formatting, source ownership, shared metadata storage,
 archives, quote/thread cutoff, and pagination after optional failures. Inline
 text tests cover exact UTF-8 downloads, filtering, atomic publication, and sidecar
 HTML exclusion. No authenticated article response or download has been captured.
-Image-size fallbacks, additional content variants, and recovery warnings remain.
+Additional content variants and recovery warnings remain.
+
+Image-size cases in `tests/twitter_images.rs` and local runtime fixtures are
+synthetic. Default orig/4096x4096/large/medium/small selection and custom ordered
+sizes preserve non-size query parameters, file order, and archive identities
+across ordinary media, video posters, cards, articles, quotes, and threads.
+Summary URLs without a size parameter and raw component/conversation-preview
+URLs remain unchanged without size chains; article HTML uses only the primary
+size. Private fallback context now changes native image request
+hashes/default filenames and resume keys; existing paths/checkpoints are not
+migrated, while social archive keys remain stable.
+
+`tests/fallbacks.rs` and CLI HTTP fixtures verify shared `_fallback` execution:
+ordered direct HTTP candidates, retries, scoped/default-enabled settings,
+validation, cancellation, publication, and resume isolation. Explicit cross-origin
+fallbacks clear all per-item headers, while cross-origin redirects remain
+rejected. Size-filtered outcomes and local filesystem failures do not try later
+candidates. Fallback publication keeps the original destination, metadata, and
+archive identity, including the original extension without MIME adjustment.
+Failed candidate partials are discarded when switching URLs; the last failed
+candidate checkpoint is retained when resume is enabled. Private fallback URLs
+are excluded from inspection/sidecars.
+These local checks do not prove authenticated live X image fallback behavior or
+implement delegated/segmented downloads.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol

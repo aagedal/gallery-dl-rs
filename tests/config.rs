@@ -1423,3 +1423,85 @@ fn twitter_article_flags_reject_malformed_values_privately_in_all_scopes() {
         assert!(parse(document).is_err());
     }
 }
+
+#[test]
+fn image_size_order_replaces_scopes_and_fallback_preserves_explicit_false() {
+    use serde_json::json;
+    let config = parse(r#"{"extractor":{"size":["orig","large"],"fallback":true,"twitter":{"size":" medium,small ","fallback":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.size.as_ref().unwrap().sizes(), ["medium", "small"]);
+    assert_eq!(twitter.fallback, Some(false));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.size.as_ref().unwrap().sizes(), ["orig", "large"]);
+    assert_eq!(inherited.fallback, Some(true));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let overlay = inherited.overlay(&Options {
+        size: twitter.size.clone(),
+        fallback: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(overlay, twitter);
+    let root = parse(r#"{"size":["4096x4096"],"fallback":false,"extractor":{"size":"large","fallback":true,"twitter":{"size":"small","fallback":true}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!(options.size.as_ref().unwrap().sizes(), ["4096x4096"]);
+        assert_eq!(options.fallback, Some(false));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.size, None);
+    assert_eq!(absent.fallback, None);
+    assert!(parse(&json!({"size":vec!["x".repeat(32);32]}).to_string()).is_ok());
+    assert!(parse(&json!({"size":["custom_size-2"]}).to_string()).is_ok());
+}
+
+#[test]
+fn image_size_and_fallback_configuration_reject_invalid_private_values_and_duplicate_keys() {
+    use serde_json::json;
+    let bad_size = [
+        json!(null),
+        json!(true),
+        json!(1),
+        json!([]),
+        json!(""),
+        json!("orig,,large"),
+        json!(["orig", 1]),
+        json!(["private-value\n"]),
+        json!("private-value/path"),
+        json!(["x".repeat(33)]),
+        json!(vec!["orig"; 33]),
+    ];
+    let bad_fallback = [
+        json!(null),
+        json!(0),
+        json!("false"),
+        json!([]),
+        json!({"private-key":"private-value"}),
+    ];
+    for (field, values) in [
+        ("size", bad_size.as_slice()),
+        ("fallback", bad_fallback.as_slice()),
+    ] {
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(!message.contains("private-key") && !message.contains("private-value"));
+            }
+        }
+        let value = if field == "size" { "\"orig\"" } else { "false" };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}

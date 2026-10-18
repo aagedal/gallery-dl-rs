@@ -22,15 +22,26 @@ pub struct MediaOptions {
     pub unavailable: bool,
 }
 
+pub(super) struct FileOptions<'a> {
+    pub(super) media: MediaOptions,
+    pub(super) cards: &'a CardOptions,
+    pub(super) articles: ArticleOptions,
+    pub(super) images: &'a ImageOptions,
+}
+
 pub(super) fn parse_tweet_media(
     tweet: &Value,
     requested_post_id: &str,
     allow_empty: bool,
-    options: MediaOptions,
-    card_options: &CardOptions,
     card_source: &Value,
-    article_options: ArticleOptions,
+    selection: FileOptions<'_>,
 ) -> Result<Vec<Media>> {
+    let FileOptions {
+        media: options,
+        cards: card_options,
+        articles: article_options,
+        images: image_options,
+    } = selection;
     let has_card = card_options.mode != CardMode::Skip && card_source.get("card").is_some();
     let has_article =
         article_options != ArticleOptions::disabled() && card_source.get("article").is_some();
@@ -71,23 +82,29 @@ pub(super) fn parse_tweet_media(
         .get("created_at")
         .and_then(Value::as_str)
         .and_then(timestamp);
-    let mut selected = select_entities(items.iter(), requested_post_id, options)?;
+    let mut selected = select_entities(items.iter(), requested_post_id, options, image_options)?;
     selected.extend(cards::select(
         card_source,
         requested_post_id,
         options,
         card_options,
+        image_options,
     )?);
-    let (article_files, article) = articles::select(card_source, article_options);
+    let (article_files, article) =
+        articles::select_with_images(card_source, article_options, image_options);
     selected.extend(article_files);
     // gallery-dl numbers files after selection, including previews after their video.
     Ok(selected
         .into_iter()
         .enumerate()
-        .map(|(i, (url, extension, job))| Media {
+        .map(|(i, (url, extension, job, fallback))| Media {
             url,
             job,
-            handoff: BTreeMap::new(),
+            handoff: if fallback.is_empty() {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([("_fallback".into(), serde_json::json!(fallback))])
+            },
             category: "twitter".into(),
             filename: format!("{requested_post_id}_{}.{extension}", i + 1),
             metadata: Some(PostMetadata {
@@ -111,12 +128,13 @@ pub(super) fn parse_tweet_media(
         .collect())
 }
 
-pub(super) type SelectedFile = (Url, String, MediaJob);
+pub(super) type SelectedFile = (Url, String, MediaJob, Vec<Url>);
 
 pub(super) fn select_entities<'a>(
     items: impl IntoIterator<Item = &'a Value>,
     requested_post_id: &str,
     options: MediaOptions,
+    image_options: &ImageOptions,
 ) -> Result<Vec<SelectedFile>> {
     let mut selected = Vec::new();
     for item in items {
@@ -138,9 +156,12 @@ pub(super) fn select_entities<'a>(
         }
         if video {
             match options.videos {
-                VideoMode::Files => {
-                    selected.push((video_url(item)?, "mp4".into(), MediaJob::DirectHttp))
-                }
+                VideoMode::Files => selected.push((
+                    video_url(item)?,
+                    "mp4".into(),
+                    MediaJob::DirectHttp,
+                    Vec::new(),
+                )),
                 VideoMode::Skip => {}
                 VideoMode::Ytdl => {
                     // Fixed first-party page; never take a delegate target from response data.
@@ -150,6 +171,7 @@ pub(super) fn select_entities<'a>(
                         Url::parse(&format!("ytdl:{page_url}"))?,
                         "mp4".into(),
                         MediaJob::VideoPage { page_url },
+                        Vec::new(),
                     ));
                 }
             }
@@ -158,7 +180,8 @@ pub(super) fn select_entities<'a>(
             }
         }
         let (url, extension) = image_url(item)?;
-        selected.push((url, extension, MediaJob::DirectHttp));
+        let (url, fallback) = image_options.apply(url);
+        selected.push((url, extension, MediaJob::DirectHttp, fallback));
     }
     Ok(selected)
 }
@@ -187,7 +210,7 @@ fn video_url(item: &Value) -> Result<Url> {
 }
 
 fn image_url(item: &Value) -> Result<(Url, String)> {
-    let mut url = item
+    let url = item
         .get("media_url_https")
         .or_else(|| item.get("media_url"))
         .and_then(Value::as_str)
@@ -207,15 +230,5 @@ fn image_url(item: &Value) -> Result<(Url, String)> {
                 .map(|(_, v)| v.into_owned())
         })
         .ok_or_else(|| error("Twitter photo has unsupported extension"))?;
-    // Preserve signed/other query parameters, replacing only the size.
-    let pairs: Vec<_> = url
-        .query_pairs()
-        .filter(|(k, _)| k != "name")
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
-    url.set_query(None);
-    url.query_pairs_mut()
-        .extend_pairs(pairs)
-        .append_pair("name", "orig");
     Ok((url, extension))
 }

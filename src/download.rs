@@ -26,6 +26,7 @@ pub struct DownloadClient {
     rate_limits: RateLimits,
     wait_limit: Duration,
     resume: bool,
+    fallback: bool,
     network: NetworkOptions,
 }
 
@@ -60,6 +61,12 @@ impl DownloadClient {
         self.wait_limit = timeout;
         self
     }
+    /// Try explicitly supplied fallback URLs after remote failures.
+    pub fn with_fallback(mut self, enabled: bool) -> Self {
+        self.fallback = enabled;
+        self
+    }
+
     /// Retain validated partial HTTP downloads for retries and later invocations.
     pub fn with_resume(mut self, enabled: bool) -> Self {
         self.resume = enabled;
@@ -78,6 +85,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         rate_limits: RateLimits::default(),
         wait_limit: timeout,
         resume: false,
+        fallback: true,
         network: NetworkOptions::default(),
     })
 }
@@ -307,26 +315,13 @@ async fn download_media(
     directory: Option<&DirectoryTemplate>,
     limits: SizeLimits,
 ) -> Result<Outcome> {
-    match &media.job {
-        MediaJob::InlineText { data } => {
-            if data.len() > crate::extract::MAX_INLINE_TEXT {
-                return Err(error("inline text exceeds the payload size limit"));
-            }
-        }
-        MediaJob::DirectHttp => {
-            crate::extract::http_url(media.url.as_str())?;
-        }
-        MediaJob::VideoPage { .. } => {
-            return Err(error(
-                "video-page downloads require the companion yt-dlp-rs adapter, which is not implemented",
-            ));
-        }
-        MediaJob::Manifest { .. } => {
-            return Err(error(
-                "HLS/DASH downloads require the companion yt-dlp-rs adapter, which is not implemented",
-            ));
-        }
+    let primary_validation = validate_job(media);
+    if let Err(failure) = &primary_validation
+        && (!failure.fallback || !client.fallback || !media.handoff.contains_key("_fallback"))
+    {
+        return Err(error(failure.error.to_string()));
     }
+    // Destination and publication metadata always belong to the original job.
     let path = destination_with_templates(root, media, template, directory)?;
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.is_file() => return Ok(Outcome::Skipped(path)),
@@ -343,55 +338,209 @@ async fn download_media(
         return write_inline_text(parent, &path, data).await;
     }
     let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
-    tokio::fs::create_dir_all(parent).await?;
-    let mut headers = HeaderMap::new();
-    for (name, value) in &media.headers {
-        let name = HeaderName::from_bytes(name.as_bytes())?;
-        // Transport framing and proxy credentials must be controlled by reqwest.
-        if matches!(
-            name.as_str(),
-            "host"
-                | "content-length"
-                | "transfer-encoding"
-                | "connection"
-                | "proxy-authorization"
-                | "range"
-                | "if-range"
-        ) {
+    let mut candidate = Cow::Borrowed(media);
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(target_digest(&media.url));
+    let mut next_index = 0;
+    let mut partial: Option<crate::resume::Partial> = None;
+    // Keep the primary checkpoint's reservation until the whole logical job ends.
+    let mut _primary_reservation = None;
+    let mut first = true;
+    loop {
+        if !first {
+            match std::fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.is_file() => return Ok(Outcome::Skipped(path)),
+                Ok(_) => return Err(error("media destination is not a regular file")),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        let result = match validate_job(&candidate) {
+            Err(failure) => Err(failure),
+            Ok(()) => {
+                tokio::fs::create_dir_all(parent).await?;
+                let mut headers = HeaderMap::new();
+                for (name, value) in &candidate.headers {
+                    let name = HeaderName::from_bytes(name.as_bytes())?;
+                    if matches!(
+                        name.as_str(),
+                        "host"
+                            | "content-length"
+                            | "transfer-encoding"
+                            | "connection"
+                            | "proxy-authorization"
+                            | "range"
+                            | "if-range"
+                    ) {
+                        continue;
+                    }
+                    headers.insert(name, HeaderValue::from_str(value)?);
+                }
+                partial = if client.resume {
+                    Some(crate::resume::Partial::open(&path, &candidate.identity()).await?)
+                } else {
+                    None
+                };
+                download_candidate(
+                    client,
+                    &candidate,
+                    &headers,
+                    &path,
+                    retries,
+                    limits,
+                    &mut partial,
+                )
+                .await
+            }
+        };
+        let failure = match result {
+            Ok(outcome) => return Ok(outcome),
+            Err(failure) if failure.fallback && client.fallback => failure,
+            Err(failure) => return Err(failure.error),
+        };
+        let Some(target) = next_fallback(media, &mut next_index, &mut seen)? else {
+            return Err(failure.error);
+        };
+        if let Some(mut old) = partial.take() {
+            old.discard().await?;
+            if first {
+                _primary_reservation = Some(old);
+            }
+        }
+        first = false;
+        let mut next = media.clone();
+        next.url = target;
+        next.job = MediaJob::DirectHttp;
+        if !same_origin(&media.url, &next.url) {
+            // Explicit cross-origin fallbacks may be public, but never inherit
+            // per-item credentials or arbitrary private headers from the first URL.
+            next.headers.clear();
+        }
+        candidate = Cow::Owned(next);
+    }
+}
+
+fn validate_job(media: &Media) -> std::result::Result<(), Failure> {
+    match &media.job {
+        MediaJob::InlineText { data } if data.len() > crate::extract::MAX_INLINE_TEXT => {
+            Err(Failure {
+                error: error("inline text exceeds the payload size limit"),
+                retry: false,
+                fallback: false,
+            })
+        }
+        MediaJob::InlineText { .. } => Ok(()),
+        MediaJob::DirectHttp => crate::extract::http_url(media.url.as_str())
+            .map(|_| ())
+            .map_err(|_| Failure {
+                error: error("invalid direct media URL"),
+                retry: false,
+                fallback: false,
+            }),
+        MediaJob::VideoPage { .. } => Err(Failure {
+            error: error(
+                "video-page downloads require the companion yt-dlp-rs adapter, which is not implemented",
+            ),
+            retry: false,
+            fallback: true,
+        }),
+        MediaJob::Manifest { .. } => Err(Failure {
+            error: error(
+                "HLS/DASH downloads require the companion yt-dlp-rs adapter, which is not implemented",
+            ),
+            retry: false,
+            fallback: true,
+        }),
+    }
+}
+
+fn same_origin(first: &url::Url, second: &url::Url) -> bool {
+    first.scheme() == second.scheme()
+        && first.host_str() == second.host_str()
+        && first.port_or_known_default() == second.port_or_known_default()
+}
+
+fn target_digest(target: &url::Url) -> [u8; 32] {
+    let mut target = target.clone();
+    target.set_fragment(None);
+    Sha256::digest(target.as_str().as_bytes()).into()
+}
+
+fn next_fallback(
+    media: &Media,
+    index: &mut usize,
+    seen: &mut std::collections::HashSet<[u8; 32]>,
+) -> Result<Option<url::Url>> {
+    let Some(value) = media.handoff.get("_fallback") else {
+        return Ok(None);
+    };
+    let values = value
+        .as_array()
+        .filter(|values| values.len() <= 128)
+        .ok_or_else(|| error("media fallback list must contain at most 128 URLs"))?;
+    while let Some(value) = values.get(*index) {
+        *index += 1;
+        let Some(value) = value.as_str().filter(|value| value.len() <= 16 * 1024) else {
+            continue;
+        };
+        let Ok(mut target) = crate::extract::http_url(value) else {
+            continue;
+        };
+        if crate::extract::manifest_protocol(&target).is_some() {
             continue;
         }
-        headers.insert(name, HeaderValue::from_str(value)?);
+        target.set_fragment(None);
+        if seen.insert(target_digest(&target)) {
+            return Ok(Some(target));
+        }
     }
-    let mut partial = if client.resume {
-        Some(crate::resume::Partial::open(&path, &media.identity()).await?)
-    } else {
-        None
-    };
+    Ok(None)
+}
+
+async fn download_candidate(
+    client: &DownloadClient,
+    media: &Media,
+    headers: &HeaderMap,
+    path: &Path,
+    retries: u8,
+    limits: SizeLimits,
+    partial: &mut Option<crate::resume::Partial>,
+) -> std::result::Result<Outcome, Failure> {
+    let parent = path.parent().ok_or_else(|| Failure {
+        error: error("invalid destination"),
+        retry: false,
+        fallback: false,
+    })?;
     for attempt in 0..=retries {
-        // Once rejected, a cleanup timeout must not trigger another request.
-        let mut filtering = false;
+        // Only a timeout while awaiting the network may advance candidates.
+        // Disk/checkpoint/publication timeouts must preserve this representation.
+        let mut remote_io = false;
         let result = tokio::time::timeout(client.wait_limit, async {
-            match &mut partial {
+            match partial {
                 Some(partial) => {
                     attempt_resume(
                         client,
                         media,
-                        &headers,
-                        &path,
+                        headers,
+                        path,
                         partial,
                         limits,
-                        &mut filtering,
+                        &mut remote_io,
                     )
                     .await
                 }
-                None => attempt_download(client, media, &headers, parent, &path, limits).await,
+                None => {
+                    attempt_download(client, media, headers, parent, path, limits, &mut remote_io)
+                        .await
+                }
             }
         })
         .await
         .unwrap_or_else(|_| {
             Err(Failure {
                 error: error("media download attempt timed out"),
-                retry: !filtering,
+                retry: remote_io,
+                fallback: remote_io,
             })
         });
         match result {
@@ -399,7 +548,7 @@ async fn download_media(
             Err(failure) if failure.retry && attempt < retries => {
                 tokio::time::sleep(Duration::from_millis(250 * (1u64 << attempt.min(6)))).await;
             }
-            Err(failure) => return Err(failure.error),
+            Err(failure) => return Err(failure),
         }
     }
     unreachable!()
@@ -434,12 +583,14 @@ async fn write_inline_text(parent: &Path, path: &Path, data: &str) -> Result<Out
 struct Failure {
     error: crate::Error,
     retry: bool,
+    fallback: bool,
 }
 impl From<std::io::Error> for Failure {
     fn from(error: std::io::Error) -> Self {
         Self {
             error: error.into(),
             retry: false,
+            fallback: false,
         }
     }
 }
@@ -453,6 +604,7 @@ impl From<reqwest::Error> for Failure {
                 error.without_url().into()
             },
             retry: true,
+            fallback: true,
         }
     }
 }
@@ -464,8 +616,12 @@ async fn attempt_download(
     parent: &Path,
     path: &Path,
     limits: SizeLimits,
+    remote_io: &mut bool,
 ) -> std::result::Result<Outcome, Failure> {
-    let response = request_media(client, media, headers).await?;
+    *remote_io = true;
+    let response = request_media(client, media, headers).await;
+    *remote_io = false;
+    let response = response?;
     check_status(client, media, &response, false)?;
     if response
         .headers()
@@ -488,7 +644,11 @@ async fn attempt_download(
         .await?;
     let mut stream = response.bytes_stream();
     let mut received = 0u64;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        *remote_io = true;
+        let chunk = stream.next().await;
+        *remote_io = false;
+        let Some(chunk) = chunk else { break };
         let chunk = chunk?;
         received = received
             .checked_add(chunk.len() as u64)
@@ -505,6 +665,7 @@ async fn attempt_download(
         return Err(Failure {
             error: error("incomplete response body"),
             retry: true,
+            fallback: true,
         });
     }
     if let Some(rejection) = limits.check(received) {
@@ -522,6 +683,7 @@ async fn attempt_download(
                 Err(Failure {
                     error: error("media destination is not a regular file"),
                     retry: false,
+                    fallback: false,
                 })
             }
         }
@@ -544,6 +706,7 @@ async fn request_media(
             .map_err(|error| Failure {
                 error,
                 retry: false,
+                fallback: true,
             })?;
         let response = client
             .http
@@ -557,6 +720,7 @@ async fn request_media(
             .map_err(|error| Failure {
                 error,
                 retry: false,
+                fallback: true,
             })? {
             Some(next) => target = next,
             None => break response,
@@ -583,6 +747,7 @@ fn check_status(
         return Err(Failure {
             error: error(format!("media server returned HTTP {}", response.status())),
             retry,
+            fallback: true,
         });
     }
     Ok(())
@@ -614,6 +779,7 @@ fn validate_media(response: &reqwest::Response) -> std::result::Result<(), Failu
                 "server returned a web page or streaming manifest; only direct media downloads are implemented",
             ),
             retry: false,
+            fallback: true,
         });
     }
     Ok(())
@@ -623,6 +789,7 @@ fn terminal(message: &str) -> Failure {
     Failure {
         error: error(message),
         retry: false,
+        fallback: true,
     }
 }
 
@@ -633,7 +800,7 @@ async fn attempt_resume(
     path: &Path,
     partial: &mut crate::resume::Partial,
     limits: SizeLimits,
-    filtering: &mut bool,
+    remote_io: &mut bool,
 ) -> std::result::Result<Outcome, Failure> {
     let mut restarted = false;
     loop {
@@ -648,6 +815,7 @@ async fn attempt_resume(
                 return Err(Failure {
                     error,
                     retry: false,
+                    fallback: false,
                 });
             }
         };
@@ -671,11 +839,19 @@ async fn attempt_resume(
             );
             headers.insert(
                 reqwest::header::IF_RANGE,
-                HeaderValue::from_str(crate::range::if_range(checkpoint).unwrap())
-                    .map_err(|_| terminal("invalid saved media validator"))?,
+                HeaderValue::from_str(crate::range::if_range(checkpoint).unwrap()).map_err(
+                    |_| Failure {
+                        error: error("invalid saved media validator"),
+                        retry: false,
+                        fallback: false,
+                    },
+                )?,
             );
         }
-        let response = request_media(client, media, &headers).await?;
+        *remote_io = true;
+        let response = request_media(client, media, &headers).await;
+        *remote_io = false;
+        let response = response?;
         if !(response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
             && checkpoint.is_some())
         {
@@ -685,6 +861,7 @@ async fn attempt_resume(
             Failure {
                 error,
                 retry: false,
+                fallback: true,
             }
         })?;
         let (start, expected, total) = match plan {
@@ -692,6 +869,7 @@ async fn attempt_resume(
                 partial.reset(None).await.map_err(|error| Failure {
                     error,
                     retry: false,
+                    fallback: false,
                 })?;
                 restarted = true;
                 continue;
@@ -703,11 +881,12 @@ async fn attempt_resume(
             }
             crate::range::Plan::Complete => {
                 if let Some(rejection) = limits.check(offset) {
-                    return filter_partial(partial, rejection, filtering).await;
+                    return filter_partial(partial, rejection).await;
                 }
                 return partial.publish(path).await.map_err(|error| Failure {
                     error,
                     retry: false,
+                    fallback: false,
                 });
             }
             crate::range::Plan::Full(checkpoint) => {
@@ -716,18 +895,19 @@ async fn attempt_resume(
                     .content_length()
                     .and_then(|size| limits.check(size))
                 {
-                    return filter_partial(partial, rejection, filtering).await;
+                    return filter_partial(partial, rejection).await;
                 }
                 partial.reset(checkpoint).await.map_err(|error| Failure {
                     error,
                     retry: false,
+                    fallback: false,
                 })?;
                 (0, response.content_length(), response.content_length())
             }
             crate::range::Plan::Append { end, total } => {
                 validate_media(&response)?;
                 if let Some(rejection) = limits.check(total) {
-                    return filter_partial(partial, rejection, filtering).await;
+                    return filter_partial(partial, rejection).await;
                 }
                 if partial
                     .checkpoint()
@@ -736,6 +916,7 @@ async fn attempt_resume(
                     partial.set_total(total).await.map_err(|error| Failure {
                         error,
                         retry: false,
+                        fallback: false,
                     })?;
                 }
                 (offset, Some(end - offset + 1), Some(total))
@@ -743,7 +924,11 @@ async fn attempt_resume(
         };
         let mut stream = response.bytes_stream();
         let mut received = 0u64;
-        while let Some(chunk) = stream.next().await {
+        loop {
+            *remote_io = true;
+            let chunk = stream.next().await;
+            *remote_io = false;
+            let Some(chunk) = chunk else { break };
             let chunk = chunk?;
             received = received
                 .checked_add(chunk.len() as u64)
@@ -755,17 +940,19 @@ async fn attempt_resume(
                 .checked_add(received)
                 .ok_or_else(|| terminal("media response exceeds size limit"))?;
             if let Some(rejection) = limits.check_max(size) {
-                return filter_partial(partial, rejection, filtering).await;
+                return filter_partial(partial, rejection).await;
             }
             partial.append(&chunk).await.map_err(|error| Failure {
                 error,
                 retry: false,
+                fallback: false,
             })?;
         }
         if expected.is_some_and(|expected| received != expected) {
             return Err(Failure {
                 error: error("incomplete response body"),
                 retry: true,
+                fallback: true,
             });
         }
         let completed = start
@@ -773,11 +960,12 @@ async fn attempt_resume(
             .ok_or_else(|| terminal("media response exceeds size limit"))?;
         if total.is_none_or(|total| completed == total) {
             if let Some(rejection) = limits.check(completed) {
-                return filter_partial(partial, rejection, filtering).await;
+                return filter_partial(partial, rejection).await;
             }
             return partial.publish(path).await.map_err(|error| Failure {
                 error,
                 retry: false,
+                fallback: false,
             });
         }
         // Some servers return only part of an open-ended range. Continue within
@@ -788,12 +976,11 @@ async fn attempt_resume(
 async fn filter_partial(
     partial: &mut crate::resume::Partial,
     rejection: SizeRejection,
-    filtering: &mut bool,
 ) -> std::result::Result<Outcome, Failure> {
-    *filtering = true;
     partial.reset(None).await.map_err(|error| Failure {
         error,
         retry: false,
+        fallback: false,
     })?;
     Ok(Outcome::Filtered(rejection))
 }

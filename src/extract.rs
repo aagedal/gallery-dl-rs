@@ -238,6 +238,8 @@ pub struct BackendOptions {
     pub videos: Option<crate::twitter::VideoMode>,
     pub previews: Option<bool>,
     pub unavailable: Option<bool>,
+    pub size: Option<crate::twitter::ImageOptions>,
+    pub fallback: Option<bool>,
     pub articles: Option<crate::twitter::ArticleOptions>,
     pub cards: Option<crate::twitter::CardMode>,
     pub cards_blacklist: Option<Vec<String>>,
@@ -345,6 +347,14 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("unavailable={unavailable}"));
+        }
+        if let Some(size) = &options.size {
+            command
+                .arg("--option")
+                .arg(format!("size={}", serde_json::json!(size.sizes())));
+        }
+        if let Some(fallback) = options.fallback {
+            command.arg("--option").arg(format!("fallback={fallback}"));
         }
         if let Some(articles) = options.articles {
             let value = if articles.metadata

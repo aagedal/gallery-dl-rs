@@ -31,6 +31,7 @@ pub(super) fn select(
     output_id: &str,
     media_options: MediaOptions,
     options: &CardOptions,
+    image_options: &ImageOptions,
 ) -> Result<Vec<SelectedFile>> {
     if options.mode == CardMode::Skip {
         return Ok(Vec::new());
@@ -80,7 +81,7 @@ pub(super) fn select(
                     let url = url
                         .as_str()
                         .ok_or_else(|| error("Twitter card image URL invalid"))?;
-                    return Ok(vec![image_file(url, true)?]);
+                    return Ok(vec![image_file(url, true, image_options)?]);
                 }
             }
         }
@@ -95,8 +96,12 @@ pub(super) fn select(
         }
         let data: Unified = serde_json::from_str(encoded)
             .map_err(|_| error("Twitter unified card data invalid"))?;
-        let mut selected =
-            media::select_entities(data.media_entities.0.iter(), output_id, media_options)?;
+        let mut selected = media::select_entities(
+            data.media_entities.0.iter(),
+            output_id,
+            media_options,
+            image_options,
+        )?;
         if let Some(objects) = data.component_objects {
             let ids = data
                 .components
@@ -148,6 +153,7 @@ pub(super) fn select(
             Url::parse(&format!("ytdl:{page_url}"))?,
             "mp4".into(),
             MediaJob::VideoPage { page_url },
+            Vec::new(),
         )]);
     }
     Ok(Vec::new())
@@ -178,8 +184,8 @@ fn bindings(value: Option<&Value>) -> Result<BTreeMap<String, Value>> {
     }
 }
 
-fn image_file(source: &str, normalize: bool) -> Result<SelectedFile> {
-    let mut url = http_url(source).map_err(|_| error("Twitter card image URL invalid"))?;
+fn image_file(source: &str, normalize: bool, image_options: &ImageOptions) -> Result<SelectedFile> {
+    let url = http_url(source).map_err(|_| error("Twitter card image URL invalid"))?;
     let supported = |ext: &str| matches!(ext, "jpg" | "jpeg" | "png" | "webp" | "avif" | "gif");
     let extension = url
         .path()
@@ -193,28 +199,22 @@ fn image_file(source: &str, normalize: bool) -> Result<SelectedFile> {
                 .map(|(_, value)| value.into_owned())
         })
         .ok_or_else(|| error("Twitter card image format unsupported"))?;
-    // Card images without an explicit size keep the supplied URL.
-    if normalize && url.query_pairs().any(|(key, _)| key == "name") {
-        let pairs: Vec<_> = url
-            .query_pairs()
-            .filter(|(key, _)| key != "name")
-            .map(|(key, value)| (key.into_owned(), value.into_owned()))
-            .collect();
-        url.set_query(None);
-        url.query_pairs_mut()
-            .extend_pairs(pairs)
-            .append_pair("name", "orig");
-    }
-    Ok((url, extension, MediaJob::DirectHttp))
+    // Summary images without an explicit size preserve their supplied URL.
+    let (url, fallback) = if normalize && url.query_pairs().any(|(key, _)| key == "name") {
+        image_options.apply(url)
+    } else {
+        (url, Vec::new())
+    };
+    Ok((url, extension, MediaJob::DirectHttp, fallback))
 }
 
 fn component_file(source: &str) -> Result<SelectedFile> {
     let url = http_url(source).map_err(|_| error("Twitter card preview URL invalid"))?;
     if let Some(media) = direct(&url) {
         let extension = media.filename.rsplit_once('.').unwrap().1.to_owned();
-        return Ok((url, extension, media.job));
+        return Ok((url, extension, media.job, Vec::new()));
     }
-    image_file(source, false)
+    image_file(source, false, &ImageOptions::default())
 }
 
 #[derive(Deserialize)]

@@ -52,21 +52,28 @@ pub struct ArticleMetadata {
     pub html: Option<Arc<str>>,
 }
 
-pub(super) fn select(
+#[cfg(test)]
+fn select(tweet: &Value, options: ArticleOptions) -> (Vec<SelectedFile>, Option<ArticleMetadata>) {
+    select_with_images(tweet, options, &ImageOptions::default())
+}
+
+pub(super) fn select_with_images(
     tweet: &Value,
     options: ArticleOptions,
+    image_options: &ImageOptions,
 ) -> (Vec<SelectedFile>, Option<ArticleMetadata>) {
     let mut files = Vec::new();
     let mut metadata = None;
     // Match the upstream article boundary: malformed optional article data must
     // not discard ordinary files or article work completed before the failure.
-    let _ = select_into(tweet, options, &mut files, &mut metadata);
+    let _ = select_into(tweet, options, image_options, &mut files, &mut metadata);
     (files, metadata)
 }
 
 fn select_into(
     tweet: &Value,
     options: ArticleOptions,
+    image_options: &ImageOptions,
     files: &mut Vec<SelectedFile>,
     metadata: &mut Option<ArticleMetadata>,
 ) -> Result<()> {
@@ -92,7 +99,10 @@ fn select_into(
         });
     }
     let html = if options.html || options.document {
-        Some(Arc::<str>::from(render(article)?))
+        Some(Arc::<str>::from(render_with_images(
+            article,
+            image_options,
+        )?))
     } else {
         None
     };
@@ -108,14 +118,14 @@ fn select_into(
             .html = html.clone();
     }
     if options.document {
-        let document = document(article, html.as_deref().unwrap())?;
+        let document = document(article, html.as_deref().unwrap(), image_options)?;
         let (url, job) = inline_text(document)?;
-        files.push((url, "html".into(), job));
+        files.push((url, "html".into(), job, Vec::new()));
     }
     if options.cover
         && let Some(cover) = article.get("cover_media").filter(|value| !value.is_null())
     {
-        files.push(image(cover)?);
+        files.push(image(cover, image_options)?);
     }
     if options.media {
         for media in article
@@ -123,7 +133,7 @@ fn select_into(
             .and_then(Value::as_array)
             .ok_or_else(|| error("Twitter article media list missing or invalid"))?
         {
-            files.push(image(media)?);
+            files.push(image(media, image_options)?);
         }
     }
     Ok(())
@@ -161,12 +171,20 @@ fn optional_timestamp(parent: Option<&Value>, key: &str) -> Result<Option<i64>> 
     }
 }
 
-fn image(value: &Value) -> Result<SelectedFile> {
+fn image(value: &Value, image_options: &ImageOptions) -> Result<SelectedFile> {
+    image_selection(value, image_options, true)
+}
+
+fn image_selection(
+    value: &Value,
+    image_options: &ImageOptions,
+    fallback: bool,
+) -> Result<SelectedFile> {
     let source = value
         .pointer("/media_info/original_img_url")
         .and_then(Value::as_str)
         .ok_or_else(|| error("Twitter article image URL missing or invalid"))?;
-    let mut url = http_url(source).map_err(|_| error("Twitter article image URL invalid"))?;
+    let url = http_url(source).map_err(|_| error("Twitter article image URL invalid"))?;
     let supported =
         |extension: &str| matches!(extension, "jpg" | "jpeg" | "png" | "webp" | "avif" | "gif");
     let extension = url
@@ -181,16 +199,12 @@ fn image(value: &Value) -> Result<SelectedFile> {
                 .map(|(_, value)| value.into_owned())
         })
         .ok_or_else(|| error("Twitter article image format unsupported"))?;
-    let pairs: Vec<_> = url
-        .query_pairs()
-        .filter(|(key, _)| key != "name")
-        .map(|(key, value)| (key.into_owned(), value.into_owned()))
-        .collect();
-    url.set_query(None);
-    url.query_pairs_mut()
-        .extend_pairs(pairs)
-        .append_pair("name", "orig");
-    Ok((url, extension, MediaJob::DirectHttp))
+    let (url, fallback) = if fallback {
+        image_options.apply(url)
+    } else {
+        (image_options.primary(url), Vec::new())
+    };
+    Ok((url, extension, MediaJob::DirectHttp, fallback))
 }
 
 #[derive(Default)]
@@ -253,7 +267,12 @@ fn key(value: &Value) -> Result<String> {
     }
 }
 
+#[cfg(test)]
 fn render(article: &Value) -> Result<String> {
+    render_with_images(article, &ImageOptions::default())
+}
+
+fn render_with_images(article: &Value, image_options: &ImageOptions) -> Result<String> {
     let content = article
         .get("content_state")
         .filter(|value| value.is_object())
@@ -322,7 +341,7 @@ fn render(article: &Value) -> Result<String> {
                     let entity = entities
                         .get(&id)
                         .ok_or_else(|| error("Twitter article entity reference missing"))?;
-                    render_entity(&mut html, block, entity, &media)?;
+                    render_entity(&mut html, block, entity, &media, image_options)?;
                 }
                 if kind == "unstyled" {
                     render_text(&mut html, block)?;
@@ -372,6 +391,7 @@ fn render_entity(
     block: &Value,
     entity: &Value,
     media: &BTreeMap<String, &Value>,
+    image_options: &ImageOptions,
 ) -> Result<()> {
     if entity.is_null() {
         return Ok(());
@@ -392,7 +412,7 @@ fn render_entity(
                 let source = media
                     .get(&id)
                     .ok_or_else(|| error("Twitter article referenced media missing"))?;
-                let (url, _, _) = image(source)?;
+                let (url, _, _, _) = image_selection(source, image_options, false)?;
                 html.push("<img src=\"")?;
                 html.escape(url.as_str())?;
                 html.push("\" alt=\"\">\n")?;
@@ -552,7 +572,7 @@ fn render_text(html: &mut Html, block: &Value) -> Result<()> {
     Ok(())
 }
 
-fn document(article: &Value, content: &str) -> Result<String> {
+fn document(article: &Value, content: &str, image_options: &ImageOptions) -> Result<String> {
     let title = article
         .get("title")
         .and_then(Value::as_str)
@@ -562,7 +582,7 @@ fn document(article: &Value, content: &str) -> Result<String> {
     html.escape(title)?;
     html.push("</title></head><body>\n")?;
     if let Some(cover) = article.get("cover_media").filter(|value| !value.is_null()) {
-        let (url, _, _) = image(cover)?;
+        let (url, _, _, _) = image_selection(cover, image_options, false)?;
         html.push("<img class=\"cover\" src=\"")?;
         html.escape(url.as_str())?;
         html.push("\" alt=\"")?;

@@ -105,6 +105,26 @@ impl Partial {
         self.checkpoint.as_ref()
     }
 
+    /// Remove a failed candidate's bytes before another representation is tried.
+    /// Keep the lock inode/reservation so concurrent writers cannot reuse it.
+    pub(crate) async fn discard(&mut self) -> Result<()> {
+        self.reset(None).await?;
+        let part = self.part.clone();
+        let lock = self.lock.clone();
+        let operation = self.operations.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let _lock = lock;
+            let _operation = operation;
+            ensure_regular_if_exists(&part)?;
+            match fs::remove_file(&part) {
+                Ok(()) => sync_parent(&part),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.into()),
+            }
+        })
+        .await?
+    }
+
     pub(crate) async fn reset(&mut self, checkpoint: Option<Checkpoint>) -> Result<()> {
         let (part, state) = (self.part.clone(), self.state.clone());
         let lock = self.lock.clone();

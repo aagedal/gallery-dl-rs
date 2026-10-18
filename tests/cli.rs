@@ -1568,3 +1568,220 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         assert!(!log.exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn image_sizes_forward_only_for_twitter_and_fallback_for_all_social_categories() {
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$SIZE_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, size, fallback) in [
+        (json!({}), None, None),
+        (
+            json!({"extractor":{"size":"orig, large","fallback":true}}),
+            Some("size=[\"orig\",\"large\"]"),
+            Some("fallback=true"),
+        ),
+        (
+            json!({"extractor":{"size":["orig","small"],"fallback":true,"twitter":{"size":["4096x4096"],"fallback":false}}}),
+            Some("size=[\"4096x4096\"]"),
+            Some("fallback=false"),
+        ),
+        (
+            json!({"size":["custom_size-2"],"fallback":false,"extractor":{"twitter":{"size":"orig","fallback":true}}}),
+            Some("size=[\"custom_size-2\"]"),
+            Some("fallback=false"),
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/person/status/1", true),
+            ("https://instagram.com/p/example/", false),
+            ("https://facebook.com/photo/?fbid=1", false),
+        ] {
+            let output = binary()
+                .env("SIZE_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("size=") || value.starts_with("fallback="))
+                .collect();
+            let expected_fallback = if twitter {
+                fallback
+            } else if settings["extractor"]["fallback"] == true
+                && settings.get("fallback").is_none()
+            {
+                Some("fallback=true")
+            } else {
+                fallback
+            };
+            let expected: Vec<_> = (if twitter { size } else { None })
+                .into_iter()
+                .chain(expected_fallback)
+                .collect();
+            assert_eq!(forwarded, expected);
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    for settings in [
+        json!({"size":["PRIVATE-SIZE-VALUE/path"]}),
+        json!({"extractor":{"twitter":{"fallback":"PRIVATE-SIZE-VALUE"}}}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let output = binary()
+            .env("SIZE_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&backend)
+            .args(["-g", "https://x.com/person/status/1"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-SIZE-VALUE"));
+        assert!(!log.exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn fallback_configuration_controls_actual_download_attempts() {
+    use serde_json::json;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        os::unix::fs::PermissionsExt,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        thread,
+        time::{Duration, Instant},
+    };
+    for (settings, enabled) in [
+        (json!({}), true),
+        (json!({"fallback":false}), false),
+        (
+            json!({"extractor":{"fallback":false,"twitter":{"fallback":true}}}),
+            true,
+        ),
+        (
+            json!({"fallback":false,"extractor":{"twitter":{"fallback":true}}}),
+            false,
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = requests.clone();
+        let worker = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while !stopping.load(Ordering::SeqCst) && Instant::now() < deadline {
+                let (mut socket, _) = match listener.accept() {
+                    Ok(socket) => socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(error) => panic!("fallback fixture accept: {error}"),
+                };
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") && request.len() < 65536 {
+                    let mut byte = [0];
+                    if socket.read(&mut byte).unwrap_or(0) != 1 {
+                        break;
+                    }
+                    request.push(byte[0]);
+                }
+                let request = String::from_utf8(request).unwrap();
+                let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
+                captured.lock().unwrap().push(path.clone());
+                let response = if path == "/fallback.jpg" {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nimage"
+                } else {
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                let _ = socket.write_all(response.as_bytes());
+            }
+        });
+        let backend = root.path().join("backend");
+        let rows = json!([[3, format!("{base}/primary.jpg"), {"filename":"photo","extension":"jpg","_fallback":[format!("{base}/fallback.jpg")]}]]);
+        let fixture = root.path().join("rows.json");
+        std::fs::write(&fixture, serde_json::to_vec(&rows).unwrap()).unwrap();
+        std::fs::write(&backend, "#!/bin/sh\ncat \"$FALLBACK_ROWS\"\n").unwrap();
+        std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let config = root.path().join("native.json");
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let saved = root.path().join("saved");
+        let output = binary()
+            .env("FALLBACK_ROWS", &fixture)
+            .arg("--extractor-command")
+            .arg(&backend)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("-D")
+            .arg(&saved)
+            .args([
+                "-f",
+                "{filename}",
+                "--retries=0",
+                "https://x.com/person/status/1",
+            ])
+            .output()
+            .unwrap();
+        stop.store(true, Ordering::SeqCst);
+        worker.join().unwrap();
+        assert_eq!(
+            output.status.success(),
+            enabled,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = if enabled {
+            vec!["/primary.jpg", "/fallback.jpg"]
+        } else {
+            vec!["/primary.jpg"]
+        };
+        assert_eq!(*requests.lock().unwrap(), expected);
+        if enabled {
+            assert_eq!(std::fs::read(saved.join("photo.jpg")).unwrap(), b"image");
+        } else {
+            assert!(!saved.join("photo.jpg").exists());
+        }
+    }
+}

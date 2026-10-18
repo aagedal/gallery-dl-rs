@@ -294,7 +294,8 @@ async fn run(args: Args) -> Result<()> {
                 let settings = &settings[item.category.as_str()];
                 let client = client
                     .clone()
-                    .with_timeout(settings.options.timeout.unwrap());
+                    .with_timeout(settings.options.timeout.unwrap())
+                    .with_fallback(settings.options.fallback.unwrap_or(true));
                 let cell = &settings.download_client;
                 let destination = settings.options.base_directory.as_ref().unwrap();
                 let archive = settings
@@ -447,6 +448,7 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_image_options(options.size.clone().unwrap_or_default())
                                     .with_article_options(options.articles.unwrap_or_default())
                                     .with_card_options(CardOptions {
                                         mode: options.cards.unwrap_or_default(),
@@ -537,6 +539,10 @@ fn extract_input<'a>(
                             unavailable: (category == "twitter")
                                 .then_some(options.unavailable)
                                 .flatten(),
+                            size: (category == "twitter")
+                                .then(|| options.size.clone())
+                                .flatten(),
+                            fallback: options.fallback,
                             articles: (category == "twitter")
                                 .then_some(options.articles)
                                 .flatten(),
@@ -636,6 +642,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         videos: None,
         previews: None,
         unavailable: None,
+        size: None,
+        fallback: None,
         articles: None,
         cards: None,
         cards_blacklist: None,

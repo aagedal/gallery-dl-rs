@@ -13,9 +13,12 @@ use crate::{
 mod expansion;
 pub use expansion::{
     ExpansionOptions, RetweetMode, parse_response_with_article_options,
-    parse_response_with_card_options, parse_response_with_media_options,
-    parse_response_with_options,
+    parse_response_with_card_options, parse_response_with_image_options,
+    parse_response_with_media_options, parse_response_with_options,
 };
+#[path = "twitter_images.rs"]
+mod images;
+pub use images::ImageOptions;
 #[path = "twitter_media.rs"]
 mod media;
 pub use media::{MediaOptions, VideoMode};
@@ -91,6 +94,7 @@ pub struct Twitter {
     media_options: MediaOptions,
     card_options: CardOptions,
     article_options: ArticleOptions,
+    image_options: ImageOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -127,6 +131,7 @@ impl Twitter {
             media_options: MediaOptions::default(),
             card_options: CardOptions::default(),
             article_options: ArticleOptions::default(),
+            image_options: ImageOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -176,6 +181,11 @@ impl Twitter {
 
     pub fn with_article_options(mut self, options: ArticleOptions) -> Self {
         self.article_options = options;
+        self
+    }
+
+    pub fn with_image_options(mut self, options: ImageOptions) -> Self {
+        self.image_options = options;
         self
     }
 
