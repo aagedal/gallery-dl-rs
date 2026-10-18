@@ -1825,3 +1825,23 @@ fn conditional_templates_preserve_order_and_replace_whole_settings() {
         assert!(parse(bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn api_key_is_tumblr_only_and_never_echoed() {
+    let config = parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"}}}"#).unwrap();
+    assert_eq!(
+        config.resolve("tumblr").unwrap().api_key.as_deref(),
+        Some("abc123")
+    );
+    assert_eq!(config.resolve("reddit").unwrap().api_key, None);
+    for json in [
+        r#"{"api-key":"abc123"}"#,
+        r#"{"extractor":{"api-key":"abc123"}}"#,
+        r#"{"extractor":{"reddit":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"tumblr":{"api-key":"abc 123!"}}}"#,
+        r#"{"extractor":{"tumblr":{"api-key":7}}}"#,
+    ] {
+        let error = parse(json).err().unwrap().to_string();
+        assert!(!error.contains("abc"), "{error}");
+    }
+}

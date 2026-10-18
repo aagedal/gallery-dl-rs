@@ -33,6 +33,7 @@ pub mod selection;
 pub mod size;
 pub mod sleep;
 mod transport;
+pub mod tumblr;
 pub mod twitter;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;

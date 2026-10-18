@@ -137,6 +137,21 @@ impl Media {
                 }
                 (category, serde_json::json!([post.media_id]).to_string())
             }
+            // Tumblr media IDs are path hashes scoped to their blog and post.
+            "tumblr" => {
+                let post = self.metadata.as_ref()?;
+                let blog = post.username.as_deref()?;
+                if !crate::tumblr::valid_blog(blog)
+                    || !crate::tumblr::valid_id(&post.post_id)
+                    || !crate::tumblr::valid_media_id(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    "tumblr",
+                    serde_json::json!([blog, post.post_id, post.media_id]).to_string(),
+                )
+            }
             // Booru files are identified by their site and post ID.
             category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
                 let post = self.metadata.as_ref()?;
@@ -294,6 +309,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if let Some(category) = crate::kemono::category(host) {
         return Some(category);
+    }
+    if crate::tumblr::is_blog_url(url) {
+        return Some("tumblr");
     }
     if let Some(site) = crate::imagehosts::Site::from_host(host) {
         return Some(site.category());

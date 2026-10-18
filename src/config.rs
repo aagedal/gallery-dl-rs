@@ -85,6 +85,8 @@ pub struct Options {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
+    /// Tumblr API v2 key; only accepted in the `tumblr` category.
+    pub api_key: Option<String>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     /// Ordered `(filter, components)` pairs from an object-valued `directory`.
@@ -174,6 +176,7 @@ impl Options {
             limit: overrides.limit.or(self.limit),
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
+            api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             directory: if overrides.directory_conditions.is_some() {
                 overrides.directory.clone()
             } else {
@@ -332,6 +335,7 @@ struct RawExtractor {
     catbox: Box<RawOptions>,
     imgbox: Box<RawOptions>,
     postimg: Box<RawOptions>,
+    tumblr: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
 
@@ -370,6 +374,7 @@ struct RawOptions {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    api_key: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -459,6 +464,7 @@ impl Config {
                 "catbox",
                 "imgbox",
                 "postimg",
+                "tumblr",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -502,6 +508,7 @@ impl Config {
             limit: root.limit,
             search_limit: root.search_limit,
             search_stop: root.search_stop,
+            api_key: Field::default(),
             directory: root.directory,
             cookies: root.cookies,
             proxy: root.proxy,
@@ -547,6 +554,7 @@ impl Config {
             limit: extractor.limit,
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
+            api_key: Field::default(),
             directory: extractor.directory,
             cookies: extractor.cookies,
             proxy: extractor.proxy,
@@ -577,8 +585,14 @@ impl Config {
             ("catbox", extractor.catbox),
             ("imgbox", extractor.imgbox),
             ("postimg", extractor.postimg),
+            ("tumblr", extractor.tumblr),
             ("direct", extractor.direct),
         ] {
+            if name != "tumblr" && settings.api_key.0.is_some() {
+                return Err(error(
+                    "native configuration api-key is only supported for tumblr",
+                ));
+            }
             // Boxed: unoptimized builds overflow the stack with inline settings.
             categories.insert(name.into(), (*settings).resolve(directory)?);
         }
@@ -609,6 +623,7 @@ impl Config {
                 | "catbox"
                 | "imgbox"
                 | "postimg"
+                | "tumblr"
                 | "direct"
         ) {
             return Err(error("unsupported native configuration category"));
@@ -852,6 +867,20 @@ impl RawOptions {
             Some(Value::String(value)) if value == "auto" => Some(3),
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
+        let api_key = match self.api_key.0 {
+            None => None,
+            Some(Value::String(key))
+                if (1..=128).contains(&key.len())
+                    && key.bytes().all(|b| b.is_ascii_alphanumeric()) =>
+            {
+                Some(key)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration api-key must be 1-128 ASCII letters or digits",
+                ));
+            }
+        };
         let file_range = range_spec(self.file_range, "file-range")?;
         let (filename, filename_conditions) = match self.filename.0 {
             None => (None, None),
@@ -987,6 +1016,7 @@ impl RawOptions {
             limit,
             search_limit,
             search_stop,
+            api_key,
             directory: templates,
             directory_conditions,
             filesize_min: size(self.filesize_min)?,

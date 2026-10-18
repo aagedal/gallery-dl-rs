@@ -366,7 +366,14 @@ fn context_parts(
         }
         if matches!(
             category,
-            "imgur" | "bluesky" | "reddit" | "pixeldrain" | "catbox" | "imgbox" | "postimg"
+            "imgur"
+                | "bluesky"
+                | "reddit"
+                | "tumblr"
+                | "pixeldrain"
+                | "catbox"
+                | "imgbox"
+                | "postimg"
         ) {
             // Upstream `id` is the image ID for files and the post ID otherwise.
             let id = if media.is_some() {
