@@ -244,6 +244,17 @@ skipped in feeds; quoted posts are not followed. `post_id` is the record key,
 and MIME type. Default filenames are `{post_id}_{index}.{extension}`; archive
 identity is (DID, CID). Compatibility mode sends Bluesky URLs to the backend.
 
+Experimental native Reddit extraction (`--extractor native`, category `reddit`)
+accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),
+subreddit listings (hot/new/top/rising/controversial, `?t=` kept), and user
+submissions (`/user/NAME`, `/u/NAME`) via the public `.json` endpoints, paging
+with `after` up to 100 pages. It downloads `i.redd.it` images, galleries in
+`gallery_data` order, `v.redd.it` fallback MP4s (video only: Reddit serves audio
+as separate DASH), and external links to direct media files; self posts,
+crossposts, deleted posts, and other external sites are skipped. Plain `i.redd.it`
+file links stay direct downloads in both modes. OAuth, comment/selftext link
+scanning, searches, multireddits, and upstream's reddit options are not implemented.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

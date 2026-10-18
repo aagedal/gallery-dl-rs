@@ -519,6 +519,10 @@ options and Retry-After cooldowns. Not yet: user profiles, favorites,
 subreddits, searches, tag listings, and the upstream `mp4` option (animated GIFs
 always use MP4).
 
+**Implemented experimental native Reddit:** submissions, galleries, subreddit
+and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
+DASH audio, comment scanning, external-site recursion, and reddit options.
+
 **Implemented experimental native Bluesky:** single posts and author
 media/posts feeds via the public AppView, with full-size `getBlob` images and
 videos. Not yet: likes, custom feeds, lists, searches, quoted-post media,
