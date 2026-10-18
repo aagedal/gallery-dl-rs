@@ -35,9 +35,20 @@ struct State {
 pub(crate) struct Partial {
     part: PathBuf,
     state: PathBuf,
-    lock: Arc<File>,
+    lock: Arc<CheckpointLock>,
     operations: Arc<tokio::sync::Mutex<()>>,
     checkpoint: Option<Checkpoint>,
+}
+
+struct CheckpointLock(File);
+
+impl Drop for CheckpointLock {
+    fn drop(&mut self) {
+        // Closing our descriptor alone leaves flock held by descriptors that a
+        // concurrent process creation inherited until exec. Release explicitly
+        // when the last owner (including non-cancellable disk work) finishes.
+        let _ = self.0.unlock();
+    }
 }
 
 impl Partial {
@@ -71,9 +82,9 @@ impl Partial {
                 digest.update(field);
             }
             let key = format!("{:x}", digest.finalize());
-            let lock = Arc::new(open_regular(&directory.join(format!("{key}.lock")))?);
-            lock.try_lock()
-                .map_err(|_| error("another download owns this resume checkpoint"))?;
+            let lock = open_regular(&directory.join(format!("{key}.lock")))?;
+            lock.try_lock().map_err(lock_error)?;
+            let lock = Arc::new(CheckpointLock(lock));
             let part = directory.join(format!("{key}.part"));
             let state = directory.join(format!("{key}.json"));
             open_regular(&part)?;
@@ -230,6 +241,17 @@ impl Partial {
     }
 }
 
+fn lock_error(failure: fs::TryLockError) -> crate::Error {
+    match failure {
+        fs::TryLockError::WouldBlock => error("another download owns this resume checkpoint"),
+        fs::TryLockError::Error(failure) => error(format!(
+            "resume checkpoint lock failed ({:?}, OS code {:?})",
+            failure.kind(),
+            failure.raw_os_error()
+        )),
+    }
+}
+
 fn ensure_regular_if_exists(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
@@ -316,6 +338,49 @@ fn sync_parent(_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lock_errors_distinguish_contention_without_exposing_io_messages() {
+        assert_eq!(
+            lock_error(fs::TryLockError::WouldBlock).to_string(),
+            "another download owns this resume checkpoint"
+        );
+        assert_eq!(
+            lock_error(fs::TryLockError::Error(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "PRIVATE_PATH_OR_VALUE"
+            )))
+            .to_string(),
+            "resume checkpoint lock failed (Interrupted, OS code None)"
+        );
+        let failure = std::io::Error::from_raw_os_error(9);
+        let expected = format!(
+            "resume checkpoint lock failed ({:?}, OS code Some(9))",
+            failure.kind()
+        );
+        assert_eq!(
+            lock_error(fs::TryLockError::Error(failure)).to_string(),
+            expected
+        );
+    }
+
+    #[tokio::test]
+    async fn owner_release_unlocks_even_while_a_duplicated_descriptor_exists() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("media");
+        let partial = Partial::open(&destination, "identity").await.unwrap();
+        // A process spawned concurrently can inherit the same open file
+        // description until exec closes its CLOEXEC descriptor. A duplicate
+        // models that lifetime deterministically without forking the runtime.
+        let inherited = partial.lock.0.try_clone().unwrap();
+        drop(partial);
+        let reopened = Partial::open(&destination, "identity").await.unwrap();
+        drop(inherited);
+        // Closing an inherited descriptor must not release the new owner's lock.
+        assert!(Partial::open(&destination, "identity").await.is_err());
+        drop(reopened);
+        assert!(Partial::open(&destination, "identity").await.is_ok());
+    }
 
     fn checkpoint() -> Checkpoint {
         Checkpoint {
