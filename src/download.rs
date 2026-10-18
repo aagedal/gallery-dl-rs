@@ -2,6 +2,7 @@ use crate::{
     Result, error,
     extract::{Media, MediaJob},
     naming::{DirectoryTemplate, FilenameTemplate},
+    size::{SizeLimits, SizeRejection},
     transport::{RateLimits, Redirects, retry_after},
 };
 use futures_util::StreamExt;
@@ -118,6 +119,16 @@ pub fn destination_with_templates(
 pub enum Outcome {
     Downloaded(PathBuf),
     Skipped(PathBuf),
+    Filtered(SizeRejection),
+}
+
+impl Outcome {
+    pub fn saved_path(&self) -> Option<&Path> {
+        match self {
+            Self::Downloaded(path) | Self::Skipped(path) => Some(path),
+            Self::Filtered(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -127,6 +138,8 @@ pub struct DownloadOptions<'a> {
     pub directory: Option<&'a DirectoryTemplate>,
     /// Save versioned post metadata beside completed or already existing media.
     pub write_metadata: bool,
+    /// Inclusive limits on the complete HTTP representation size.
+    pub limits: SizeLimits,
 }
 
 pub async fn download(
@@ -170,10 +183,12 @@ pub async fn download_with_template(
         options.retries,
         template,
         options.directory,
+        options.limits,
     )
     .await?;
-    if options.write_metadata {
-        let (Outcome::Downloaded(path) | Outcome::Skipped(path)) = &outcome;
+    if options.write_metadata
+        && let Some(path) = outcome.saved_path()
+    {
         write_metadata(path, media).await.map_err(|e| {
             error(format!(
                 "media is saved at {}; metadata sidecar failed: {e}",
@@ -253,6 +268,7 @@ async fn download_media(
     retries: u8,
     template: Option<&FilenameTemplate>,
     directory: Option<&DirectoryTemplate>,
+    limits: SizeLimits,
 ) -> Result<Outcome> {
     match &media.job {
         MediaJob::DirectHttp => {
@@ -302,17 +318,30 @@ async fn download_media(
         None
     };
     for attempt in 0..=retries {
+        // Once rejected, a cleanup timeout must not trigger another request.
+        let mut filtering = false;
         let result = tokio::time::timeout(client.wait_limit, async {
             match &mut partial {
-                Some(partial) => attempt_resume(client, media, &headers, &path, partial).await,
-                None => attempt_download(client, media, &headers, parent, &path).await,
+                Some(partial) => {
+                    attempt_resume(
+                        client,
+                        media,
+                        &headers,
+                        &path,
+                        partial,
+                        limits,
+                        &mut filtering,
+                    )
+                    .await
+                }
+                None => attempt_download(client, media, &headers, parent, &path, limits).await,
             }
         })
         .await
         .unwrap_or_else(|_| {
             Err(Failure {
                 error: error("media download attempt timed out"),
-                retry: true,
+                retry: !filtering,
             })
         });
         match result {
@@ -358,6 +387,7 @@ async fn attempt_download(
     headers: &HeaderMap,
     parent: &Path,
     path: &Path,
+    limits: SizeLimits,
 ) -> std::result::Result<Outcome, Failure> {
     let response = request_media(client, media, headers).await?;
     check_status(client, media, &response, false)?;
@@ -369,6 +399,9 @@ async fn attempt_download(
     }
     let expected = response.content_length();
     validate_media(&response)?;
+    if let Some(rejection) = expected.and_then(|size| limits.check(size)) {
+        return Ok(Outcome::Filtered(rejection));
+    }
     // A unique temporary file prevents concurrent workers from sharing a partial
     // file. Dropping TempPath removes incomplete downloads, including on failure.
     let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
@@ -378,17 +411,28 @@ async fn attempt_download(
         .open(&temporary)
         .await?;
     let mut stream = response.bytes_stream();
-    let mut received = 0;
+    let mut received = 0u64;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
+        received = received
+            .checked_add(chunk.len() as u64)
+            .ok_or_else(|| terminal("media response exceeds size limit"))?;
+        if expected.is_some_and(|expected| received > expected) {
+            return Err(terminal("media body exceeds declared length"));
+        }
+        if let Some(rejection) = limits.check_max(received) {
+            return Ok(Outcome::Filtered(rejection));
+        }
         file.write_all(&chunk).await?;
-        received += chunk.len() as u64;
     }
     if expected.is_some_and(|length| length != received) {
         return Err(Failure {
             error: error("incomplete response body"),
             retry: true,
         });
+    }
+    if let Some(rejection) = limits.check(received) {
+        return Ok(Outcome::Filtered(rejection));
     }
     file.flush().await?;
     file.sync_all().await?;
@@ -512,6 +556,8 @@ async fn attempt_resume(
     headers: &HeaderMap,
     path: &Path,
     partial: &mut crate::resume::Partial,
+    limits: SizeLimits,
+    filtering: &mut bool,
 ) -> std::result::Result<Outcome, Failure> {
     let mut restarted = false;
     loop {
@@ -580,6 +626,9 @@ async fn attempt_resume(
                 ));
             }
             crate::range::Plan::Complete => {
+                if let Some(rejection) = limits.check(offset) {
+                    return filter_partial(partial, rejection, filtering).await;
+                }
                 return partial.publish(path).await.map_err(|error| Failure {
                     error,
                     retry: false,
@@ -587,6 +636,12 @@ async fn attempt_resume(
             }
             crate::range::Plan::Full(checkpoint) => {
                 validate_media(&response)?;
+                if let Some(rejection) = response
+                    .content_length()
+                    .and_then(|size| limits.check(size))
+                {
+                    return filter_partial(partial, rejection, filtering).await;
+                }
                 partial.reset(checkpoint).await.map_err(|error| Failure {
                     error,
                     retry: false,
@@ -595,6 +650,9 @@ async fn attempt_resume(
             }
             crate::range::Plan::Append { end, total } => {
                 validate_media(&response)?;
+                if let Some(rejection) = limits.check(total) {
+                    return filter_partial(partial, rejection, filtering).await;
+                }
                 if partial
                     .checkpoint()
                     .is_some_and(|checkpoint| checkpoint.total.is_none())
@@ -617,6 +675,12 @@ async fn attempt_resume(
             if expected.is_some_and(|expected| received > expected) {
                 return Err(terminal("media body exceeds declared range length"));
             }
+            let size = start
+                .checked_add(received)
+                .ok_or_else(|| terminal("media response exceeds size limit"))?;
+            if let Some(rejection) = limits.check_max(size) {
+                return filter_partial(partial, rejection, filtering).await;
+            }
             partial.append(&chunk).await.map_err(|error| Failure {
                 error,
                 retry: false,
@@ -632,6 +696,9 @@ async fn attempt_resume(
             .checked_add(received)
             .ok_or_else(|| terminal("media response exceeds size limit"))?;
         if total.is_none_or(|total| completed == total) {
+            if let Some(rejection) = limits.check(completed) {
+                return filter_partial(partial, rejection, filtering).await;
+            }
             return partial.publish(path).await.map_err(|error| Failure {
                 error,
                 retry: false,
@@ -640,4 +707,17 @@ async fn attempt_resume(
         // Some servers return only part of an open-ended range. Continue within
         // this attempt's existing deadline; never publish a truncated segment.
     }
+}
+
+async fn filter_partial(
+    partial: &mut crate::resume::Partial,
+    rejection: SizeRejection,
+    filtering: &mut bool,
+) -> std::result::Result<Outcome, Failure> {
+    *filtering = true;
+    partial.reset(None).await.map_err(|error| Failure {
+        error,
+        retry: false,
+    })?;
+    Ok(Outcome::Filtered(rejection))
 }

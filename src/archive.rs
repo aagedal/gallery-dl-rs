@@ -106,9 +106,10 @@ impl Archive {
         }
         let outcome =
             download::download_with_template(client, root, media, options, template).await?;
-        if let Some(identity) = &identity {
+        if let Some(identity) = &identity
+            && let Some(path) = outcome.saved_path()
+        {
             self.record(identity).await.map_err(|e| {
-                let (Outcome::Downloaded(path) | Outcome::Skipped(path)) = &outcome;
                 error(format!(
                     "media is saved at {}; download archive update failed: {e}",
                     path.display()

@@ -12,6 +12,7 @@ pub mod naming;
 mod range;
 mod resume;
 pub mod selection;
+pub mod size;
 mod transport;
 pub mod twitter;
 

@@ -15,6 +15,7 @@ use gallery_dl_rs::{
     instagram::Instagram,
     naming::{DirectoryTemplate, FilenameTemplate},
     selection::RangeSelection,
+    size::{SizeLimits, parse_bytes},
     twitter::Twitter,
 };
 use sha2::{Digest, Sha256};
@@ -50,6 +51,12 @@ struct Args {
     /// Select one-based file positions per input (e.g. 5, 8-20, or 1:24:3)
     #[arg(long = "range", allow_hyphen_values = true)]
     file_range: Option<String>,
+    /// Minimum media size in bytes or binary units, e.g. 500k or 2.5M
+    #[arg(long, value_parser = parse_size)]
+    filesize_min: Option<u64>,
+    /// Maximum media size in bytes or binary units (0 disables this bound)
+    #[arg(long, value_parser = parse_size)]
+    filesize_max: Option<u64>,
     /// Print media URLs without downloading (still performs extraction)
     #[arg(short = 'g', long, conflicts_with = "dump_json")]
     get_urls: bool,
@@ -100,6 +107,10 @@ struct Args {
 enum Extractor {
     Compatibility,
     Native,
+}
+
+fn parse_size(value: &str) -> std::result::Result<u64, String> {
+    parse_bytes(value).map_err(|e| e.to_string())
 }
 
 fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
@@ -219,6 +230,7 @@ async fn run(args: Args) -> Result<()> {
                 let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
                     retries: settings.options.retries.unwrap(),
+                    limits: settings.limits,
                     write_metadata: args.write_metadata,
                     directory: settings.directory.as_ref(),
                 };
@@ -263,6 +275,9 @@ async fn run(args: Args) -> Result<()> {
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
                     eprintln!("skipped {}", path.display())
+                }
+                Ok(ArchiveOutcome::Completed(Outcome::Filtered(reason))) => {
+                    eprintln!("filtered media: {reason}")
                 }
                 Ok(ArchiveOutcome::AlreadyArchived) => eprintln!("skipped archived media"),
                 Err(e) => {
@@ -391,6 +406,7 @@ struct Settings {
     filename: Option<FilenameTemplate>,
     directory: Option<DirectoryTemplate>,
     selection: Option<RangeSelection>,
+    limits: SizeLimits,
 }
 
 async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
@@ -418,6 +434,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         },
         cookies: args.cookies.clone(),
         archive: args.download_archive.clone(),
+        filesize_min: args.filesize_min,
+        filesize_max: args.filesize_max,
         retries: args.retries,
         timeout: args.timeout,
     };
@@ -441,6 +459,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .as_deref()
             .map(RangeSelection::parse)
             .transpose()?;
+        let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
         settings.insert(
             category,
             Settings {
@@ -448,6 +467,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 filename,
                 directory,
                 selection,
+                limits,
             },
         );
     }

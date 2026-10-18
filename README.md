@@ -207,6 +207,31 @@ boundaries. The separate compatibility configuration can apply its own selection
 before Rust receives media. Post/child ranges and metadata expressions remain
 unimplemented.
 
+## File-size limits
+
+`--filesize-min 500k --filesize-max 2.5M` filters direct HTTP media by its complete
+size, including resumed downloads. Bare numbers are bytes; suffixes `b`, `k`, `m`,
+`g`, `t`, and `p` are case-insensitive powers of 1024. Fractional amounts round to
+the nearest even byte. Both bounds are inclusive, and `0` disables that bound.
+Negative, non-finite, overflowing, or contradictory effective limits fail before
+downloading. Native configuration accepts `filesize-min` / `filesize-max` as
+numbers or strings in the normal root/extractor/category scopes; explicit CLI
+values, including zero, take precedence.
+
+Known response sizes are checked before reading the body. For unknown lengths,
+the maximum is checked before writing each chunk and the minimum after complete
+EOF. Resume checks use the validated full representation size, including a
+completed partial confirmed by HTTP 416; stale partials cannot reject a changed,
+allowed representation. Rejected resume state loses its checkpoint and stored
+bytes; an empty partial and lock file may remain.
+
+Filtering succeeds without publishing media, metadata, or an archive entry, so
+a later run with different bounds can download it. Filtering itself is not
+retried. Existing files and archive hits retain their ordinary skip behavior;
+limits do not delete or recheck them. `-g` and `-j` inspect extraction results
+without requesting media or applying size filters. Empty category/output folders
+may remain after a rejected response.
+
 ## Native configuration
 
 `--native-config settings.json` loads an explicit, strict subset of
@@ -235,7 +260,7 @@ Neither configuration file is loaded automatically.
 ```
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
-`retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`filesize-min`, `filesize-max`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
@@ -452,6 +477,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/range.rs` validates resumable HTTP representations and ranges.
 `src/selection.rs` parses file-index ranges and filters streams with early cancellation.
 `src/input.rs` reads bounded URL lines lazily from files and stdin.
+`src/size.rs` parses binary byte amounts and applies inclusive size limits.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

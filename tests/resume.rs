@@ -739,3 +739,141 @@ async fn cli_resume_opt_in_persists_between_processes() {
     assert!(std::fs::read(root.path().join("direct/custom.jpg")).unwrap() == complete());
     assert_range(&server.requests()[1], HALF, "\"v1\"");
 }
+
+#[tokio::test]
+async fn size_limits_use_full_resumed_total_and_clear_rejected_checkpoints() {
+    for limits in [
+        gallery_dl_rs::size::SizeLimits::new(None, Some(6000)).unwrap(),
+        gallery_dl_rs::size::SizeLimits::new(Some(9000), None).unwrap(),
+    ] {
+        let server = Server::new(vec![
+            initial("ETag: \"v1\"\r\n"),
+            remainder("ETag: \"v1\"\r\n"),
+            full(b"ok".to_vec()),
+        ]);
+        let item = media(&server);
+        let root = tempfile::tempdir().unwrap();
+        server.watch(root.path());
+        assert!(
+            download::download(&client(), root.path(), &item, 0)
+                .await
+                .is_err()
+        );
+        let result = download::download_with_options(
+            &client(),
+            root.path(),
+            &item,
+            DownloadOptions {
+                limits,
+                retries: 2,
+                write_metadata: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, Outcome::Filtered(_)));
+        let path = download::destination(root.path(), &item);
+        assert!(!path.exists());
+        assert!(
+            !path
+                .with_file_name(format!(
+                    "{}.json",
+                    path.file_name().unwrap().to_str().unwrap()
+                ))
+                .exists()
+        );
+        for entry in std::fs::read_dir(root.path().join("direct/.gallery-dl-rs")).unwrap() {
+            let entry = entry.unwrap();
+            assert!(!entry.path().extension().is_some_and(|ext| ext == "json"));
+            if entry.path().extension().is_some_and(|ext| ext == "part") {
+                assert_eq!(entry.metadata().unwrap().len(), 0);
+            }
+        }
+        download::download(&client(), root.path(), &item, 0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"ok");
+        let requests = server.requests();
+        assert_eq!(requests.len(), 3);
+        assert_range(&requests[1], HALF, "\"v1\"");
+        assert_full(&requests[2]);
+    }
+}
+
+#[tokio::test]
+async fn size_limits_validate_new_representation_before_rejecting_stale_partial() {
+    let server = Server::new(vec![initial("ETag: \"v1\"\r\n"), full(b"ok".to_vec())]);
+    let item = media(&server);
+    let root = tempfile::tempdir().unwrap();
+    server.watch(root.path());
+    assert!(
+        download::download(&client(), root.path(), &item, 0)
+            .await
+            .is_err()
+    );
+    let limits = gallery_dl_rs::size::SizeLimits::new(None, Some(5)).unwrap();
+    let result = download::download_with_options(
+        &client(),
+        root.path(),
+        &item,
+        DownloadOptions {
+            limits,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(result, Outcome::Downloaded(_)));
+    assert_eq!(
+        std::fs::read(download::destination(root.path(), &item)).unwrap(),
+        b"ok"
+    );
+    assert_range(&server.requests()[1], HALF, "\"v1\"");
+}
+
+#[tokio::test]
+async fn size_limits_filter_validated_416_completion_before_publication() {
+    let chunk = [
+        format!("{HALF:x}\r\n").into_bytes(),
+        prefix(),
+        b"\r\n".to_vec(),
+    ]
+    .concat();
+    let mut truncated = response(
+        "200 OK",
+        "Transfer-Encoding: chunked\r\nETag: \"v1\"\r\n",
+        chunk,
+    );
+    truncated.wait_for_prefix = true;
+    let server = Server::new(vec![
+        truncated,
+        response(
+            "416 Range Not Satisfiable",
+            &format!("Content-Length: 0\r\nETag: \"v1\"\r\nContent-Range: bytes */{HALF}\r\n"),
+            Vec::new(),
+        ),
+    ]);
+    let item = media(&server);
+    let root = tempfile::tempdir().unwrap();
+    server.watch(root.path());
+    assert!(
+        download::download(&client(), root.path(), &item, 0)
+            .await
+            .is_err()
+    );
+    let outcome = download::download_with_options(
+        &client(),
+        root.path(),
+        &item,
+        DownloadOptions {
+            limits: gallery_dl_rs::size::SizeLimits::new(None, Some(4000)).unwrap(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, Outcome::Filtered(_)));
+    assert!(!download::destination(root.path(), &item).exists());
+    assert_eq!(server.requests().len(), 2);
+}

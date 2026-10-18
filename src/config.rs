@@ -8,6 +8,7 @@ use crate::{
     Result, error,
     naming::{DirectoryTemplate, FilenameTemplate},
     selection::RangeSelection,
+    size::parse_bytes,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -33,6 +34,8 @@ pub struct Options {
     pub cookies: Option<PathBuf>,
     /// Uses gallery-dl-rs's archive identities, not upstream database IDs.
     pub archive: Option<PathBuf>,
+    pub filesize_min: Option<u64>,
+    pub filesize_max: Option<u64>,
     pub retries: Option<u8>,
     pub timeout: Option<Duration>,
 }
@@ -57,6 +60,8 @@ impl Options {
                 .or_else(|| self.directory.clone()),
             cookies: overrides.cookies.clone().or_else(|| self.cookies.clone()),
             archive: overrides.archive.clone().or_else(|| self.archive.clone()),
+            filesize_min: overrides.filesize_min.or(self.filesize_min),
+            filesize_max: overrides.filesize_max.or(self.filesize_max),
             retries: overrides.retries.or(self.retries),
             timeout: overrides.timeout.or(self.timeout),
         }
@@ -81,6 +86,8 @@ struct RawRoot {
     directory: Field,
     cookies: Field,
     archive: Field,
+    filesize_min: Field,
+    filesize_max: Field,
     retries: Field,
     timeout: Field,
     extractor: RawExtractor,
@@ -95,6 +102,8 @@ struct RawExtractor {
     directory: Field,
     cookies: Field,
     archive: Field,
+    filesize_min: Field,
+    filesize_max: Field,
     retries: Field,
     timeout: Field,
     instagram: RawOptions,
@@ -112,6 +121,8 @@ struct RawOptions {
     directory: Field,
     cookies: Field,
     archive: Field,
+    filesize_min: Field,
+    filesize_max: Field,
     retries: Field,
     timeout: Field,
 }
@@ -192,6 +203,8 @@ impl Config {
             directory: root.directory,
             cookies: root.cookies,
             archive: root.archive,
+            filesize_min: root.filesize_min,
+            filesize_max: root.filesize_max,
             retries: root.retries,
             timeout: root.timeout,
         }
@@ -204,6 +217,8 @@ impl Config {
             directory: extractor.directory,
             cookies: extractor.cookies,
             archive: extractor.archive,
+            filesize_min: extractor.filesize_min,
+            filesize_max: extractor.filesize_max,
             retries: extractor.retries,
             timeout: extractor.timeout,
         }
@@ -327,6 +342,8 @@ impl RawOptions {
             filename,
             file_range,
             directory: templates,
+            filesize_min: size(self.filesize_min)?,
+            filesize_max: size(self.filesize_max)?,
             retries,
             timeout,
         })
@@ -358,4 +375,25 @@ fn path(field: Field, directory: &Path, name: &str) -> Result<Option<PathBuf>> {
     } else {
         directory.join(value)
     }))
+}
+
+fn size(field: Field) -> Result<Option<u64>> {
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
+    let invalid = || {
+        error(
+            "native configuration file size limit must be nonnegative bytes or a supported binary size string",
+        )
+    };
+    match value {
+        Value::Number(number) => number
+            .as_u64()
+            .map(Ok)
+            .unwrap_or_else(|| parse_bytes(&number.to_string()))
+            .map(Some)
+            .map_err(|_| invalid()),
+        Value::String(value) => parse_bytes(&value).map(Some).map_err(|_| invalid()),
+        _ => Err(invalid()),
+    }
 }

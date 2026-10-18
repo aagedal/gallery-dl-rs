@@ -161,6 +161,18 @@ Parser, CLI, process-lifecycle, native-pagination, sidecar, and archive tests co
 selection behavior. Site-specific offset skipping, counters at flattened child
 boundaries, post/child ranges, and metadata filters remain.
 
+**Implemented file-size selection:** CLI and scoped native `filesize-min` /
+`filesize-max` settings support byte amounts and binary suffixes, inclusive
+bounds, and explicit zero overrides. Full and resumable downloads check known
+sizes before reading media, reject upper-bound overruns before writing chunks,
+and validate unknown sizes at EOF. Resumed ranges use complete representation
+totals, including validated 416 completions; changed resources are validated
+before stale partials can reject them. Filtered media publishes no file, sidecar,
+or archive entry, and rejected resume checkpoints/contents are cleared. Existing
+files/archive hits keep their skip behavior; extraction-only inspection makes no
+media requests. Local HTTP tests cover withheld/chunked bodies, unknown sizes,
+resume transitions, cleanup, config/CLI precedence, and archive retryability.
+
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and
 compatibility Instagram, Twitter/X, and Facebook survive signed URL/header

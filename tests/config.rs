@@ -322,3 +322,53 @@ fn media_range_validation_never_quotes_private_specs() {
     }
     assert!(parse(r#"{"file-range":"1","file-range":"2"}"#).is_err());
 }
+
+#[test]
+fn size_limits_support_bytes_units_and_explicit_zero_overlays() {
+    let config = parse(r#"{"filesize-min":"2.5k","extractor":{"filesize-max":"1M","direct":{"filesize-max":9000}}}"#).unwrap();
+    let direct = config.resolve("direct").unwrap();
+    assert_eq!(direct.filesize_min, Some(2560));
+    assert_eq!(direct.filesize_max, Some(9000));
+    assert_eq!(
+        config.resolve("instagram").unwrap().filesize_max,
+        Some(1048576)
+    );
+    assert_eq!(
+        direct
+            .overlay(&Options {
+                filesize_max: Some(0),
+                ..Default::default()
+            })
+            .filesize_max,
+        Some(0)
+    );
+    assert_eq!(
+        parse(r#"{"filesize-min":1.5}"#)
+            .unwrap()
+            .resolve("direct")
+            .unwrap()
+            .filesize_min,
+        Some(2)
+    );
+}
+
+#[test]
+fn invalid_size_configuration_fails_without_echoing_values() {
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!([]),
+        serde_json::json!(-1),
+        serde_json::json!("private-limit"),
+        serde_json::json!("1e9999"),
+        serde_json::json!("18446744073709551616"),
+    ] {
+        for field in ["filesize-min", "filesize-max"] {
+            let message = parse(&serde_json::json!({field:value}).to_string())
+                .unwrap_err()
+                .to_string();
+            assert!(!message.contains("private-limit"));
+        }
+    }
+    assert!(parse(r#"{"filesize-min":1,"filesize-min":2}"#).is_err());
+}
