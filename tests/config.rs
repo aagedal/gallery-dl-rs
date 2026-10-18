@@ -76,6 +76,96 @@ fn literal_paths_resolve_against_configuration_directory() {
 }
 
 #[test]
+fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
+    let config = parse(r#"{"extractor":{"cookies":"default.txt","instagram":{"cookies":["firefox","profiles/instagram"]},"twitter":{"cookies":["firefox","profiles/x",null,"none"]}}}"#).unwrap();
+    for (category, profile) in [("instagram", "instagram"), ("twitter", "x")] {
+        let selected = config.resolve(category).unwrap();
+        assert!(selected.cookies.is_none());
+        assert_eq!(
+            selected.browser_cookies,
+            Some(directory().join("profiles").join(profile))
+        );
+        let cli = selected.overlay(&Options {
+            cookies: Some("cli.txt".into()),
+            ..Default::default()
+        });
+        assert_eq!(cli.cookies, Some("cli.txt".into()));
+        assert!(cli.browser_cookies.is_none());
+    }
+    assert!(
+        config
+            .resolve("facebook")
+            .unwrap()
+            .browser_cookies
+            .is_none()
+    );
+    assert_eq!(
+        config.resolve("facebook").unwrap().cookies,
+        Some(directory().join("default.txt"))
+    );
+    let config = parse(
+        r#"{"extractor":{"cookies":["firefox","default-profile"],"twitter":{"cookies":"x.txt"}}}"#,
+    )
+    .unwrap();
+    let selected = config.resolve("twitter").unwrap();
+    assert!(selected.browser_cookies.is_none());
+    assert_eq!(selected.cookies, Some(directory().join("x.txt")));
+    let global = parse(r#"{"cookies":["firefox","global-profile"],"extractor":{"cookies":"default.txt","twitter":{"cookies":"x.txt"}}}"#).unwrap();
+    let selected = global.resolve("twitter").unwrap();
+    assert!(selected.cookies.is_none());
+    assert_eq!(
+        selected.browser_cookies,
+        Some(directory().join("global-profile"))
+    );
+}
+
+#[test]
+fn browser_cookie_arrays_validate_every_scope_without_private_diagnostics() {
+    use serde_json::json;
+    for source in [
+        json!([]),
+        json!(["firefox"]),
+        json!(["chrome", "private-profile"]),
+        json!(["firefox", null]),
+        json!(["firefox", ""]),
+        json!(["firefox", "~private-profile"]),
+        json!(["firefox", "$private-profile"]),
+        json!(["firefox", "private-profile::container"]),
+        json!(["firefox", "private-profile", "private-keyring"]),
+        json!(["firefox", "private-profile", null, "private-container"]),
+        json!(["firefox", "private-profile", null, null, ".x.com"]),
+    ] {
+        for document in [
+            json!({"cookies":source}),
+            json!({"extractor":{"cookies":source}}),
+            json!({"extractor":{"twitter":{"cookies":source}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-"), "{message}");
+        }
+    }
+    for suffix in [
+        vec![],
+        vec![json!(null)],
+        vec![json!(null), json!(null)],
+        vec![json!(null), json!("none")],
+    ] {
+        let mut source = vec![json!("firefox"), json!("private-profile")];
+        source.extend(suffix);
+        let selected = parse(&json!({"cookies":source}).to_string())
+            .unwrap()
+            .resolve("direct")
+            .unwrap();
+        assert_eq!(
+            selected.browser_cookies,
+            Some(directory().join("private-profile"))
+        );
+        assert!(!format!("{selected:?}").contains("private-profile"));
+    }
+    assert!(parse(r#"{"cookies":"a.txt","cookies":["firefox","private-profile"]}"#).is_err());
+}
+
+#[test]
 fn unsupported_schema_and_values_fail_without_echoing_private_input() {
     for json in [
         r#"{"secret-key":"secret-value"}"#,

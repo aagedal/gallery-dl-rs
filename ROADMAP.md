@@ -99,8 +99,14 @@ Native clients can also be constructed from a scoped in-memory jar. Compatibilit
 mode forwards browser specifications to the installed backend, avoiding Rust
 cookie export files. Synthetic database and CLI fixtures cover scope, WAL,
 source preservation, precedence, lazy reads, and errors. Live authenticated
-verification, profile discovery, containers, other native browser formats, and
-scoped native browser-cookie configuration remain.
+verification, profile discovery, containers, and other native browser formats
+remain. Scoped native configuration now accepts explicit Firefox `cookies`
+arrays with configuration-relative profile paths. Browser arrays and cookie-file
+strings replace each other through normal scope and CLI precedence; per-category
+clients import lazily, while compatibility forwards the selected browser source.
+Synthetic profile/configuration tests cover isolation, precedence, lazy reads,
+private errors, and source preservation. Keyring/container/domain selectors and
+cookie rotation lists remain unsupported.
 
 **Implemented network settings:** native configuration and CLI `proxy` /
 `user-agent` options apply across native APIs/bootstrap requests and Rust media

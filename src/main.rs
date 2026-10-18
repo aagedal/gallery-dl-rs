@@ -175,17 +175,7 @@ async fn run(args: Args) -> Result<()> {
     }
     let settings = resolved_settings(&args).await?;
     let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
-    let extractors = Extractors {
-        browser: if matches!(args.extractor, Extractor::Native) {
-            args.cookies_from_browser
-                .as_deref()
-                .map(FirefoxProfile::parse)
-                .transpose()?
-        } else {
-            None
-        },
-        ..Default::default()
-    };
+    let extractors = Extractors::default();
     let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
         .values()
         .filter_map(|settings| settings.options.archive.clone())
@@ -211,14 +201,8 @@ async fn run(args: Args) -> Result<()> {
                     let selected_settings = extract::http_url(&source)
                         .ok()
                         .map(|url| &settings[extract::social_site(&url).unwrap_or("direct")]);
-                    let input = extract_input(
-                        source,
-                        &extractors,
-                        &backend,
-                        args.extractor,
-                        &settings,
-                        args.cookies_from_browser.as_deref(),
-                    );
+                    let input =
+                        extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
                         Some(settings) => {
                             let input = if settings.options.date_before.is_some()
@@ -360,18 +344,17 @@ async fn run(args: Args) -> Result<()> {
 
 #[derive(Default)]
 struct Extractors {
-    browser: Option<FirefoxProfile>,
     instagram: OnceCell<Result<Instagram>>,
     twitter: OnceCell<Result<Twitter>>,
     facebook: OnceCell<Result<Facebook>>,
 }
 
 impl Extractors {
-    async fn cookie_jar(&self, options: &ConfigOptions, site: &str) -> Result<CookieJar> {
-        if let Some(browser) = &self.browser {
+    async fn cookie_jar(&self, settings: &Settings, site: &str) -> Result<CookieJar> {
+        if let Some(browser) = &settings.browser {
             return browser.load(site).await;
         }
-        match &options.cookies {
+        match &settings.options.cookies {
             Some(path) => CookieJar::parse(&tokio::fs::read_to_string(path).await?),
             None => Ok(CookieJar::default()),
         }
@@ -384,7 +367,6 @@ fn extract_input<'a>(
     backend: &'a Backend,
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
-    browser: Option<&'a str>,
 ) -> BoxStream<'a, Result<extract::Media>> {
     stream::once(async move {
         let url = extract::http_url(&source)?;
@@ -399,7 +381,7 @@ fn extract_input<'a>(
                         .instagram
                         .get_or_init(|| async {
                             Instagram::from_cookie_jar(
-                                extractors.cookie_jar(options, "instagram.com").await?,
+                                extractors.cookie_jar(configured, "instagram.com").await?,
                                 backend.timeout,
                             )
                             .and_then(|native| {
@@ -421,7 +403,7 @@ fn extract_input<'a>(
                         .twitter
                         .get_or_init(|| async {
                             Twitter::from_cookie_jar(
-                                extractors.cookie_jar(options, "x.com").await?,
+                                extractors.cookie_jar(configured, "x.com").await?,
                                 backend.timeout,
                             )
                             .and_then(|native| {
@@ -444,7 +426,7 @@ fn extract_input<'a>(
                         .facebook
                         .get_or_init(|| async {
                             Facebook::from_cookie_jar(
-                                extractors.cookie_jar(options, "facebook.com").await?,
+                                extractors.cookie_jar(configured, "facebook.com").await?,
                                 backend.timeout,
                             )
                             .and_then(|native| {
@@ -472,7 +454,7 @@ fn extract_input<'a>(
                     backend.stream_with_options(
                         &url,
                         BackendOptions {
-                            browser: browser.map(str::to_owned),
+                            browser: configured.browser_spec.clone(),
                             proxy: configured.network.proxy().map(str::to_owned),
                             user_agent: configured.network.user_agent().map(str::to_owned),
                         },
@@ -494,6 +476,8 @@ fn extract_input<'a>(
 
 struct Settings {
     options: ConfigOptions,
+    browser: Option<FirefoxProfile>,
+    browser_spec: Option<String>,
     filename: Option<FilenameTemplate>,
     directory: Option<DirectoryTemplate>,
     selection: Option<RangeSelection>,
@@ -529,6 +513,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             (!args.directory.is_empty()).then(|| args.directory.clone())
         },
         cookies: args.cookies.clone(),
+        browser_cookies: None,
         proxy: args.proxy.clone(),
         user_agent: args.user_agent.clone(),
         archive: args.download_archive.clone(),
@@ -542,6 +527,20 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         let options = defaults
             .overlay(&config.resolve(category)?)
             .overlay(&overrides);
+        let browser_spec = args.cookies_from_browser.clone().or_else(|| {
+            options.browser_cookies.as_ref().map(|profile| {
+                // Config parsing has already checked that this path is UTF-8.
+                format!("firefox:{}", profile.display())
+            })
+        });
+        let browser = if matches!(args.extractor, Extractor::Native) {
+            browser_spec
+                .as_deref()
+                .map(FirefoxProfile::parse)
+                .transpose()?
+        } else {
+            None
+        };
         let filename = options
             .filename
             .as_deref()
@@ -564,6 +563,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             category,
             Settings {
                 options,
+                browser,
+                browser_spec,
                 filename,
                 directory,
                 selection,

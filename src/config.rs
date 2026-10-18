@@ -37,6 +37,9 @@ pub struct Options {
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
+    /// Explicit Firefox profile selected by an upstream-style `cookies` array.
+    /// Mutually exclusive with the cookie file during scope resolution.
+    pub browser_cookies: Option<PathBuf>,
     pub proxy: Option<String>,
     pub user_agent: Option<String>,
     /// Uses gallery-dl-rs's archive identities, not upstream database IDs.
@@ -73,7 +76,18 @@ impl Options {
                 .directory
                 .clone()
                 .or_else(|| self.directory.clone()),
-            cookies: overrides.cookies.clone().or_else(|| self.cookies.clone()),
+            cookies: if overrides.browser_cookies.is_some() {
+                None
+            } else {
+                overrides.cookies.clone().or_else(|| self.cookies.clone())
+            },
+            browser_cookies: if overrides.browser_cookies.is_some() {
+                overrides.browser_cookies.clone()
+            } else if overrides.cookies.is_some() {
+                None
+            } else {
+                self.browser_cookies.clone()
+            },
             proxy: overrides.proxy.clone().or_else(|| self.proxy.clone()),
             user_agent: overrides
                 .user_agent
@@ -378,11 +392,13 @@ impl RawOptions {
         let proxy = network_string(self.proxy)?;
         let user_agent = network_string(self.user_agent)?;
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
+        let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
             proxy,
             user_agent,
             base_directory: path(self.base_directory, directory, "base-directory")?,
-            cookies: path(self.cookies, directory, "cookies")?,
+            cookies,
+            browser_cookies,
             archive: path(self.archive, directory, "archive")?,
             filename,
             file_range,
@@ -394,6 +410,37 @@ impl RawOptions {
             retries,
             timeout,
         })
+    }
+}
+
+fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Option<PathBuf>)> {
+    let Some(value) = field.0 else {
+        return Ok((None, None));
+    };
+    if let Value::Array(values) = value {
+        let invalid = || {
+            error(
+                "native configuration cookies browser source requires an explicit Firefox profile without keyring or container selection",
+            )
+        };
+        if !(2..=4).contains(&values.len())
+            || values[0].as_str() != Some("firefox")
+            || values.get(2).is_some_and(|value| !value.is_null())
+            || values
+                .get(3)
+                .is_some_and(|value| !value.is_null() && value.as_str() != Some("none"))
+        {
+            return Err(invalid());
+        }
+        let profile =
+            path(Field(Some(values[1].clone())), directory, "cookies")?.ok_or_else(invalid)?;
+        // Keep configuration and the CLI's explicit profile grammar aligned.
+        let profile_text = profile.to_str().ok_or_else(invalid)?;
+        crate::browser::FirefoxProfile::parse(&format!("firefox:{profile_text}"))
+            .map_err(|_| invalid())?;
+        Ok((None, Some(profile)))
+    } else {
+        Ok((path(Field(Some(value)), directory, "cookies")?, None))
     }
 }
 

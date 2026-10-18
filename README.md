@@ -199,8 +199,32 @@ gallery-dl executable, which manages its own supported browsers and profile
 syntax. For example, `--cookies-from-browser chrome` is available there when
 supported by that executable. Rust does not read a browser database on this path.
 The explicit browser flag conflicts with `-C/--cookies` and takes precedence over
-cookie files in native configuration. Browser import is currently a CLI option;
-scoped native `cookies-from-browser` configuration remains unimplemented.
+all configured cookie sources. Explicit `-C/--cookies` also replaces a configured
+browser source.
+
+Native configuration accepts the upstream [`cookies` browser-array format](https://gdl-org.github.io/docs/configuration.html#extractor-cookies)
+for explicit Firefox profiles, allowing separate sessions per site:
+
+```json
+{
+  "extractor": {
+    "instagram": { "cookies": ["firefox", "profiles/instagram"] },
+    "twitter": { "cookies": ["firefox", "profiles/x"] }
+  }
+}
+```
+
+Profile paths in configuration are literal and relative to that file's directory.
+They select a directory or `cookies.sqlite` file, without profile-name discovery.
+An optional third entry must be null; an optional fourth entry may be null or
+`"none"`, selecting the default non-container context. Other browsers, keyrings,
+containers, and a fifth domain selector are not yet accepted in native configuration.
+A cookie file string and a browser array replace one another according to normal
+scope precedence. Sources are opened only when their site's native client is
+needed; direct links and empty selections do not read a profile. Compatibility
+mode forwards each configured Firefox source through `--cookies-from-browser`
+without opening the database in Rust. Use the CLI browser flag for other browsers
+supported by that backend.
 
 ## Network settings
 
@@ -396,7 +420,8 @@ extraction without creating configured destinations or opening archives.
 The CLI also accepts fractional `--timeout` seconds; zero, non-finite values, and
 timeouts outside the monotonic clock's range or precision are rejected.
 
-Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, nulls,
+Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, null settings
+(except the optional browser-array placeholders described above),
 unsupported types, hooks, environment expansion, and conditional values fail
 explicitly. Filenames use the native template subset described below; archive
 files use the Rust archive format. Full gallery-dl configuration compatibility,
