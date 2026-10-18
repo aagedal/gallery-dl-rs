@@ -3,7 +3,7 @@
 use futures_util::{FutureExt, StreamExt};
 use gallery_dl_rs::extract::Backend;
 use std::{os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration};
-use tokio::time::{Instant, sleep, timeout};
+use tokio::time::{sleep, timeout};
 use url::Url;
 
 const ROW: &str = "[3,\"https://cdn.example/first.jpg\",{}]";
@@ -291,17 +291,22 @@ async fn active_wait_timeout_stops_the_owned_backend() {
     let backend = fixture(
         root.path(),
         "printf '%s' \"$$\" > \"$0.pid\"\nwhile :; do sleep 0.02; done",
-        Duration::from_millis(150),
+        Duration::from_secs(10),
     );
-    let started = Instant::now();
     let mut stream = backend.stream(&social_url());
-    let failure = timeout(Duration::from_secs(2), stream.next())
+    let mut next = Box::pin(stream.next());
+    assert!(next.as_mut().now_or_never().is_none());
+    // Let the real child start before advancing the extraction clock.
+    wait_until(|| root.path().join("backend.pid").exists()).await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(11)).await;
+    tokio::time::resume();
+    let failure = timeout(Duration::from_secs(2), next)
         .await
         .unwrap()
         .unwrap()
         .unwrap_err();
     assert!(failure.to_string().contains("timed out"));
-    assert!(started.elapsed() < Duration::from_secs(2));
     let pid = std::fs::read_to_string(root.path().join("backend.pid")).unwrap();
     wait_until(|| !pid_alive(&pid)).await;
 }
