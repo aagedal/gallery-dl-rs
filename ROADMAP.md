@@ -562,6 +562,16 @@ content, literature/journal text, favorites, collections, scraps, stash, tags,
 search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
 and metadata options, and upstream's `{title}_{index}` filenames.
 
+**Implemented experimental native Wallhaven:** wallpapers, searches, user
+uploads and collections via the API (optional `api-key`). Remaining: per-item
+`w/ID` metadata (tags/uploader) for listings, collection lists, upstream's
+`{category}_{id}_{resolution}` filenames and `metadata` option.
+
+**Implemented experimental native ArtStation:** projects and user portfolios
+via site JSON with browser-like headers. Remaining: Cloudflare challenges,
+video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
+albums by ID, collections, challenges, search/artwork listings, following.
+
 **Implemented experimental native Flickr:** photos, videos, albums, user
 photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
 Remaining: OAuth/private content, favorites, galleries, groups, tags/search,

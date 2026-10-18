@@ -364,7 +364,7 @@ the title, with `published_time` and width/height. Default filenames are
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
 uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`, never
+`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`, never
 echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
 `photos.getSizes`: "Original" or the largest photo; videos pick the best
 stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
@@ -377,6 +377,35 @@ the photo ID, `username` the owner, caption the title, timestamp the upload
 date, with width/height and photo/video type. Default filenames are
 `{post_id}.{extension}`; archive identity is the photo ID. Plain
 `staticflickr.com` links stay direct downloads.
+
+Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
+category) uses the public API (`/api/v1`). Supported: `wallhaven.cc/w/ID` and
+`whvn.cc/ID` (`w/ID`), `wallhaven.cc/search?...` (same query forwarded to
+`search`), `user/USER/uploads` (search `q=@USER`) and
+`user/USER/favorites/ID` (`collections/USER/ID`); listings follow
+`meta.last_page`, capped at 200 pages. An optional `extractor.wallhaven.api-key`
+is sent as `X-API-Key` (never echoed); NSFW and private collections require it
+(HTTP 401 maps to an api-key hint). Media are `data.path`, HTTPS on
+`w.wallhaven.cc` only. `post_id`/`media_id`/`id` is the wallpaper ID,
+`username` the uploader and caption the space-joined tags (single wallpapers
+only; listing items carry neither), timestamp `created_at`, with
+width/height. Default filenames are `wallhaven-{id}.{extension}`; archive
+identity is the wallpaper ID. Plain `w.wallhaven.cc` links stay direct.
+
+Experimental native ArtStation extraction (`--extractor native`, `artstation`
+category) uses the site JSON: `www.artstation.com/artwork/HASH` and
+`USER.artstation.com/projects/HASH` (`projects/HASH.json`), and portfolios
+`www.artstation.com/USER[/albums/all]` or `USER.artstation.com`
+(`users/USER/projects.json?page=N` until `total_count`, capped at 200 pages,
+then each project's JSON). ArtStation sits behind Cloudflare: requests send a
+browser User-Agent, Accept and Referer, but may still be blocked (HTTP 403
+reports this). Only `image` assets are downloaded, using `image_url` as-is
+(no `4k` rewrite), HTTPS on `cdn*.artstation.com` only; covers, video/player
+embeds (YouTube etc.) and 3D/other assets are skipped. `post_id`/`id` is the
+project hash, `media_id` the asset ID, `username` the artist, caption the
+title, timestamp `published_at`, index 1-based per project, with width/height.
+Default filenames are `{post_id}_{media_id}.{extension}`; archive identity is
+the asset ID. Plain CDN links stay direct.
 
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
