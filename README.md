@@ -299,6 +299,20 @@ file description is the original name. Default filenames are
 `{post_id}_{index:02}.{extension}`; archive identity is (service, creator, post,
 hash). Plain `/data/` file links stay direct downloads.
 
+Experimental native image host extraction (`--extractor native`), one category
+per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
+`/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`); `catbox` albums
+(`/c/ID`, file links and `<h1>` title from the page); `imgbox` galleries
+(`/g/ID`, thumbnails mapped to `imagesN.imgbox.com/.../ID_o.EXT`) and image pages
+(`/ID`); `postimg` (postimg.cc/postimages.org) image pages (download link, else
+`og:image`) and galleries (thumbnail links, each image page fetched; capped at
+1000). Media must be HTTPS on the site's CDN. `post_id` is the file/list/album/
+gallery ID, `media_id` the file ID, caption the title (or file name), file
+`media_type` the MIME type and description the original name. Filenames are
+`{media_id}.{extension}` for single files and `{post_id}_{index:02}.{extension}`
+otherwise; archive identity is (category, file ID). Plain CDN file links
+(files.catbox.moe, i.postimg.cc, images2.imgbox.com) stay direct downloads.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

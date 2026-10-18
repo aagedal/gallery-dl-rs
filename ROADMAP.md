@@ -536,6 +536,12 @@ Discord servers, search/tag/popular views, revisions, comments/DMs, inline
 content images, archive/link extraction from post text, cookies/login, and
 upstream options (`duplicates`, `revisions`, `max-posts`, `endpoint`).
 
+**Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
+lists, albums, galleries and image pages. Remaining: Pixeldrain API keys,
+`#item=N` selection, filesystem (`/d/`) links and other domains; Catbox file
+`/c/` descriptions; imgbox per-image metadata (width/height); Postimg
+JS-paginated gallery pages beyond the server-rendered listing.
+
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
