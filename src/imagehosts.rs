@@ -197,13 +197,17 @@ pub fn target(url: &Url) -> Result<Target> {
 // Small HTML scanning helpers.
 
 /// Text between the first `start` and the following `end`.
-fn between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
+pub(crate) fn between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
     let rest = &text[text.find(start)? + start.len()..];
     Some(&rest[..rest.find(end)?])
 }
 
 /// Every non-overlapping text between `start` and `end`.
-fn between_all<'a>(text: &'a str, start: &'a str, end: &'a str) -> impl Iterator<Item = &'a str> {
+pub(crate) fn between_all<'a>(
+    text: &'a str,
+    start: &'a str,
+    end: &'a str,
+) -> impl Iterator<Item = &'a str> {
     let mut rest = text;
     std::iter::from_fn(move || {
         let from = rest.find(start)? + start.len();
@@ -215,14 +219,14 @@ fn between_all<'a>(text: &'a str, start: &'a str, end: &'a str) -> impl Iterator
 }
 
 /// The opening tag (`<...>`) containing byte offset `at`.
-fn tag_around(text: &str, at: usize) -> Option<&str> {
+pub(crate) fn tag_around(text: &str, at: usize) -> Option<&str> {
     let open = text[..at].rfind('<')?;
     let close = at + text[at..].find('>')?;
     Some(&text[open..=close])
 }
 
 /// A double- or single-quoted attribute value from one tag.
-fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+pub(crate) fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     for quote in ['"', '\''] {
         let needle = format!(" {name}={quote}");
         if let Some(start) = tag.find(&needle) {
@@ -234,7 +238,7 @@ fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// `content` of `<meta property="NAME">`.
-fn meta_property<'a>(html: &'a str, name: &str) -> Option<&'a str> {
+pub(crate) fn meta_property<'a>(html: &'a str, name: &str) -> Option<&'a str> {
     for quote in ['"', '\''] {
         let needle = format!("property={quote}{name}{quote}");
         if let Some(at) = html.find(&needle) {
@@ -245,7 +249,7 @@ fn meta_property<'a>(html: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// Decode the common named and numeric HTML entities.
-fn unescape(text: &str) -> String {
+pub(crate) fn unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find('&') {
@@ -284,7 +288,7 @@ fn unescape(text: &str) -> String {
     out
 }
 
-fn clean_text(text: &str) -> Option<String> {
+pub(crate) fn clean_text(text: &str) -> Option<String> {
     let text = unescape(text.trim());
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_owned())

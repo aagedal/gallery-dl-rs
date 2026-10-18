@@ -417,6 +417,7 @@ async fn run(args: Args) -> Result<()> {
                     | "wallhaven"
                     | "artstation"
                     | "pinterest"
+                    | "vsco"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -601,6 +602,7 @@ struct Extractors {
     wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
     artstation: OnceCell<Result<gallery_dl_rs::artstation::ArtStation>>,
     pinterest: OnceCell<Result<gallery_dl_rs::pinterest::Pinterest>>,
+    vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
 }
 
 impl Extractors {
@@ -873,6 +875,22 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native ArtStation initialization failed: {e}"))
                         })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "vsco" => {
+                    let native = extractors
+                        .vsco
+                        .get_or_init(|| async {
+                            gallery_dl_rs::vsco::Vsco::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
                     native.events(&url)
                 }
                 Extractor::Native if category == "pinterest" => {
@@ -1199,6 +1217,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "wallhaven",
         "artstation",
         "pinterest",
+        "vsco",
         "direct",
     ] {
         let options = defaults

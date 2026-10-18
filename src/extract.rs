@@ -163,6 +163,14 @@ impl Media {
                     serde_json::json!([post.post_id, post.index]).to_string(),
                 )
             }
+            // VSCO files are identified by media ID.
+            "vsco" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::vsco::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("vsco", serde_json::json!([post.media_id]).to_string())
+            }
             // ArtStation files are identified by asset ID.
             "artstation" => {
                 let post = self.metadata.as_ref()?;
@@ -363,6 +371,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if let Some(category) = crate::kemono::category(host) {
         return Some(category);
+    }
+    if crate::vsco::is_vsco_url(url) {
+        return Some("vsco");
     }
     if crate::pinterest::is_pinterest_url(url) {
         return Some("pinterest");
