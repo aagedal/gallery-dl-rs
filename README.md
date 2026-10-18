@@ -362,6 +362,22 @@ only. Deviations without image content (literature, journals) are skipped.
 the title, with `published_time` and width/height. Default filenames are
 `{post_id}.{extension}`; archive identity is the UUID.
 
+Experimental native Flickr extraction (`--extractor native`, `flickr` category)
+uses the REST API with upstream's default public key unless
+`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`, never
+echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
+`photos.getSizes`: "Original" or the largest photo; videos pick the best
+stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
+`photos/USER` (`urls.lookupUser` + `people.getPhotos`) and `flic.kr/p/CODE`
+(base58 photo ID). Listings page 500 per page, capped at 200 pages, using
+`url_o/k/h/l` extras; videos cost one `getSizes` call each. Media must be HTTPS
+on `*.staticflickr.com` (videos also `*.flickr.com`). API `stat: fail` replies
+map to errors (code 1 not found, 100 invalid key). `post_id`/`media_id`/`id` is
+the photo ID, `username` the owner, caption the title, timestamp the upload
+date, with width/height and photo/video type. Default filenames are
+`{post_id}.{extension}`; archive identity is the photo ID. Plain
+`staticflickr.com` links stay direct downloads.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

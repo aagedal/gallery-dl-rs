@@ -562,6 +562,12 @@ content, literature/journal text, favorites, collections, scraps, stash, tags,
 search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
 and metadata options, and upstream's `{title}_{index}` filenames.
 
+**Implemented experimental native Flickr:** photos, videos, albums, user
+photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
+Remaining: OAuth/private content, favorites, galleries, groups, tags/search,
+album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
+`videos` options, and album metadata on listed items.
+
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
