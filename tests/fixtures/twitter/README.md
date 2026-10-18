@@ -12,7 +12,7 @@ Protocol research (2026-10-18) used primary upstream sources:
 - https://github.com/mikf/gallery-dl/blob/master/gallery_dl/extractor/twitter.py
 - https://github.com/mikf/gallery-dl/blob/master/gallery_dl/extractor/utils/twitter_transaction_id.py
 
-The operation snapshot is TweetResultByRestId, authenticated with x.com cookies,
+The original operation snapshot is TweetResultByRestId, authenticated with x.com cookies,
 web-client Bearer authorization, CSRF, and a generated client transaction ID.
 Homepage verification metadata/loading SVG and the referenced abs.twimg.com
 ondemand script supply the transaction inputs. Script requests carry no cookies,
@@ -24,8 +24,9 @@ validation, bounds/cycles, scoped credentials, ranges, dates, and cancellation.
 Posts/replies/highlights tabs have synthetic/local coverage described in
 [the profile timeline notes](media_README.md). Root-profile search fallback and standalone search/hashtags also have synthetic
 coverage there. Likes, bookmarks, lists, and home feeds have separate
-[collection protocol notes](collections_README.md). Threads, cards/articles,
-playlists, and other collections remain unsupported natively. Compatibility remains the default.
+[collection protocol notes](collections_README.md). TweetDetail and conversation modes have separate
+[detail protocol notes](detail_README.md). Cards/articles, playlists, and other
+collections remain unsupported natively. Compatibility remains the default.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol

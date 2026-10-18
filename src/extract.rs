@@ -201,6 +201,8 @@ pub struct BackendOptions {
     pub user_agent: Option<String>,
     pub retweets: Option<crate::twitter::RetweetMode>,
     pub quoted: Option<bool>,
+    pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
+    pub conversations: Option<crate::twitter::ConversationMode>,
     pub pinned: Option<bool>,
     pub replies: Option<crate::twitter::ReplyMode>,
     pub strategy: Option<crate::twitter::TimelineStrategy>,
@@ -281,6 +283,26 @@ impl Backend {
         }
         if let Some(quoted) = options.quoted {
             command.arg("--option").arg(format!("quoted={quoted}"));
+        }
+        if let Some(endpoint) = options.tweet_endpoint {
+            let value = match endpoint {
+                crate::twitter::TweetEndpoint::Auto => "auto",
+                crate::twitter::TweetEndpoint::Detail => "detail",
+                crate::twitter::TweetEndpoint::RestId => "restid",
+            };
+            command
+                .arg("--option")
+                .arg(format!("tweet-endpoint=\"{value}\""));
+        }
+        if let Some(conversations) = options.conversations {
+            let value = match conversations {
+                crate::twitter::ConversationMode::Off => "false",
+                crate::twitter::ConversationMode::All => "true",
+                crate::twitter::ConversationMode::Accessible => "\"accessible\"",
+            };
+            command
+                .arg("--option")
+                .arg(format!("conversations={value}"));
         }
         if let Some(pinned) = options.pinned {
             command.arg("--option").arg(format!("pinned={pinned}"));

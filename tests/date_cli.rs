@@ -456,3 +456,73 @@ async fn date_configuration_precedence_and_invalid_settings_are_checked_before_e
         assert!(!root.path().join("backend.log").exists());
     }
 }
+
+#[tokio::test]
+async fn conversations_keep_qualified_context_after_old_focal_and_reset_for_next_input() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(
+        root.path(),
+        &[
+            row("old-focal", json!(4)),
+            row("context", json!(6)),
+            row("old-reply", json!(3)),
+            row("later-reply", json!(7)),
+        ],
+        &[row("next-input", json!(8))],
+    );
+    let config = root.path().join("native.json");
+    for conversations in [json!(true), json!("accessible")] {
+        std::fs::write(
+            &config,
+            serde_json::to_vec(&json!({"extractor":{"twitter":{"conversations":conversations}}}))
+                .unwrap(),
+        )
+        .unwrap();
+        let result = output(
+            binary(root.path(), &backend)
+                .arg("--native-config")
+                .arg(&config)
+                .args(["-g", "--date-after=5", "--date-before=8", FIRST, SECOND]),
+        )
+        .await;
+        success(&result);
+        assert_eq!(
+            urls(&result),
+            [
+                "https://cdn.example/context.jpg",
+                "https://cdn.example/later-reply.jpg"
+            ]
+        );
+        let result = output(
+            binary(root.path(), &backend)
+                .arg("--native-config")
+                .arg(&config)
+                .args(["-g", "--date-after=5", FIRST, SECOND]),
+        )
+        .await;
+        success(&result);
+        assert_eq!(
+            urls(&result),
+            [
+                "https://cdn.example/context.jpg",
+                "https://cdn.example/later-reply.jpg",
+                "https://cdn.example/next-input.jpg"
+            ]
+        );
+    }
+    // Explicit false keeps the existing descending single-status cutoff.
+    std::fs::write(
+        &config,
+        br#"{"conversations":false,"extractor":{"twitter":{"conversations":true}}}"#,
+    )
+    .unwrap();
+    let result = output(
+        binary(root.path(), &backend)
+            .arg("--native-config")
+            .arg(&config)
+            .args(["-g", "--date-after=5", FIRST, SECOND]),
+    )
+    .await;
+    success(&result);
+    assert_eq!(urls(&result), ["https://cdn.example/next-input.jpg"]);
+}

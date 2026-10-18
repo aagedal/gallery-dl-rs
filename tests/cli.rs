@@ -969,3 +969,95 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         assert!(!log.exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn twitter_status_config_forwarding_preserves_precedence_and_category_isolation() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &script,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$STATUS_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, expected) in [
+        (serde_json::json!({}), vec![]),
+        (
+            serde_json::json!({"extractor":{"twitter":{"tweet-endpoint":"restid","conversations":"accessible"}}}),
+            vec!["tweet-endpoint=\"restid\"", "conversations=\"accessible\""],
+        ),
+        (
+            serde_json::json!({"extractor":{"tweet-endpoint":"auto","conversations":true,"twitter":{"tweet-endpoint":"detail","conversations":false}}}),
+            vec!["tweet-endpoint=\"detail\"", "conversations=false"],
+        ),
+        (
+            serde_json::json!({"tweet-endpoint":"auto","conversations":false,"extractor":{"twitter":{"tweet-endpoint":"detail","conversations":"accessible"}}}),
+            vec!["tweet-endpoint=\"auto\"", "conversations=false"],
+        ),
+        (
+            serde_json::json!({"conversations":true}),
+            vec!["conversations=true"],
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/user/status/1", true),
+            ("https://instagram.com/p/example/", false),
+            ("https://facebook.com/photo/?fbid=1", false),
+        ] {
+            let result = binary()
+                .env("STATUS_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&script)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| {
+                    value.starts_with("tweet-endpoint=") || value.starts_with("conversations=")
+                })
+                .collect();
+            assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    for settings in [
+        serde_json::json!({"tweet-endpoint":"PRIVATE-SETTING"}),
+        serde_json::json!({"extractor":{"twitter":{"conversations":"PRIVATE-SETTING"}}}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let result = binary()
+            .env("STATUS_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&script)
+            .args(["-g", "https://x.com/user/status/1"])
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(result.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("PRIVATE-SETTING"));
+        assert!(!log.exists());
+    }
+}

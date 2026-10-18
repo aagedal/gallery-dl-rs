@@ -38,6 +38,10 @@ pub struct Options {
     pub retweets: Option<crate::twitter::RetweetMode>,
     /// Include media from quoted posts.
     pub quoted: Option<bool>,
+    /// Endpoint used to resolve a single Twitter post.
+    pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
+    /// Include posts from the requested status conversation.
+    pub conversations: Option<crate::twitter::ConversationMode>,
     /// Include the pinned post in account timelines.
     pub pinned: Option<bool>,
     /// Which reply posts to include in account timelines.
@@ -90,6 +94,8 @@ impl Options {
             date_after: overrides.date_after.or(self.date_after),
             retweets: overrides.retweets.or(self.retweets),
             quoted: overrides.quoted.or(self.quoted),
+            tweet_endpoint: overrides.tweet_endpoint.or(self.tweet_endpoint),
+            conversations: overrides.conversations.or(self.conversations),
             pinned: overrides.pinned.or(self.pinned),
             replies: overrides.replies.or(self.replies),
             strategy: overrides.strategy.or(self.strategy),
@@ -147,6 +153,8 @@ struct RawRoot {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    tweet_endpoint: Field,
+    conversations: Field,
     pinned: Field,
     replies: Field,
     strategy: Field,
@@ -177,6 +185,8 @@ struct RawExtractor {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    tweet_endpoint: Field,
+    conversations: Field,
     pinned: Field,
     replies: Field,
     strategy: Field,
@@ -210,6 +220,8 @@ struct RawOptions {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    tweet_endpoint: Field,
+    conversations: Field,
     pinned: Field,
     replies: Field,
     strategy: Field,
@@ -306,6 +318,8 @@ impl Config {
             date_after: root.date_after,
             retweets: root.retweets,
             quoted: root.quoted,
+            tweet_endpoint: root.tweet_endpoint,
+            conversations: root.conversations,
             pinned: root.pinned,
             replies: root.replies,
             strategy: root.strategy,
@@ -334,6 +348,8 @@ impl Config {
             date_after: extractor.date_after,
             retweets: extractor.retweets,
             quoted: extractor.quoted,
+            tweet_endpoint: extractor.tweet_endpoint,
+            conversations: extractor.conversations,
             pinned: extractor.pinned,
             replies: extractor.replies,
             strategy: extractor.strategy,
@@ -400,6 +416,33 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration quoted must be a boolean")),
+        };
+        let tweet_endpoint = match self.tweet_endpoint.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "auto" => crate::twitter::TweetEndpoint::Auto,
+                "detail" => crate::twitter::TweetEndpoint::Detail,
+                "restid" => crate::twitter::TweetEndpoint::RestId,
+                _ => return Err(error("unsupported native configuration tweet-endpoint")),
+            }),
+            Some(_) => {
+                return Err(error(
+                    "native configuration tweet-endpoint must be a string",
+                ));
+            }
+        };
+        let conversations = match self.conversations.0 {
+            None => None,
+            Some(Value::Bool(false)) => Some(crate::twitter::ConversationMode::Off),
+            Some(Value::Bool(true)) => Some(crate::twitter::ConversationMode::All),
+            Some(Value::String(value)) if value == "accessible" => {
+                Some(crate::twitter::ConversationMode::Accessible)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration conversations must be a boolean or accessible",
+                ));
+            }
         };
         let pinned = match self.pinned.0 {
             None => None,
@@ -565,6 +608,8 @@ impl RawOptions {
             date_after: date(self.date_after)?,
             retweets,
             quoted,
+            tweet_endpoint,
+            conversations,
             pinned,
             replies,
             strategy,

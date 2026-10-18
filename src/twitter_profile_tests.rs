@@ -1087,7 +1087,7 @@ async fn standalone_reply_filter_uses_the_posts_own_author_for_self_only() {
         (ReplyMode::All, "42", "99", true),
         (ReplyMode::Skip, "42", "42", false),
         (ReplyMode::SelfOnly, "42", "42", true),
-        (ReplyMode::SelfOnly, "42", "99", false),
+        (ReplyMode::SelfOnly, "42", "99", true),
         (ReplyMode::SelfOnly, "99", "99", true),
     ] {
         let server = Server::new(vec![Response::json(post_response(reply(
@@ -2576,4 +2576,593 @@ async fn likes_empty_pages_stop_unless_cursor_explicitly_permits_continuation() 
         );
         assert_eq!(server.count(), if continue_empty { 2 } else { 1 });
     }
+}
+
+fn detail_page(tweets: Vec<Value>, cursor: Option<&str>) -> Value {
+    let mut entries: Vec<_> = tweets.into_iter().map(entry).collect();
+    if let Some(cursor) = cursor {
+        entries.push(json!({"entryId":"cursor-bottom-detail","content":{"entryType":"TimelineTimelineCursor","cursorType":"Bottom","value":cursor}}));
+    }
+    json!({"data":{"threaded_conversation_with_injections_v2":{"instructions":[{"type":"TimelineAddEntries","entries":entries}]}}})
+}
+fn conversation_options(conversations: ConversationMode) -> StatusOptions {
+    StatusOptions {
+        endpoint: TweetEndpoint::Detail,
+        conversations,
+    }
+}
+
+#[tokio::test]
+async fn detail_selects_exact_focal_post_and_stops_before_followup_pages() {
+    let server = Server::new(vec![
+        Response::json(detail_page(
+            vec![tweet("99"), tweet("100"), tweet("101")],
+            Some("next"),
+        )),
+        Response::json(detail_page(vec![tweet("102")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .detail_stream_at(server.base.clone(), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(server.count(), 1);
+    let urls = server.urls();
+    assert!(
+        urls[0]
+            .path()
+            .ends_with("/iFEr5AcP121Og4wx9Yqo3w/TweetDetail")
+    );
+    let vars = variables(&urls[0]);
+    assert_eq!(vars["focalTweetId"], "100");
+    assert_eq!(vars["referrer"], "profile");
+    for key in [
+        "with_rux_injections",
+        "includePromotedContent",
+        "withQuickPromoteEligibilityTweetFields",
+    ] {
+        assert_eq!(vars[key], false);
+    }
+    for key in ["withCommunity", "withBirdwatchNotes", "withVoice"] {
+        assert_eq!(vars[key], true);
+    }
+    assert!(vars.get("cursor").is_none());
+    let toggles: Value = serde_json::from_str(
+        &urls[0]
+            .query_pairs()
+            .find(|(key, _)| key == "fieldToggles")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    assert_eq!(toggles["withArticleRichContentState"], true);
+    assert_eq!(toggles["withArticlePlainText"], false);
+    assert_eq!(toggles["withGrokAnalyze"], false);
+    assert_eq!(toggles["withDisallowedReplyControls"], false);
+    assert_scoped_expansion_requests(&server, &native);
+}
+
+#[tokio::test]
+async fn detail_find_focal_on_later_page_without_substituting_context() {
+    let cursor = "detail opaque+/=&?";
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![tweet("99")], Some(cursor))),
+        Response::json(detail_page(
+            vec![tweet("100"), tweet("101")],
+            Some("unneeded"),
+        )),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .detail_stream_at(server.base.clone(), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(server.count(), 2);
+    assert_eq!(variables(&server.urls()[1])["cursor"], cursor);
+
+    let server = Server::new(vec![Response::json(detail_page(vec![tweet("99")], None))]);
+    let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
+    assert!(stream.next().await.unwrap().is_err());
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+async fn detail_conversation_modes_bind_prefix_and_reply_filters_to_focal_author() {
+    for (mode, replies, expected) in [
+        (
+            ConversationMode::All,
+            ReplyMode::All,
+            vec!["98", "99", "100", "101", "102"],
+        ),
+        (
+            ConversationMode::Accessible,
+            ReplyMode::All,
+            vec!["98", "99", "100", "101", "102"],
+        ),
+        (
+            ConversationMode::All,
+            ReplyMode::SelfOnly,
+            vec!["99", "100", "101"],
+        ),
+        (ConversationMode::Accessible, ReplyMode::Skip, vec!["100"]),
+    ] {
+        let server = Server::new(vec![
+            Response::json(detail_page(
+                vec![reply("98", "77", "42"), reply("99", "42", "77")],
+                Some("next"),
+            )),
+            Response::json(detail_page(
+                vec![
+                    tweet("100"),
+                    reply("101", "42", "77"),
+                    reply("102", "77", "42"),
+                ],
+                None,
+            )),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_status_options(conversation_options(mode))
+            .with_profile_options(ProfileOptions {
+                pinned: false,
+                replies,
+            });
+        let items: Vec<_> = native
+            .detail_stream_at(server.base.clone(), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), expected);
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn detail_inaccessible_focal_returns_context_only_in_all_mode() {
+    for (mode, expected) in [
+        (ConversationMode::All, vec!["99", "101"]),
+        (ConversationMode::Accessible, vec![]),
+    ] {
+        let mut first = detail_page(vec![tweet("99")], Some("next"));
+        first["data"]["threaded_conversation_with_injections_v2"]["instructions"][0]["entries"]
+            .as_array_mut().unwrap().push(json!({"entryId":"tweet-100","content":{"entryType":"TimelineTimelineItem","itemContent":{"itemType":"TimelineTweet","tweet_results":{"result":{"__typename":"TweetTombstone","tombstone":{"text":{"text":"private inaccessible context"}}}}}}}));
+        let server = Server::new(vec![
+            Response::json(first),
+            Response::json(detail_page(vec![tweet("101")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_status_options(conversation_options(mode));
+        let items: Vec<_> = native
+            .detail_stream_at(server.base.clone(), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), expected);
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn detail_reuses_same_page_quote_target_preserving_order_and_archive_identity() {
+    for mode in [ConversationMode::Off, ConversationMode::All] {
+        let server = Server::new(vec![Response::json(detail_page(
+            vec![
+                tweet("99"),
+                quoted_tweet("100", "101"),
+                tweet("101"),
+                tweet("102"),
+            ],
+            None,
+        ))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_status_options(conversation_options(mode))
+            .with_expansion(expansion_options(RetweetMode::Skip));
+        let items: Vec<_> = native
+            .detail_stream_at(server.base.clone(), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            post_ids(&items),
+            if mode == ConversationMode::Off {
+                vec!["100", "101"]
+            } else {
+                vec!["99", "100", "101", "102"]
+            }
+        );
+        let quote = items
+            .iter()
+            .find(|media| media.metadata.as_ref().unwrap().post_id == "101")
+            .unwrap();
+        let direct = parse_response(
+            &serde_json::to_vec(&post_response(tweet("101"))).unwrap(),
+            "101",
+        )
+        .unwrap();
+        assert_eq!(quote.archive_key(), direct[0].archive_key());
+        assert_eq!(
+            quote.metadata.as_ref().unwrap().quoted_by_id.as_deref(),
+            Some("100")
+        );
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn detail_missing_quote_fetch_is_lazy_and_precedes_next_detail_page() {
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![quoted_tweet("100", "101")], Some("next"))),
+        Response::json(post_response(tweet("101"))),
+        Response::json(detail_page(vec![tweet("102")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_status_options(conversation_options(ConversationMode::All))
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
+    assert_eq!(server.count(), 0);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "100"
+    );
+    assert_eq!(server.count(), 1);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "101"
+    );
+    assert_eq!(server.count(), 2);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "102"
+    );
+    assert!(stream.next().await.is_none());
+    let urls = server.urls();
+    assert!(urls[1].path().ends_with("/TweetResultByRestId"));
+    assert_eq!(variables(&urls[1])["tweetId"], "101");
+    assert!(urls[2].path().ends_with("/TweetDetail"));
+    assert_eq!(variables(&urls[2])["cursor"], "next");
+    assert_scoped_expansion_requests(&server, &native);
+}
+
+#[tokio::test]
+async fn detail_range_and_drop_cancel_quote_and_pagination_work() {
+    for use_range in [false, true] {
+        let server = Server::new(vec![
+            Response::json(detail_page(vec![quoted_tweet("100", "101")], Some("next"))),
+            Response::json(post_response(tweet("101"))),
+            Response::json(detail_page(vec![tweet("102")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_status_options(conversation_options(ConversationMode::All))
+            .with_expansion(expansion_options(RetweetMode::Skip));
+        let stream = native.detail_stream_at(server.base.clone(), "100".into());
+        if use_range {
+            let mut selected = crate::selection::RangeSelection::parse("1")
+                .unwrap()
+                .apply(stream);
+            assert!(selected.next().await.unwrap().is_ok());
+            assert!(selected.next().await.is_none());
+        } else {
+            let mut stream = stream;
+            assert!(stream.next().await.unwrap().is_ok());
+            drop(stream);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn detail_late_auth_failure_keeps_emitted_context_and_hides_response_data() {
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![tweet("99"), tweet("100")], Some("next"))),
+        Response::json(json!({"errors":[{"code":89,"message":"private session csrf status-id"}]})),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_status_options(conversation_options(ConversationMode::All));
+    let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "99"
+    );
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "100"
+    );
+    let error = stream.next().await.unwrap().unwrap_err().to_string();
+    assert!(!error.contains("private session"));
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn detail_active_budget_excludes_consumer_pause_and_accumulates_quote_requests() {
+    let native = extractor(Duration::from_millis(250))
+        .await
+        .with_status_options(conversation_options(ConversationMode::All))
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![tweet("100")], Some("next"))).delayed(20),
+        Response::json(detail_page(vec![tweet("101")], None)).delayed(20),
+    ]);
+    let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
+    assert!(stream.next().await.unwrap().is_ok());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(stream.next().await.is_none());
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![quoted_tweet("100", "101")], Some("next"))).delayed(150),
+        Response::json(post_response(tweet("101"))).delayed(180),
+        Response::json(detail_page(vec![tweet("102")], None)),
+    ]);
+    let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("timed out")
+    );
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn detail_repeated_cursor_fails_without_fetching_or_emitting_loop_page() {
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![tweet("100")], Some("same"))),
+        Response::json(detail_page(vec![tweet("101")], Some("same"))),
+        Response::json(detail_page(vec![tweet("102")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_status_options(conversation_options(ConversationMode::All));
+    let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(stream.next().await.unwrap().is_err());
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn detail_cookies_rotate_on_actual_operation_path_without_reaching_media_headers() {
+    let mut first = Response::json(detail_page(vec![quoted_tweet("100", "101")], None));
+    first.headers = "Set-Cookie: ct0=detailrotated; Path=/i/api/graphql/\r\nSet-Cookie: auth_token=detailsession; Path=/i/api/graphql/\r\n".into();
+    let server = Server::new(vec![first, Response::json(post_response(tweet("101")))]);
+    let network = NetworkOptions::new(None, Some("gallery-dl-detail-test/1".into())).unwrap();
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_network(&network)
+        .unwrap()
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let items: Vec<_> = native
+        .detail_stream_at(server.base.clone(), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "101"]);
+    let requests = server.requests.lock().unwrap();
+    assert!(
+        requests[0]
+            .to_ascii_lowercase()
+            .contains("x-csrf-token: csrf\r\n")
+    );
+    let second = requests[1].to_ascii_lowercase();
+    assert!(second.contains("x-csrf-token: detailrotated\r\n"));
+    assert!(second.contains("auth_token=detailsession"));
+    drop(requests);
+    for media in items {
+        assert_eq!(
+            media.headers.get("User-Agent").map(String::as_str),
+            Some("gallery-dl-detail-test/1")
+        );
+        assert!(!media.headers.keys().any(|key| {
+            [
+                "cookie",
+                "authorization",
+                "x-csrf-token",
+                "x-client-transaction-id",
+            ]
+            .iter()
+            .any(|private| key.eq_ignore_ascii_case(private))
+        }));
+        assert!(
+            !media
+                .headers
+                .values()
+                .any(|value| value.contains("detailrotated") || value.contains("detailsession"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn detail_dropping_pending_initial_request_stops_navigation() {
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![tweet("100")], Some("next"))).delayed(300),
+        Response::json(detail_page(vec![tweet("101")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_status_options(conversation_options(ConversationMode::All));
+    let mut stream = native.detail_stream_at(server.base.clone(), "100".into());
+    {
+        let pending = stream.next();
+        tokio::pin!(pending);
+        tokio::select! {
+            result = &mut pending => panic!("unexpected completion: {result:?}"),
+            () = server.wait_for(1) => {}
+        }
+    }
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn detail_original_retweet_self_only_binds_original_author_and_reuses_resolved_target() {
+    for same_page_target in [false, true] {
+        let original = reply("101", "99", "42");
+        let mut repost = authored(tweet("100"), "42");
+        repost["legacy"]["retweeted_status_id_str"] = "101".into();
+        let mut posts = vec![repost, reply("102", "42", "99"), reply("103", "99", "42")];
+        if same_page_target {
+            posts.push(original.clone());
+        }
+        let mut responses = vec![Response::json(detail_page(posts, None))];
+        if !same_page_target {
+            responses.push(Response::json(post_response(original.clone())));
+        }
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_status_options(conversation_options(ConversationMode::All))
+            .with_expansion(expansion_options(RetweetMode::Original))
+            .with_profile_options(ProfileOptions {
+                pinned: false,
+                replies: ReplyMode::SelfOnly,
+            });
+        let items: Vec<_> = native
+            .detail_stream_at(server.base.clone(), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), ["101", "103"]);
+        assert_eq!(
+            items[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .reposted_by_id
+                .as_deref(),
+            Some("100")
+        );
+        let direct = parse_response(
+            &serde_json::to_vec(&post_response(original)).unwrap(),
+            "101",
+        )
+        .unwrap();
+        assert_eq!(items[0].archive_key(), direct[0].archive_key());
+        assert_eq!(server.count(), if same_page_target { 1 } else { 2 });
+        if !same_page_target {
+            assert!(server.urls()[1].path().ends_with("/TweetResultByRestId"));
+            assert_eq!(variables(&server.urls()[1])["tweetId"], "101");
+        }
+        assert_scoped_expansion_requests(&server, &native);
+    }
+}
+
+#[tokio::test]
+async fn standalone_original_retweet_self_only_fetches_target_once_and_uses_original_archive() {
+    let original = reply("101", "99", "42");
+    let mut repost = authored(tweet("100"), "42");
+    repost["legacy"]["retweeted_status_id_str"] = "101".into();
+    let server = Server::new(vec![
+        Response::json(post_response(repost)),
+        Response::json(post_response(original.clone())),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Original))
+        .with_profile_options(ProfileOptions {
+            pinned: false,
+            replies: ReplyMode::SelfOnly,
+        });
+    let items: Vec<_> = native
+        .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["101"]);
+    assert_eq!(
+        items[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .reposted_by_id
+            .as_deref(),
+        Some("100")
+    );
+    let direct = parse_response(
+        &serde_json::to_vec(&post_response(original)).unwrap(),
+        "101",
+    )
+    .unwrap();
+    assert_eq!(items[0].archive_key(), direct[0].archive_key());
+    assert_eq!(server.count(), 2);
+    assert_eq!(variables(&server.urls()[1])["tweetId"], "101");
+    assert_scoped_expansion_requests(&server, &native);
+}
+
+#[tokio::test]
+async fn detail_missing_focal_self_only_uses_unbound_actual_self_reply_filter() {
+    let server = Server::new(vec![
+        Response::json(detail_page(
+            vec![reply("100", "42", "42"), reply("101", "42", "99")],
+            Some("next"),
+        )),
+        Response::json(detail_page(
+            vec![reply("102", "99", "42"), reply("103", "99", "99")],
+            None,
+        )),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_status_options(conversation_options(ConversationMode::All))
+        .with_profile_options(ProfileOptions {
+            pinned: false,
+            replies: ReplyMode::SelfOnly,
+        });
+    let items: Vec<_> = native
+        .detail_stream_at(server.base.clone(), "999".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "103"]);
+    assert_eq!(server.count(), 2);
 }

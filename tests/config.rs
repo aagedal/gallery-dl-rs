@@ -917,3 +917,85 @@ fn twitter_collection_limit_rejects_duplicate_valid_values_in_every_scope() {
         assert!(parse(document).is_err());
     }
 }
+
+#[test]
+fn twitter_status_options_are_sparse_and_resolve_all_scopes() {
+    use gallery_dl_rs::twitter::{ConversationMode, TweetEndpoint};
+    let config = parse(r#"{"extractor":{"tweet-endpoint":"restid","conversations":true,"twitter":{"tweet-endpoint":"detail","conversations":"accessible"}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.tweet_endpoint, Some(TweetEndpoint::Detail));
+    assert_eq!(twitter.conversations, Some(ConversationMode::Accessible));
+    let facebook = config.resolve("facebook").unwrap();
+    assert_eq!(facebook.tweet_endpoint, Some(TweetEndpoint::RestId));
+    assert_eq!(facebook.conversations, Some(ConversationMode::All));
+    let global = parse(r#"{"tweet-endpoint":"auto","conversations":false,"extractor":{"tweet-endpoint":"restid","conversations":true,"twitter":{"tweet-endpoint":"detail","conversations":"accessible"}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let resolved = global.resolve(category).unwrap();
+        assert_eq!(resolved.tweet_endpoint, Some(TweetEndpoint::Auto));
+        assert_eq!(resolved.conversations, Some(ConversationMode::Off));
+    }
+    let overrides = Options {
+        tweet_endpoint: Some(TweetEndpoint::RestId),
+        conversations: Some(ConversationMode::Off),
+        ..Options::default()
+    };
+    let overlaid = twitter.overlay(&overrides);
+    assert_eq!(overlaid.tweet_endpoint, overrides.tweet_endpoint);
+    assert_eq!(overlaid.conversations, overrides.conversations);
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.tweet_endpoint, None);
+    assert_eq!(absent.conversations, None);
+}
+
+#[test]
+fn twitter_status_configuration_rejects_malformed_and_duplicate_values_privately() {
+    use serde_json::json;
+    for field in ["tweet-endpoint", "conversations"] {
+        let mut invalid = vec![
+            json!(null),
+            json!(0),
+            json!(1),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+            json!("Auto"),
+        ];
+        if field == "tweet-endpoint" {
+            invalid.extend([json!(true), json!(false), json!("rest_id")]);
+        } else {
+            invalid.extend([json!("true"), json!("Accessible")]);
+        }
+        for value in invalid {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let value = if field == "tweet-endpoint" {
+            "\"auto\""
+        } else {
+            "false"
+        };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}

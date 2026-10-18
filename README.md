@@ -70,8 +70,8 @@ stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fb
 `/USER/videos/ID` videos, and Twitter/X single-status plus `/USER/media`, `/USER/tweets`, `/USER/with_replies`,
 and `/USER/highlights` URLs, root profiles, search, hashtags, likes, bookmarks,
 lists, and home feeds.
-Other profiles, threads, and album listings still need the
-compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
+X conversation extraction is also available through scoped settings. Other
+unsupported profiles and album listings still need the compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
 The native Instagram extractor reads Netscape cookies scoped to the API URL's domain, path,
@@ -225,15 +225,41 @@ remain required. These checks verify extraction, not complete media downloads or
 authenticated access. See the [video fixture notes](tests/fixtures/facebook/video_README.md).
 
 Native Twitter/X requires current `x.com` `auth_token` and `ct0` cookies from
-a Netscape file or explicit Firefox profile import;
-it does not log in or use a guest session. It requests the exact status through
-GraphQL, selecting original-size photos and the highest-bitrate direct MP4 video
-variants in mixed-media order. IDs, username, caption, UTC timestamp, and one-based
-media indices feed metadata, filename templates, and the same stable archive keys
-as compatibility extraction. The response must match the requested root tweet;
-retweets are skipped and quoted posts are not expanded by default. Missing video
-variants fail instead of returning thumbnails. Protected, missing, expired-session,
-rate-limit, and challenge responses fail explicitly.
+a Netscape file or explicit Firefox profile import; it does not log in or use a
+guest session. Authenticated single-status extraction now defaults to
+`TweetDetail`, matching upstream's `"tweet-endpoint": "auto"`. Scoped
+`"tweet-endpoint": "detail"` selects it explicitly; `"restid"` retains the
+`TweetResultByRestId` route. Conversation mode always uses detail, independently
+of endpoint selection. API operation IDs/features remain experimental snapshots.
+
+Normal status selection requires the exact requested post ID among structured
+detail entries. Other conversation posts cannot replace a missing focal post.
+Original-size photos, highest-bitrate direct MP4 variants, mixed-media order,
+metadata, and stable archive keys use the existing shared parser. Retweets are
+skipped and quoted posts are not expanded by default. Same-response explicit
+quote targets are reused; missing targets are fetched lazily through the fixed
+post API. Invalid media fails instead of returning thumbnails, and API/session
+failures remain private explicit errors.
+
+Scoped `"conversations": false` (default) selects only the requested post and its
+enabled quote expansion. `true` emits accessible conversation context and replies,
+including preceding posts, even if the focal post never becomes accessible.
+`"accessible"` emits the conversation only after finding that focal post; a
+terminal response without it produces no media. Both modes buffer preceding
+context until finding the focal post or reaching the end so reply filtering can
+use its author. The pre-focal context buffer is limited to 16 MiB and fails
+privately if exceeded. Recognized owned tombstones/unavailable items are skipped;
+malformed accessible identities and unsupported envelopes still fail explicitly.
+
+Detail traversal retains post order, per-input deduplication, first-page pin
+opt-in, active-time budgets, cursor progress checks, and range/drop cancellation.
+Normal selection stops once the requested post and its enabled quotes drain;
+conversation modes continue through later detail pages. Prior output survives
+late failures. Source-order date filtering applies to conversations. Scoped
+endpoint/conversation settings also forward to compatibility mode when explicit.
+All detail behavior has synthetic/parser/local HTTP coverage; authenticated live
+verification and sanitized real captures remain required. See the
+[conversation protocol notes](tests/fixtures/twitter/detail_README.md).
 
 Experimental X profile timelines use `Twitter::stream` and the native CLI at
 `/USERNAME/media`, `/USERNAME/tweets`, `/USERNAME/with_replies`, and
@@ -263,8 +289,10 @@ Scoped Twitter settings include `"pinned": false` (default) or `true`, and
 `"replies": true` (default), `false`, or `"self"`. Pins are opt-in and precede
 regular first-page posts, whether supplied as a pin instruction or identified in
 user metadata. With `replies: false`, reply posts are skipped. With `"self"`, a
-profile feed retains replies authored by that profile, while a standalone status
-retains replies addressed to its own author. Quote posts are filtered
+profile feed retains replies authored by that profile. A status/conversation
+request uses the selected focal author's context, including the original author
+when original-retweet mode is selected. If conversation mode allows an inaccessible
+focal and none is found, the unbound fallback retains replies to their own author. Quote posts are filtered
 independently. These settings also forward to compatibility extraction only when
 explicitly configured. Profile tabs use unordered date filtering so pins and
 conversation context cannot hide later qualifying media.
@@ -361,7 +389,8 @@ Timeline API IDs/features are upstream snapshots. Synthetic parser and local HTT
 tests cover traversal, signing paths, cookie rotation, user-agent propagation,
 date/range selection, deadlines, and cancellation. Real response fixtures and
 successful authenticated timeline traversal remain unverified. The collecting
-`Twitter::extract` API remains single-post. See the [media timeline fixture notes](tests/fixtures/twitter/media_README.md).
+`Twitter::extract` API collects the selected status or enabled conversation;
+`Twitter::stream` also handles profiles and collections. See the [media timeline fixture notes](tests/fixtures/twitter/media_README.md).
 
 The native X client generates transaction headers from verification/SVG data and
 the current signing asset, with a first-party `/i/jf/` bootstrap fallback for newer
@@ -619,7 +648,8 @@ Neither configuration file is loaded automatically.
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
-`retweets`, `quoted`, `pinned`, `replies`, `strategy`, `search-pagination`,
+`retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
+`strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
@@ -811,11 +841,12 @@ Rust incrementally decodes the compatibility backend's resolved JSON array,
 preserving its child-extractor handling. The external backend still collects
 results internally before dumping that array; very large profiles can exhaust
 its memory or hit `--extraction-timeout` before any output arrives. Native
-single-post extraction still buffers one complete post. The Rust download
+status extraction buffers each media batch, and conversation modes can buffer
+pre-focal context up to their documented limit. The Rust download
 pipeline retains one message buffer plus active jobs, while deduplication keeps
 a fixed-size SHA-256 digest per unique job across all inputs. `-j` additionally
-buffers all unique media for its JSON array. Native collection pagination and
-end-to-end streaming remain planned. Library callers can use `Backend::stream`;
+buffers all unique media for its JSON array. Native collection streams now pull supported pages and jobs lazily; further
+sites and collection types remain planned. Library callers can use `Backend::stream`;
 `Backend::extract` deliberately collects a complete vector. Signed URL changes produce new filenames; use the
 download archive to skip previously saved social media by stable IDs. Existing files are assumed complete,
 without revalidation.
@@ -851,6 +882,8 @@ and native extraction, and Retry-After parsing.
 `src/twitter_expansion.rs` validates explicit retweet/quote links and media identity;
 `src/twitter_search.rs` handles search routing, options, and pagination progress;
 `src/twitter_collections.rs` validates collection routes and response envelopes;
+`src/twitter_detail.rs` selects focal posts and buffers pre-focal conversation context;
+`src/twitter_detail_parse.rs` parses owned conversation entries and tombstones;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
 [fixture and manual-check notes](tests/fixtures/instagram/README.md) before
 promoting native extraction to the default.

@@ -20,7 +20,9 @@ use gallery_dl_rs::{
     network::NetworkOptions,
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
-    twitter::{ExpansionOptions, ProfileOptions, TimelineOptions, Twitter},
+    twitter::{
+        ConversationMode, ExpansionOptions, ProfileOptions, StatusOptions, TimelineOptions, Twitter,
+    },
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -205,7 +207,15 @@ async fn run(args: Args) -> Result<()> {
                             || gallery_dl_rs::twitter::is_search_url(&url)
                             || gallery_dl_rs::twitter::is_collection_url(&url)
                             || (extract::social_site(&url) == Some("twitter")
-                                && settings["twitter"].options.quoted == Some(true))
+                                && (settings["twitter"].options.quoted == Some(true)
+                                    || (gallery_dl_rs::twitter::post_id(&url).is_ok()
+                                        && matches!(
+                                            settings["twitter"].options.conversations,
+                                            Some(
+                                                ConversationMode::All
+                                                    | ConversationMode::Accessible
+                                            )
+                                        ))))
                     });
                     let selected_settings = extract::http_url(&source)
                         .ok()
@@ -425,6 +435,10 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_status_options(StatusOptions {
+                                        endpoint: options.tweet_endpoint.unwrap_or_default(),
+                                        conversations: options.conversations.unwrap_or_default(),
+                                    })
                                     .with_timeline_options(TimelineOptions {
                                         limit: options.limit.unwrap_or(50),
                                         strategy: options.strategy.unwrap_or_default(),
@@ -489,6 +503,12 @@ fn extract_input<'a>(
                                 .then_some(options.retweets)
                                 .flatten(),
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
+                            tweet_endpoint: (category == "twitter")
+                                .then_some(options.tweet_endpoint)
+                                .flatten(),
+                            conversations: (category == "twitter")
+                                .then_some(options.conversations)
+                                .flatten(),
                             pinned: (category == "twitter").then_some(options.pinned).flatten(),
                             replies: (category == "twitter").then_some(options.replies).flatten(),
                             strategy: (category == "twitter")
@@ -566,6 +586,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         browser_cookies: None,
         retweets: None,
         quoted: None,
+        tweet_endpoint: None,
+        conversations: None,
         pinned: None,
         replies: None,
         strategy: None,

@@ -197,6 +197,16 @@ impl Engine {
         Ok(())
     }
 
+    pub(super) fn supply_value(&mut self, value: Value) -> Result<()> {
+        let job = self
+            .jobs
+            .front_mut()
+            .ok_or_else(|| error("Twitter linked post state missing"))?;
+        validated(&value, &job.id)?;
+        job.value = Some(value);
+        Ok(())
+    }
+
     pub(super) fn next(&mut self) -> Result<Action> {
         loop {
             let Some(mut job) = self.jobs.pop_front() else {
@@ -353,4 +363,44 @@ fn keep_reply(tweet: &Value, mode: ReplyMode, profile_owner: Option<&str>) -> Re
         return Err(error("Twitter reply author fields conflict"));
     }
     Ok(author == profile_owner.unwrap_or(recipient))
+}
+
+pub(super) enum OwnerLookup {
+    Owner(String),
+    Fetch(String),
+}
+pub(super) fn owner_lookup(
+    value: &Value,
+    mode: RetweetMode,
+    known: &BTreeMap<String, Value>,
+) -> Result<OwnerLookup> {
+    let mut value = value.clone();
+    let mut visited = std::collections::HashSet::new();
+    for _ in 0..=16 {
+        let tweet = unwrapped(&value)?;
+        let id = tweet["rest_id"]
+            .as_str()
+            .filter(|id| valid_id(id))
+            .ok_or_else(|| error("Twitter focal post identifier invalid"))?;
+        validated(tweet, id)?;
+        if !visited.insert(id.to_owned()) {
+            return Err(error(
+                "Twitter linked post cycle or traversal limit exceeded",
+            ));
+        }
+        if mode == RetweetMode::Original
+            && let Some(target) = link(tweet, "retweeted_status_result", "retweeted_status_id_str")?
+        {
+            if visited.len() > 16 {
+                return Err(error("Twitter linked post traversal limit exceeded"));
+            }
+            match target.value.or_else(|| known.get(&target.id).cloned()) {
+                Some(target) => value = target,
+                None => return Ok(OwnerLookup::Fetch(target.id)),
+            }
+        } else {
+            return Ok(OwnerLookup::Owner(detail_parse::post_owner(tweet)?));
+        }
+    }
+    Err(error("Twitter linked post traversal limit exceeded"))
 }

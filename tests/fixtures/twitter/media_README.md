@@ -43,7 +43,8 @@ Pins default to disabled; enabled pin instructions or user
 `legacy.pinned_tweet_ids_str` move a matching first-page post to the front.
 Metadata from lookup is retained when the timeline omits it. Reply modes include
 all (default), skip, and self, comparing author against the profile owner when
-present or the reply recipient for standalone posts. Quote selection remains
+present. Status/conversation requests use the focal author's context; unbound
+collections compare author to reply recipient. Quote selection remains
 independent of parent filtering. Per-input post identity digests suppress repeat
 posts after their first media batch, retaining all initial media siblings.
 

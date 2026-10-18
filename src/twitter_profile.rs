@@ -8,6 +8,7 @@ enum Source {
     Profile(ProfileTab),
     Search(search::Paging),
     Feed(collections::Collection),
+    Detail(detail::Selection),
 }
 enum RootStage {
     Initial { last: Option<String> },
@@ -41,10 +42,7 @@ impl Twitter {
     /// Downstream pauses do not consume the cumulative active extraction budget.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
         if let Ok(id) = post_id(url) {
-            return match endpoint(&id) {
-                Ok(endpoint) => self.post_stream_at(endpoint, id),
-                Err(e) => stream::once(async move { Err(e) }).boxed(),
-            };
+            return self.status_stream(id);
         }
         match search::input(url) {
             Ok(Some(query)) => {
@@ -74,11 +72,37 @@ impl Twitter {
         }
     }
 
+    pub(super) fn status_stream(&self, id: String) -> BoxStream<'_, Result<Media>> {
+        if self.status_options.conversations != ConversationMode::Off
+            || self.status_options.endpoint != TweetEndpoint::RestId
+        {
+            self.detail_stream_at(Url::parse("https://x.com/i/api/graphql/").unwrap(), id)
+        } else {
+            match endpoint(&id) {
+                Ok(target) => self.post_stream_at(target, id),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            }
+        }
+    }
+
+    pub(super) fn detail_stream_at(&self, base: Url, id: String) -> BoxStream<'_, Result<Media>> {
+        self.collection_stream(
+            None,
+            Source::Detail(detail::Selection::new(
+                id,
+                self.status_options.conversations,
+            )),
+            None,
+            base,
+        )
+    }
+
     pub(super) fn post_stream_at(&self, endpoint: Url, id: String) -> BoxStream<'_, Result<Media>> {
         struct PostState {
             endpoint: Url,
             id: String,
             engine: Option<expansion::Engine>,
+            known: BTreeMap<String, Value>,
             pending: VecDeque<Media>,
             done: bool,
             seen: HashSet<[u8; 32]>,
@@ -88,6 +112,7 @@ impl Twitter {
             endpoint,
             id,
             engine: None,
+            known: BTreeMap::new(),
             pending: VecDeque::new(),
             done: false,
             seen: HashSet::new(),
@@ -108,13 +133,25 @@ impl Twitter {
                             .await?;
                         let bytes = self.fetch(&state.endpoint, &state.id, true).await?;
                         let root = expansion::response_root(&bytes, &state.id)?;
+                        let owner = if self.profile_options.replies == ReplyMode::SelfOnly {
+                            Some(
+                                self.resolve_focal_owner(&root, &state.endpoint, &mut state.known)
+                                    .await?,
+                            )
+                        } else {
+                            None
+                        };
                         state.engine = Some(
                             expansion::Engine::new(root, state.id.clone(), self.expansion, false)
-                                .with_replies(self.profile_options.replies, None),
+                                .with_replies(self.profile_options.replies, owner),
                         );
                     }
-                    self.expand_next(state.engine.as_mut().unwrap(), &state.endpoint)
-                        .await
+                    self.expand_next_known(
+                        state.engine.as_mut().unwrap(),
+                        &state.endpoint,
+                        Some(&state.known),
+                    )
+                    .await
                 })
                 .await
                 .unwrap_or_else(|_| Err(error("native Twitter extraction timed out")));
@@ -136,10 +173,11 @@ impl Twitter {
         .boxed()
     }
 
-    async fn expand_next(
+    async fn expand_next_known(
         &self,
         engine: &mut expansion::Engine,
         base: &Url,
+        known: Option<&BTreeMap<String, Value>>,
     ) -> Result<Option<Vec<Media>>> {
         loop {
             match engine.next()? {
@@ -151,6 +189,10 @@ impl Twitter {
                     return Ok(Some(media));
                 }
                 expansion::Action::Fetch(id) => {
+                    if let Some(value) = known.and_then(|known| known.get(&id)) {
+                        engine.supply_value(value.clone())?;
+                        continue;
+                    }
                     // Only validated decimal IDs can select another fixed API endpoint.
                     let mut target = endpoint(&id)?;
                     target
@@ -309,7 +351,11 @@ impl Twitter {
             );
         }
         if let Some(engine) = state.expansion.as_mut() {
-            match self.expand_next(engine, &state.base).await? {
+            let known = match &state.source {
+                Source::Detail(selection) => Some(&selection.known),
+                _ => None,
+            };
+            match self.expand_next_known(engine, &state.base, known).await? {
                 Some(media) => {
                     if !queue_unique(media, &mut state.pending, &mut state.seen) {
                         tokio::task::yield_now().await;
@@ -393,6 +439,39 @@ impl Twitter {
                 state.done = paging.advance(&page, self.timeline_options)?;
                 page
             }
+            Source::Detail(selection) => {
+                let target =
+                    detail::endpoint_at(&state.base, &selection.id, state.cursor.as_deref())?;
+                self.ensure_transaction_at(&selection.id, &target).await?;
+                let body = self.fetch(&target, &selection.id, true).await?;
+                let mut page = detail_parse::parse_page(&body, state.pinned_pending)?;
+                state.pinned_pending = false;
+                let done = page.done || empty_feed_finished(&page, &mut state.empty_pages, 0);
+                let selected = selection.select(std::mem::take(&mut page.posts), done)?;
+                if let Some(focal) = &selected.focal
+                    && self.profile_options.replies == ReplyMode::SelfOnly
+                {
+                    state.owner = Some(
+                        self.resolve_focal_owner(focal, &state.base, &mut selection.known)
+                            .await?,
+                    );
+                }
+                state.done = selected.done;
+                let cursor = if state.done {
+                    None
+                } else {
+                    page.cursor.clone()
+                };
+                if let Some(cursor) = &cursor {
+                    let digest = <[u8; 32]>::from(Sha256::digest(cursor.as_bytes()));
+                    if !state.cursors.insert(digest) {
+                        return Err(error("Twitter conversation cursor repeated"));
+                    }
+                }
+                state.cursor = cursor;
+                page.posts = selected.posts;
+                page
+            }
             Source::Feed(kind) => {
                 let target = feed_endpoint(
                     &state.base,
@@ -428,6 +507,34 @@ impl Twitter {
         };
         state.posts = page.posts.into();
         Ok(())
+    }
+
+    async fn resolve_focal_owner(
+        &self,
+        value: &Value,
+        base: &Url,
+        known: &mut BTreeMap<String, Value>,
+    ) -> Result<String> {
+        loop {
+            match expansion::owner_lookup(value, self.expansion.retweets, known)? {
+                expansion::OwnerLookup::Owner(owner) => return Ok(owner),
+                expansion::OwnerLookup::Fetch(id) => {
+                    let mut target = endpoint(&id)?;
+                    target
+                        .set_scheme(base.scheme())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    target
+                        .set_host(base.host_str())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    target
+                        .set_port(base.port())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    self.ensure_transaction_at(&id, &target).await?;
+                    let bytes = self.fetch(&target, &id, true).await?;
+                    known.insert(id.clone(), expansion::response_root(&bytes, &id)?);
+                }
+            }
+        }
     }
 
     fn advance_root(&self, state: &mut State) -> Result<()> {

@@ -12,8 +12,13 @@ use crate::{
 #[path = "twitter_expansion.rs"]
 mod expansion;
 pub use expansion::{ExpansionOptions, RetweetMode, parse_response_with_options};
+#[path = "twitter_detail.rs"]
+mod detail;
+pub use detail::{ConversationMode, StatusOptions, TweetEndpoint};
 #[path = "twitter_collections.rs"]
 mod collections;
+#[path = "twitter_detail_parse.rs"]
+mod detail_parse;
 pub use collections::is_collection_url;
 #[path = "twitter_search.rs"]
 mod search;
@@ -65,6 +70,7 @@ pub struct Twitter {
     expansion: ExpansionOptions,
     profile_options: ProfileOptions,
     timeline_options: TimelineOptions,
+    status_options: StatusOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -96,6 +102,7 @@ impl Twitter {
             expansion: ExpansionOptions::default(),
             profile_options: ProfileOptions::default(),
             timeline_options: TimelineOptions::default(),
+            status_options: StatusOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -123,6 +130,11 @@ impl Twitter {
         self
     }
 
+    pub fn with_status_options(mut self, options: StatusOptions) -> Self {
+        self.status_options = options;
+        self
+    }
+
     /// Apply proxy and user-agent settings to API requests and emitted media.
     pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
         self.client = network.client(USER_AGENT, self.timeout)?;
@@ -145,7 +157,7 @@ impl Twitter {
 
     pub async fn extract(&self, post: &Url) -> Result<Vec<Media>> {
         let id = post_id(post)?;
-        self.post_stream_at(endpoint(&id)?, id).try_collect().await
+        self.status_stream(id).try_collect().await
     }
 
     #[cfg(test)]

@@ -108,3 +108,25 @@ fn reply_identity_failures_are_private_and_null_recipient_is_not_a_reply() {
         .remove("rest_id");
     assert!(parse(root, ReplyMode::SelfOnly, None, RetweetMode::Skip).is_err());
 }
+
+#[test]
+fn focal_original_owner_resolution_bounds_missing_target_requests() {
+    let mut leaf = tweet("116", "99", None);
+    for id in (100..116).rev() {
+        let mut parent = tweet(&id.to_string(), "42", None);
+        parent["legacy"]["retweeted_status_id_str"] = leaf["rest_id"].clone();
+        parent["retweeted_status_result"] = json!({"result":leaf});
+        leaf = parent;
+    }
+    let known = BTreeMap::new();
+    assert!(
+        matches!(expansion::owner_lookup(&leaf, RetweetMode::Original, &known).unwrap(), expansion::OwnerLookup::Owner(owner) if owner == "99")
+    );
+    // One further declared link must fail before asking runtime to fetch it.
+    let mut node = &mut leaf;
+    for _ in 0..16 {
+        node = &mut node["retweeted_status_result"]["result"];
+    }
+    node["legacy"]["retweeted_status_id_str"] = "117".into();
+    assert!(expansion::owner_lookup(&leaf, RetweetMode::Original, &known).is_err());
+}

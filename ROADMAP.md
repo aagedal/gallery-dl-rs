@@ -73,8 +73,7 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Original and quoted media preserve direct-post archive identities; repost mode
   retains the repost identity. Parser, scoped configuration, compatibility
   forwarding, and local HTTP tests cover these paths. Live authenticated
-  expansion remains unverified. Threads and cards/articles remain outside native
-  coverage.
+  expansion remains unverified. Cards/articles remain outside native coverage.
   **Implemented experimental profile tabs:** `/USER/media`, `/USER/tweets`,
   `/USER/with_replies`, `/USER/highlights`, and numeric ID forms stream their
   operation-specific pages. Username lookup uses identity-bound `UserByScreenName`;
@@ -115,6 +114,19 @@ shared extraction interface that emits media, post metadata, and child URLs.
   consumer pauses, and cancellation. Authenticated live collection traversal,
   real fixtures, bookmark-specific metadata, communities, membership/follow
   traversal, text-only output, and other routes/options remain unfinished.
+  **Implemented experimental TweetDetail and conversations:** authenticated status
+  Auto/Detail now select the exact focal post from structured TweetDetail pages;
+  explicit restid retains the original route. Conversations false/true/accessible
+  select the focal post, accessible context regardless of focal availability, or
+  context gated on focal accessibility. Pre-focal context buffering is capped at
+  16 MiB; owned tombstones are skipped without revealing their text. Shared quote
+  targets reuse response data, missing targets fetch lazily, and original-retweet
+  author resolution caches target responses. Self-reply context now follows the
+  focal author for both status endpoints. Parser, selection, scoped config,
+  compatibility, date, and HTTP tests cover missing/late focal posts, context
+  order, identity, bounds, archives, cookies/signing, deadlines, cancellation,
+  and late errors. Real response captures, authenticated live verification,
+  timeline `expand`, broader thread variants, and extended metadata remain.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and
