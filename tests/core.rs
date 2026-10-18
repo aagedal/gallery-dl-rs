@@ -293,6 +293,13 @@ fn routes_social_hosts_without_lookalike_domains() {
             Some("bluesky"),
         ),
         ("https://bsky.app.evil.example/profile/a.bsky.social", None),
+        (
+            "https://old.reddit.com/r/pics/comments/abc12/",
+            Some("reddit"),
+        ),
+        ("https://redd.it/abc12", Some("reddit")),
+        ("https://reddit.com.evil.example/r/pics", None),
+        ("https://notreddit.com/r/pics", None),
         ("https://x.com/user/status/123", Some("twitter")),
         ("https://twitter.com/user/status/123", Some("twitter")),
         ("https://notinstagram.com/p/abc", None),
@@ -790,4 +797,30 @@ fn compatibility_mode_downloads_plain_imgur_file_links_directly() {
         String::from_utf8_lossy(&output.stdout).trim(),
         "https://i.imgur.com/abcdefg.jpg"
     );
+}
+
+#[test]
+fn plain_reddit_image_links_download_directly_in_both_modes() {
+    for mode in ["compatibility", "native"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .args([
+                "--extractor-command",
+                "/nonexistent/gallery-dl",
+                "--extractor",
+                mode,
+                "-g",
+            ])
+            .arg("https://i.redd.it/abcdefg.jpg")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{mode}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "https://i.redd.it/abcdefg.jpg"
+        );
+    }
 }

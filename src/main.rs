@@ -211,12 +211,16 @@ fn default_native_config() -> Option<PathBuf> {
 
 /// Compatibility mode keeps plain Imgur file links as direct downloads, as
 /// before native Imgur support; native mode extracts them for metadata.
+/// Plain `i.redd.it` file links carry no submission context and always stay
+/// direct.
 fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
     extract::social_site(url).filter(|site| {
+        let file = extract::direct(url).is_some();
         !(*site == "imgur"
             && matches!(extractor, Extractor::Compatibility)
             && url.host_str() == Some("i.imgur.com")
-            && extract::direct(url).is_some())
+            && file
+            || *site == "reddit" && url.host_str() == Some("i.redd.it") && file)
     })
 }
 
@@ -377,7 +381,7 @@ async fn run(args: Args) -> Result<()> {
             // Distinct social files can share a URL and request context.
             if matches!(
                 item.category.as_str(),
-                "instagram" | "twitter" | "facebook" | "imgur" | "bluesky"
+                "instagram" | "twitter" | "facebook" | "imgur" | "bluesky" | "reddit"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -550,6 +554,7 @@ struct Extractors {
     facebook: OnceCell<Result<Facebook>>,
     imgur: OnceCell<Result<gallery_dl_rs::imgur::Imgur>>,
     bluesky: OnceCell<Result<gallery_dl_rs::bluesky::Bluesky>>,
+    reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
 }
 
 impl Extractors {
@@ -716,6 +721,22 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Bluesky initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "reddit" => {
+                    let native = extractors
+                        .reddit
+                        .get_or_init(|| async {
+                            gallery_dl_rs::reddit::Reddit::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Reddit initialization failed: {e}")))?;
                     native.events(&url)
                 }
                 Extractor::Native => {
@@ -896,6 +917,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "facebook",
         "imgur",
         "bluesky",
+        "reddit",
         "direct",
     ] {
         let options = defaults

@@ -320,6 +320,7 @@ struct RawExtractor {
     facebook: RawOptions,
     imgur: RawOptions,
     bluesky: RawOptions,
+    reddit: RawOptions,
     direct: RawOptions,
 }
 
@@ -435,6 +436,7 @@ impl Config {
                 "facebook",
                 "imgur",
                 "bluesky",
+                "reddit",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -541,6 +543,7 @@ impl Config {
             ("facebook", extractor.facebook),
             ("imgur", extractor.imgur),
             ("bluesky", extractor.bluesky),
+            ("reddit", extractor.reddit),
             ("direct", extractor.direct),
         ] {
             categories.insert(name.into(), settings.resolve(directory)?);
@@ -555,7 +558,7 @@ impl Config {
     pub fn resolve(&self, category: &str) -> Result<Options> {
         if !matches!(
             category,
-            "instagram" | "twitter" | "facebook" | "imgur" | "bluesky" | "direct"
+            "instagram" | "twitter" | "facebook" | "imgur" | "bluesky" | "reddit" | "direct"
         ) {
             return Err(error("unsupported native configuration category"));
         }

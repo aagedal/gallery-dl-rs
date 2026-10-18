@@ -23,6 +23,7 @@ pub mod naming;
 pub mod network;
 pub mod post_selection;
 mod range;
+pub mod reddit;
 mod resume;
 pub mod selection;
 pub mod size;

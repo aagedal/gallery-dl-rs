@@ -81,6 +81,19 @@ impl Media {
                     serde_json::json!([did, post.media_id]).to_string(),
                 )
             }
+            // Reddit media IDs are scoped to their submission.
+            "reddit" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::reddit::valid_id(&post.post_id)
+                    || !crate::reddit::valid_media_id(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    "reddit",
+                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                )
+            }
             category @ ("instagram" | "twitter" | "facebook") => {
                 let post = self.metadata.as_ref()?;
                 if !decimal_id(&post.post_id) {
@@ -227,6 +240,8 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("fb.watch", "facebook"),
         ("bsky.app", "bluesky"),
         ("imgur.com", "imgur"),
+        ("reddit.com", "reddit"),
+        ("redd.it", "reddit"),
         ("imgur.io", "imgur"),
         ("twitter.com", "twitter"),
         ("x.com", "twitter"),
