@@ -272,6 +272,20 @@ tags are not exposed. No API keys or logins are sent, so Gelbooru may refuse
 unauthenticated API requests and restricted content stays hidden. Plain CDN file
 links stay direct downloads.
 
+Experimental native Mastodon extraction (`--extractor native`) covers
+mastodon.social, pawoo.net and baraag.net under one `mastodon` category (upstream
+uses separate `mastodon.social`, `pawoo` and `baraag` categories; the host is
+exposed as `instance`). Supported: statuses (`/@USER/ID`, `/web/statuses/ID`)
+and user media timelines (`/@USER`, `/@USER/media`, including `@user@remote`
+accounts) via the public REST API, 40 per page with Link/`max_id` paging capped
+at 100 pages. Image, GIFV, video and audio attachments are downloaded from any
+HTTPS CDN host without API headers or cookies; reblogs and media-less statuses
+are skipped (a media-less single status is an error). `post_id` is the status
+ID, `media_id` the attachment ID, `username` the account `acct`, caption the
+status HTML with tags stripped. Default filenames are
+`{post_id}_{media_id}.{extension}`; archive identity is (instance, attachment ID).
+No access tokens are sent, so private/followers-only content stays hidden.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.

@@ -524,6 +524,12 @@ Safebooru posts and tag searches, plus Danbooru/e621 pools. Remaining: API
 key/login credentials, favorites/popular/artist views, Gelbooru pools, notes,
 `tags`/`metadata` options, and file-size/rating metadata.
 
+**Implemented experimental native Mastodon:** statuses and user media
+timelines on mastodon.social, pawoo.net and baraag.net (single `mastodon`
+category). Remaining: access tokens, arbitrary instances, bookmarks/favorites/
+lists/hashtags/followed views, card images, `reblogs`/`replies`/`text-posts`
+options, and per-instance categories.
+
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
