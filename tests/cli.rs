@@ -346,6 +346,8 @@ mod cancellation {
             Err(e) => panic!("{e}"),
         });
         let mut socket = connection.unwrap();
+        // Accepted sockets can inherit nonblocking mode on macOS.
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
