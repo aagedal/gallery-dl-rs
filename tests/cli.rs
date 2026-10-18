@@ -108,6 +108,25 @@ fn partial_input_failure_keeps_successful_results_and_returns_failure() {
 }
 
 #[test]
+fn json_inspection_keeps_input_order_and_deduplicates_after_failures() {
+    let output = binary()
+        .args([
+            "-j",
+            "https://example.com/b.jpg",
+            "https://example.com/page",
+            "https://example.com/a.jpg",
+            "https://example.com/b.jpg",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(items.as_array().unwrap().len(), 2);
+    assert_eq!(items[0]["url"], "https://example.com/b.jpg");
+    assert_eq!(items[1]["url"], "https://example.com/a.jpg");
+}
+
+#[test]
 fn zero_concurrency_is_rejected() {
     assert!(
         !binary()
@@ -314,6 +333,181 @@ mod cancellation {
         std::fs::read_dir(path)
             .map(|entries| entries.count())
             .unwrap_or(0)
+    }
+
+    fn accept_request(listener: &TcpListener) -> std::net::TcpStream {
+        let mut connection = None;
+        wait_until(|| match listener.accept() {
+            Ok((socket, _)) => {
+                connection = Some(socket);
+                true
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
+            Err(e) => panic!("{e}"),
+        });
+        let mut socket = connection.unwrap();
+        // Accepted sockets can inherit nonblocking mode on macOS.
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0; 1024];
+        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            let count = socket.read(&mut buffer).unwrap();
+            assert_ne!(count, 0);
+            request.extend_from_slice(&buffer[..count]);
+        }
+        socket
+    }
+
+    fn waiting_backend(root: &Path, response: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let script = root.join("backend");
+        // Keep the directly owned shell alive so cancellation can terminate it.
+        std::fs::write(&script, format!(
+            "#!/bin/sh\nprintf '%s' \"$$\" > \"$0.pid\"\nwhile [ ! -f \"$0.release\" ]; do sleep 0.02; done\nprintf '%s' '{}'\n", response
+        )).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        script
+    }
+
+    #[test]
+    fn downloads_publish_while_later_extraction_waits_and_failures_continue() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/photo.jpg", listener.local_addr().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        let script = waiting_backend(root.path(), "[]");
+        let item = gallery_dl_rs::extract::direct(&gallery_dl_rs::extract::http_url(&url).unwrap())
+            .unwrap();
+        let destination = root.path().join("downloads");
+        let saved = gallery_dl_rs::download::destination(&destination, &item);
+        let mut child = Running(Some(
+            binary()
+                .arg("-d")
+                .arg(&destination)
+                .arg("--extractor-command")
+                .arg(script)
+                .args([
+                    "--jobs",
+                    "2",
+                    "--retries",
+                    "0",
+                    &url,
+                    "https://x.com/user/status/1",
+                    "https://example.com/page",
+                    &url,
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let mut socket = accept_request(&listener);
+        wait_until(|| root.path().join("backend.pid").exists());
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nphoto")
+            .unwrap();
+        drop(socket);
+        // Completion must be polled even with the next extractor still pending.
+        wait_until(|| saved.exists());
+        assert!(child.0.as_mut().unwrap().try_wait().unwrap().is_none());
+        assert_eq!(std::fs::read(saved).unwrap(), b"photo");
+        std::fs::write(root.path().join("backend.release"), b"").unwrap();
+        wait_until(|| child.0.as_mut().unwrap().try_wait().unwrap().is_some());
+        let output = child.0.take().unwrap().wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("2 operation(s) failed"), "{stderr}");
+        assert_eq!(stderr.matches("downloaded ").count(), 1, "{stderr}");
+        // Duplicate input must not even issue another request after extraction fails.
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+    }
+
+    #[test]
+    fn full_download_capacity_defers_the_next_extraction() {
+        use std::os::unix::fs::PermissionsExt;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/photo.jpg", listener.local_addr().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("backend");
+        // At jobs=1 the first download must publish before another input is pulled.
+        std::fs::write(&script, "#!/bin/sh\ntest -f \"$PIPELINE_SAVED\" || exit 7\nprintf '%s' '[[3,\"https://example.com/unsupported.m3u8\",{}]]'\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let item = gallery_dl_rs::extract::direct(&gallery_dl_rs::extract::http_url(&url).unwrap())
+            .unwrap();
+        let destination = root.path().join("downloads");
+        let saved = gallery_dl_rs::download::destination(&destination, &item);
+        let mut child = Running(Some(
+            binary()
+                .arg("-d")
+                .arg(&destination)
+                .arg("--extractor-command")
+                .arg(script)
+                .env("PIPELINE_SAVED", saved)
+                .args(["--jobs", "1", &url, "https://x.com/user/status/1"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let mut socket = accept_request(&listener);
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nphoto")
+            .unwrap();
+        drop(socket);
+        wait_until(|| child.0.as_mut().unwrap().try_wait().unwrap().is_some());
+        let output = child.0.take().unwrap().wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(stderr.contains("companion yt-dlp-rs adapter"), "{stderr}");
+        assert!(!stderr.contains("extraction failed"), "{stderr}");
+        assert!(stderr.contains("1 operation(s) failed"), "{stderr}");
+    }
+
+    #[test]
+    fn ctrl_c_cancels_extraction_and_download_together() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/photo.jpg", listener.local_addr().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        let script = waiting_backend(root.path(), "[]");
+        let destination = root.path().join("downloads");
+        let child = Running(Some(
+            binary()
+                .arg("-d")
+                .arg(&destination)
+                .arg("--extractor-command")
+                .arg(script)
+                .args(["--jobs", "2", &url, "https://x.com/user/status/1"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let mut socket = accept_request(&listener);
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\npartial",
+            )
+            .unwrap();
+        wait_until(|| file_count(&destination.join("direct")) == 1);
+        let pid_file = root.path().join("backend.pid");
+        wait_until(|| std::fs::read_to_string(&pid_file).is_ok_and(|s| !s.is_empty()));
+        let pid = std::fs::read_to_string(pid_file).unwrap();
+        interrupt(child);
+        assert_eq!(file_count(&destination.join("direct")), 0);
+        wait_until(|| {
+            let state = Command::new("ps")
+                .args(["-o", "stat=", "-p", &pid])
+                .stderr(Stdio::null())
+                .output()
+                .unwrap();
+            let state = String::from_utf8_lossy(&state.stdout);
+            state.trim().is_empty() || state.trim().starts_with('Z')
+        });
     }
 
     #[test]

@@ -7,7 +7,8 @@ use gallery_dl_rs::{
     extract::{self, Backend},
     instagram::Instagram,
 };
-use std::{collections::HashSet, path::PathBuf, time::Duration};
+use sha2::{Digest, Sha256};
+use std::{cell::Cell, collections::HashSet, path::PathBuf, time::Duration};
 
 #[derive(Parser)]
 #[command(
@@ -105,58 +106,57 @@ async fn run(args: Args) -> Result<()> {
         config: args.config,
         timeout: Duration::from_secs(args.extraction_timeout),
     };
-    let mut media = Vec::new();
-    let mut failed = 0;
-    for (index, source) in args.urls.iter().enumerate() {
-        let result = async {
-            let url = extract::http_url(source)?;
-            // Social pages always go through their extractor, even if their path
-            // happens to end with a media extension.
-            if extract::social_site(&url).is_some() {
-                match &native {
-                    Some(native) if extract::social_site(&url) == Some("instagram") => native.extract(&url).await,
-                    Some(_) => Err(error("native extraction currently supports Instagram single posts only; use --extractor compatibility")),
-                    None => backend.extract(&url).await,
-                }
-            } else if let Some(item) = extract::direct(&url) {
-                Ok(vec![item])
-            } else {
-                Err(error(
-                    "unsupported URL; expected a social URL or direct media file",
-                ))
-            }
-        }
-        .await;
-        match result {
-            Ok(items) => media.extend(items),
-            Err(e) => {
-                eprintln!("extraction failed for input {}: {e}", index + 1);
-                failed += 1;
-            }
-        }
-    }
+    let failed = Cell::new(0);
     let mut seen = HashSet::new();
-    media.retain(|item| seen.insert(item.identity()));
+    // Pull one input at a time, retaining only its results and active downloads.
+    // buffer_unordered below supplies backpressure when all download slots are full.
+    let media = stream::iter(args.urls.iter().enumerate())
+        .then(|(index, source)| {
+            let native = &native;
+            let backend = &backend;
+            let failed = &failed;
+            async move {
+                let result = extract_input(source, native.as_ref(), backend).await;
+                match result {
+                    Ok(items) => items,
+                    Err(e) => {
+                        eprintln!("extraction failed for input {}: {e}", index + 1);
+                        failed.set(failed.get() + 1);
+                        Vec::new()
+                    }
+                }
+            }
+        })
+        .flat_map(stream::iter)
+        .filter(|item| {
+            // Keep fixed-size digests instead of retaining URLs, headers, or inline manifests.
+            let identity: [u8; 32] = Sha256::digest(item.identity().as_bytes()).into();
+            std::future::ready(seen.insert(identity))
+        });
+    tokio::pin!(media);
     if args.dump_json {
+        let media: Vec<_> = media.collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
     } else if args.get_urls {
-        for item in &media {
+        while let Some(item) = media.next().await {
             println!("{}", item.url);
         }
     } else {
         let client = download::client(Duration::from_secs(args.timeout))?;
-        let results = stream::iter(media.iter().map(|item| {
-            download::download_with_options(
-                &client,
-                &args.destination,
-                item,
-                DownloadOptions {
-                    retries: args.retries,
-                    write_metadata: args.write_metadata,
-                },
-            )
-        }))
-        .buffer_unordered(args.jobs as usize);
+        let results =
+            media
+                .map(|item| {
+                    let client = &client;
+                    let destination = &args.destination;
+                    let options = DownloadOptions {
+                        retries: args.retries,
+                        write_metadata: args.write_metadata,
+                    };
+                    async move {
+                        download::download_with_options(client, destination, &item, options).await
+                    }
+                })
+                .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
         while let Some(result) = results.next().await {
             match result {
@@ -164,14 +164,42 @@ async fn run(args: Args) -> Result<()> {
                 Ok(Outcome::Skipped(path)) => eprintln!("skipped {}", path.display()),
                 Err(e) => {
                     eprintln!("download failed: {e}");
-                    failed += 1;
+                    failed.set(failed.get() + 1);
                 }
             }
         }
     }
+    let failed = failed.get();
     if failed > 0 {
         Err(error(format!("{failed} operation(s) failed")))
     } else {
         Ok(())
+    }
+}
+
+async fn extract_input(
+    source: &str,
+    native: Option<&Instagram>,
+    backend: &Backend,
+) -> Result<Vec<extract::Media>> {
+    let url = extract::http_url(source)?;
+    // Social pages always go through their extractor, even if their path
+    // happens to end with a media extension.
+    if extract::social_site(&url).is_some() {
+        match native {
+            Some(native) if extract::social_site(&url) == Some("instagram") => {
+                native.extract(&url).await
+            }
+            Some(_) => Err(error(
+                "native extraction currently supports Instagram single posts only; use --extractor compatibility",
+            )),
+            None => backend.extract(&url).await,
+        }
+    } else if let Some(item) = extract::direct(&url) {
+        Ok(vec![item])
+    } else {
+        Err(error(
+            "unsupported URL; expected a social URL or direct media file",
+        ))
     }
 }

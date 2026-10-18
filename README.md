@@ -88,6 +88,10 @@ Instagram session cookies are never copied to media hosts.
   depend on the installed gallery-dl version and the account's access.
 - Direct media links use a native extractor. Arbitrary HTML galleries are not
   implemented in this milestone.
+- Download mode pulls extraction results one input at a time and feeds at most
+  `--jobs` active downloads. Downloads can finish while the next input is being
+  extracted; a full download pipeline pauses extraction of later inputs.
+  `-g` emits deduplicated URLs as inputs finish; `-j` retains one ordered JSON array.
 - Media bodies stream to disk with bounded download concurrency. Each completed
   file is published from a temporary file without overwriting an existing file.
 - `--write-metadata` saves `<media filename>.json` beside completed media, including
@@ -161,10 +165,15 @@ forwards per-item `_http_headers`, but does not import the backend's session coo
 jar or TLS/browser impersonation. Media requiring those features may fail even
 when extraction succeeds.
 
-Extraction results are currently buffered before downloads begin. Very large
-profiles can exhaust memory or hit `--extraction-timeout`; start with individual
-posts. Signed URL changes produce new filenames, so skipping existing files is
-not a permanent archive. Existing files are assumed complete, without revalidation.
+Each social input still buffers its entire extraction result before handing media
+to the download pipeline. Very large profiles can exhaust memory or hit
+`--extraction-timeout`; start with individual posts. Download mode retains at most
+one input’s pending media plus active jobs, while the deduplication set keeps a
+fixed-size SHA-256 digest per unique job across all inputs. `-j` additionally buffers
+all unique media for its JSON array. True per-item extraction streaming and native
+pagination remain planned. Signed URL changes produce new filenames, so skipping
+existing files is not a permanent archive. Existing files are assumed complete,
+without revalidation.
 
 ## Development
 
