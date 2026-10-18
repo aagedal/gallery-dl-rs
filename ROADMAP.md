@@ -555,6 +555,13 @@ delays), bookmarks/favorites, following, rankings, searches, novels, sketch,
 pixivision, series, user avatars/backgrounds, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
 
+**Implemented experimental native DeviantArt:** deviations, user galleries and
+folders via the OAuth2 API (client credentials, overridable `client-id`/
+`client-secret`). Remaining: user OAuth (refresh tokens) and private/premium
+content, literature/journal text, favorites, collections, scraps, stash, tags,
+search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
+and metadata options, and upstream's `{title}_{index}` filenames.
+
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.

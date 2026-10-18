@@ -346,6 +346,22 @@ width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
 is (illustration, page). Plain `i.pximg.net` links stay direct downloads and
 usually fail without the Referer.
 
+Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
+category) uses the OAuth2 API with a client-credentials token (upstream's public
+client unless `extractor.deviantart.client-id`/`client-secret` are set; accepted
+only in the `deviantart` category, never echoed), cached for the run and
+refreshed once on HTTP 401. Supported: `www.deviantart.com/USER/art/SLUG-ID`
+(UUID from the page's `DeviantArt://deviation/UUID` app link, then
+`deviation/UUID`), `USER`, `USER/gallery[/all]` (`gallery/all`) and
+`USER/gallery/FOLDER/NAME` (folder UUID matched by name via `gallery/folders`);
+legacy `USER.deviantart.com` hosts are normalized. Listings use offset paging
+capped at 200 pages. Media are `content.src`, or the `deviation/download`
+original for downloadable deviations; HTTPS on `*.wixmp.com`/`*.deviantart.net`
+only. Deviations without image content (literature, journals) are skipped.
+`post_id`/`media_id`/`id` is the deviation UUID, `username` the author, caption
+the title, with `published_time` and width/height. Default filenames are
+`{post_id}.{extension}`; archive identity is the UUID.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.
