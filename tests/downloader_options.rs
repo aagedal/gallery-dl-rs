@@ -123,3 +123,28 @@ async fn metadata_dates_override_http_and_absent_values_fall_back() {
     );
     assert_eq!(fetch(client, None).await, LAST_MODIFIED);
 }
+
+#[tokio::test]
+async fn sleep_waits_before_network_downloads_but_not_existing_files() {
+    let client = download::client(Duration::from_secs(5))
+        .unwrap()
+        .with_sleep(Some(
+            gallery_dl_rs::sleep::SleepRange::parse("0.3").unwrap(),
+        ));
+    let root = tempfile::tempdir().unwrap();
+    let (url, handle) = server();
+    let media = item(&url, None);
+    let start = Instant::now();
+    let outcome = download::download(&client, root.path(), &media, 0)
+        .await
+        .unwrap();
+    handle.join().unwrap();
+    assert!(start.elapsed() >= Duration::from_millis(300));
+    assert!(matches!(outcome, Outcome::Downloaded(_)));
+    let start = Instant::now();
+    let outcome = download::download(&client, root.path(), &media, 0)
+        .await
+        .unwrap();
+    assert!(matches!(outcome, Outcome::Skipped(_)));
+    assert!(start.elapsed() < Duration::from_millis(300));
+}

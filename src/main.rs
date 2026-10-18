@@ -103,6 +103,9 @@ struct Args {
     /// Set new files' modification times from a metadata date field, e.g. date
     #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "date")]
     mtime: Option<String>,
+    /// Seconds to wait before each download, as SECONDS or MIN-MAX
+    #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
+    sleep: Option<gallery_dl_rs::sleep::SleepRange>,
     /// SQLite history of completed media (gallery-dl-rs format)
     #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
     download_archive: Option<PathBuf>,
@@ -161,6 +164,10 @@ fn parse_date_arg(value: &str) -> std::result::Result<i64, String> {
 
 fn parse_size(value: &str) -> std::result::Result<u64, String> {
     parse_bytes(value).map_err(|e| e.to_string())
+}
+
+fn parse_sleep(value: &str) -> std::result::Result<gallery_dl_rs::sleep::SleepRange, String> {
+    gallery_dl_rs::sleep::SleepRange::parse(value).map_err(|e| e.to_string())
 }
 
 fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
@@ -329,7 +336,8 @@ async fn run(args: Args) -> Result<()> {
         let client = download::client(Duration::from_secs(60))?
             .with_resume(args.resume)
             .with_http_mtime(!args.no_mtime)
-            .with_metadata_mtime(args.mtime.clone());
+            .with_metadata_mtime(args.mtime.clone())
+            .with_sleep(args.sleep);
         let results = media
             .map(|item| {
                 let settings = &settings[item.category.as_str()];

@@ -30,6 +30,7 @@ pub struct DownloadClient {
     network: NetworkOptions,
     mtime_http: bool,
     mtime_field: Option<String>,
+    sleep: Option<crate::sleep::SleepRange>,
 }
 
 /// Modification time policy for newly published files.
@@ -109,6 +110,12 @@ impl DownloadClient {
         self
     }
 
+    /// Wait before each network download, after archive and existing-file checks.
+    pub fn with_sleep(mut self, sleep: Option<crate::sleep::SleepRange>) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
     fn mtime(&self, media: &Media) -> Mtime {
         let fixed = self.mtime_field.as_ref().and_then(|field| {
             let seconds = match crate::filter::context(media).get(field.as_str())? {
@@ -150,6 +157,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         network: NetworkOptions::default(),
         mtime_http: true,
         mtime_field: None,
+        sleep: None,
     })
 }
 
@@ -415,6 +423,9 @@ async fn download_media(
     let mut _primary_reservation = None;
     let mut first = true;
     let mtime = client.mtime(media);
+    if let Some(sleep) = &client.sleep {
+        sleep.wait().await;
+    }
     loop {
         if !first {
             match std::fs::symlink_metadata(&path) {

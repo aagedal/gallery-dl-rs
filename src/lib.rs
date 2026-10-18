@@ -23,6 +23,7 @@ mod range;
 mod resume;
 pub mod selection;
 pub mod size;
+pub mod sleep;
 mod transport;
 pub mod twitter;
 
