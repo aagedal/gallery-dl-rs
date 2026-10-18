@@ -86,8 +86,7 @@ shared extraction interface that emits media, post metadata, and child URLs.
   media siblings while suppressing overlapping pages/pins/quotes. Backpressure,
   source-order date/range selection, active budgets, cancellation, credential
   scoping, and compatibility forwarding are tested. Authenticated live traversal,
-  real response fixtures, configurable uniqueness, and dynamic operation refresh
-  remain unfinished.
+  real response fixtures and dynamic operation refresh remain unfinished.
   **Implemented experimental search and root timelines:** ordinary/numeric profile
   roots and `/timeline` share an initial strategy-selected feed, a search for
   older links, and an unfiltered search only if the link search has no post
@@ -126,7 +125,20 @@ shared extraction interface that emits media, post metadata, and child URLs.
   compatibility, date, and HTTP tests cover missing/late focal posts, context
   order, identity, bounds, archives, cookies/signing, deadlines, cancellation,
   and late errors. Real response captures, authenticated live verification,
-  timeline `expand`, broader thread variants, and extended metadata remain.
+  broader thread variants and extended metadata remain.
+
+
+  **Implemented experimental thread expansion and uniqueness:** scoped `expand`
+  traverses each conversation ID once per input using lazy child TweetDetail
+  pages. Child posts do not recursively expand; failed detail requests fall back
+  to the original post even after earlier child output. Original-retweet lookup
+  uses the target conversation; missing IDs skip while explicit false bypasses
+  expansion. Child traversal shares parent budgets, reply context, cancellation,
+  and source-order date selection. Scoped `unique: false` retains repeated post
+  batches and their siblings, including across CLI inputs; once-per-conversation
+  expansion stays independent. Native runtime, strict configuration,
+  compatibility forwarding, and CLI tests cover these options. Authenticated live
+  verification and sanitized real thread fixtures remain required.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and

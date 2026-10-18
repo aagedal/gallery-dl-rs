@@ -21,7 +21,8 @@ use gallery_dl_rs::{
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
     twitter::{
-        ConversationMode, ExpansionOptions, ProfileOptions, StatusOptions, TimelineOptions, Twitter,
+        ConversationMode, ExpansionOptions, ProfileOptions, StatusOptions, ThreadOptions,
+        TimelineOptions, Twitter,
     },
 };
 use sha2::{Digest, Sha256};
@@ -208,6 +209,7 @@ async fn run(args: Args) -> Result<()> {
                             || gallery_dl_rs::twitter::is_collection_url(&url)
                             || (extract::social_site(&url) == Some("twitter")
                                 && (settings["twitter"].options.quoted == Some(true)
+                                    || settings["twitter"].options.expand == Some(true)
                                     || (gallery_dl_rs::twitter::post_id(&url).is_ok()
                                         && matches!(
                                             settings["twitter"].options.conversations,
@@ -263,6 +265,9 @@ async fn run(args: Args) -> Result<()> {
             item
         })
         .filter(|item| {
+            if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
+                return std::future::ready(true);
+            }
             // Keep fixed-size digests instead of retaining URLs, headers, or inline manifests.
             let identity: [u8; 32] = Sha256::digest(item.identity().as_bytes()).into();
             std::future::ready(seen.insert(identity))
@@ -435,6 +440,10 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_thread_options(ThreadOptions {
+                                        expand: options.expand.unwrap_or(false),
+                                        unique: options.unique.unwrap_or(true),
+                                    })
                                     .with_status_options(StatusOptions {
                                         endpoint: options.tweet_endpoint.unwrap_or_default(),
                                         conversations: options.conversations.unwrap_or_default(),
@@ -503,6 +512,8 @@ fn extract_input<'a>(
                                 .then_some(options.retweets)
                                 .flatten(),
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
+                            expand: (category == "twitter").then_some(options.expand).flatten(),
+                            unique: (category == "twitter").then_some(options.unique).flatten(),
                             tweet_endpoint: (category == "twitter")
                                 .then_some(options.tweet_endpoint)
                                 .flatten(),
@@ -586,6 +597,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         browser_cookies: None,
         retweets: None,
         quoted: None,
+        expand: None,
+        unique: None,
         tweet_endpoint: None,
         conversations: None,
         pinned: None,

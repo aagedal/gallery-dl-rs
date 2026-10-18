@@ -999,3 +999,75 @@ fn twitter_status_configuration_rejects_malformed_and_duplicate_values_privately
         }
     }
 }
+
+#[test]
+fn twitter_thread_settings_follow_scopes_and_preserve_false_overlays() {
+    let config = parse(
+        r#"{"extractor":{"expand":true,"unique":true,"twitter":{"expand":false,"unique":false}}}"#,
+    )
+    .unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!((twitter.expand, twitter.unique), (Some(false), Some(false)));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(
+        (inherited.expand, inherited.unique),
+        (Some(true), Some(true))
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = inherited.overlay(&Options {
+        expand: Some(false),
+        unique: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(
+        (disabled.expand, disabled.unique),
+        (Some(false), Some(false))
+    );
+    let root = parse(r#"{"expand":false,"unique":false,"extractor":{"expand":true,"unique":true,"twitter":{"expand":true,"unique":true}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!((options.expand, options.unique), (Some(false), Some(false)));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!((absent.expand, absent.unique), (None, None));
+}
+
+#[test]
+fn twitter_thread_settings_reject_types_and_duplicates_privately_in_every_scope() {
+    use serde_json::json;
+    for field in ["expand", "unique"] {
+        for value in [
+            json!(null),
+            json!(0),
+            json!(1),
+            json!("false"),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+        ] {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(!message.contains("private-key"));
+                assert!(!message.contains("private-value"));
+            }
+        }
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}

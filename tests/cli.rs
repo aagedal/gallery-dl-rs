@@ -1061,3 +1061,110 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         assert!(!log.exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn twitter_thread_options_forward_scopes_and_preserve_duplicates_when_disabled() {
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(&backend, r##"#!/bin/sh
+printf '%s\n' "$@" > "$THREAD_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/first.jpg",{"filename":"first","extension":"jpg"}],[3,"https://cdn.example/sibling.jpg",{"filename":"sibling","extension":"jpg"}],[3,"https://cdn.example/first.jpg",{"filename":"first","extension":"jpg"}]]'
+"##).unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, expected) in [
+        (json!({}), vec![]),
+        (
+            json!({"extractor":{"twitter":{"expand":true,"unique":false}}}),
+            vec!["expand=true", "unique=false"],
+        ),
+        (
+            json!({"extractor":{"expand":false,"unique":false,"twitter":{"expand":true,"unique":true}}}),
+            vec!["expand=true", "unique=true"],
+        ),
+        (
+            json!({"expand":false,"unique":false,"extractor":{"twitter":{"expand":true,"unique":true}}}),
+            vec!["expand=false", "unique=false"],
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/person/status/1", true),
+            ("https://instagram.com/p/example/", false),
+        ] {
+            let output = binary()
+                .env("THREAD_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .args(["-g", url, url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let args: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = args
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("expand=") || value.starts_with("unique="))
+                .collect();
+            assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
+            let one = [
+                "https://cdn.example/first.jpg",
+                "https://cdn.example/sibling.jpg",
+            ];
+            let duplicates = [
+                "https://cdn.example/first.jpg",
+                "https://cdn.example/sibling.jpg",
+                "https://cdn.example/first.jpg",
+                "https://cdn.example/first.jpg",
+                "https://cdn.example/sibling.jpg",
+                "https://cdn.example/first.jpg",
+            ];
+            let urls: Vec<_> = std::str::from_utf8(&output.stdout)
+                .unwrap()
+                .lines()
+                .collect();
+            assert_eq!(
+                urls,
+                if twitter && expected.contains(&"unique=false") {
+                    duplicates.as_slice()
+                } else {
+                    one.as_slice()
+                }
+            );
+        }
+    }
+    std::fs::remove_file(&log).unwrap();
+    for field in ["expand", "unique"] {
+        std::fs::write(
+            &config,
+            serde_json::to_vec(&json!({"extractor":{"twitter":{(field):"PRIVATE-THREAD-VALUE"}}}))
+                .unwrap(),
+        )
+        .unwrap();
+        let output = binary()
+            .env("THREAD_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&backend)
+            .args(["-g", "https://x.com/person/status/1"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-THREAD-VALUE"));
+        assert!(!log.exists());
+    }
+}

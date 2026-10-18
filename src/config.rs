@@ -38,6 +38,10 @@ pub struct Options {
     pub retweets: Option<crate::twitter::RetweetMode>,
     /// Include media from quoted posts.
     pub quoted: Option<bool>,
+    /// Expand each source post's conversation once per input.
+    pub expand: Option<bool>,
+    /// Suppress duplicate Twitter posts.
+    pub unique: Option<bool>,
     /// Endpoint used to resolve a single Twitter post.
     pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
     /// Include posts from the requested status conversation.
@@ -94,6 +98,8 @@ impl Options {
             date_after: overrides.date_after.or(self.date_after),
             retweets: overrides.retweets.or(self.retweets),
             quoted: overrides.quoted.or(self.quoted),
+            expand: overrides.expand.or(self.expand),
+            unique: overrides.unique.or(self.unique),
             tweet_endpoint: overrides.tweet_endpoint.or(self.tweet_endpoint),
             conversations: overrides.conversations.or(self.conversations),
             pinned: overrides.pinned.or(self.pinned),
@@ -153,6 +159,8 @@ struct RawRoot {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    expand: Field,
+    unique: Field,
     tweet_endpoint: Field,
     conversations: Field,
     pinned: Field,
@@ -185,6 +193,8 @@ struct RawExtractor {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    expand: Field,
+    unique: Field,
     tweet_endpoint: Field,
     conversations: Field,
     pinned: Field,
@@ -220,6 +230,8 @@ struct RawOptions {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    expand: Field,
+    unique: Field,
     tweet_endpoint: Field,
     conversations: Field,
     pinned: Field,
@@ -318,6 +330,8 @@ impl Config {
             date_after: root.date_after,
             retweets: root.retweets,
             quoted: root.quoted,
+            expand: root.expand,
+            unique: root.unique,
             tweet_endpoint: root.tweet_endpoint,
             conversations: root.conversations,
             pinned: root.pinned,
@@ -348,6 +362,8 @@ impl Config {
             date_after: extractor.date_after,
             retweets: extractor.retweets,
             quoted: extractor.quoted,
+            expand: extractor.expand,
+            unique: extractor.unique,
             tweet_endpoint: extractor.tweet_endpoint,
             conversations: extractor.conversations,
             pinned: extractor.pinned,
@@ -416,6 +432,16 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration quoted must be a boolean")),
+        };
+        let expand = match self.expand.0 {
+            None => None,
+            Some(Value::Bool(value)) => Some(value),
+            Some(_) => return Err(error("native configuration expand must be a boolean")),
+        };
+        let unique = match self.unique.0 {
+            None => None,
+            Some(Value::Bool(value)) => Some(value),
+            Some(_) => return Err(error("native configuration unique must be a boolean")),
         };
         let tweet_endpoint = match self.tweet_endpoint.0 {
             None => None,
@@ -608,6 +634,8 @@ impl RawOptions {
             date_after: date(self.date_after)?,
             retweets,
             quoted,
+            expand,
+            unique,
             tweet_endpoint,
             conversations,
             pinned,

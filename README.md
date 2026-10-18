@@ -261,6 +261,23 @@ All detail behavior has synthetic/parser/local HTTP coverage; authenticated live
 verification and sanitized real captures remain required. See the
 [conversation protocol notes](tests/fixtures/twitter/detail_README.md).
 
+Scoped X `"expand": true` replaces each source post with a lazy TweetDetail
+traversal for its conversation ID. Each conversation expands once per input,
+including when duplicate output is enabled. Child posts do not recursively start
+new thread traversals. Detail API failures fall back to the original post,
+including after earlier child media has been emitted. Missing, null, or empty
+conversation IDs are skipped; an explicit false ID keeps the original post.
+Expansion shares the parent active-time budget, reply-author context, and
+range/drop cancellation. Source-order date filtering applies while expanding.
+The default is `"expand": false`.
+
+Scoped X `"unique": true` (default) suppresses repeated post batches while keeping
+all media siblings. `false` retains repeated batches and disables the CLI's
+cross-input media deduplication for X. Existing-file and archive checks still
+apply when downloading. Both options forward to compatibility mode when explicit.
+Synthetic and local HTTP tests cover these settings; authenticated live thread
+expansion remains unverified.
+
 Experimental X profile timelines use `Twitter::stream` and the native CLI at
 `/USERNAME/media`, `/USERNAME/tweets`, `/USERNAME/with_replies`, and
 `/USERNAME/highlights`, with equivalent `/id:USER_ID/TAB` forms on X/Twitter hosts.
@@ -275,7 +292,7 @@ preserve source order. Each post shares single-post media and archive handling.
 The stream retains one bounded page, pending jobs, and sets of fixed-size cursor
 and emitted-post identity digests. All media siblings from a post's first
 occurrence are kept; overlapping pages, pins, and quote expansion do not emit the
-same post again within that input. Later pages wait until current jobs drain;
+same post again within that input by default. Later pages wait until current jobs drain;
 dropping the stream or reaching a file range stops later requests. Active
 extraction time includes profile lookup, transaction bootstrap, requests, and
 retries, excluding consumer pauses. Empty pages with an advancing Bottom cursor
@@ -844,8 +861,8 @@ its memory or hit `--extraction-timeout` before any output arrives. Native
 status extraction buffers each media batch, and conversation modes can buffer
 pre-focal context up to their documented limit. The Rust download
 pipeline retains one message buffer plus active jobs, while deduplication keeps
-a fixed-size SHA-256 digest per unique job across all inputs. `-j` additionally
-buffers all unique media for its JSON array. Native collection streams now pull supported pages and jobs lazily; further
+a fixed-size SHA-256 digest per unique job across all inputs, except for X with
+`unique: false`. `-j` additionally buffers all selected media for its JSON array. Native collection streams now pull supported pages and jobs lazily; further
 sites and collection types remain planned. Library callers can use `Backend::stream`;
 `Backend::extract` deliberately collects a complete vector. Signed URL changes produce new filenames; use the
 download archive to skip previously saved social media by stable IDs. Existing files are assumed complete,

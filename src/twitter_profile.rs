@@ -9,6 +9,7 @@ enum Source {
     Search(search::Paging),
     Feed(collections::Collection),
     Detail(detail::Selection),
+    RestId(String),
 }
 enum RootStage {
     Initial { last: Option<String> },
@@ -33,6 +34,9 @@ struct State {
     pending: VecDeque<Media>,
     posts: VecDeque<(String, Value)>,
     expansion: Option<expansion::Engine>,
+    thread: Option<threads::Frame>,
+    conversations: HashSet<[u8; 32]>,
+    thread_cache: BTreeMap<String, Value>,
     done: bool,
     budget: Duration,
 }
@@ -98,6 +102,9 @@ impl Twitter {
     }
 
     pub(super) fn post_stream_at(&self, endpoint: Url, id: String) -> BoxStream<'_, Result<Media>> {
+        if self.thread_options.expand {
+            return self.restid_stream_at(endpoint, id);
+        }
         struct PostState {
             endpoint: Url,
             id: String,
@@ -150,6 +157,7 @@ impl Twitter {
                         state.engine.as_mut().unwrap(),
                         &state.endpoint,
                         Some(&state.known),
+                        None,
                     )
                     .await
                 })
@@ -158,7 +166,12 @@ impl Twitter {
                 state.budget = state.budget.saturating_sub(started.elapsed());
                 match result {
                     Ok(Some(media)) => {
-                        if !queue_unique(media, &mut state.pending, &mut state.seen) {
+                        if !queue_unique(
+                            media,
+                            &mut state.pending,
+                            &mut state.seen,
+                            self.thread_options.unique,
+                        ) {
                             tokio::task::yield_now().await;
                         }
                     }
@@ -178,6 +191,7 @@ impl Twitter {
         engine: &mut expansion::Engine,
         base: &Url,
         known: Option<&BTreeMap<String, Value>>,
+        extra: Option<&BTreeMap<String, Value>>,
     ) -> Result<Option<Vec<Media>>> {
         loop {
             match engine.next()? {
@@ -189,7 +203,10 @@ impl Twitter {
                     return Ok(Some(media));
                 }
                 expansion::Action::Fetch(id) => {
-                    if let Some(value) = known.and_then(|known| known.get(&id)) {
+                    if let Some(value) = known
+                        .and_then(|known| known.get(&id))
+                        .or_else(|| extra.and_then(|known| known.get(&id)))
+                    {
                         engine.supply_value(value.clone())?;
                         continue;
                     }
@@ -277,6 +294,11 @@ impl Twitter {
         self.collection_stream(None, Source::Feed(kind), None, base)
     }
 
+    pub(super) fn restid_stream_at(&self, target: Url, id: String) -> BoxStream<'_, Result<Media>> {
+        // Keep the exact initial endpoint for fixture injection and request scoping.
+        self.collection_stream(None, Source::RestId(id), None, target)
+    }
+
     fn collection_stream(
         &self,
         input: Option<ProfileInput>,
@@ -308,6 +330,9 @@ impl Twitter {
             pending: VecDeque::new(),
             posts: VecDeque::new(),
             expansion: None,
+            thread: None,
+            conversations: HashSet::new(),
+            thread_cache: BTreeMap::new(),
             done: false,
             budget: self.timeout,
         };
@@ -320,6 +345,7 @@ impl Twitter {
                     && state.root.is_none()
                     && state.posts.is_empty()
                     && state.expansion.is_none()
+                    && state.thread.is_none()
                 {
                     return None;
                 }
@@ -333,6 +359,7 @@ impl Twitter {
                     state.root = None;
                     state.posts.clear();
                     state.expansion = None;
+                    state.thread = None;
                     return Some((Err(e), state));
                 }
             }
@@ -341,28 +368,99 @@ impl Twitter {
     }
 
     async fn media_page(&self, state: &mut State) -> Result<()> {
-        if state.expansion.is_none()
-            && let Some((id, post)) = state.posts.pop_front()
-        {
-            // Timeline parsing has already validated membership and post identity.
-            state.expansion = Some(
-                expansion::Engine::new(post, id, self.expansion, true)
-                    .with_replies(self.profile_options.replies, state.owner.clone()),
-            );
-        }
         if let Some(engine) = state.expansion.as_mut() {
-            let known = match &state.source {
-                Source::Detail(selection) => Some(&selection.known),
-                _ => None,
+            let known = if let Some(thread) = &state.thread {
+                Some(&thread.known)
+            } else {
+                match &state.source {
+                    Source::Detail(selection) => Some(&selection.known),
+                    _ => None,
+                }
             };
-            match self.expand_next_known(engine, &state.base, known).await? {
+            match self
+                .expand_next_known(engine, &state.base, known, Some(&state.thread_cache))
+                .await?
+            {
                 Some(media) => {
-                    if !queue_unique(media, &mut state.pending, &mut state.seen) {
+                    if !queue_unique(
+                        media,
+                        &mut state.pending,
+                        &mut state.seen,
+                        self.thread_options.unique,
+                    ) {
                         tokio::task::yield_now().await;
                     }
                 }
                 None => state.expansion = None,
             }
+            return Ok(());
+        }
+        if let Some(thread) = state.thread.as_mut() {
+            if let Some((id, post)) = thread.posts.pop_front() {
+                state.expansion = Some(
+                    expansion::Engine::new(post, id, self.expansion, true)
+                        .with_replies(self.profile_options.replies, state.owner.clone()),
+                );
+                return Ok(());
+            }
+            if thread.done {
+                state.thread = None;
+                return Ok(());
+            }
+            let result = self.thread_page(thread, &state.base).await;
+            if result.is_err() {
+                // Upstream falls back to the original raw post on detail API failure.
+                let frame = state.thread.take().unwrap();
+                state.expansion = Some(
+                    expansion::Engine::new(
+                        frame.original.1,
+                        frame.original.0,
+                        self.expansion,
+                        true,
+                    )
+                    .with_replies(self.profile_options.replies, state.owner.clone()),
+                );
+            }
+            return Ok(());
+        }
+        if let Some((id, post)) = state.posts.pop_front() {
+            // RestId has only one parent and may have resolved its original author.
+            if !matches!(state.source, Source::RestId(_)) {
+                state.thread_cache.clear();
+            }
+            if self.thread_options.expand {
+                let available = match &state.source {
+                    Source::Detail(selection) => Some(&selection.known),
+                    _ => None,
+                };
+                let lookup = self
+                    .thread_lookup(&post, &state.base, &mut state.thread_cache, available)
+                    .await?;
+                match lookup {
+                    expansion::ThreadLookup::Id(cid) => {
+                        let digest = <[u8; 32]>::from(Sha256::digest(cid.as_bytes()));
+                        if state.conversations.insert(digest) {
+                            state.thread = Some(threads::Frame::new(
+                                cid,
+                                (id, post),
+                                self.profile_options.pinned,
+                            ));
+                        }
+                        tokio::task::yield_now().await;
+                        return Ok(());
+                    }
+                    expansion::ThreadLookup::Skip => {
+                        tokio::task::yield_now().await;
+                        return Ok(());
+                    }
+                    expansion::ThreadLookup::Bypass => {}
+                    expansion::ThreadLookup::Fetch(_) => unreachable!(),
+                }
+            }
+            state.expansion = Some(
+                expansion::Engine::new(post, id, self.expansion, true)
+                    .with_replies(self.profile_options.replies, state.owner.clone()),
+            );
             return Ok(());
         }
         if state.done {
@@ -385,7 +483,23 @@ impl Twitter {
             state.lookup_pending = false;
             return Ok(());
         }
+        if let Source::RestId(id) = &state.source {
+            let target = state.base.clone();
+            self.ensure_transaction_at(id, &target).await?;
+            let body = self.fetch(&target, id, true).await?;
+            let root = expansion::response_root(&body, id)?;
+            if self.profile_options.replies == ReplyMode::SelfOnly {
+                state.owner = Some(
+                    self.resolve_focal_owner(&root, &state.base, &mut state.thread_cache)
+                        .await?,
+                );
+            }
+            state.posts.push_back((id.clone(), root));
+            state.done = true;
+            return Ok(());
+        }
         let page = match &mut state.source {
+            Source::RestId(_) => unreachable!(),
             Source::Profile(tab) => {
                 let target = profile_endpoint(
                     &state.base,
@@ -507,6 +621,70 @@ impl Twitter {
         };
         state.posts = page.posts.into();
         Ok(())
+    }
+
+    async fn thread_page(&self, frame: &mut threads::Frame, base: &Url) -> Result<()> {
+        // A RestId parent's base is a complete status URL; detail uses its API directory.
+        let mut api_base = base.clone();
+        api_base.set_path("/i/api/graphql/");
+        api_base.set_query(None);
+        api_base.set_fragment(None);
+        let target = detail::endpoint_at(&api_base, &frame.id, frame.cursor.as_deref())?;
+        self.ensure_transaction_at(&frame.id, &target).await?;
+        let bytes = self.fetch(&target, &frame.id, true).await?;
+        let page = detail_parse::parse_page(&bytes, frame.pinned)?;
+        frame.pinned = false;
+        frame.done = page.done || (page.posts.is_empty() && !page.continue_empty);
+        let cursor = if frame.done { None } else { page.cursor };
+        if let Some(cursor) = &cursor {
+            let digest = <[u8; 32]>::from(Sha256::digest(cursor.as_bytes()));
+            if !frame.cursors.insert(digest) {
+                return Err(error("Twitter conversation cursor repeated"));
+            }
+        }
+        frame.cursor = cursor;
+        frame.known.clear();
+        for (id, value) in &page.posts {
+            frame
+                .known
+                .entry(id.clone())
+                .or_insert_with(|| value.clone());
+        }
+        frame.posts = page.posts.into();
+        Ok(())
+    }
+
+    async fn thread_lookup(
+        &self,
+        value: &Value,
+        base: &Url,
+        known: &mut BTreeMap<String, Value>,
+        available: Option<&BTreeMap<String, Value>>,
+    ) -> Result<expansion::ThreadLookup> {
+        loop {
+            match expansion::thread_lookup(value, self.expansion.retweets, known)? {
+                expansion::ThreadLookup::Fetch(id) => {
+                    if let Some(value) = available.and_then(|posts| posts.get(&id)) {
+                        known.insert(id, value.clone());
+                        continue;
+                    }
+                    let mut target = endpoint(&id)?;
+                    target
+                        .set_scheme(base.scheme())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    target
+                        .set_host(base.host_str())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    target
+                        .set_port(base.port())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    self.ensure_transaction_at(&id, &target).await?;
+                    let bytes = self.fetch(&target, &id, true).await?;
+                    known.insert(id.clone(), expansion::response_root(&bytes, &id)?);
+                }
+                lookup => return Ok(lookup),
+            }
+        }
     }
 
     async fn resolve_focal_owner(
@@ -740,10 +918,15 @@ fn queue_unique(
     media: Vec<Media>,
     pending: &mut VecDeque<Media>,
     seen: &mut HashSet<[u8; 32]>,
+    unique: bool,
 ) -> bool {
     let Some(first) = media.first() else {
         return false;
     };
+    if !unique {
+        pending.extend(media);
+        return true;
+    }
     let metadata = first.metadata.as_ref().unwrap();
     let digest = <[u8; 32]>::from(Sha256::digest(metadata.post_id.as_bytes()));
     if !seen.insert(digest) {

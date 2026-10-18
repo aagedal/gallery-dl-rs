@@ -404,3 +404,51 @@ pub(super) fn owner_lookup(
     }
     Err(error("Twitter linked post traversal limit exceeded"))
 }
+
+pub(super) enum ThreadLookup {
+    Id(String),
+    Bypass,
+    Skip,
+    Fetch(String),
+}
+pub(super) fn thread_lookup(
+    value: &Value,
+    mode: RetweetMode,
+    known: &BTreeMap<String, Value>,
+) -> Result<ThreadLookup> {
+    let mut value = value.clone();
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..=16 {
+        let tweet = unwrapped(&value)?;
+        let id = tweet["rest_id"]
+            .as_str()
+            .filter(|id| valid_id(id))
+            .ok_or_else(|| error("Twitter thread post identifier invalid"))?;
+        validated(tweet, id)?;
+        if !seen.insert(id.to_owned()) {
+            return Err(error(
+                "Twitter linked post cycle or traversal limit exceeded",
+            ));
+        }
+        if mode == RetweetMode::Original
+            && let Some(target) = link(tweet, "retweeted_status_result", "retweeted_status_id_str")?
+        {
+            if seen.len() > 16 {
+                return Err(error("Twitter linked post traversal limit exceeded"));
+            }
+            match target.value.or_else(|| known.get(&target.id).cloned()) {
+                Some(target) => value = target,
+                None => return Ok(ThreadLookup::Fetch(target.id)),
+            }
+            continue;
+        }
+        return match tweet.pointer("/legacy/conversation_id_str") {
+            None | Some(Value::Null) => Ok(ThreadLookup::Skip),
+            Some(Value::Bool(false)) => Ok(ThreadLookup::Bypass),
+            Some(Value::String(id)) if id.is_empty() => Ok(ThreadLookup::Skip),
+            Some(Value::String(id)) if valid_id(id) => Ok(ThreadLookup::Id(id.clone())),
+            _ => Err(error("Twitter conversation identifier invalid")),
+        };
+    }
+    Err(error("Twitter linked post traversal limit exceeded"))
+}

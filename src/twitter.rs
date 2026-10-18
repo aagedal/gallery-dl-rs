@@ -12,6 +12,9 @@ use crate::{
 #[path = "twitter_expansion.rs"]
 mod expansion;
 pub use expansion::{ExpansionOptions, RetweetMode, parse_response_with_options};
+#[path = "twitter_threads.rs"]
+mod threads;
+pub use threads::ThreadOptions;
 #[path = "twitter_detail.rs"]
 mod detail;
 pub use detail::{ConversationMode, StatusOptions, TweetEndpoint};
@@ -71,6 +74,7 @@ pub struct Twitter {
     profile_options: ProfileOptions,
     timeline_options: TimelineOptions,
     status_options: StatusOptions,
+    thread_options: ThreadOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -103,6 +107,7 @@ impl Twitter {
             profile_options: ProfileOptions::default(),
             timeline_options: TimelineOptions::default(),
             status_options: StatusOptions::default(),
+            thread_options: ThreadOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -132,6 +137,11 @@ impl Twitter {
 
     pub fn with_status_options(mut self, options: StatusOptions) -> Self {
         self.status_options = options;
+        self
+    }
+
+    pub fn with_thread_options(mut self, options: ThreadOptions) -> Self {
+        self.thread_options = options;
         self
     }
 

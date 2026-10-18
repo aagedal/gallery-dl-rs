@@ -9,8 +9,8 @@ and successful authenticated live traversal remain required.
 Primary sources inspected 2026-10-18:
 [upstream Twitter extractor](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/extractor/twitter.py)
 and [configuration reference](https://github.com/mikf/gallery-dl/blob/master/docs/configuration.rst),
-including `_tweets_detail`, `_tweets_conversation`, `tweet_detail`,
-`tweet-endpoint`, and `conversations`.
+including `_tweets_detail`, `_tweets_conversation`, `_expand_tweets`, `tweet_detail`,
+`tweet-endpoint`, `conversations`, `expand`, and `unique`.
 
 The operation snapshot is `iFEr5AcP121Og4wx9Yqo3w/TweetDetail`. Variables include
 focalTweetId, referrer=profile, with_rux_injections=false,
@@ -43,12 +43,24 @@ When All permits a missing focal, no author context is invented: SelfOnly retain
 only replies whose author equals their reply recipient. Quote references are
 resolved from known response posts before making additional fixed-ID requests.
 The first occurrence of duplicate posts supplies quote data; output dedup keeps
-all initial media siblings and suppresses later copies.
+all initial media siblings and suppresses later copies by default.
+
+Scoped expand (default false) runs a raw child detail traversal for each distinct
+conversation ID. Child posts do not recursively expand. Original-retweet mode
+uses the original target's conversation ID; missing/null/empty IDs skip, explicit
+false bypasses expansion, and malformed IDs fail privately. A failed child API
+request falls back to the original post, including after prior child output.
+Children retain the parent's author context and share its active-time budget,
+range selection, and cancellation. Scoped unique (default true) controls repeated
+post batches independently of the once-per-conversation set. False retains all
+media siblings and disables the CLI's X deduplication across inputs. Both status
+endpoints, profile/search feeds, and account collections share these settings.
 
 Parser/selection/HTTP/CLI tests cover focal selection among unrelated posts,
 page-late and inaccessible focal posts, quote reuse, original-retweet owners,
 archive equivalence, memory bounds, order, strict private errors, exact variables
 and transaction paths, scoped rotated credentials, source-order dates, consumer
 pauses, overall deadlines, cursor loops, range/drop cancellation, and late
-failure preservation. Broader detail variants, timeline `expand`, extended
+failure preservation, lazy thread expansion, original-retweet thread lookup,
+duplicate settings, and canonical child API paths. Broader detail variants, extended
 metadata, and real authenticated verification remain unfinished.

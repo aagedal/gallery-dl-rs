@@ -526,3 +526,55 @@ async fn conversations_keep_qualified_context_after_old_focal_and_reset_for_next
     success(&result);
     assert_eq!(urls(&result), ["https://cdn.example/next-input.jpg"]);
 }
+
+#[tokio::test]
+async fn expanded_single_status_keeps_recent_thread_after_old_source() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(
+        root.path(),
+        &[
+            row("old-source", json!(4)),
+            row("new-thread", json!(6)),
+            row("old-thread", json!(3)),
+            row("later-thread", json!(7)),
+        ],
+        &[row("next-input", json!(8))],
+    );
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &config,
+        br#"{"extractor":{"twitter":{"expand":true,"tweet-endpoint":"restid"}}}"#,
+    )
+    .unwrap();
+    let result = output(
+        binary(root.path(), &backend)
+            .arg("--native-config")
+            .arg(&config)
+            .args(["-g", "--date-after=5", FIRST, SECOND]),
+    )
+    .await;
+    success(&result);
+    assert_eq!(
+        urls(&result),
+        [
+            "https://cdn.example/new-thread.jpg",
+            "https://cdn.example/later-thread.jpg",
+            "https://cdn.example/next-input.jpg"
+        ]
+    );
+    // Root false wins, retaining descending cutoff for an unexpanded single post.
+    std::fs::write(
+        &config,
+        br#"{"expand":false,"extractor":{"twitter":{"expand":true,"tweet-endpoint":"restid"}}}"#,
+    )
+    .unwrap();
+    let result = output(
+        binary(root.path(), &backend)
+            .arg("--native-config")
+            .arg(&config)
+            .args(["-g", "--date-after=5", FIRST, SECOND]),
+    )
+    .await;
+    success(&result);
+    assert_eq!(urls(&result), ["https://cdn.example/next-input.jpg"]);
+}

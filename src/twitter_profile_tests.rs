@@ -3166,3 +3166,569 @@ async fn detail_missing_focal_self_only_uses_unbound_actual_self_reply_filter() 
     assert_eq!(post_ids(&items), ["100", "103"]);
     assert_eq!(server.count(), 2);
 }
+
+fn in_thread(mut post: Value, conversation: Value) -> Value {
+    post["legacy"]["conversation_id_str"] = conversation;
+    post
+}
+
+fn expanded_threads(unique: bool) -> ThreadOptions {
+    ThreadOptions {
+        expand: true,
+        unique,
+    }
+}
+
+#[tokio::test]
+async fn unique_setting_applies_without_thread_expansion_to_all_paginated_sources() {
+    for unique in [true, false] {
+        for source in ["profile", "search", "bookmarks", "detail"] {
+            let mut post = tweet("100");
+            let photo = post["legacy"]["extended_entities"]["media"][0].clone();
+            post["legacy"]["extended_entities"]["media"] = json!([photo.clone(), photo]);
+            let bodies = match source {
+                "profile" => vec![
+                    page(vec![post.clone()], Some("next")),
+                    page(vec![post], None),
+                ],
+                "search" => vec![
+                    search_page(vec![post.clone()], Some("next")),
+                    search_page(vec![post], None),
+                ],
+                "bookmarks" => vec![
+                    feed_page(
+                        &collections::Collection::Bookmarks,
+                        vec![post.clone()],
+                        Some("next"),
+                    ),
+                    feed_page(&collections::Collection::Bookmarks, vec![post], None),
+                ],
+                _ => vec![
+                    detail_page(vec![post.clone()], Some("next")),
+                    detail_page(vec![post], None),
+                ],
+            };
+            let server = Server::new(bodies.into_iter().map(Response::json).collect());
+            let native = extractor(Duration::from_secs(3))
+                .await
+                .with_thread_options(ThreadOptions {
+                    expand: false,
+                    unique,
+                })
+                .with_timeline_options(TimelineOptions {
+                    search_pagination: SearchPagination::Cursor,
+                    ..Default::default()
+                })
+                .with_status_options(conversation_options(ConversationMode::All));
+            let stream = match source {
+                "profile" => native.media_stream(input("id:42"), server.base.clone()),
+                "search" => native.search_stream("fixture".into(), server.base.clone()),
+                "bookmarks" => {
+                    native.feed_stream(collections::Collection::Bookmarks, server.base.clone())
+                }
+                _ => native.detail_stream_at(server.base.clone(), "100".into()),
+            };
+            let items: Vec<_> = stream.try_collect().await.unwrap();
+            assert_eq!(
+                post_ids(&items),
+                vec!["100"; if unique { 2 } else { 4 }],
+                "{source}, unique={unique}"
+            );
+            let indices: Vec<_> = items
+                .iter()
+                .map(|item| item.metadata.as_ref().unwrap().index)
+                .collect();
+            assert_eq!(indices, if unique { vec![1, 2] } else { vec![1, 2, 1, 2] });
+            assert_eq!(server.count(), 2);
+        }
+    }
+}
+
+#[tokio::test]
+async fn thread_expansion_is_lazy_ordered_once_per_conversation_and_nonrecursive() {
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![
+                in_thread(tweet("100"), json!("90")),
+                in_thread(tweet("101"), json!("90")),
+                in_thread(tweet("102"), json!(false)),
+            ],
+            Some("parent-next"),
+        )),
+        Response::json(detail_page(
+            vec![
+                in_thread(tweet("90"), json!("80")),
+                in_thread(tweet("100"), json!("90")),
+            ],
+            Some("child-next"),
+        )),
+        Response::json(detail_page(
+            vec![in_thread(tweet("101"), json!("90"))],
+            None,
+        )),
+        Response::json(page(vec![in_thread(tweet("103"), json!(false))], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true));
+    let mut stream = native.media_stream(input("id:42"), server.base.clone());
+    assert_eq!(server.count(), 0);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "90"
+    );
+    assert_eq!(server.count(), 2);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 2);
+    let rest: Vec<_> = stream.try_collect().await.unwrap();
+    assert_eq!(post_ids(&rest), ["100", "101", "102", "103"]);
+    let urls = server.urls();
+    assert_eq!(urls.len(), 4);
+    assert!(urls[1].path().ends_with("/TweetDetail"));
+    assert_eq!(variables(&urls[1])["focalTweetId"], "90");
+    assert_eq!(variables(&urls[2])["focalTweetId"], "90");
+    assert_eq!(variables(&urls[2])["cursor"], "child-next");
+    assert_eq!(variables(&urls[3])["cursor"], "parent-next");
+    assert_scoped_expansion_requests(&server, &native);
+}
+
+#[tokio::test]
+async fn threads_missing_ids_skip_false_bypasses_and_malformed_ids_are_private() {
+    let server = Server::new(vec![Response::json(page(
+        vec![
+            tweet("100"),
+            in_thread(tweet("101"), Value::Null),
+            in_thread(tweet("102"), json!("")),
+            in_thread(tweet("103"), json!(false)),
+        ],
+        None,
+    ))]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true));
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["103"]);
+    assert_eq!(server.count(), 1);
+    for bad in [
+        json!("private-thread-marker"),
+        json!("090"),
+        json!(true),
+        json!(90),
+        json!({"secret":"private-thread-marker"}),
+    ] {
+        let server = Server::new(vec![Response::json(page(
+            vec![in_thread(tweet("100"), bad)],
+            None,
+        ))]);
+        let mut stream = native.media_stream(input("id:42"), server.base.clone());
+        let error = stream.next().await.unwrap().unwrap_err().to_string();
+        assert!(!error.contains("private-thread-marker"));
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn thread_failure_falls_back_to_original_and_continues_parent_without_leaking_error() {
+    for late in [false, true] {
+        let mut responses = vec![Response::json(page(
+            vec![
+                in_thread(tweet("100"), json!("90")),
+                in_thread(tweet("102"), json!(false)),
+            ],
+            None,
+        ))];
+        if late {
+            responses.push(Response::json(detail_page(vec![tweet("90")], Some("next"))));
+        }
+        responses.push(Response::json(
+            json!({"errors":[{"code":89,"message":"private-auth-thread-marker"}]}),
+        ));
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_thread_options(expanded_threads(true));
+        let items: Vec<_> = native
+            .media_stream(input("id:42"), server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            post_ids(&items),
+            if late {
+                vec!["90", "100", "102"]
+            } else {
+                vec!["100", "102"]
+            }
+        );
+        assert_eq!(server.count(), if late { 3 } else { 2 });
+    }
+}
+
+#[tokio::test]
+async fn thread_failure_fallback_respects_unique_setting_after_partial_child_output() {
+    for unique in [true, false] {
+        let server = Server::new(vec![
+            Response::json(page(vec![in_thread(tweet("100"), json!("90"))], None)),
+            Response::json(detail_page(vec![tweet("100")], Some("next"))),
+            Response::json(json!({"data":{"threaded_conversation_with_injections_v2":null}})),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_thread_options(expanded_threads(unique));
+        let items: Vec<_> = native
+            .media_stream(input("id:42"), server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            post_ids(&items),
+            if unique {
+                vec!["100"]
+            } else {
+                vec!["100", "100"]
+            }
+        );
+        assert_eq!(server.count(), 3);
+    }
+}
+
+#[tokio::test]
+async fn nonunique_threads_preserve_overlapping_posts_but_never_expand_a_conversation_twice() {
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![
+                in_thread(tweet("100"), json!("90")),
+                in_thread(tweet("101"), json!("90")),
+            ],
+            Some("next"),
+        )),
+        Response::json(detail_page(
+            vec![tweet("90"), tweet("100"), tweet("100")],
+            None,
+        )),
+        Response::json(page(vec![in_thread(tweet("100"), json!(false))], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(false));
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["90", "100", "100", "100"]);
+    assert_eq!(server.count(), 3);
+}
+
+#[tokio::test]
+async fn thread_range_cutoff_and_dropped_pending_child_stop_all_followup_work() {
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true));
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![
+                in_thread(tweet("100"), json!("90")),
+                in_thread(tweet("101"), json!("80")),
+            ],
+            Some("parent"),
+        )),
+        Response::json(detail_page(vec![tweet("90"), tweet("100")], Some("child"))),
+        Response::json(detail_page(vec![tweet("101")], None)),
+    ]);
+    let items: Vec<_> = native
+        .media_stream(input("id:42"), server.base.clone())
+        .take(1)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["90"]);
+    assert_eq!(server.count(), 2);
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![in_thread(tweet("100"), json!("90"))],
+            Some("parent"),
+        )),
+        Response::json(detail_page(vec![tweet("90")], Some("child"))).delayed(300),
+        Response::json(detail_page(vec![tweet("100")], None)),
+    ]);
+    let mut stream = native.media_stream(input("id:42"), server.base.clone());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), stream.next())
+            .await
+            .is_err()
+    );
+    server.wait_for(2).await;
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(330)).await;
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn thread_expansion_shares_parent_active_budget_and_excludes_consumer_pause() {
+    let native = extractor(Duration::from_millis(250))
+        .await
+        .with_thread_options(expanded_threads(true));
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![in_thread(tweet("100"), json!("90"))],
+            Some("parent"),
+        ))
+        .delayed(20),
+        Response::json(detail_page(vec![tweet("90")], Some("child"))).delayed(20),
+        Response::json(detail_page(vec![tweet("100")], None)).delayed(20),
+        Response::json(page(vec![in_thread(tweet("101"), json!(false))], None)).delayed(20),
+    ]);
+    let mut stream = native.media_stream(input("id:42"), server.base.clone());
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "90"
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let rest: Vec<_> = stream.try_collect().await.unwrap();
+    assert_eq!(post_ids(&rest), ["100", "101"]);
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![in_thread(tweet("100"), json!("90"))],
+            Some("parent"),
+        ))
+        .delayed(100),
+        Response::json(detail_page(vec![tweet("90")], Some("child"))).delayed(100),
+        Response::json(detail_page(vec![tweet("100")], None)).delayed(100),
+        Response::json(page(vec![in_thread(tweet("101"), json!(false))], None)),
+    ]);
+    let mut stream = native.media_stream(input("id:42"), server.base.clone());
+    assert!(stream.next().await.unwrap().is_ok());
+    let results: Vec<_> = stream.collect().await;
+    assert!(results.iter().any(|item| {
+        item.as_ref()
+            .is_err_and(|error| error.to_string().contains("timed out"))
+    }));
+    assert_eq!(server.count(), 3);
+}
+
+#[tokio::test]
+async fn thread_expansion_applies_to_search_bookmarks_rest_id_and_detail_sources() {
+    for source in ["search", "bookmarks", "rest", "detail"] {
+        let post = in_thread(tweet("100"), json!("90"));
+        let body = match source {
+            "search" => search_page(vec![post], None),
+            "bookmarks" => feed_page(&collections::Collection::Bookmarks, vec![post], None),
+            "rest" => post_response(post),
+            _ => detail_page(vec![post], None),
+        };
+        let server = Server::new(vec![
+            Response::json(body),
+            Response::json(detail_page(vec![tweet("90"), tweet("100")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_thread_options(expanded_threads(true));
+        let stream = match source {
+            "search" => native.search_stream("fixture".into(), server.base.clone()),
+            "bookmarks" => {
+                native.feed_stream(collections::Collection::Bookmarks, server.base.clone())
+            }
+            "rest" => native.post_stream_at(local_post_endpoint(&server, "100"), "100".into()),
+            _ => native.detail_stream_at(server.base.clone(), "100".into()),
+        };
+        let items: Vec<_> = stream.try_collect().await.unwrap();
+        assert_eq!(post_ids(&items), ["90", "100"], "{source}");
+        assert_eq!(server.count(), 2, "{source}");
+        assert_eq!(
+            server.urls()[1].path(),
+            "/i/api/graphql/iFEr5AcP121Og4wx9Yqo3w/TweetDetail",
+            "expanded {source} must use the canonical detail path"
+        );
+        assert_eq!(variables(&server.urls()[1])["focalTweetId"], "90");
+    }
+}
+
+#[tokio::test]
+async fn expanded_profile_replies_keep_the_requested_owner_for_self_only_filter() {
+    let server = Server::new(vec![
+        Response::json(page(vec![in_thread(tweet("100"), json!("90"))], None)),
+        Response::json(detail_page(
+            vec![
+                authored(tweet("90"), "77"),
+                reply("100", "42", "42"),
+                reply("101", "77", "77"),
+                reply("102", "42", "77"),
+            ],
+            None,
+        )),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true))
+        .with_profile_options(ProfileOptions {
+            replies: ReplyMode::SelfOnly,
+            ..Default::default()
+        });
+    let items: Vec<_> = native
+        .profile_stream(
+            input("id:42"),
+            timeline::ProfileTab::Replies,
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["90", "100", "102"]);
+    assert_eq!(server.count(), 2);
+}
+
+#[test]
+fn thread_lookup_preserves_original_retweet_and_disabled_link_semantics() {
+    use expansion::{ThreadLookup, thread_lookup};
+    let mut outer = in_thread(tweet("100"), json!("90"));
+    outer["legacy"]["retweeted_status_id_str"] = json!("101");
+    let known = BTreeMap::new();
+    assert!(
+        matches!(thread_lookup(&outer, RetweetMode::Original, &known).unwrap(), ThreadLookup::Fetch(id) if id == "101")
+    );
+    for mode in [RetweetMode::Skip, RetweetMode::Repost] {
+        assert!(
+            matches!(thread_lookup(&outer, mode, &known).unwrap(), ThreadLookup::Id(id) if id == "90")
+        );
+    }
+    let mut known = BTreeMap::new();
+    known.insert("101".into(), in_thread(tweet("101"), json!("80")));
+    assert!(
+        matches!(thread_lookup(&outer, RetweetMode::Original, &known).unwrap(), ThreadLookup::Id(id) if id == "80")
+    );
+    outer["retweeted_status_result"] = json!({"result":in_thread(tweet("101"), json!(false))});
+    assert!(matches!(
+        thread_lookup(&outer, RetweetMode::Original, &known).unwrap(),
+        ThreadLookup::Bypass
+    ));
+    outer["retweeted_status_result"] = json!({"result":in_thread(tweet("101"), Value::Null)});
+    assert!(matches!(
+        thread_lookup(&outer, RetweetMode::Original, &known).unwrap(),
+        ThreadLookup::Skip
+    ));
+    outer["retweeted_status_result"] =
+        json!({"result":in_thread(tweet("101"), json!("private-thread-id"))});
+    let error = match thread_lookup(&outer, RetweetMode::Original, &known) {
+        Err(error) => error,
+        Ok(_) => panic!("malformed original conversation must fail"),
+    };
+    assert!(!error.to_string().contains("private-thread-id"));
+    // Disabled original expansion ignores malformed nested metadata.
+    assert!(
+        matches!(thread_lookup(&outer, RetweetMode::Repost, &known).unwrap(), ThreadLookup::Id(id) if id == "90")
+    );
+}
+
+#[test]
+fn thread_lookup_rejects_original_retweet_cycles_and_conflicting_targets_privately() {
+    use expansion::thread_lookup;
+    let mut outer = in_thread(tweet("100"), json!("90"));
+    outer["legacy"]["retweeted_status_id_str"] = json!("101");
+    let mut original = in_thread(tweet("101"), json!("80"));
+    original["legacy"]["retweeted_status_id_str"] = json!("100");
+    let mut known = BTreeMap::new();
+    known.insert("100".into(), outer.clone());
+    known.insert("101".into(), original);
+    let error = match thread_lookup(&outer, RetweetMode::Original, &known) {
+        Err(error) => error,
+        Ok(_) => panic!("original retweet cycle must fail"),
+    };
+    assert!(error.to_string().contains("cycle"));
+    outer["retweeted_status_result"] = json!({"result":tweet("102")});
+    let error = match thread_lookup(&outer, RetweetMode::Original, &known) {
+        Err(error) => error,
+        Ok(_) => panic!("conflicting retweet identity must fail"),
+    };
+    assert!(!error.to_string().contains("102"));
+    assert!(!error.to_string().contains("101"));
+}
+
+#[tokio::test]
+async fn expanded_rest_id_original_retweet_reuses_self_only_owner_resolution_target() {
+    let mut outer = in_thread(tweet("100"), json!("90"));
+    outer["legacy"]["retweeted_status_id_str"] = json!("101");
+    let original = in_thread(reply("101", "99", "42"), json!("80"));
+    let server = Server::new(vec![
+        Response::json(post_response(outer)),
+        Response::json(post_response(original.clone())),
+        Response::json(detail_page(
+            vec![authored(tweet("80"), "99"), original],
+            None,
+        )),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true))
+        .with_expansion(expansion_options(RetweetMode::Original))
+        .with_profile_options(ProfileOptions {
+            replies: ReplyMode::SelfOnly,
+            ..Default::default()
+        });
+    let items: Vec<_> = native
+        .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["80", "101"]);
+    let urls = server.urls();
+    assert_eq!(urls.len(), 3);
+    assert!(urls[1].path().ends_with("/TweetResultByRestId"));
+    assert_eq!(variables(&urls[1])["tweetId"], "101");
+    assert_eq!(
+        urls[2].path(),
+        "/i/api/graphql/iFEr5AcP121Og4wx9Yqo3w/TweetDetail"
+    );
+    assert_eq!(variables(&urls[2])["focalTweetId"], "80");
+}
+
+#[tokio::test]
+async fn expanded_detail_original_retweet_reuses_same_page_target_for_conversation_lookup() {
+    let mut outer = in_thread(tweet("100"), json!("90"));
+    outer["legacy"]["retweeted_status_id_str"] = json!("101");
+    let original = in_thread(authored(tweet("101"), "99"), json!("80"));
+    let server = Server::new(vec![
+        Response::json(detail_page(vec![outer, original.clone()], None)),
+        Response::json(detail_page(
+            vec![authored(tweet("80"), "99"), original],
+            None,
+        )),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_thread_options(expanded_threads(true))
+        .with_expansion(expansion_options(RetweetMode::Original));
+    let items: Vec<_> = native
+        .detail_stream_at(server.base.clone(), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["80", "101"]);
+    let urls = server.urls();
+    assert_eq!(urls.len(), 2);
+    assert!(
+        urls.iter()
+            .all(|url| url.path() == "/i/api/graphql/iFEr5AcP121Og4wx9Yqo3w/TweetDetail")
+    );
+    assert_eq!(variables(&urls[0])["focalTweetId"], "100");
+    assert_eq!(variables(&urls[1])["focalTweetId"], "80");
+}

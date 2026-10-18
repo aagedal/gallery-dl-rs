@@ -201,6 +201,8 @@ pub struct BackendOptions {
     pub user_agent: Option<String>,
     pub retweets: Option<crate::twitter::RetweetMode>,
     pub quoted: Option<bool>,
+    pub expand: Option<bool>,
+    pub unique: Option<bool>,
     pub tweet_endpoint: Option<crate::twitter::TweetEndpoint>,
     pub conversations: Option<crate::twitter::ConversationMode>,
     pub pinned: Option<bool>,
@@ -283,6 +285,12 @@ impl Backend {
         }
         if let Some(quoted) = options.quoted {
             command.arg("--option").arg(format!("quoted={quoted}"));
+        }
+        if let Some(expand) = options.expand {
+            command.arg("--option").arg(format!("expand={expand}"));
+        }
+        if let Some(unique) = options.unique {
+            command.arg("--option").arg(format!("unique={unique}"));
         }
         if let Some(endpoint) = options.tweet_endpoint {
             let value = match endpoint {
