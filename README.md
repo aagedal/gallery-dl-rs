@@ -31,6 +31,9 @@ cargo build --release --locked
 # Native direct media downloads need no Python or gallery-dl installation
 ./target/release/gallery-dl-rs --jobs 4 -d downloads 'https://example.com/photo.jpg'
 
+# Keep validated partial downloads and resume after an interruption
+./target/release/gallery-dl-rs --resume -d downloads 'https://example.com/large.mp4'
+
 # Save available post metadata beside downloaded media
 ./target/release/gallery-dl-rs --write-metadata -C cookies.txt --extractor native 'https://www.instagram.com/p/SHORTCODE/'
 
@@ -100,6 +103,25 @@ Instagram session cookies are never copied to media hosts.
   `-g` emits deduplicated URLs as inputs finish; `-j` retains one ordered JSON array.
 - Media bodies stream to disk with bounded download concurrency. Each completed
   file is published from a temporary file without overwriting an existing file.
+- `--resume` retains partial direct HTTP media in a hidden `.gallery-dl-rs`
+  directory under the category directory, across retries, failures, and Ctrl-C.
+  Subsequent attempts use `Range` and `If-Range` only with a saved strong ETag,
+  or a Last-Modified value at least 60 seconds before the response Date when no
+  ETag was provided. Weak/missing validators restart the full file. Full responses
+  replace partial bytes; range responses must match the saved representation,
+  effective URL, offset, total, and byte count. A validated 416 can finish an
+  already complete partial; other 416 responses restart with a full request.
+  Changed validators or redirect targets also restart without mixing bytes.
+  Resume requests require identity content encoding. Checkpoint names hash the
+  full request identity and destination; signed URL or header changes therefore
+  start separate partials. JSON checkpoints contain only a validator, size, and
+  effective URL digest; URLs, cookies, and request headers are not stored.
+  File locks exclude simultaneous users of the same checkpoint and are released
+  on exit. Empty `.lock` files remain to preserve locking across processes;
+  completed partials/checkpoints are removed after no-overwrite publication.
+  Remove an unused checkpoint directory only while no downloads are running.
+  Without `--resume`, failed or cancelled partials are removed as before.
+  This flag conflicts with `-g` and `-j`.
 - `--write-metadata` saves `<media filename>.json` beside completed media, including
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,
@@ -167,7 +189,7 @@ Instagram session cookies are never copied to media hosts.
   extraction or download results in a nonzero exit code. Status goes to stderr;
   `-g` and `-j` output goes to stdout.
 - Ctrl-C cancels extraction, active downloads, and retry/cooldown waits, removes
-  temporary downloads, and stops the directly owned compatibility process. Files
+  temporary downloads (or retains checkpoints with `--resume`), and stops the directly owned compatibility process. Files
   already published are kept. Cancellation exits with status 130.
 
 ## Limitations
@@ -231,6 +253,8 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/download.rs` owns request headers, downloads, retries, and file publication.
 `src/archive.rs` owns SQLite completed-media history and archive-aware downloads.
 `src/naming.rs` owns native filename template parsing and safe basename rendering.
+`src/resume.rs` owns locked partial files and durable checkpoints;
+`src/range.rs` validates resumable HTTP representations and ranges.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

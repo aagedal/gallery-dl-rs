@@ -4,6 +4,8 @@ pub mod download;
 pub mod extract;
 pub mod instagram;
 pub mod naming;
+mod range;
+mod resume;
 mod transport;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;

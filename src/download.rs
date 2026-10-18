@@ -22,6 +22,20 @@ pub struct DownloadClient {
     http: Client,
     rate_limits: RateLimits,
     wait_limit: Duration,
+    resume: bool,
+}
+
+impl DownloadClient {
+    /// Override the per-attempt deadline while sharing connections and cooldowns.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.wait_limit = timeout;
+        self
+    }
+    /// Retain validated partial HTTP downloads for retries and later invocations.
+    pub fn with_resume(mut self, enabled: bool) -> Self {
+        self.resume = enabled;
+        self
+    }
 }
 
 pub fn client(timeout: Duration) -> Result<DownloadClient> {
@@ -34,6 +48,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
             .build()?,
         rate_limits: RateLimits::default(),
         wait_limit: timeout,
+        resume: false,
     })
 }
 
@@ -239,17 +254,30 @@ async fn download_media(
         // Transport framing and proxy credentials must be controlled by reqwest.
         if matches!(
             name.as_str(),
-            "host" | "content-length" | "transfer-encoding" | "connection" | "proxy-authorization"
+            "host"
+                | "content-length"
+                | "transfer-encoding"
+                | "connection"
+                | "proxy-authorization"
+                | "range"
+                | "if-range"
         ) {
             continue;
         }
         headers.insert(name, HeaderValue::from_str(value)?);
     }
+    let mut partial = if client.resume {
+        Some(crate::resume::Partial::open(&path, &media.identity()).await?)
+    } else {
+        None
+    };
     for attempt in 0..=retries {
-        let result = tokio::time::timeout(
-            client.wait_limit,
-            attempt_download(client, media, &headers, parent, &path),
-        )
+        let result = tokio::time::timeout(client.wait_limit, async {
+            match &mut partial {
+                Some(partial) => attempt_resume(client, media, &headers, &path, partial).await,
+                None => attempt_download(client, media, &headers, parent, &path).await,
+            }
+        })
         .await
         .unwrap_or_else(|_| {
             Err(Failure {
@@ -301,72 +329,16 @@ async fn attempt_download(
     parent: &Path,
     path: &Path,
 ) -> std::result::Result<Outcome, Failure> {
-    let mut target = media.url.clone();
-    let mut redirects = Redirects::new(&target);
-    let response = loop {
-        client
-            .rate_limits
-            .wait(&target, client.wait_limit)
-            .await
-            .map_err(|error| Failure {
-                error,
-                retry: false,
-            })?;
-        let response = client
-            .http
-            .get(target.clone())
-            .headers(headers.clone())
-            .send()
-            .await?;
-        match redirects
-            .next(response.url(), response.status(), response.headers())
-            .map_err(|error| Failure {
-                error,
-                retry: false,
-            })? {
-            Some(next) => target = next,
-            None => break response,
-        }
-    };
-    if !response.status().is_success() {
-        let retry = response.status().is_server_error()
-            || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
-        if retry && let Some(delay) = retry_after(response.headers(), SystemTime::now()) {
-            // Record even on the final attempt so other workers honor the server.
-            client.rate_limits.defer(&media.url, delay);
-        }
-        return Err(Failure {
-            error: error(format!("media server returned HTTP {}", response.status())),
-            retry,
-        });
+    let response = request_media(client, media, headers).await?;
+    check_status(client, media, &response, false)?;
+    if response
+        .headers()
+        .contains_key(reqwest::header::CONTENT_RANGE)
+    {
+        return Err(terminal("unexpected Content-Range in full media response"));
     }
     let expected = response.content_length();
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("")
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    if matches!(
-        content_type.as_str(),
-        "text/html"
-            | "application/xhtml+xml"
-            | "application/dash+xml"
-            | "application/vnd.apple.mpegurl"
-            | "application/x-mpegurl"
-    ) || crate::extract::manifest_protocol(response.url()).is_some()
-    {
-        return Err(Failure {
-            error: error(
-                "server returned a web page or streaming manifest; only direct media downloads are implemented",
-            ),
-            retry: false,
-        });
-    }
+    validate_media(&response)?;
     // A unique temporary file prevents concurrent workers from sharing a partial
     // file. Dropping TempPath removes incomplete downloads, including on failure.
     let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
@@ -404,5 +376,238 @@ async fn attempt_download(
             }
         }
         Err(e) => Err(e.error.into()),
+    }
+}
+
+async fn request_media(
+    client: &DownloadClient,
+    media: &Media,
+    headers: &HeaderMap,
+) -> std::result::Result<reqwest::Response, Failure> {
+    let mut target = media.url.clone();
+    let mut redirects = Redirects::new(&target);
+    let response = loop {
+        client
+            .rate_limits
+            .wait(&target, client.wait_limit)
+            .await
+            .map_err(|error| Failure {
+                error,
+                retry: false,
+            })?;
+        let response = client
+            .http
+            .get(target.clone())
+            .timeout(client.wait_limit)
+            .headers(headers.clone())
+            .send()
+            .await?;
+        match redirects
+            .next(response.url(), response.status(), response.headers())
+            .map_err(|error| Failure {
+                error,
+                retry: false,
+            })? {
+            Some(next) => target = next,
+            None => break response,
+        }
+    };
+    Ok(response)
+}
+
+fn check_status(
+    client: &DownloadClient,
+    media: &Media,
+    response: &reqwest::Response,
+    allow_partial: bool,
+) -> std::result::Result<(), Failure> {
+    if response.status() != reqwest::StatusCode::OK
+        && !(allow_partial && response.status() == reqwest::StatusCode::PARTIAL_CONTENT)
+    {
+        let retry = response.status().is_server_error()
+            || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
+        if retry && let Some(delay) = retry_after(response.headers(), SystemTime::now()) {
+            // Record even on the final attempt so other workers honor the server.
+            client.rate_limits.defer(&media.url, delay);
+        }
+        return Err(Failure {
+            error: error(format!("media server returned HTTP {}", response.status())),
+            retry,
+        });
+    }
+    Ok(())
+}
+
+fn validate_media(response: &reqwest::Response) -> std::result::Result<(), Failure> {
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if matches!(
+        content_type.as_str(),
+        "text/html"
+            | "application/xhtml+xml"
+            | "application/dash+xml"
+            | "application/vnd.apple.mpegurl"
+            | "application/x-mpegurl"
+            | "multipart/byteranges"
+    ) || crate::extract::manifest_protocol(response.url()).is_some()
+    {
+        return Err(Failure {
+            error: error(
+                "server returned a web page or streaming manifest; only direct media downloads are implemented",
+            ),
+            retry: false,
+        });
+    }
+    Ok(())
+}
+
+fn terminal(message: &str) -> Failure {
+    Failure {
+        error: error(message),
+        retry: false,
+    }
+}
+
+async fn attempt_resume(
+    client: &DownloadClient,
+    media: &Media,
+    headers: &HeaderMap,
+    path: &Path,
+    partial: &mut crate::resume::Partial,
+) -> std::result::Result<Outcome, Failure> {
+    let mut restarted = false;
+    loop {
+        let offset = match partial.len().await {
+            Ok(offset) => offset,
+            Err(error) => {
+                // A timed-out blocking publication may have completed before
+                // this retry acquired the checkpoint's operation guard.
+                if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+                    return Ok(Outcome::Skipped(path.into()));
+                }
+                return Err(Failure {
+                    error,
+                    retry: false,
+                });
+            }
+        };
+        let checkpoint = partial
+            .checkpoint()
+            .filter(|checkpoint| {
+                offset > 0
+                    && checkpoint.total.is_none_or(|total| offset <= total)
+                    && crate::range::if_range(checkpoint).is_some()
+            })
+            .cloned();
+        let mut headers = headers.clone();
+        headers.insert(
+            reqwest::header::ACCEPT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
+        if let Some(checkpoint) = &checkpoint {
+            headers.insert(
+                reqwest::header::RANGE,
+                HeaderValue::from_str(&format!("bytes={offset}-")).unwrap(),
+            );
+            headers.insert(
+                reqwest::header::IF_RANGE,
+                HeaderValue::from_str(crate::range::if_range(checkpoint).unwrap())
+                    .map_err(|_| terminal("invalid saved media validator"))?,
+            );
+        }
+        let response = request_media(client, media, &headers).await?;
+        if !(response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
+            && checkpoint.is_some())
+        {
+            check_status(client, media, &response, checkpoint.is_some())?;
+        }
+        let plan = crate::range::plan(&response, offset, checkpoint.as_ref()).map_err(|error| {
+            Failure {
+                error,
+                retry: false,
+            }
+        })?;
+        let (start, expected, total) = match plan {
+            crate::range::Plan::Restart if !restarted => {
+                partial.reset(None).await.map_err(|error| Failure {
+                    error,
+                    retry: false,
+                })?;
+                restarted = true;
+                continue;
+            }
+            crate::range::Plan::Restart => {
+                return Err(terminal(
+                    "media representation changed repeatedly during resume",
+                ));
+            }
+            crate::range::Plan::Complete => {
+                return partial.publish(path).await.map_err(|error| Failure {
+                    error,
+                    retry: false,
+                });
+            }
+            crate::range::Plan::Full(checkpoint) => {
+                validate_media(&response)?;
+                partial.reset(checkpoint).await.map_err(|error| Failure {
+                    error,
+                    retry: false,
+                })?;
+                (0, response.content_length(), response.content_length())
+            }
+            crate::range::Plan::Append { end, total } => {
+                validate_media(&response)?;
+                if partial
+                    .checkpoint()
+                    .is_some_and(|checkpoint| checkpoint.total.is_none())
+                {
+                    partial.set_total(total).await.map_err(|error| Failure {
+                        error,
+                        retry: false,
+                    })?;
+                }
+                (offset, Some(end - offset + 1), Some(total))
+            }
+        };
+        let mut stream = response.bytes_stream();
+        let mut received = 0u64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            received = received
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| terminal("media response exceeds size limit"))?;
+            if expected.is_some_and(|expected| received > expected) {
+                return Err(terminal("media body exceeds declared range length"));
+            }
+            partial.append(&chunk).await.map_err(|error| Failure {
+                error,
+                retry: false,
+            })?;
+        }
+        if expected.is_some_and(|expected| received != expected) {
+            return Err(Failure {
+                error: error("incomplete response body"),
+                retry: true,
+            });
+        }
+        let completed = start
+            .checked_add(received)
+            .ok_or_else(|| terminal("media response exceeds size limit"))?;
+        if total.is_none_or(|total| completed == total) {
+            return partial.publish(path).await.map_err(|error| Failure {
+                error,
+                retry: false,
+            });
+        }
+        // Some servers return only part of an open-ended range. Continue within
+        // this attempt's existing deadline; never publish a truncated segment.
     }
 }

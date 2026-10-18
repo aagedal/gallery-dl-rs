@@ -41,6 +41,9 @@ struct Args {
     /// Native filename template, e.g. '{post_id}_{index:03}.{extension}'
     #[arg(short = 'f', long, conflicts_with_all = ["get_urls", "dump_json"])]
     filename: Option<String>,
+    /// Retain validated partial HTTP media for retries and later invocations
+    #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
+    resume: bool,
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
@@ -159,7 +162,7 @@ async fn run(args: Args) -> Result<()> {
             println!("{}", item.url);
         }
     } else {
-        let client = download::client(Duration::from_secs(args.timeout))?;
+        let client = download::client(Duration::from_secs(args.timeout))?.with_resume(args.resume);
         let results = media
             .map(|item| {
                 let client = &client;

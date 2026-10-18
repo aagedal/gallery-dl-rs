@@ -95,7 +95,7 @@ inspection still buffers one array. CLI regressions cover publication during
 blocked extraction, backpressure at capacity, deduplication/order, failure
 continuation, and simultaneous extraction/download cancellation. Each social
 input still buffers its complete result; true per-item extraction streaming,
-pagination and range resume remain.
+native pagination remains; range resume is described below.
 
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and
@@ -111,7 +111,20 @@ processes can download the same initial miss; writes are idempotent and do not
 reserve jobs. The format is separate from Python gallery-dl archives. Tests cover
 rotation, identity separation, privacy, persistence, concurrent writes, foreign
 databases, failure recovery, and CLI behavior. Full extraction still occurs before
-archive filtering; native collection pagination and range resume remain.
+archive filtering; native collection pagination remains.
+
+**Implemented resume step:** opt-in `--resume` retains direct HTTP partial files
+under a hidden category-local directory. Strong ETags or conservative strong
+Last-Modified dates authorize conditional byte-range requests; validators,
+effective target identity, offsets, totals, and body lengths are checked before
+publication. Ignored ranges and changed representations restart safely, partial
+ranges continue under the same attempt deadline, and matching 416 responses can
+publish completed bytes. Weak/missing validators never authorize appending.
+Checkpoint names bind full request identity and output name without storing URLs
+or request credentials. Persistent file locks and ordered blocking writes protect
+against concurrent writers and cancellation during disk I/O. Cancellation retains
+resume state only when opted in; default temporary-file cleanup is unchanged.
+Archive entries and metadata sidecars are produced only after complete publication.
 
 ## 4. Broader compatibility
 
