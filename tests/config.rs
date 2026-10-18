@@ -1505,3 +1505,109 @@ fn image_size_and_fallback_configuration_reject_invalid_private_values_and_dupli
         }
     }
 }
+
+#[test]
+fn file_filter_scopes_replace_clauses_and_resolve_image_filter_alias_within_each_layer() {
+    let config = parse(r#"{"extractor":{"file-filter":"width > 10","image-filter":"height > 10","twitter":{"file-filter":[],"image-filter":["width > 20","height > 20"]},"instagram":{"image-filter":"width > 30"}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(
+        twitter.file_filter,
+        Some(vec!["width > 20".into(), "height > 20".into()])
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().file_filter,
+        Some(vec!["width > 30".into()])
+    );
+    assert_eq!(
+        config.resolve("facebook").unwrap().file_filter,
+        Some(vec!["width > 10".into()])
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                file_filter: Some(vec![]),
+                ..Default::default()
+            })
+            .file_filter,
+        Some(vec![])
+    );
+    let primary = parse(r#"{"file-filter":["width > 50"],"image-filter":"height > 50","extractor":{"twitter":{"file-filter":"width > 1"}}}"#).unwrap();
+    assert_eq!(
+        primary.resolve("twitter").unwrap().file_filter,
+        Some(vec!["width > 50".into()])
+    );
+    for empty in [serde_json::json!(""), serde_json::json!([])] {
+        let clear = serde_json::json!({"file-filter":empty,"extractor":{"file-filter":"width > 1","twitter":{"image-filter":"height > 1"}}});
+        for category in ["twitter", "instagram", "facebook", "direct"] {
+            assert_eq!(
+                parse(&clear.to_string())
+                    .unwrap()
+                    .resolve(category)
+                    .unwrap()
+                    .file_filter,
+                Some(vec![])
+            );
+        }
+        let alias = serde_json::json!({"file-filter":empty,"image-filter":"height > 99"});
+        assert_eq!(
+            parse(&alias.to_string())
+                .unwrap()
+                .resolve("twitter")
+                .unwrap()
+                .file_filter,
+            Some(vec!["height > 99".into()])
+        );
+    }
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().file_filter,
+        None
+    );
+    assert!(parse(&serde_json::json!({"file-filter":vec!["width > 0";32]}).to_string()).is_ok());
+}
+
+#[test]
+fn file_filter_aliases_reject_private_invalid_syntax_types_bounds_and_duplicate_keys() {
+    use serde_json::json;
+    for field in ["file-filter", "image-filter"] {
+        for value in [
+            json!(null),
+            json!(false),
+            json!(1),
+            json!({"private-key":"private-value"}),
+            json!([1]),
+            json!([""]),
+            json!(["width > 0", ""]),
+            json!("width >"),
+            json!("PRIVATE-FILTER-VALUE + )"),
+            json!(vec!["width > 0"; 33]),
+            json!(format!("width > 0{}", " ".repeat(16 * 1024))),
+            json!(vec![format!("width > 0{}", " ".repeat(16 * 1024 - 9)); 5]),
+        ] {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                for private in ["private-key", "private-value", "PRIVATE-FILTER-VALUE"] {
+                    assert!(!message.contains(private));
+                }
+            }
+        }
+        let duplicate = format!(r#""{field}":"width > 0","{field}":"width > 1""#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}

@@ -11,6 +11,7 @@ mod facebook_album;
 mod facebook_dash;
 mod facebook_video;
 pub mod file_metadata;
+pub mod filter;
 pub mod input;
 pub mod instagram;
 mod messages;

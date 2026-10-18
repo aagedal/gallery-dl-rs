@@ -709,8 +709,70 @@ optimizations; native extractors still parse a whole response page or post.
 Compatibility positions count the resolved media stream for an entire input,
 including flattened child extractors; counters do not yet reset at nested child
 boundaries. The separate compatibility configuration can apply its own selection
-before Rust receives media. Post/child ranges and metadata expressions remain
+before Rust receives media. Post/child ranges and their expression filters remain
 unimplemented.
+
+## Metadata file filters
+
+`--filter EXPR` selects files using a native Python-style expression. It applies
+with both extractors and in `-g` / `-j` inspection. Repeat the flag to require all
+clauses. For example:
+
+```sh
+gallery-dl-rs --filter "width >= 1000 and extension in ('jpg', 'png')" URL
+gallery-dl-rs --filter "metadata.get('file', {}).get('width', 0) >= 1000" URL
+```
+
+Scoped `file-filter` (or the upstream `image-filter` alias) accepts a string or
+list of strings. Clauses in a list are ANDed; an empty string/list clears an
+inherited filter. Within one scope a nonempty `file-filter` wins over its alias.
+Normal root/category/default precedence applies; explicit CLI clauses replace
+configured clauses. Rust applies the filter itself; it does not forward another
+filter to the compatibility executable.
+
+Dates are selected first, then metadata filters, then file ranges, global
+deduplication, and archive checks. Rejected files do not consume `--range`
+positions. Original per-post `index`/`num` metadata and archive identities stay
+unchanged. Reaching the final selected range position drops upstream immediately;
+rejection loops yield for cancellation. Rejected files publish no media, sidecar,
+or archive entry. Extraction errors still report normally. As with upstream's
+default expression mode, missing keys, invalid operations, and evaluation-limit
+failures reject only the current file. Invalid syntax or unsupported calls fail
+before extraction without echoing the expression.
+
+Available names include `category`, `filename`/`name` (stem), `extension`,
+`url`/`_url`, post/media IDs, `username`, `caption`/`content`, `timestamp`/`date`
+(epoch seconds), `index`/`num`, file properties, `community`, `article`, and the
+nested public `metadata` map. Available dimensions have `image_width` /
+`image_height` aliases; `type` aliases `media_type`. X also supplies `tweet_id`,
+`quote_id`, `retweet_id`, and available `source_user` attribution; Facebook
+supplies `id`. Instagram `description`
+means its post caption; X `description` means file alt text. Canonical decimal
+IDs are exact integers in this expression context. Missing optional properties
+are absent, so map `.get()` calls can provide defaults. Only normalized public
+fields are available; arbitrary backend keys, headers, cookies, and private
+handoffs are excluded. The extension groups `exts_image`, `exts_video`, and
+`exts_archive` support membership tests.
+
+The supported expression language includes finite numbers, strings and escapes,
+booleans/`None`, lists, tuples, string-keyed dictionaries, indexing (including
+negative sequence indexes), arithmetic, chained comparisons, membership,
+`and`/`or`/`not`, and conditional expressions. Builtins are `len`, `bool`, `str`,
+`int`, `float`, `abs`, `round`, `min`, `max`, `any`, `all`, and gallery-dl's
+`contains`. Supported methods are dictionary `get` and string `lower`, `upper`,
+`startswith`, `endswith`, `strip`, `lstrip`, `rstrip`, `replace`, `count`, `find`,
+`index`, `split`, and `join`. Function/method arguments are positional.
+
+This is a native expression subset, not a Python runtime. Comprehensions,
+lambdas, slicing, regex/datetime/module helpers, arbitrary attributes/calls,
+dictionary views, full Python integer precision, and the full upstream metadata
+schema remain unfinished. Integer arithmetic is checked at 128 bits. Each clause
+is limited to 16 KiB source, 4096 tokens/nodes, and depth 64; a filter has at most
+32 clauses and 64 KiB total source. Evaluation bounds steps, scanned work,
+sequence lengths, and generated values. Oversized metadata values can therefore
+reject a file even when an equivalent unrestricted Python expression would pass.
+The checked-in CPython reference cases and synthetic streaming/CLI tests cover
+the implemented behavior; they do not establish complete Python compatibility.
 
 ## Date selection
 
@@ -800,6 +862,7 @@ Neither configuration file is loaded automatically.
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
+`file-filter`, `image-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
 `expand`, `unique`, `videos`, `previews`, `unavailable`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,
@@ -893,7 +956,7 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   Compatibility properties use an allowlist, including `image_width` /
   `image_height` aliases. Adding descriptive file properties does not change
   request identities, default paths, file numbering, or stable archive keys.
-  Metadata expression filtering remains unfinished.
+  These properties are also available to native file-filter expressions.
   Existing sidecars are never overwritten. Sidecar publication is atomic but is
   separate from media publication: a sidecar failure returns a nonzero status and
   keeps the media; rerunning backfills missing sidecars without downloading again.

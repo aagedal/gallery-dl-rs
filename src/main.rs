@@ -14,6 +14,7 @@ use gallery_dl_rs::{
     error,
     extract::{self, Backend, BackendOptions},
     facebook::Facebook,
+    filter::FilterExpression,
     input::Inputs,
     instagram::Instagram,
     naming::{DirectoryTemplate, FilenameTemplate},
@@ -58,6 +59,9 @@ struct Args {
     /// Select one-based file positions per input (e.g. 5, 8-20, or 1:24:3)
     #[arg(long = "range", allow_hyphen_values = true)]
     file_range: Option<String>,
+    /// Select files with a metadata expression; repeat to require all expressions
+    #[arg(long = "filter", value_name = "EXPR", allow_hyphen_values = true)]
+    file_filter: Vec<String>,
     /// Process posts created before this UTC date or Unix timestamp (exclusive)
     #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
     date_before: Option<i64>,
@@ -236,6 +240,10 @@ async fn run(args: Args) -> Result<()> {
                                 }
                             } else {
                                 input
+                            };
+                            let input = match &settings.filter {
+                                Some(filter) => filter.apply(input),
+                                None => input,
                             };
                             match &settings.selection {
                                 Some(selection) => selection.apply(input),
@@ -602,6 +610,7 @@ struct Settings {
     filename: Option<FilenameTemplate>,
     directory: Option<DirectoryTemplate>,
     selection: Option<RangeSelection>,
+    filter: Option<FilterExpression>,
     dates: DateFilter,
     network: NetworkOptions,
     download_client: OnceCell<Result<download::DownloadClient>>,
@@ -626,6 +635,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .or_else(|| args.destination.clone()),
         filename: args.filename.clone(),
         file_range: args.file_range.clone(),
+        file_filter: (!args.file_filter.is_empty()).then(|| args.file_filter.clone()),
         date_before: args.date_before,
         date_after: args.date_after,
         directory: if args.exact_directory.is_some() {
@@ -699,6 +709,11 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .as_deref()
             .map(RangeSelection::parse)
             .transpose()?;
+        let filter = options
+            .file_filter
+            .as_deref()
+            .map(FilterExpression::parse_all)
+            .transpose()?;
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
         let dates = DateFilter::new(options.date_before, options.date_after)?;
@@ -711,6 +726,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 filename,
                 directory,
                 selection,
+                filter,
                 dates,
                 network,
                 download_client: OnceCell::new(),

@@ -418,7 +418,22 @@ and drops upstream immediately at the last matching index. Empty selections do
 not start extraction or open archives. Cooperative skips preserve cancellation.
 Parser, CLI, process-lifecycle, native-pagination, sidecar, and archive tests cover
 selection behavior. Site-specific offset skipping, counters at flattened child
-boundaries, post/child ranges, and metadata filters remain.
+boundaries, post/child ranges, and their metadata filters remain.
+
+**Implemented native file metadata expressions:** repeated `--filter` and scoped
+`file-filter` / `image-filter` string/list settings select normalized public fields
+for both backends and inspection. A bounded native parser/evaluator supports
+Python-style literals, list/tuple/dict operations, short-circuit logic, arithmetic,
+comparisons, membership, conditionals, common builtins/string methods, and the
+upstream `contains` helper. Missing keys/runtime errors reject only the file;
+syntax/unsupported calls fail privately before extraction. Date selection precedes
+filters; file ranges count filter survivors before dedup/archive. Cooperative
+skips and finite-range drop preserve cancellation and prevent later page/row
+requests. Filters do not mutate filenames, source indices, or stable identities.
+Scoped replacement/clearing, aliases, selected-only sidecars/archives, streaming
+errors, and cancellation have CLI coverage; recorded CPython reference vectors
+exercise accepted expression semantics. Full Python syntax, integer precision,
+helpers, datetime/regex, arbitrary upstream fields, and post/child filters remain.
 
 **Implemented file-size selection:** CLI and scoped native `filesize-min` /
 `filesize-max` settings support byte amounts and binary suffixes, inclusive
@@ -493,7 +508,7 @@ default paths, file order, and stable archives remain unchanged. Dimensions are
 API declarations, not downloaded-file probes; fallback image sizes can differ.
 Synthetic parser, selection, inheritance, naming, privacy, and identity tests
 cover these paths. Real authenticated captures, complete upstream metadata, and
-metadata expression filtering remain unfinished.
+full Python expression compatibility remain unfinished.
 
 **Implemented filename step:** `-f` / `--filename` supports native placeholders
 for filename/name/extension/category and available post IDs, username, shortcode,

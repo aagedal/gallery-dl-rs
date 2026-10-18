@@ -32,6 +32,8 @@ pub struct Options {
     pub filename: Option<String>,
     /// One-based media position ranges, applied separately to each input.
     pub file_range: Option<String>,
+    /// AND-combined media filters, with an empty list clearing inherited clauses.
+    pub file_filter: Option<Vec<String>>,
     pub date_before: Option<i64>,
     pub date_after: Option<i64>,
     /// Whether to include reposts, optionally under the original author.
@@ -110,6 +112,10 @@ impl Options {
                 .file_range
                 .clone()
                 .or_else(|| self.file_range.clone()),
+            file_filter: overrides
+                .file_filter
+                .clone()
+                .or_else(|| self.file_filter.clone()),
             date_before: overrides.date_before.or(self.date_before),
             date_after: overrides.date_after.or(self.date_after),
             retweets: overrides.retweets.or(self.retweets),
@@ -182,6 +188,8 @@ struct RawRoot {
     base_directory: Field,
     filename: Field,
     file_range: Field,
+    file_filter: Field,
+    image_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -224,6 +232,8 @@ struct RawExtractor {
     base_directory: Field,
     filename: Field,
     file_range: Field,
+    file_filter: Field,
+    image_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -269,6 +279,8 @@ struct RawOptions {
     base_directory: Field,
     filename: Field,
     file_range: Field,
+    file_filter: Field,
+    image_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -377,6 +389,8 @@ impl Config {
             base_directory: root.base_directory,
             filename: root.filename,
             file_range: root.file_range,
+            file_filter: root.file_filter,
+            image_filter: root.image_filter,
             date_before: root.date_before,
             date_after: root.date_after,
             retweets: root.retweets,
@@ -417,6 +431,8 @@ impl Config {
             base_directory: extractor.base_directory,
             filename: extractor.filename,
             file_range: extractor.file_range,
+            file_filter: extractor.file_filter,
+            image_filter: extractor.image_filter,
             date_before: extractor.date_before,
             date_after: extractor.date_after,
             retweets: extractor.retweets,
@@ -482,6 +498,12 @@ impl Config {
 
 impl RawOptions {
     fn resolve(self, directory: &Path) -> Result<Options> {
+        let primary_filter = filter_clauses(self.file_filter)?;
+        let alias_filter = filter_clauses(self.image_filter)?;
+        let file_filter = match primary_filter {
+            Some(primary) if !primary.is_empty() => Some(primary),
+            primary => alias_filter.or(primary),
+        };
         let retweets = match self.retweets.0 {
             None => None,
             Some(Value::Bool(false)) => Some(crate::twitter::RetweetMode::Skip),
@@ -793,6 +815,7 @@ impl RawOptions {
             archive: path(self.archive, directory, "archive")?,
             filename,
             file_range,
+            file_filter,
             date_before: date(self.date_before)?,
             date_after: date(self.date_after)?,
             retweets,
@@ -824,6 +847,39 @@ impl RawOptions {
             timeout,
         })
     }
+}
+
+fn filter_clauses(field: Field) -> Result<Option<Vec<String>>> {
+    let invalid = || {
+        error("native configuration file-filter or image-filter requires valid bounded expressions")
+    };
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
+    let clauses = match value {
+        Value::String(value) if value.is_empty() => Vec::new(),
+        Value::String(value) => vec![value],
+        Value::Array(values) if values.len() <= 32 => values
+            .into_iter()
+            .map(|value| {
+                if let Value::String(value) = value {
+                    Ok(value)
+                } else {
+                    Err(invalid())
+                }
+            })
+            .collect::<Result<Vec<_>>>()?,
+        _ => return Err(invalid()),
+    };
+    let mut bytes = 0usize;
+    for clause in &clauses {
+        bytes = bytes.checked_add(clause.len()).ok_or_else(invalid)?;
+        if clause.is_empty() || clause.len() > 16 * 1024 || bytes > 64 * 1024 {
+            return Err(invalid());
+        }
+        crate::filter::FilterExpression::parse(clause).map_err(|_| invalid())?;
+    }
+    Ok(Some(clauses))
 }
 
 fn article_options(field: Field) -> Result<Option<crate::twitter::ArticleOptions>> {
