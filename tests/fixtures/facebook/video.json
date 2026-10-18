@@ -1,0 +1,13 @@
+{
+  "data": {
+    "video": {
+      "__typename": "Video",
+      "id": "123456789",
+      "owner": { "username": "synthetic_creator" },
+      "creation_story": { "message": { "text": "Synthetic video caption 🎥" } },
+      "publish_time": 1700000000,
+      "dash_manifest": "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"><Period><AdaptationSet mimeType=\"video/mp4\"><Representation id=\"low\" width=\"640\" height=\"360\" bandwidth=\"400000\"><BaseURL>https://cdn.example.test/low.mp4?sig=synthetic&amp;kind=video</BaseURL><SegmentBase indexRange=\"0-200\"/></Representation><Representation id=\"high\" width=\"1920\" height=\"1080\" bandwidth=\"2000000\"><BaseURL>https://cdn.example.test/high.mp4?sig=synthetic&amp;kind=video</BaseURL><SegmentBase indexRange=\"0-400\"/></Representation></AdaptationSet><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"audio-low\" bandwidth=\"64000\"><BaseURL>https://cdn.example.test/low.m4a</BaseURL></Representation><Representation id=\"audio-high\" bandwidth=\"128000\"><BaseURL>https://cdn.example.test/high.m4a?sig=synthetic&amp;kind=audio</BaseURL></Representation></AdaptationSet></Period></MPD>"
+    },
+    "preview": { "uri": "https://cdn.example.test/preview.jpg" }
+  }
+}

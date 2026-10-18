@@ -25,7 +25,17 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Synthetic parser and local HTTP fixtures cover identity validation and errors.
   Anonymous public check on 2026-10-18 returned no identity-bound photo; it did
   not verify successful extraction. Real response fixtures, successful live
-  extraction, album response verification, and videos remain required.
+  extraction and album response verification remain required.
+  **Implemented experimental videos:** watch/user-video URLs, exact Video identity,
+  legacy/current inline DASH and progressive delivery, bounded XML, largest full
+  MP4 plus optional M4A, separate stable archive IDs, and existing rotating-cookie
+  transport. Synthetic fixtures and local tests cover quality, metadata, aliases,
+  malformed audio, private errors, retries, and cookie isolation. Anonymous native
+  CLI extraction on 2026-10-18 returned one MP4 for upstream's first public video
+  and MP4/M4A for its second. One initial response-read failure succeeded with a
+  longer timeout; separate raw capture attempts returned shells. Sanitized real
+  fixtures, authenticated verification, and complete live downloads remain.
+  Dynamic/segmented/encrypted/external-only manifests and merging remain unsupported.
 - Twitter/X: single-post photos and direct video variants, including mixed-media
   posts and explicit unavailable/protected-post errors.
   **Implemented experimentally:** authenticated single-status GraphQL extraction,

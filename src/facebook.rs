@@ -1,4 +1,5 @@
-//! Experimental native Facebook photo and album extraction from identity-bound JSON.
+//! Experimental native Facebook photo, album, and video extraction.
+pub use crate::facebook_video::{parse_video, video_id};
 use crate::{
     Result,
     cookies::CookieJar,
@@ -22,7 +23,7 @@ use std::{
 };
 use url::Url;
 
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
 pub struct Facebook {
@@ -82,6 +83,11 @@ impl Facebook {
     }
 
     pub async fn extract(&self, post: &Url) -> Result<Vec<Media>> {
+        if let Ok(id) = video_id(post) {
+            let mut endpoint = http_url("https://www.facebook.com/watch/")?;
+            endpoint.query_pairs_mut().append_pair("v", &id);
+            return self.extract_video_endpoint(&endpoint, &id).await;
+        }
         let code = photo_id(post)?;
         let mut endpoint = http_url("https://www.facebook.com/photo/")?;
         endpoint
@@ -94,6 +100,15 @@ impl Facebook {
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
         let body = self.request_body(endpoint, self.timeout).await?;
         let mut media = parse_photo(&body, code)?;
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        Ok(media)
+    }
+
+    async fn extract_video_endpoint(&self, endpoint: &Url, id: &str) -> Result<Vec<Media>> {
+        let body = self.request_body(endpoint, self.timeout).await?;
+        let mut media = parse_video(&body, id)?;
         for item in &mut media {
             self.network.apply_media(item);
         }
@@ -117,10 +132,10 @@ impl Facebook {
         .map_err(|_| error("native Facebook extraction timed out"))?
     }
 
-    /// Lazily traverse a single photo or an experimental album. Downstream
+    /// Lazily extract a photo/video or traverse an experimental album. Downstream
     /// pauses do not consume the cumulative active extraction timeout.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
-        if photo_id(url).is_ok() {
+        if photo_id(url).is_ok() || video_id(url).is_ok() {
             let url = url.clone();
             return stream::once(async move { self.extract(&url).await })
                 .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
@@ -242,10 +257,11 @@ impl Facebook {
                     }
                     if !matches!(
                         next.path().trim_end_matches('/'),
-                        "/photo" | "/photo.php" | "/media/set"
-                    ) {
+                        "/photo" | "/photo.php" | "/media/set" | "/watch"
+                    ) && video_id(&next).is_err()
+                    {
                         return Err(error(
-                            "Facebook redirected outside the album/photo endpoints; login may be required",
+                            "Facebook redirected outside supported media endpoints; login may be required",
                         )
                         .into());
                     }
@@ -534,7 +550,7 @@ pub(crate) fn embedded_payloads(bytes: &[u8]) -> Result<Vec<Value>> {
     Ok(payloads)
 }
 
-fn has_error_root(value: &Value) -> bool {
+pub(crate) fn has_error_root(value: &Value) -> bool {
     match value {
         Value::Object(object) => {
             object.get("__dr").and_then(Value::as_str) == Some("CometErrorRoot.react")
@@ -580,6 +596,80 @@ mod transport_tests {
     };
 
     const PHOTO: &[u8] = include_bytes!("../tests/fixtures/facebook/photo.html");
+    const VIDEO: &[u8] = include_bytes!("../tests/fixtures/facebook/video.json");
+
+    #[tokio::test]
+    async fn video_requests_retry_rotate_cookies_and_apply_network_identity_to_both_files() {
+        let (mut endpoint, server) = serve_sequence(vec![
+            response(
+                "503 Service Unavailable",
+                "Retry-After: 0\r\nSet-Cookie: session=rotated; Path=/\r\n",
+                b"",
+            ),
+            response(
+                "302 Found",
+                "Location: /watch/?v=123456789&ref=redirect\r\n",
+                b"",
+            ),
+            response("200 OK", "", VIDEO),
+        ]);
+        endpoint.set_path("/watch/");
+        endpoint.set_query(Some("v=123456789"));
+        let network = NetworkOptions::new(None, Some("native-video-test/1".into())).unwrap();
+        let mut native = Facebook::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_retries(1)
+            .with_network(&network)
+            .unwrap();
+        native.cookies = CookieJar::parse("127.0.0.1\tFALSE\t/\tFALSE\t0\tsession\tinitial\n")
+            .unwrap()
+            .into();
+        let media = native
+            .extract_video_endpoint(&endpoint, "123456789")
+            .await
+            .unwrap();
+        assert_eq!(media.len(), 2);
+        for item in media {
+            assert_eq!(
+                item.headers.get("User-Agent").map(String::as_str),
+                Some("native-video-test/1")
+            );
+            assert!(
+                !item
+                    .headers
+                    .keys()
+                    .any(|key| key.eq_ignore_ascii_case("cookie"))
+            );
+        }
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0].2.contains("session=initial"));
+        for (_, _, request) in &requests[1..] {
+            assert!(request.contains("session=rotated"));
+        }
+    }
+
+    #[tokio::test]
+    async fn video_parser_and_authentication_failures_are_terminal() {
+        for (status, body) in [
+            ("200 OK", &b"{\"data\":{}}"[..]),
+            ("403 Forbidden", &b""[..]),
+        ] {
+            let (endpoint, server) = serve_sequence(vec![response(status, "", body)]);
+            let native = Facebook::new(None, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .with_retries(2);
+            assert!(
+                native
+                    .extract_video_endpoint(&endpoint, "123456789")
+                    .await
+                    .is_err()
+            );
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
 
     #[tokio::test]
     async fn request_timeout_is_separate_from_the_overall_extraction_deadline() {

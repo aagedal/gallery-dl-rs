@@ -11,3 +11,7 @@ Experimental album parsing and streaming now have separate
 identity-bound seeds/navigation, complete ordered output, earlier-result retention,
 backpressure, loops, deadlines, cancellation, and range/date cutoffs. Successful
 authenticated album traversal remains a separate live verification gate.
+
+Video extraction has separate [synthetic fixture and live-check notes](video_README.md).
+Anonymous native checks extracted upstream's one-file and two-file public videos;
+real sanitized delivery responses and authenticated/download verification remain.

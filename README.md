@@ -8,7 +8,7 @@ An early Rust implementation of a gallery downloader, inspired by
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
 its JSON messages. Experimental native Instagram posts/profile feeds, Facebook
-photos/albums, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
+photos/albums/videos, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
 extraction has not yet been verified.
 
 ## Build and run
@@ -65,8 +65,9 @@ it is invoked directly, without a shell.
 supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
 `/USERNAME/feed/` profiles, Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
 `/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
-`/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, and Twitter/X single-status URLs.
-Other profiles, stories, threads, album listings, and Facebook videos still need the
+`/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
+`/USER/videos/ID` videos, and Twitter/X single-status URLs.
+Other profiles, stories, threads, and album listings still need the
 compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
@@ -114,7 +115,7 @@ own `image.uri`, never a global image or Open Graph preview. It selects the larg
 identity-bound image and emits available metadata plus stable archive identities.
 Cookies remain scoped to Facebook page requests; media receives user-agent and
 referer only. Requests have bounded redirects, retries, cooldowns, response size,
-and deadlines. Videos and profile album listings are not implemented. An anonymous public page
+and deadlines. Profile album listings are not implemented. An anonymous public page
 check on 2026-10-18 returned no identity-bound photo; successful live extraction
 and sanitized real response fixtures remain required. See the
 [Facebook fixture notes](tests/fixtures/facebook/README.md).
@@ -124,7 +125,7 @@ It resolves the first photo only from an ordered collection tied to the requeste
 set token, then follows each requested Photo's own set-bound navigation. A
 `/photo/?fbid=ID&set=TOKEN&setextract` URL starts directly at that photo. Plain
 photo permalinks keep their single-photo behavior; the collecting `extract`
-library method also remains single-photo. Album output follows viewer navigation
+library method handles individual photos/videos. Album output follows viewer navigation
 and assigns a one-based album index while preserving photo/archive identity.
 
 Only the current bounded HTML response and parsed photo are retained, plus a set
@@ -142,6 +143,31 @@ synthetic protocol fixtures and local HTTP tests and remains unverified against
 an authenticated response. Empty albums and additional live envelope variants
 are not yet recognized. Compatibility remains the default. See the
 [album fixture notes](tests/fixtures/facebook/album_README.md).
+
+Experimental Facebook video extraction accepts `/watch/?v=ID` and
+`/USER/videos/ID` URLs through both `Facebook::extract` and `Facebook::stream`.
+Delivery fields must belong to the exact requested Video (or a legacy record
+owning that `video_id`); previews and unrelated recommendations are excluded.
+Inline DASH manifests select the largest complete-resource MP4 representation
+and highest-bandwidth optional M4A audio. Video and audio remain separate files,
+matching upstream's default output, with distinct `id.extension` archive identities.
+Legacy and modern progressive MP4 delivery fields provide HD/SD selection when
+there is no inline DASH manifest. Existing authenticated transport and configured
+user-agent settings apply to video requests and both emitted files.
+
+XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
+Static, single-period manifests with complete-resource BaseURLs are supported;
+SegmentBase initialization/index byte ranges refer to the same complete file.
+Segment templates/lists, external initialization, encrypted media, external-only
+manifests, and ambiguous or incomplete delivery fail explicitly. General segmented
+downloads and audio/video merging remain unimplemented.
+
+Anonymous native CLI checks on 2026-10-18 extracted the upstream public video
+examples as one MP4 and as MP4 plus M4A. One request initially failed while reading
+the response and succeeded with a longer timeout. Separate attempts to capture
+the raw response returned logged-out shells, so sanitized real delivery fixtures
+remain required. These checks verify extraction, not complete media downloads or
+authenticated access. See the [video fixture notes](tests/fixtures/facebook/video_README.md).
 
 Native Twitter/X requires current `x.com` `auth_token` and `ct0` cookies from
 a Netscape file or explicit Firefox profile import;

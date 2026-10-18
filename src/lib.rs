@@ -8,6 +8,8 @@ pub mod download;
 pub mod extract;
 pub mod facebook;
 mod facebook_album;
+mod facebook_dash;
+mod facebook_video;
 pub mod input;
 pub mod instagram;
 mod messages;
