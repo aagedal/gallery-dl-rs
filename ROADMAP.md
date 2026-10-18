@@ -111,8 +111,25 @@ shared extraction interface that emits media, post metadata, and child URLs.
   operation variables, owner/alias validation, cookie rotation, signed paths,
   bounded empty pages, cursor loops, expansion/dedup, dates/ranges, late errors,
   consumer pauses, and cancellation. Authenticated live collection traversal,
-  real fixtures, bookmark-specific metadata, communities, membership/follow
-  traversal, text-only output, and other routes/options remain unfinished.
+  real fixtures, bookmark-specific metadata, membership/follow traversal,
+  text-only output, and other routes/options remain unfinished.
+  **Implemented experimental community feeds:** explicit `/i/communities/ID`
+  media timelines and the session's followed-community feed at `/i/communities`
+  or `/USER/communities` share lazy traversal, limits, media options, expansion,
+  source-order dates, cancellation, and signing. Exact operation envelopes and
+  present community identity aliases are validated. `text-tweets` and the
+  CommunityTweetsTimeline text variant remain unsupported. Post-owned community
+  metadata uses a public allowlist, with validated IDs and optional typed fields;
+  malformed optional metadata cannot supply a community archive identity. Native
+  and transformed compatibility community fields support `{community_id}` and
+  `{community_name}` filename/directory substitutions. Sidecars omit the banner
+  URL while retaining descriptive fields. Community feed archive keys include
+  community/post/file identity; ordinary statuses retain their prior archive
+  identity even with descriptive community metadata. Missing/invalid IDs remain
+  downloadable without stable archive entries. Compatibility subcategory values
+  select community archive scope. Synthetic parser/runtime/CLI tests cover these
+  distinctions, cross-feed deduplication, and shared media selection. Live
+  authenticated traversal and real sanitized response captures remain pending.
   **Implemented experimental TweetDetail and conversations:** authenticated status
   Auto/Detail now select the exact focal post from structured TweetDetail pages;
   explicit restid retains the original route. Conversations false/true/accessible

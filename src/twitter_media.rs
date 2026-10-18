@@ -93,6 +93,7 @@ pub(super) fn parse_tweet_media(
     let (article_files, article) =
         articles::select_with_images(card_source, article_options, image_options);
     selected.extend(article_files);
+    let community = community::native(card_source);
     // gallery-dl numbers files after selection, including previews after their video.
     Ok(selected
         .into_iter()
@@ -108,6 +109,8 @@ pub(super) fn parse_tweet_media(
             category: "twitter".into(),
             filename: format!("{requested_post_id}_{}.{extension}", i + 1),
             metadata: Some(PostMetadata {
+                community: community.clone(),
+                community_archive: false,
                 retweet_id: None,
                 quoted_by_id: None,
                 reposted_by_id: None,

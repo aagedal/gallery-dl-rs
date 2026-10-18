@@ -1785,3 +1785,69 @@ fn fallback_configuration_controls_actual_download_attempts() {
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn compatibility_community_archives_keep_scoped_files_distinct_from_ordinary_posts() {
+    use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let fixture = root.path().join("rows.json");
+    let row = |filename: &str, subcategory: &str, community: serde_json::Value| {
+        json!([3,"https://cdn.example/shared.jpg",{
+            "filename":filename,"extension":"jpg","tweet_id":"100","num":1,
+            "subcategory":subcategory,"community":community
+        }])
+    };
+    let first = json!({"id":42,"name":"First community","unknown":"PRIVATE-UNALLOWED-FIELD"});
+    let second = json!({"id":"43","name":"Second community"});
+    let rows = json!([
+        row("ordinary", "tweet", first.clone()),
+        row("community-one", "community", first.clone()),
+        row("community-two", "communities", second),
+        row("repeat-community-one", "community", first.clone()),
+        row("repeat-community-one-other-feed", "communities", first),
+        row("repeat-ordinary", "tweet", serde_json::Value::Null),
+        row("missing-community", "community", serde_json::Value::Null),
+        row("invalid-community", "communities", json!({"id":"invalid"}))
+    ]);
+    std::fs::write(&fixture, serde_json::to_vec(&rows).unwrap()).unwrap();
+    std::fs::write(&backend, "#!/bin/sh\ncat \"$COMMUNITY_ROWS\"\n").unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let output = binary()
+        .env("COMMUNITY_ROWS", &fixture)
+        .arg("--extractor-command")
+        .arg(&backend)
+        .args([
+            "-j",
+            "https://x.com/i/communities/42",
+            "https://x.com/i/communities",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let media: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let media = media.as_array().unwrap();
+    assert_eq!(
+        media
+            .iter()
+            .map(|item| item["filename"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "ordinary.jpg",
+            "community-one.jpg",
+            "community-two.jpg",
+            "missing-community.jpg"
+        ]
+    );
+    assert_eq!(media[0]["metadata"]["community"]["id"], "42");
+    assert_eq!(media[1]["metadata"]["community"]["name"], "First community");
+    assert_eq!(media[2]["metadata"]["community"]["id"], "43");
+    assert!(media[3]["metadata"].get("community").is_none());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE-UNALLOWED-FIELD"));
+}

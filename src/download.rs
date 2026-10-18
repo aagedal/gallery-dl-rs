@@ -267,6 +267,10 @@ async fn write_metadata(path: &Path, media: &Media) -> Result<()> {
         // descriptive article fields, just as they omit the media request URL.
         article.html = None;
     }
+    if let Some(community) = metadata.as_mut().and_then(|post| post.community.as_mut()) {
+        // Like article HTML, the banner can contain a private signed media URL.
+        community.banner = None;
+    }
     let mut bytes = serde_json::to_vec_pretty(&MetadataSidecar {
         schema_version: 1,
         category: &media.category,

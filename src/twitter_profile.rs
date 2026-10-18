@@ -385,7 +385,20 @@ impl Twitter {
                 .expand_next_known(engine, &state.base, known, Some(&state.thread_cache))
                 .await?
             {
-                Some(media) => {
+                Some(mut media) => {
+                    if matches!(
+                        &state.source,
+                        Source::Feed(
+                            collections::Collection::Community(_)
+                                | collections::Collection::Communities
+                        )
+                    ) {
+                        for item in &mut media {
+                            if let Some(metadata) = item.metadata.as_mut() {
+                                metadata.community_archive = true;
+                            }
+                        }
+                    }
                     if !queue_unique(
                         media,
                         &mut state.pending,
@@ -885,6 +898,18 @@ fn feed_endpoint(
             }
             variables["listId"] = id.as_str().into();
             "06JtmwM8k_1cthpFZITVVA/ListLatestTweetsTimeline"
+        }
+        Collection::Community(id) => {
+            if !valid_id(id) {
+                return Err(error("Twitter community identifier invalid"));
+            }
+            variables["communityId"] = id.as_str().into();
+            variables["withCommunity"] = true.into();
+            "ZniZ7AAK_VVu1xtSx1V-gQ/CommunityMediaTimeline"
+        }
+        Collection::Communities => {
+            variables["withCommunity"] = true.into();
+            "p048a9n3hTPppQyK7FQTFw/CommunitiesMainPageTimeline"
         }
         Collection::HomeLatest | Collection::Home => {
             variables["includePromotedContent"] = false.into();

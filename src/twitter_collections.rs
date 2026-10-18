@@ -8,6 +8,8 @@ pub(super) enum Collection {
     List(String),
     HomeLatest,
     Home,
+    Community(String),
+    Communities,
 }
 
 pub fn is_collection_url(url: &Url) -> bool {
@@ -44,6 +46,27 @@ pub(super) fn input(url: &Url) -> Result<Option<Collection>> {
         }
         _ => {
             if let Some(id) = path
+                .strip_prefix("/i/communities/")
+                .filter(|id| !id.contains('/'))
+            {
+                if !valid_id(id) {
+                    return Err(error("Twitter community identifier missing or invalid"));
+                }
+                Some(Collection::Community(id.into()))
+            } else if path
+                .strip_prefix('/')
+                .and_then(|path| path.strip_suffix("/communities"))
+                .filter(|name| {
+                    !name.is_empty()
+                        && name.len() <= 15
+                        && name
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                })
+                .is_some()
+            {
+                Some(Collection::Communities)
+            } else if let Some(id) = path
                 .strip_prefix("/i/lists/")
                 .filter(|id| !id.contains('/'))
             {
@@ -67,6 +90,52 @@ pub(super) fn parse_collection_posts(
     let path = match collection {
         Collection::Bookmarks => "/data/bookmark_timeline_v2/timeline/instructions",
         Collection::Home | Collection::HomeLatest => "/data/home/home_timeline_urt/instructions",
+        Collection::Communities => "/data/viewer/communities_timeline/timeline/instructions",
+        Collection::Community(expected) => {
+            if !valid_id(expected) {
+                return Err(error("invalid Twitter community identifier"));
+            }
+            let community = data
+                .pointer("/data/communityResults/result")
+                .filter(|value| value.is_object())
+                .ok_or_else(|| error("Twitter community timeline missing"))?;
+            for field in ["rest_id", "id_str", "id"] {
+                if let Some(value) = community.get(field) {
+                    let numeric;
+                    let decoded;
+                    let id = if field == "id" && value.is_u64() {
+                        numeric = value.as_u64().unwrap().to_string();
+                        numeric.as_str()
+                    } else if field == "id"
+                        && value
+                            .as_str()
+                            .is_some_and(|value| !value.bytes().all(|byte| byte.is_ascii_digit()))
+                    {
+                        decoded = value
+                            .as_str()
+                            .and_then(|value| {
+                                STANDARD
+                                    .decode(value)
+                                    .or_else(|_| STANDARD_NO_PAD.decode(value))
+                                    .ok()
+                            })
+                            .and_then(|value| String::from_utf8(value).ok())
+                            .ok_or_else(|| error("Twitter community identity alias invalid"))?;
+                        decoded
+                            .strip_prefix("Community:")
+                            .ok_or_else(|| error("Twitter community identity alias invalid"))?
+                    } else {
+                        value.as_str().unwrap_or("")
+                    };
+                    if !valid_id(id) || id != expected {
+                        return Err(error(
+                            "Twitter timeline does not match the requested community",
+                        ));
+                    }
+                }
+            }
+            "/data/communityResults/result/community_media_timeline/timeline/instructions"
+        }
         Collection::List(expected) => {
             if !valid_id(expected) {
                 return Err(error("invalid Twitter list identifier"));
@@ -152,6 +221,12 @@ mod tests {
             Collection::List(_) => {
                 json!({"data":{"list":{"tweets_timeline":{"timeline":{"instructions":instructions}}}}})
             }
+            Collection::Community(_) => {
+                json!({"data":{"communityResults":{"result":{"community_media_timeline":{"timeline":{"instructions":instructions}}}}}})
+            }
+            Collection::Communities => {
+                json!({"data":{"viewer":{"communities_timeline":{"timeline":{"instructions":instructions}}}}})
+            }
         }
     }
     fn parse(data: Value, collection: &Collection, pinned: bool) -> Result<Page> {
@@ -177,6 +252,9 @@ mod tests {
                 ("home/for-you", Collection::Home),
                 ("home/for_you", Collection::Home),
                 ("home/for%20you", Collection::Home),
+                ("i/communities/42", Collection::Community("42".into())),
+                ("i/communities", Collection::Communities),
+                ("fixture/communities", Collection::Communities),
             ] {
                 let url = Url::parse(&format!("https://{host}/{path}/?s=20#fragment")).unwrap();
                 assert_eq!(input(&url).unwrap(), Some(expected));
@@ -190,6 +268,9 @@ mod tests {
             "home/following/more",
             "HOME",
             "user/media",
+            "i/communities/42/members",
+            "fixture/communities/more",
+            "bad!name/communities",
         ] {
             assert_eq!(
                 input(&Url::parse(&format!("https://x.com/{path}")).unwrap()).unwrap(),
@@ -201,6 +282,10 @@ mod tests {
             "https://x.com/i/lists/042",
             "https://x.com/i/lists/18446744073709551616",
             "https://x.com/i/lists/PRIVATE",
+            "https://x.com/i/communities/0",
+            "https://x.com/i/communities/042",
+            "https://x.com/i/communities/18446744073709551616",
+            "https://x.com/i/communities/PRIVATE",
             "https://user:PRIVATE@x.com/home",
             "https://x.com:444/home",
             "https://x.com.evil/home",
@@ -218,6 +303,8 @@ mod tests {
             Collection::List("42".into()),
             Collection::HomeLatest,
             Collection::Home,
+            Collection::Community("42".into()),
+            Collection::Communities,
         ];
         for collection in &collections {
             let instructions = json!([
@@ -290,6 +377,50 @@ mod tests {
             }
         }
         assert!(parse(base, &Collection::List("042".into()), true).is_err());
+    }
+
+    #[test]
+    fn community_envelope_aliases_bind_to_requested_identity_without_attributing_post_community() {
+        let collection = Collection::Community("42".into());
+        let base = envelope(
+            &collection,
+            json!([{"type":"TimelineAddEntries","entries":[entry(tweet("11","99"))]}]),
+        );
+        assert_eq!(
+            parse(base.clone(), &collection, false).unwrap().posts.len(),
+            1
+        );
+        let mut aliases = base.clone();
+        aliases["data"]["communityResults"]["result"]["rest_id"] = json!("42");
+        aliases["data"]["communityResults"]["result"]["id_str"] = json!("42");
+        for id in [
+            json!(42),
+            json!("42"),
+            json!(STANDARD.encode("Community:42")),
+            json!(STANDARD_NO_PAD.encode("Community:42")),
+        ] {
+            aliases["data"]["communityResults"]["result"]["id"] = id;
+            assert!(parse(aliases.clone(), &collection, false).is_ok());
+        }
+        for field in ["rest_id", "id_str", "id"] {
+            for value in [
+                json!("private alias"),
+                json!("43"),
+                json!(null),
+                json!(42.0),
+                json!(-1),
+                json!(0),
+                json!("042"),
+                json!(STANDARD.encode("Community:43")),
+                json!(STANDARD.encode("List:42")),
+            ] {
+                let mut bad = base.clone();
+                bad["data"]["communityResults"]["result"][field] = value;
+                let error = parse(bad, &collection, false).err().unwrap().to_string();
+                assert!(!error.contains("private alias"));
+            }
+        }
+        assert!(parse(base, &Collection::Community("042".into()), false).is_err());
     }
 
     #[test]

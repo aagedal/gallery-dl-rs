@@ -83,7 +83,16 @@ impl Media {
                 }
                 (
                     category,
-                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                    if category == "twitter" && post.community_archive {
+                        let community = post.community.as_ref()?;
+                        if !crate::twitter::valid_id(&community.id) {
+                            return None;
+                        }
+                        serde_json::json!(["community", community.id, post.post_id, post.media_id])
+                            .to_string()
+                    } else {
+                        serde_json::json!([post.post_id, post.media_id]).to_string()
+                    },
                 )
             }
             _ => return None,
@@ -114,6 +123,11 @@ impl Media {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PostMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub community: Option<crate::twitter::CommunityMetadata>,
+    /// Community feeds use their own archive namespace; ordinary posts do not.
+    #[serde(skip_serializing)]
+    pub community_archive: bool,
     pub post_id: String,
     /// Site media ID; Twitter uses the upstream file number and Facebook uses
     /// `id.extension` because separate audio and video files share an ID.
@@ -692,6 +706,17 @@ fn compatibility_metadata(
         .then_some(value)
     };
     Some(PostMetadata {
+        community: (category == "twitter")
+            .then(|| {
+                data.get("community")
+                    .and_then(crate::twitter::community::compatibility)
+            })
+            .flatten(),
+        community_archive: category == "twitter"
+            && data
+                .get("subcategory")
+                .and_then(Value::as_str)
+                .is_some_and(|value| matches!(value, "community" | "communities")),
         retweet_id: context_id("retweet_id"),
         quoted_by_id: context_id("quote_id"),
         reposted_by_id: None,

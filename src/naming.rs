@@ -72,6 +72,8 @@ impl FilenameTemplate {
                             | "username"
                             | "index"
                             | "timestamp"
+                            | "community_id"
+                            | "community_name"
                     ) {
                         return Err(error(format!("unknown filename template field: {name}")));
                     }
@@ -133,6 +135,17 @@ impl FilenameTemplate {
                                 error(format!("filename field {field} requires post metadata"))
                             })?;
                             match field {
+                                "community_id" => metadata
+                                    .community
+                                    .as_ref()
+                                    .map(|value| value.id.clone())
+                                    .unwrap_or_default(),
+                                "community_name" => metadata
+                                    .community
+                                    .as_ref()
+                                    .and_then(|value| value.name.as_deref())
+                                    .unwrap_or_default()
+                                    .to_owned(),
                                 "post_id" => metadata.post_id.clone(),
                                 "media_id" => metadata.media_id.clone(),
                                 "shortcode" => metadata.shortcode.clone(),

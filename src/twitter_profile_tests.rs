@@ -1950,6 +1950,12 @@ fn feed_page(kind: &collections::Collection, tweets: Vec<Value>, cursor: Option<
         collections::Collection::Home | collections::Collection::HomeLatest => {
             json!({"data":{"home":{"home_timeline_urt":{"instructions":instructions}}}})
         }
+        collections::Collection::Community(id) => {
+            json!({"data":{"communityResults":{"result":{"rest_id":id,"community_media_timeline":{"timeline":{"instructions":instructions}}}}}})
+        }
+        collections::Collection::Communities => {
+            json!({"data":{"viewer":{"communities_timeline":{"timeline":{"instructions":instructions}}}}})
+        }
     }
 }
 fn other_author(mut post: Value) -> Value {
@@ -2025,6 +2031,7 @@ async fn feed_operations_are_lazy_cursor_bound_and_keep_original_media_identity(
             Collection::Home => {
                 json!({"count":7,"includePromotedContent":false,"latestControlAvailable":true,"withCommunity":true})
             }
+            Collection::Community(_) | Collection::Communities => unreachable!(),
         };
         assert_eq!(variables(&urls[0]), expected);
         expected["cursor"] = "opaque+/=?".into();
@@ -4709,4 +4716,259 @@ async fn expanded_threads_inherit_image_sizes_for_posters_and_range_avoids_later
     assert_image_chain(&items[1], &["medium", "small"]);
     assert_eq!(items[1].filename, "90_2.jpg");
     assert_eq!(server.count(), 2);
+}
+
+fn community_post(id: &str, community: &str) -> Value {
+    let mut post = tweet(id);
+    post["author_community_relationship"] =
+        json!({"community_results":{"result":{"id_str":community,"name":"Fixture community"}}});
+    post
+}
+fn community_instructions(page: &mut Value, joined: bool) -> &mut Value {
+    if joined {
+        &mut page["data"]["viewer"]["communities_timeline"]["timeline"]["instructions"]
+    } else {
+        &mut page["data"]["communityResults"]["result"]["community_media_timeline"]["timeline"]["instructions"]
+    }
+}
+
+#[tokio::test]
+async fn community_feeds_paginate_lazily_with_exact_operations_and_signed_headers() {
+    use collections::Collection;
+    for (kind, operation) in [
+        (
+            Collection::Community("55".into()),
+            "/ZniZ7AAK_VVu1xtSx1V-gQ/CommunityMediaTimeline",
+        ),
+        (
+            Collection::Communities,
+            "/p048a9n3hTPppQyK7FQTFw/CommunitiesMainPageTimeline",
+        ),
+    ] {
+        let server = Server::new(vec![
+            Response::json(feed_page(
+                &kind,
+                vec![
+                    community_post("100", "55"),
+                    other_author(community_post("101", "55")),
+                ],
+                Some("community+/=?"),
+            )),
+            Response::json(feed_page(
+                &kind,
+                vec![community_post("101", "55"), community_post("102", "55")],
+                None,
+            )),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_timeline_options(TimelineOptions {
+                limit: 7,
+                ..Default::default()
+            });
+        let mut stream = native.feed_stream(kind.clone(), server.base.clone());
+        assert_eq!(server.count(), 0);
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first.metadata.as_ref().unwrap().post_id, "100");
+        let second = stream.next().await.unwrap().unwrap();
+        assert_eq!(second.metadata.as_ref().unwrap().post_id, "101");
+        assert_eq!(
+            server.count(),
+            1,
+            "queued posts must not trigger another page"
+        );
+        let rest: Vec<_> = stream.try_collect().await.unwrap();
+        assert_eq!(post_ids(&rest), ["102"]);
+        let urls = server.urls();
+        assert_eq!(urls.len(), 2);
+        assert!(urls.iter().all(|url| url.path().ends_with(operation)));
+        let mut expected = json!({"count":7,"withCommunity":true});
+        if matches!(kind, Collection::Community(_)) {
+            expected["communityId"] = "55".into();
+        }
+        assert_eq!(variables(&urls[0]), expected);
+        expected["cursor"] = "community+/=?".into();
+        assert_eq!(variables(&urls[1]), expected);
+        assert_scoped_expansion_requests(&server, &native);
+        let standalone = parse_response(
+            &serde_json::to_vec(&post_response(community_post("100", "55"))).unwrap(),
+            "100",
+        )
+        .unwrap();
+        assert_ne!(first.archive_key(), standalone[0].archive_key());
+        let ordinary = parse_response(
+            &serde_json::to_vec(&post_response(tweet("100"))).unwrap(),
+            "100",
+        )
+        .unwrap();
+        assert_ne!(
+            first.archive_key(),
+            ordinary[0].archive_key(),
+            "community archive context must remain distinct"
+        );
+        assert!(
+            !first
+                .headers
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case("cookie")
+                    || key.eq_ignore_ascii_case("x-client-transaction-id"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn community_grid_modules_preserve_order_and_stop_on_repeated_cursor() {
+    use collections::Collection;
+    for joined in [false, true] {
+        let kind = if joined {
+            Collection::Communities
+        } else {
+            Collection::Community("55".into())
+        };
+        let mut first = feed_page(&kind, vec![community_post("100", "55")], Some("repeat"));
+        let module_item = |id| json!({"item":{"itemContent":entry(community_post(id, "55"))["content"]["itemContent"].clone()}});
+        community_instructions(&mut first, joined)[0]["entries"].as_array_mut().unwrap().insert(1, json!({"entryId":"module-community","content":{"entryType":"TimelineTimelineModule","items":[module_item("101"),module_item("102")]}}));
+        community_instructions(&mut first, joined)
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"TimelineAddToModule","moduleItems":[module_item("103")]}));
+        let server = Server::new(vec![
+            Response::json(first),
+            Response::json(feed_page(
+                &kind,
+                vec![community_post("104", "55")],
+                Some("repeat"),
+            )),
+        ]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let mut stream = native.feed_stream(kind, server.base.clone());
+        for id in ["100", "101", "102", "103"] {
+            assert_eq!(
+                stream
+                    .next()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .metadata
+                    .unwrap()
+                    .post_id,
+                id
+            );
+        }
+        let error = stream.next().await.unwrap().unwrap_err().to_string();
+        assert!(error.contains("cursor"));
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn community_feed_range_and_drop_never_request_unneeded_pages() {
+    use collections::Collection;
+    for kind in [Collection::Community("55".into()), Collection::Communities] {
+        for range in [false, true] {
+            let server = Server::new(vec![
+                Response::json(feed_page(
+                    &kind,
+                    vec![community_post("100", "55"), community_post("101", "55")],
+                    Some("unused"),
+                )),
+                Response::json(feed_page(&kind, vec![community_post("102", "55")], None)),
+            ]);
+            let native = extractor(Duration::from_secs(3)).await;
+            if range {
+                let selected: Vec<_> = crate::selection::RangeSelection::parse("1")
+                    .unwrap()
+                    .apply(native.feed_stream(kind.clone(), server.base.clone()))
+                    .try_collect()
+                    .await
+                    .unwrap();
+                assert_eq!(post_ids(&selected), ["100"]);
+            } else {
+                let mut stream = native.feed_stream(kind.clone(), server.base.clone());
+                assert!(stream.next().await.unwrap().is_ok());
+                drop(stream);
+            }
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            assert_eq!(server.count(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn individual_community_envelope_alias_mismatch_is_a_private_terminal_error() {
+    use collections::Collection;
+    let kind = Collection::Community("55".into());
+    for alias in ["rest_id", "id_str", "id"] {
+        let mut wrong = feed_page(&kind, vec![community_post("101", "55")], None);
+        wrong["data"]["communityResults"]["result"][alias] = "private-mismatched-community".into();
+        let server = Server::new(vec![
+            Response::json(feed_page(
+                &kind,
+                vec![community_post("100", "55")],
+                Some("next"),
+            )),
+            Response::json(wrong),
+        ]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let mut stream = native.feed_stream(kind.clone(), server.base.clone());
+        assert!(stream.next().await.unwrap().is_ok());
+        let error = stream.next().await.unwrap().unwrap_err().to_string();
+        assert!(!error.contains("private-mismatched-community"));
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn community_feeds_cancel_active_pages_and_report_late_authentication_privately() {
+    use collections::Collection;
+    for kind in [Collection::Community("55".into()), Collection::Communities] {
+        let server = Server::new(vec![
+            Response::json(feed_page(
+                &kind,
+                vec![community_post("100", "55")],
+                Some("next"),
+            )),
+            Response::json(feed_page(
+                &kind,
+                vec![community_post("101", "55")],
+                Some("unused"),
+            ))
+            .delayed(500),
+            Response::json(feed_page(&kind, vec![community_post("102", "55")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let mut stream = native.feed_stream(kind.clone(), server.base.clone());
+        assert!(stream.next().await.unwrap().is_ok());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), stream.next())
+                .await
+                .is_err()
+        );
+        server.wait_for(2).await;
+        drop(stream);
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert_eq!(
+            server.count(),
+            2,
+            "cancellation cannot fetch another cursor page"
+        );
+
+        let server = Server::new(vec![
+            Response::json(feed_page(
+                &kind,
+                vec![community_post("100", "55")],
+                Some("next"),
+            )),
+            Response::json(json!({"errors":[{"code":89,"message":"PRIVATE COMMUNITY SESSION"}]})),
+        ]);
+        let mut stream = native.feed_stream(kind, server.base.clone());
+        assert!(stream.next().await.unwrap().is_ok());
+        let error = stream.next().await.unwrap().unwrap_err().to_string();
+        assert!(error.contains("authentication"), "{error}");
+        assert!(!error.contains("PRIVATE"));
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), 2);
+    }
 }

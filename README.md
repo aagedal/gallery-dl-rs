@@ -69,7 +69,7 @@ stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fb
 `/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
 `/USER/videos/ID` videos, and Twitter/X single-status plus `/USER/media`, `/USER/tweets`, `/USER/with_replies`,
 and `/USER/highlights` URLs, root profiles, search, hashtags, likes, bookmarks,
-lists, and home feeds.
+lists, home feeds, and community feeds.
 X conversation extraction is also available through scoped settings. Other
 unsupported profiles and album listings still need the compatibility backend.
 Native extraction does not fall back to that backend automatically. Native mode
@@ -464,6 +464,36 @@ archive identities, first-page pin opt-in, duplicate suppression, and active-tim
 budgets. Present decimal list identifiers must match the requested list; opaque
 GraphQL node IDs are not treated as decimal aliases.
 
+Native community media uses `/i/communities/COMMUNITY_ID`. The followed-community
+feed uses `/i/communities` or `/USER/communities`; the latter is an alias for the
+current session's feed, not another user's followed communities. Requests use
+`CommunityMediaTimeline` and `CommunitiesMainPageTimeline`, respectively. They
+share lazy pagination, media selection, quote/thread expansion, limits, and
+source-order dates with other collection feeds. These routes emit media; upstream
+`text-tweets` and `CommunityTweetsTimeline` text output are not implemented.
+Community response identity aliases, when present, must match the requested ID;
+an unrelated nested timeline cannot replace the required envelope.
+
+Posts can include allowlisted `metadata.community`: canonical decimal `id`,
+`name`, `description`, epoch-second `date`, `nsfw`, `role`, `member_count`, string
+`rules`, `admin`, `creator`, and a validated HTTP(S) `banner` URL. Optional invalid
+fields are omitted or null; missing, invalid, or conflicting community IDs omit
+the community object. Community identity comes from each post's explicit
+relationship, never from an assumed feed ID. Compatibility extraction accepts
+the corresponding transformed public fields. Inspection can include the banner;
+metadata sidecars strip it and retain descriptive community fields.
+
+Community feeds use a separate stable archive namespace containing community ID,
+post ID, and file number. The same file in two communities or an ordinary post
+remains distinct; repeated instances in the same community collapse. Ordinary
+status/profile archives keep their existing identity even when community metadata
+is present. Feed items without a valid community ID still download but have no
+stable archive entry. Compatibility rows select this scope through upstream
+`subcategory: "community"` or `"communities"`. Custom filename and directory
+templates can use `{community_id}` and `{community_name}`; missing values fail
+like other required template fields. Default output directory rules are unchanged.
+Authenticated live community traversal and captures remain unverified.
+
 Scoped `"limit"` sets the page size for profile and collection requests (integer
 1–100, default 50), independently of `search-limit`, and forwards to compatibility
 mode only when explicit. Bookmarks tolerate 128 consecutive empty continuations;
@@ -474,7 +504,7 @@ date filtering preserves source order because bookmark, like, list, and ranked
 feed order need not match original post dates. No collection request credentials
 are copied to media requests.
 
-Communities, list membership/follow relations, arbitrary
+List membership/follow relations, arbitrary
 root-profile dispatch selection, cursor-resume configuration,
 text-only output, and other collection routes remain
 unfinished. New collection behavior has synthetic/local coverage; successful
@@ -885,7 +915,8 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   template under `destination/category/`. Available fields are `{filename}`
   (including extension), `{name}` (without the final extension), `{extension}`
   (without the dot), `{category}`, `{post_id}`, `{media_id}`, `{shortcode}`,
-  `{username}`, `{index}`, and `{timestamp}`. Only index supports zero-padding,
+  `{username}`, `{index}`, `{timestamp}`, `{community_id}`, and `{community_name}`.
+  Only index supports zero-padding,
   such as `{index:03}` or `{index:03d}`. `{{` / `}}` escape braces; all output then
   uses safe ASCII filename characters, so literal braces become underscores.
   Unknown fields/formats, missing values, and literal directory paths fail

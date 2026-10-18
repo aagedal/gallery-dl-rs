@@ -23,7 +23,7 @@ These check original/repost identities, lazy missing-target requests, alias/root
 validation, bounds/cycles, scoped credentials, ranges, dates, and cancellation.
 Posts/replies/highlights tabs have synthetic/local coverage described in
 [the profile timeline notes](media_README.md). Root-profile search fallback and standalone search/hashtags also have synthetic
-coverage there. Likes, bookmarks, lists, and home feeds have separate
+coverage there. Likes, bookmarks, lists, home, and community feeds have separate
 [collection protocol notes](collections_README.md). TweetDetail and conversation modes have separate
 [detail protocol notes](detail_README.md). Playlists and other
 collections remain unsupported natively. Compatibility remains the default.
@@ -73,6 +73,18 @@ archives, quote/thread cutoff, and pagination after optional failures. Inline
 text tests cover exact UTF-8 downloads, filtering, atomic publication, and sidecar
 HTML exclusion. No authenticated article response or download has been captured.
 Additional content variants and recovery warnings remain.
+
+Community feed/metadata fixtures are synthetic derivatives in
+`src/twitter_collections.rs`, `src/twitter_community.rs`, and local runtime tests;
+see the [collection protocol notes](collections_README.md). Tests validate exact
+community envelopes, post-owned public metadata, source order, cursor progress,
+lazy cancellation, and shared media/quote/thread options. Compatibility CLI cases
+keep distinct community-scoped copies and ordinary posts with the same URL,
+while suppressing repeated same-community files across inputs. Invalid/missing
+community IDs leave scoped items without stable archive keys. Sidecars strip
+community banners; filename/directory templates accept community IDs/names.
+Community text output and live authenticated captures remain unsupported or
+unverified; no fixture contains personal community/session data.
 
 Image-size cases in `tests/twitter_images.rs` and local runtime fixtures are
 synthetic. Default orig/4096x4096/large/medium/small selection and custom ordered

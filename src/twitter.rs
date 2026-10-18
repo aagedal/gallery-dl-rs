@@ -34,6 +34,9 @@ pub use threads::ThreadOptions;
 #[path = "twitter_detail.rs"]
 mod detail;
 pub use detail::{ConversationMode, StatusOptions, TweetEndpoint};
+#[path = "twitter_community.rs"]
+pub(crate) mod community;
+pub use community::CommunityMetadata;
 #[path = "twitter_collections.rs"]
 mod collections;
 #[path = "twitter_detail_parse.rs"]
