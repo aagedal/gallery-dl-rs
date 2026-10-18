@@ -530,6 +530,12 @@ category). Remaining: access tokens, arbitrary instances, bookmarks/favorites/
 lists/hashtags/followed views, card images, `reblogs`/`replies`/`text-posts`
 options, and per-instance categories.
 
+**Implemented experimental native Kemono/Coomer:** posts and creator post
+listings with deduplicated files. Remaining: creator names, favorites,
+Discord servers, search/tag/popular views, revisions, comments/DMs, inline
+content images, archive/link extraction from post text, cookies/login, and
+upstream options (`duplicates`, `revisions`, `max-posts`, `endpoint`).
+
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.

@@ -286,6 +286,19 @@ status HTML with tags stripped. Default filenames are
 `{post_id}_{media_id}.{extension}`; archive identity is (instance, attachment ID).
 No access tokens are sent, so private/followers-only content stays hidden.
 
+Experimental native Kemono/Coomer extraction (`--extractor native`) covers
+kemono.cr/.su/.party (`kemono` category) and coomer.st/.su/.party (`coomer`).
+Supported: posts (`/SERVICE/user/USER/post/ID`) and creator listings
+(`/SERVICE/user/USER`, offset paging 50 per page, capped at 200 pages) via the
+`/api/v1` API with `Accept: text/css`. The post `file` and `attachments` are
+downloaded from `https://HOST/data/PATH` (redirects to `nN.HOST` CDN subdomains
+are allowed for these categories only), with identical paths deduplicated.
+`post_id` is the post ID, `media_id` the file hash, `username` the creator ID,
+`service` the service, caption the title, date from `published`/`added`, and the
+file description is the original name. Default filenames are
+`{post_id}_{index:02}.{extension}`; archive identity is (service, creator, post,
+hash). Plain `/data/` file links stay direct downloads.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.
