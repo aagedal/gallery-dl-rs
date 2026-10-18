@@ -7,7 +7,7 @@ An early Rust implementation of a gallery downloader, inspired by
 **This is a working foundation, not a native Rust replacement for gallery-dl yet.**
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
-its JSON messages. Experimental native Instagram posts/profile feeds/stories/highlights, Facebook
+its JSON messages. Experimental native Instagram posts/collections/stories/highlights, Facebook
 photos/albums/videos, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
 extraction has not yet been verified.
 
@@ -63,7 +63,8 @@ it is invoked directly, without a shell.
 
 `--extractor compatibility` is the default. `--extractor native` experimentally
 supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
-`/USERNAME/feed/` profiles, Instagram stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
+`/USERNAME/feed/` profiles, Instagram reels/tagged/saved collections and
+stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
 `/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
 `/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
 `/USER/videos/ID` videos, and Twitter/X single-status URLs.
@@ -109,6 +110,31 @@ cursors and inaccessible private profiles fail explicitly; results from earlier
 pages remain available after a late failure. `Instagram::stream` supports these
 collections; the collecting `extract` API remains single-post. Profile fixtures
 are synthetic; live authenticated pagination remains unverified.
+
+Native Instagram also streams `/USERNAME/posts/`, `/USERNAME/reels/`,
+`/USERNAME/tagged/`, `/USERNAME/saved/` (or `/saved/all-posts/`), and
+`/USERNAME/saved/COLLECTION_NAME/COLLECTION_ID/`. Posts, reels, and tagged routes
+also accept `id:USER_ID` in place of the username to skip profile lookup. Saved
+routes always use the currently authenticated account's saved items; their URL
+username and collection-name label do not select another account or change the
+numeric collection endpoint.
+
+Reels use form POST pagination; the other routes use GET pagination. Each page
+is validated before output, preserving post/carousel order, actual creator
+metadata, and the same archive identities as single-post extraction. Profile
+posts require the requested owner; reels also accept an explicitly listed
+coauthor. Tagged and saved posts can belong to other creators. Missing wrappers,
+conflicting identities, missing/repeated cursors, and malformed media fail
+explicitly; earlier pages survive a later failure. Later pages are requested
+only as consumers drain the current page, with shared active extraction budgets.
+For these named routes, the API decides private-account access.
+
+POST requests reuse scoped cookies, CSRF updates, proxy/user-agent settings,
+retry cooldowns, response bounds, and cancellation. Same-origin API redirects
+preserve POST bodies for 307/308; 301/302/303 switch to GET without the form body.
+A retry restarts the original request. These routes have synthetic parser and
+local transport tests; authenticated live verification and sanitized real
+response fixtures remain required. See the [collection fixture notes](tests/fixtures/instagram/collections_README.md).
 
 Experimental Instagram stories/highlights use `Instagram::stream` and the native
 CLI. Supported URLs include `/stories/USERNAME/`, `/stories/USERNAME/MEDIA_ID/`,
@@ -384,10 +410,10 @@ bound, drops the extractor, and proceeds to the next input. This assumes newest
 first ordering; an older pinned or out-of-order post can end traversal early.
 Already selected downloads finish normally.
 
-Recognized Instagram story, highlight, and story-tray URLs use source-order date
+Recognized Instagram story, highlight, story-tray, reels, tagged, and saved-collection URLs use source-order date
 filtering with either extractor backend: `--date-after` skips older items and
 continues scanning. This avoids dropping newer items later in an ascending or
-mixed-order reel. Library users can select the same behavior with
+mixed-order source. Library users can select the same behavior with
 `DateFilter::apply_unordered`. Date selection still runs before file ranges.
 
 Values accept signed integer Unix seconds, `YYYY-MM-DD` (midnight UTC), or

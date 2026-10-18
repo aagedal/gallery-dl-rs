@@ -74,7 +74,7 @@ fn urls(result: &Output) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn story_dates_skip_older_entries_without_ending_ascending_or_mixed_feeds() {
+async fn source_order_dates_skip_old_entries_in_stories_reels_tagged_and_saved_feeds() {
     let root = tempfile::tempdir().unwrap();
     let backend = fixture(
         root.path(),
@@ -91,23 +91,32 @@ async fn story_dates_skip_older_entries_without_ending_ascending_or_mixed_feeds(
         ],
         &[],
     );
-    let result = output(binary(root.path(), &backend).args([
-        "-g",
-        "--date-after=5",
-        "--date-before=10",
+    for source in [
         "https://instagram.com/stories/fixture/",
-    ]))
-    .await;
-    success(&result);
-    assert_eq!(
-        urls(&result),
-        [
-            "https://cdn.example/ascending.jpg",
-            "https://cdn.example/mixed.jpg",
-            "https://cdn.example/unknown.jpg",
-            "https://cdn.example/later.jpg",
-        ]
-    );
+        "https://instagram.com/stories/highlights/123/",
+        "https://instagram.com/fixture/reels/",
+        "https://instagram.com/fixture/tagged/",
+        "https://instagram.com/fixture/saved/",
+        "https://instagram.com/fixture/saved/collection/123/",
+    ] {
+        let result = output(binary(root.path(), &backend).args([
+            "-g",
+            "--date-after=5",
+            "--date-before=10",
+            source,
+        ]))
+        .await;
+        success(&result);
+        assert_eq!(
+            urls(&result),
+            [
+                "https://cdn.example/ascending.jpg",
+                "https://cdn.example/mixed.jpg",
+                "https://cdn.example/unknown.jpg",
+                "https://cdn.example/later.jpg",
+            ]
+        );
+    }
 }
 
 #[tokio::test]

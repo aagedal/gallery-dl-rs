@@ -40,3 +40,7 @@ including a carousel/video, an empty profile, and an authorized private profile.
 Stories, highlight lists/shared highlights, and the signed-in story tray now have
 separate [synthetic protocol and verification notes](stories_README.md). Their
 authenticated live verification remains pending as well.
+
+Explicit posts/reels/tagged/saved collections have separate
+[synthetic request and pagination notes](collections_README.md), including POST
+transport and source-order date filtering. Their live verification also remains pending.

@@ -27,6 +27,16 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Real response fixtures and successful authenticated extraction remain required.
   Full upstream reel metadata, highlight titles/expiry, music/sticker audio,
   split/order configuration, and segmented story video remain.
+  **Implemented experimental post collections:** explicit posts, reels, tagged,
+  saved posts, and saved collection routes stream bounded REST pages. Reels use
+  form POST and nested paging state; other routes use GET and root cursors.
+  ID selectors skip username lookup. Profile/reel owner or coauthor checks,
+  creator-preserving saved/tagged metadata, stable archive IDs, page atomicity,
+  cursor loops, source-order date filtering, lazy range/cancellation, and active
+  budgets have synthetic/local coverage. POST retries, cookie/CSRF rotation, and
+  body-preserving versus body-free redirects are tested. Live authenticated
+  verification, real response fixtures, broader API variants, saved collection
+  discovery, and extended collection metadata/options remain.
 - Facebook: photo permalinks and albums first, then video posts. Establish tested
   URL coverage and distinguish login pages from successful extraction.
   **Implemented experimentally:** single-photo permalink extraction from matching

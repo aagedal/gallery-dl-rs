@@ -1,4 +1,6 @@
-//! Experimental native post, profile, story, and highlight REST extraction.
+//! Experimental native Instagram REST media and collection extraction.
+#[path = "instagram_collections.rs"]
+mod collections;
 #[path = "instagram_stories.rs"]
 mod stories;
 use crate::{
@@ -9,6 +11,7 @@ use crate::{
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
+pub use collections::is_unordered_collection_url;
 use futures_util::{
     StreamExt, TryStreamExt,
     stream::{self, BoxStream},
@@ -103,9 +106,28 @@ impl Instagram {
     }
 
     async fn request_json(&self, endpoint: &Url, referer: &str, budget: Duration) -> Result<Value> {
+        self.request_api(endpoint, referer, budget, None).await
+    }
+
+    async fn request_form(
+        &self,
+        endpoint: &Url,
+        form: &[(String, String)],
+        budget: Duration,
+    ) -> Result<Value> {
+        self.request_api(endpoint, "", budget, Some(form)).await
+    }
+
+    async fn request_api(
+        &self,
+        endpoint: &Url,
+        referer: &str,
+        budget: Duration,
+        form: Option<&[(String, String)]>,
+    ) -> Result<Value> {
         tokio::time::timeout(budget, async {
             for attempt in 0..=self.retries {
-                match self.attempt(endpoint, referer, attempt).await {
+                match self.attempt(endpoint, referer, attempt, form).await {
                     Ok(data) => return Ok(data),
                     Err(failure) if failure.retry && attempt < self.retries => {
                         tokio::time::sleep(backoff(attempt)).await;
@@ -119,7 +141,7 @@ impl Instagram {
         .map_err(|_| error("native Instagram extraction timed out"))?
     }
 
-    /// Lazily traverse posts, profile feeds, stories, or highlights. The current page is
+    /// Lazily traverse posts and collections. Only the current response page is
     /// buffered; downstream pauses do not consume the active extraction budget.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
         if shortcode(url).is_ok() {
@@ -131,6 +153,12 @@ impl Instagram {
         }
         if let Ok(input) = stories::input(url) {
             return self.story_stream(
+                input,
+                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
+            );
+        }
+        if let Ok(input) = collections::input(url) {
+            return self.collection_stream(
                 input,
                 Url::parse("https://www.instagram.com/api/v1/").unwrap(),
             );
@@ -271,6 +299,7 @@ impl Instagram {
         endpoint: &Url,
         code: &str,
         attempt: u8,
+        mut form: Option<&[(String, String)]>,
     ) -> std::result::Result<Value, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
@@ -278,7 +307,14 @@ impl Instagram {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = self
                 .client
-                .get(target.clone())
+                .request(
+                    if form.is_some() {
+                        reqwest::Method::POST
+                    } else {
+                        reqwest::Method::GET
+                    },
+                    target.clone(),
+                )
                 .timeout(self.request_timeout)
                 .header(header::ACCEPT, "application/json")
                 .header(
@@ -292,6 +328,9 @@ impl Instagram {
                 .header("X-IG-App-ID", "936619743392459")
                 .header("X-Requested-With", "XMLHttpRequest")
                 .header("X-IG-WWW-Claim", "0");
+            if let Some(form) = form {
+                request = request.form(form);
+            }
             if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
                 if let Some(token) = cookies
                     .split("; ")
@@ -313,6 +352,11 @@ impl Instagram {
                     // API normalization is allowed; login/challenge pages are terminal.
                     if !next.path().starts_with("/api/") {
                         return Err(error("Instagram redirected outside the API; login or a session challenge may be required").into());
+                    }
+                    // Match HTTP client redirect semantics: 307/308 retain the
+                    // method/body; 301/302/303 turn POST into a body-free GET.
+                    if matches!(response.status().as_u16(), 301..=303) {
+                        form = None;
                     }
                     target = next;
                 }
@@ -812,19 +856,12 @@ mod transport_tests {
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0; 1024];
-            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                let count = stream.read(&mut buffer).unwrap();
-                assert_ne!(count, 0, "client closed before completing request headers");
-                request.extend_from_slice(&buffer[..count]);
-                assert!(request.len() < 64 * 1024);
-            }
+            let request = read_request(&mut stream);
             thread::sleep(delay);
             // A timed-out client can disconnect before the response is written.
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.write_all(&body);
-            String::from_utf8(request).unwrap()
+            request
         });
         (endpoint, task)
     }
@@ -868,21 +905,153 @@ mod transport_tests {
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
-                let mut request = Vec::new();
-                let mut buffer = [0; 1024];
-                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                    let count = stream.read(&mut buffer).unwrap();
-                    assert_ne!(count, 0);
-                    request.extend_from_slice(&buffer[..count]);
-                    assert!(request.len() < 64 * 1024);
-                }
-                arrivals.push((arrival.0, arrival.1, String::from_utf8(request).unwrap()));
+                let request = read_request(&mut stream);
+                arrivals.push((arrival.0, arrival.1, request));
                 thread::sleep(delay);
                 let _ = stream.write_all(&response);
             }
             arrivals
         });
         (endpoint, task)
+    }
+
+    fn read_request(stream: &mut std::net::TcpStream) -> String {
+        let mut request = Vec::new();
+        let mut buffer = [0; 1024];
+        loop {
+            if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                let headers = std::str::from_utf8(&request[..end]).unwrap();
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':')
+                            .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                            .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                assert!(length <= 64 * 1024);
+                if request.len() >= end + 4 + length {
+                    break;
+                }
+            }
+            let count = stream.read(&mut buffer).unwrap();
+            assert_ne!(count, 0, "client closed before completing request");
+            request.extend_from_slice(&buffer[..count]);
+            assert!(request.len() <= 128 * 1024);
+        }
+        String::from_utf8(request).unwrap()
+    }
+
+    #[tokio::test]
+    async fn form_retries_restart_original_post_and_preserve_bodies_through_307_308() {
+        let (endpoint, server) = serve_sequence(vec![
+            response(
+                "307 Temporary Redirect",
+                "Location: /api/v1/clips/moved/\r\nSet-Cookie: csrftoken=updated; Path=/\r\n",
+                b"",
+            ),
+            response("503 Service Unavailable", "Retry-After: 0\r\n", b""),
+            response(
+                "308 Permanent Redirect",
+                "Location: /api/v1/clips/final/\r\n",
+                b"",
+            ),
+            response("200 OK", "", br#"{"status":"ok"}"#),
+        ]);
+        let native = Instagram::from_cookie_jar(
+            CookieJar::parse("127.0.0.1\tFALSE\t/\tFALSE\t0\tcsrftoken\toriginal\n").unwrap(),
+            Duration::from_secs(3),
+        )
+        .unwrap()
+        .with_retries(1);
+        let form = vec![
+            ("max_id".to_owned(), "private+cursor&next=1".to_owned()),
+            ("target_user_id".into(), "42".into()),
+        ];
+        native
+            .request_form(&endpoint, &form, Duration::from_secs(3))
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        for (_, _, request) in &requests {
+            assert!(request.starts_with("POST "));
+            let (headers, body) = request.split_once("\r\n\r\n").unwrap();
+            assert!(
+                headers
+                    .to_ascii_lowercase()
+                    .contains("content-type: application/x-www-form-urlencoded")
+            );
+            let fields: Vec<_> = url::form_urlencoded::parse(body.as_bytes())
+                .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                .collect();
+            assert_eq!(fields, form);
+        }
+        for (_, _, request) in &requests[1..] {
+            assert!(
+                request
+                    .to_ascii_lowercase()
+                    .contains("x-csrftoken: updated\r\n")
+            );
+        }
+        assert_eq!(requests[0].2.lines().next(), requests[2].2.lines().next());
+        assert!(requests[1].2.starts_with("POST /api/v1/clips/moved/ "));
+        assert!(requests[3].2.starts_with("POST /api/v1/clips/final/ "));
+    }
+
+    #[tokio::test]
+    async fn form_301_302_303_redirects_switch_to_get_without_form_headers_or_body() {
+        for status in ["301 Moved Permanently", "302 Found", "303 See Other"] {
+            let (endpoint, server) = serve_sequence(vec![
+                response(status, "Location: /api/v1/clips/final/\r\n", b""),
+                response("200 OK", "", br#"{"status":"ok"}"#),
+            ]);
+            let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+            native
+                .request_form(
+                    &endpoint,
+                    &[("max_id".into(), "private-body".into())],
+                    Duration::from_secs(3),
+                )
+                .await
+                .unwrap();
+            let requests = server.join().unwrap();
+            assert!(requests[0].2.starts_with("POST "));
+            assert!(requests[1].2.starts_with("GET /api/v1/clips/final/ "));
+            let (headers, body) = requests[1].2.split_once("\r\n\r\n").unwrap();
+            assert!(body.is_empty());
+            assert!(!headers.to_ascii_lowercase().contains("content-type:"));
+            assert!(!requests[1].2.contains("private-body"));
+        }
+    }
+
+    #[tokio::test]
+    async fn form_auth_and_unsafe_redirect_failures_do_not_retry_or_disclose_body() {
+        for (status, headers) in [
+            ("302 Found", "Location: /accounts/login/?private-value\r\n"),
+            (
+                "307 Temporary Redirect",
+                "Location: https://other.invalid/api/private-value\r\n",
+            ),
+            ("403 Forbidden", ""),
+        ] {
+            let (endpoint, server) = serve_sequence(vec![response(status, headers, b"")]);
+            let native = Instagram::new(None, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .with_retries(2);
+            let message = native
+                .request_form(
+                    &endpoint,
+                    &[("max_id".into(), "private-value".into())],
+                    Duration::from_secs(3),
+                )
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(!message.contains("private-value"), "{message}");
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
     }
 
     fn response(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
@@ -1416,3 +1585,7 @@ mod profile_tests;
 #[cfg(test)]
 #[path = "instagram_stories_tests.rs"]
 mod story_tests;
+
+#[cfg(test)]
+#[path = "instagram_collections_tests.rs"]
+mod collection_tests;
