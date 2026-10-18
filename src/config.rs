@@ -34,6 +34,10 @@ pub struct Options {
     pub file_range: Option<String>,
     pub date_before: Option<i64>,
     pub date_after: Option<i64>,
+    /// Whether to include reposts, optionally under the original author.
+    pub retweets: Option<crate::twitter::RetweetMode>,
+    /// Include media from quoted posts.
+    pub quoted: Option<bool>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
@@ -72,6 +76,8 @@ impl Options {
                 .or_else(|| self.file_range.clone()),
             date_before: overrides.date_before.or(self.date_before),
             date_after: overrides.date_after.or(self.date_after),
+            retweets: overrides.retweets.or(self.retweets),
+            quoted: overrides.quoted.or(self.quoted),
             directory: overrides
                 .directory
                 .clone()
@@ -119,6 +125,8 @@ struct RawRoot {
     file_range: Field,
     date_before: Field,
     date_after: Field,
+    retweets: Field,
+    quoted: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -139,6 +147,8 @@ struct RawExtractor {
     file_range: Field,
     date_before: Field,
     date_after: Field,
+    retweets: Field,
+    quoted: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -162,6 +172,8 @@ struct RawOptions {
     file_range: Field,
     date_before: Field,
     date_after: Field,
+    retweets: Field,
+    quoted: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -248,6 +260,8 @@ impl Config {
             file_range: root.file_range,
             date_before: root.date_before,
             date_after: root.date_after,
+            retweets: root.retweets,
+            quoted: root.quoted,
             directory: root.directory,
             cookies: root.cookies,
             proxy: root.proxy,
@@ -266,6 +280,8 @@ impl Config {
             file_range: extractor.file_range,
             date_before: extractor.date_before,
             date_after: extractor.date_after,
+            retweets: extractor.retweets,
+            quoted: extractor.quoted,
             directory: extractor.directory,
             cookies: extractor.cookies,
             proxy: extractor.proxy,
@@ -307,6 +323,24 @@ impl Config {
 
 impl RawOptions {
     fn resolve(self, directory: &Path) -> Result<Options> {
+        let retweets = match self.retweets.0 {
+            None => None,
+            Some(Value::Bool(false)) => Some(crate::twitter::RetweetMode::Skip),
+            Some(Value::Bool(true)) => Some(crate::twitter::RetweetMode::Repost),
+            Some(Value::String(value)) if value == "original" => {
+                Some(crate::twitter::RetweetMode::Original)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration retweets must be a boolean or original",
+                ));
+            }
+        };
+        let quoted = match self.quoted.0 {
+            None => None,
+            Some(Value::Bool(value)) => Some(value),
+            Some(_) => return Err(error("native configuration quoted must be a boolean")),
+        };
         let file_range = match self.file_range.0 {
             None => None,
             Some(value) => {
@@ -404,6 +438,8 @@ impl RawOptions {
             file_range,
             date_before: date(self.date_before)?,
             date_after: date(self.date_after)?,
+            retweets,
+            quoted,
             directory: templates,
             filesize_min: size(self.filesize_min)?,
             filesize_max: size(self.filesize_max)?,

@@ -119,6 +119,12 @@ pub struct PostMetadata {
     pub caption: Option<String>,
     pub timestamp: Option<i64>,
     pub index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retweet_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quoted_by_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reposted_by_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -193,6 +199,8 @@ pub struct BackendOptions {
     pub browser: Option<String>,
     pub proxy: Option<String>,
     pub user_agent: Option<String>,
+    pub retweets: Option<crate::twitter::RetweetMode>,
+    pub quoted: Option<bool>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -254,6 +262,17 @@ impl Backend {
         }
         if let Some(agent) = &options.user_agent {
             command.arg("--user-agent").arg(agent);
+        }
+        if let Some(retweets) = options.retweets {
+            let value = match retweets {
+                crate::twitter::RetweetMode::Skip => "false",
+                crate::twitter::RetweetMode::Repost => "true",
+                crate::twitter::RetweetMode::Original => "\"original\"",
+            };
+            command.arg("--option").arg(format!("retweets={value}"));
+        }
+        if let Some(quoted) = options.quoted {
+            command.arg("--option").arg(format!("quoted={quoted}"));
         }
         command.args([
             "--option",
@@ -460,7 +479,18 @@ fn compatibility_metadata(
         }
         _ => return None,
     };
+    let context_id = |key: &str| {
+        let value = id(key);
+        (category == "twitter"
+            && value
+                .parse::<u64>()
+                .is_ok_and(|n| n > 0 && n.to_string() == value))
+        .then_some(value)
+    };
     Some(PostMetadata {
+        retweet_id: context_id("retweet_id"),
+        quoted_by_id: context_id("quote_id"),
+        reposted_by_id: None,
         post_id,
         media_id,
         shortcode,

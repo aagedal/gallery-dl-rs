@@ -121,6 +121,46 @@ async fn source_order_dates_skip_old_entries_in_stories_reels_tagged_and_saved_f
 }
 
 #[tokio::test]
+async fn quoted_single_status_dates_skip_old_root_and_exhaust_later_quotes() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = script(
+        root.path(),
+        &format!(
+            "printf '%s' '[{},'\nsleep 0.1\nprintf '%s' '{},{},{}'\nprintf '%s' exhausted > \"$0.exhausted\"\nprintf '%s' ']'",
+            row("old-root", json!(4)),
+            row("new-quote", json!(6)),
+            row("old-quote", json!(3)),
+            row("later-quote", json!(7)),
+        ),
+    );
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &config,
+        serde_json::to_vec(&json!({"extractor":{"twitter":{"quoted":true}}})).unwrap(),
+    )
+    .unwrap();
+    let result = output(
+        binary(root.path(), &backend)
+            .arg("--native-config")
+            .arg(&config)
+            .args(["-g", "--date-after=5", FIRST]),
+    )
+    .await;
+    success(&result);
+    assert_eq!(
+        urls(&result),
+        [
+            "https://cdn.example/new-quote.jpg",
+            "https://cdn.example/later-quote.jpg",
+        ]
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("backend.exhausted")).unwrap(),
+        "exhausted"
+    );
+}
+
+#[tokio::test]
 async fn strict_timestamp_boundaries_include_zero_and_negative_dates() {
     let root = tempfile::tempdir().unwrap();
     let rows: Vec<_> = (-3..=2)

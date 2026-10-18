@@ -537,3 +537,308 @@ async fn lookup_cookie_rotation_and_user_agent_reach_all_pages_without_leaking_t
         }
     }
 }
+
+fn post_response(tweet: Value) -> Value {
+    json!({"data":{"tweetResult":{"result":tweet}}})
+}
+fn quoted_tweet(id: &str, quoted: &str) -> Value {
+    let mut value = tweet(id);
+    value["legacy"]["quoted_status_id_str"] = quoted.into();
+    value
+}
+fn expansion_options(retweets: RetweetMode) -> ExpansionOptions {
+    ExpansionOptions {
+        retweets,
+        quoted: true,
+    }
+}
+fn local_post_endpoint(server: &Server, id: &str) -> Url {
+    let upstream = endpoint(id).unwrap();
+    let mut local = server.base.clone();
+    local.set_path(upstream.path());
+    local.set_query(upstream.query());
+    local
+}
+fn assert_scoped_expansion_requests(server: &Server, native: &Twitter) {
+    for request in server.requests.lock().unwrap().iter() {
+        let lower = request.to_ascii_lowercase();
+        assert!(lower.contains("x-csrf-token: csrf\r\n"));
+        assert!(lower.contains("auth_token=session"));
+        let encoded = request
+            .lines()
+            .find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("x-client-transaction-id")
+                    .then(|| value.trim())
+            })
+            .unwrap();
+        let bytes = STANDARD_NO_PAD.decode(encoded).unwrap();
+        let transaction = native.transaction.lock().unwrap();
+        let transaction = transaction.as_ref().unwrap();
+        let mask = bytes[0];
+        let offset = 1 + transaction.key.len();
+        let seconds = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .iter()
+                .map(|byte| byte ^ mask)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        );
+        let path = request
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .split('?')
+            .next()
+            .unwrap();
+        assert_eq!(
+            encoded,
+            transaction.generate_at("GET", path, u64::from(seconds), mask)
+        );
+    }
+}
+
+#[tokio::test]
+async fn post_quote_fetch_waits_for_consumer_and_drop_cancels_traversal() {
+    let server = Server::new(vec![
+        Response::json(post_response(quoted_tweet("100", "101"))),
+        Response::json(post_response(tweet("101"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+    assert_eq!(server.count(), 0);
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "100"
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 1);
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn post_quote_fetch_preserves_original_identity_and_scoped_transaction() {
+    let server = Server::new(vec![
+        Response::json(post_response(quoted_tweet("100", "101"))),
+        Response::json(post_response(tweet("101"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let items: Vec<_> = native
+        .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].metadata.as_ref().unwrap().post_id, "100");
+    let quoted = items[1].metadata.as_ref().unwrap();
+    assert_eq!(quoted.post_id, "101");
+    assert_eq!(quoted.quoted_by_id.as_deref(), Some("100"));
+    let original = parse_response(
+        &serde_json::to_vec(&post_response(tweet("101"))).unwrap(),
+        "101",
+    )
+    .unwrap();
+    assert_eq!(items[1].archive_key(), original[0].archive_key());
+    assert_eq!(items[1].filename, original[0].filename);
+    let urls = server.urls();
+    assert_eq!(urls.len(), 2);
+    assert_eq!(urls[0].origin(), urls[1].origin());
+    assert!(urls[1].path().ends_with("/TweetResultByRestId"));
+    assert_eq!(variables(&urls[1])["tweetId"], "101");
+    assert_scoped_expansion_requests(&server, &native);
+    for item in items {
+        let metadata = serde_json::to_string(item.metadata.as_ref().unwrap()).unwrap();
+        assert!(!metadata.contains("session"));
+        assert!(!metadata.contains("csrf"));
+        assert!(!item.headers.keys().any(|key| {
+            key.eq_ignore_ascii_case("cookie")
+                || key.eq_ignore_ascii_case("authorization")
+                || key.eq_ignore_ascii_case("x-client-transaction-id")
+        }));
+    }
+}
+
+#[tokio::test]
+async fn timeline_expands_missing_quote_before_requesting_next_page() {
+    let server = Server::new(vec![
+        Response::json(page(vec![quoted_tweet("100", "101")], Some("next"))),
+        Response::json(post_response(tweet("101"))),
+        Response::json(page(vec![tweet("102")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut stream = native.media_stream(input("id:42"), server.base.clone());
+    for (id, count) in [("100", 1), ("101", 2), ("102", 3)] {
+        assert_eq!(
+            stream
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+                .unwrap()
+                .post_id,
+            id
+        );
+        assert_eq!(server.count(), count);
+    }
+    assert!(stream.next().await.is_none());
+    let urls = server.urls();
+    assert!(urls[0].path().ends_with("/UserMedia"));
+    assert!(urls[1].path().ends_with("/TweetResultByRestId"));
+    assert_eq!(variables(&urls[1])["tweetId"], "101");
+    assert!(urls[2].path().ends_with("/UserMedia"));
+    assert_eq!(variables(&urls[2])["cursor"], "next");
+}
+
+#[tokio::test]
+async fn timeline_range_cutoff_avoids_missing_quote_and_next_page_requests() {
+    let server = Server::new(vec![
+        Response::json(page(vec![quoted_tweet("100", "101")], Some("next"))),
+        Response::json(post_response(tweet("101"))),
+        Response::json(page(vec![tweet("102")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut selected = crate::selection::RangeSelection::parse("1")
+        .unwrap()
+        .apply(native.media_stream(input("id:42"), server.base.clone()));
+    assert!(selected.next().await.unwrap().is_ok());
+    assert!(selected.next().await.is_none());
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn missing_retweet_target_fetch_uses_selected_archive_identity() {
+    for mode in [RetweetMode::Repost, RetweetMode::Original] {
+        let mut repost = tweet("100");
+        repost["legacy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("extended_entities");
+        repost["legacy"]["retweeted_status_id_str"] = "101".into();
+        let server = Server::new(vec![
+            Response::json(post_response(repost)),
+            Response::json(post_response(tweet("101"))),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_expansion(expansion_options(mode));
+        let media: Vec<_> = native
+            .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(media.len(), 1);
+        assert_eq!(server.count(), 2);
+        assert_eq!(variables(&server.urls()[1])["tweetId"], "101");
+        let metadata = media[0].metadata.as_ref().unwrap();
+        let identity = match mode {
+            RetweetMode::Repost => {
+                assert_eq!(metadata.retweet_id.as_deref(), Some("101"));
+                "100"
+            }
+            RetweetMode::Original => {
+                assert_eq!(metadata.reposted_by_id.as_deref(), Some("100"));
+                "101"
+            }
+            RetweetMode::Skip => unreachable!(),
+        };
+        assert_eq!(metadata.post_id, identity);
+        let direct = parse_response(
+            &serde_json::to_vec(&post_response(tweet(identity))).unwrap(),
+            identity,
+        )
+        .unwrap();
+        assert_eq!(media[0].archive_key(), direct[0].archive_key());
+        assert_scoped_expansion_requests(&server, &native);
+    }
+}
+
+#[tokio::test]
+async fn quote_auth_failure_preserves_parent_and_ends_without_private_error_text() {
+    let mut denied =
+        Response::json(json!({"errors":[{"code":32,"message":"private session fixture"}]}))
+            .delayed(20);
+    denied.status = 401;
+    let server = Server::new(vec![
+        Response::json(post_response(quoted_tweet("100", "101"))),
+        denied,
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap()
+            .post_id,
+        "100"
+    );
+    assert_eq!(server.count(), 1);
+    let error = stream.next().await.unwrap().unwrap_err().to_string();
+    assert!(!error.contains("private session fixture"));
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn dropping_pending_quote_request_stops_further_expansion() {
+    let server = Server::new(vec![
+        Response::json(post_response(quoted_tweet("100", "101"))),
+        Response::json(post_response(quoted_tweet("101", "102"))).delayed(300),
+        Response::json(post_response(tweet("102"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+    assert!(stream.next().await.unwrap().is_ok());
+    {
+        let pending = stream.next();
+        tokio::pin!(pending);
+        tokio::select! { result = &mut pending => panic!("unexpected completion: {result:?}"), () = server.wait_for(2) => {} }
+    }
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn quote_cycle_errors_without_refetching_the_ancestor() {
+    let server = Server::new(vec![
+        Response::json(post_response(quoted_tweet("100", "101"))),
+        Response::json(post_response(quoted_tweet("101", "100"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip));
+    let mut stream = native.post_stream_at(local_post_endpoint(&server, "100"), "100".into());
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(stream.next().await.unwrap().is_ok());
+    assert!(stream.next().await.unwrap().is_err());
+    assert!(stream.next().await.is_none());
+    assert_eq!(server.count(), 2);
+}

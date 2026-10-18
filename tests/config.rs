@@ -551,3 +551,95 @@ fn invalid_network_values_fail_privately_in_every_scope() {
             .unwrap();
     assert!(!format!("{options:?}").contains("private"));
 }
+
+#[test]
+fn twitter_expansion_settings_follow_scopes_and_preserve_false_overlays() {
+    use gallery_dl_rs::twitter::RetweetMode;
+    let config = parse(
+        r#"{"extractor":{"retweets":true,"quoted":true,"twitter":{"retweets":"original","quoted":false},"instagram":{"retweets":false}}}"#,
+    )
+    .unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.retweets, Some(RetweetMode::Original));
+    assert_eq!(twitter.quoted, Some(false));
+    assert_eq!(
+        config.resolve("facebook").unwrap().retweets,
+        Some(RetweetMode::Repost)
+    );
+    assert_eq!(config.resolve("facebook").unwrap().quoted, Some(true));
+    assert_eq!(
+        config.resolve("instagram").unwrap().retweets,
+        Some(RetweetMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = twitter.overlay(&Options {
+        retweets: Some(RetweetMode::Skip),
+        quoted: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(disabled.retweets, Some(RetweetMode::Skip));
+    assert_eq!(disabled.quoted, Some(false));
+    let global = parse(
+        r#"{"retweets":false,"quoted":false,"extractor":{"retweets":true,"quoted":true,"twitter":{"retweets":"original","quoted":true}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let settings = global.resolve(category).unwrap();
+        assert_eq!(settings.retweets, Some(RetweetMode::Skip));
+        assert_eq!(settings.quoted, Some(false));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.retweets, None);
+    assert_eq!(absent.quoted, None);
+}
+
+#[test]
+fn twitter_expansion_configuration_rejects_types_privately_in_all_scopes() {
+    use serde_json::json;
+    for (field, value) in [
+        ("retweets", json!(null)),
+        ("retweets", json!(0)),
+        ("retweets", json!(1)),
+        ("retweets", json!([])),
+        ("retweets", json!({"private-key":"private-value"})),
+        ("retweets", json!("private-value")),
+        ("retweets", json!("true")),
+        ("retweets", json!("Original")),
+        ("quoted", json!(null)),
+        ("quoted", json!(0)),
+        ("quoted", json!([])),
+        ("quoted", json!({"private-key":"private-value"})),
+        ("quoted", json!("private-value")),
+        ("quoted", json!("false")),
+    ] {
+        for document in [
+            json!({(field):value}),
+            json!({"extractor":{(field):value}}),
+            json!({"extractor":{"twitter":{(field):value}}}),
+            json!({"extractor":{"instagram":{(field):value}}}),
+            json!({"extractor":{"facebook":{(field):value}}}),
+            json!({"extractor":{"direct":{(field):value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key"), "{message}");
+            assert!(!message.contains("private-value"), "{message}");
+        }
+    }
+}
+
+#[test]
+fn twitter_expansion_configuration_rejects_duplicate_keys() {
+    for field in ["retweets", "quoted"] {
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}

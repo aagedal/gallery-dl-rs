@@ -242,6 +242,80 @@ printf '%s\n' '[[3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls",
 
 #[cfg(unix)]
 #[test]
+fn twitter_expansion_config_is_forwarded_only_when_explicit_and_only_for_twitter() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &script,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$EXPANSION_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let cases = [
+        (serde_json::json!({}), None, None),
+        (
+            serde_json::json!({"extractor":{"twitter":{"retweets":"original","quoted":true}}}),
+            Some("retweets=\"original\""),
+            Some("quoted=true"),
+        ),
+        (
+            serde_json::json!({"extractor":{"retweets":true,"quoted":true,"twitter":{"retweets":false,"quoted":false}}}),
+            Some("retweets=false"),
+            Some("quoted=false"),
+        ),
+        (
+            serde_json::json!({"retweets":true,"quoted":true,"extractor":{"twitter":{"retweets":false,"quoted":false}}}),
+            Some("retweets=true"),
+            Some("quoted=true"),
+        ),
+    ];
+    for (settings, retweets, quoted) in cases {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/user/status/1", true),
+            ("https://instagram.com/p/example/", false),
+        ] {
+            let output = binary()
+                .env("EXPANSION_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&script)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("retweets=") || value.starts_with("quoted="))
+                .collect();
+            let expected: Vec<_> = if twitter {
+                retweets.into_iter().chain(quoted).collect()
+            } else {
+                Vec::new()
+            };
+            assert_eq!(forwarded, expected);
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn social_backend_is_invoked_without_a_shell() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();

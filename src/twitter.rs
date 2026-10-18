@@ -9,6 +9,9 @@ use crate::{
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
+#[path = "twitter_expansion.rs"]
+mod expansion;
+pub use expansion::{ExpansionOptions, RetweetMode, parse_response_with_options};
 #[path = "twitter_profile.rs"]
 mod profile;
 #[path = "twitter_timeline.rs"]
@@ -36,6 +39,7 @@ const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleW
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
 pub struct Twitter {
+    expansion: ExpansionOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -64,6 +68,7 @@ impl Twitter {
                 .timeout(timeout)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
+            expansion: ExpansionOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -73,6 +78,12 @@ impl Twitter {
             transaction: Mutex::new(None),
             initialize: tokio::sync::Mutex::new(()),
         })
+    }
+
+    /// Select repost identity and opt into explicit quoted-post traversal.
+    pub fn with_expansion(mut self, options: ExpansionOptions) -> Self {
+        self.expansion = options;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -97,26 +108,14 @@ impl Twitter {
 
     pub async fn extract(&self, post: &Url) -> Result<Vec<Media>> {
         let id = post_id(post)?;
-        let endpoint = endpoint(&id)?;
-        tokio::time::timeout(self.timeout, async {
-            self.ensure_transaction(&id).await?;
-            self.extract_endpoint(&endpoint, &id).await
-        })
-        .await
-        .map_err(|_| error("native Twitter extraction timed out"))?
+        self.post_stream_at(endpoint(&id)?, id).try_collect().await
     }
 
+    #[cfg(test)]
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
-        let body = self.fetch(endpoint, code, true).await?;
-        let mut media = parse_response(&body, code)?;
-        for item in &mut media {
-            self.network.apply_media(item);
-        }
-        Ok(media)
-    }
-
-    async fn ensure_transaction(&self, code: &str) -> Result<()> {
-        self.ensure_transaction_at(code, &endpoint(code)?).await
+        self.post_stream_at(endpoint.clone(), code.into())
+            .try_collect()
+            .await
     }
 
     async fn ensure_transaction_at(&self, code: &str, auth_endpoint: &Url) -> Result<()> {
@@ -498,72 +497,38 @@ fn check_errors(data: &Value) -> Result<()> {
     Ok(())
 }
 
-/// Read only the requested root result, never quoted/retweeted/nested tweets.
-/// Public metadata is deliberately allowlisted and raw API errors are redacted.
+/// Parse the requested root with upstream-default expansion settings.
 pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media>> {
-    if bytes.len() > MAX_RESPONSE {
-        return Err(error("Twitter response exceeded 16 MiB"));
-    }
-    if !valid_id(requested_post_id) {
-        return Err(error("invalid Twitter post identifier"));
-    }
-    let data: Value = serde_json::from_slice(bytes).map_err(|_| error("Twitter returned a web page or invalid JSON; login or a client transaction challenge may be required"))?;
-    check_errors(&data)?;
-    let mut tweet = data
-        .pointer("/data/tweetResult/result")
-        .ok_or_else(|| error("Twitter post unavailable or unexpected GraphQL response"))?;
-    for _ in 0..4 {
-        if tweet.get("__typename").and_then(Value::as_str) == Some("TweetWithVisibilityResults") {
-            tweet = tweet
-                .get("tweet")
-                .ok_or_else(|| error("Twitter visibility result has no post"))?;
-        } else {
-            break;
+    parse_response_with_options(bytes, requested_post_id, ExpansionOptions::default())
+}
+
+fn parse_tweet_media(
+    tweet: &Value,
+    requested_post_id: &str,
+    allow_empty: bool,
+) -> Result<Vec<Media>> {
+    let legacy = &tweet["legacy"];
+    let items = match legacy.get("extended_entities") {
+        Some(extended) => extended
+            .get("media")
+            .and_then(Value::as_array)
+            .ok_or_else(|| error("Twitter post media fields malformed"))?,
+        None => {
+            if legacy
+                .pointer("/entities/media")
+                .is_some_and(|v| !v.as_array().is_some_and(Vec::is_empty))
+            {
+                return Err(error("Twitter post extended media missing"));
+            }
+            if allow_empty {
+                return Ok(Vec::new());
+            }
+            return Err(error("Twitter post has no downloadable media"));
         }
+    };
+    if items.is_empty() && !allow_empty {
+        return Err(error("Twitter post has no downloadable media"));
     }
-    match tweet.get("__typename").and_then(Value::as_str) {
-        Some("TweetUnavailable" | "TweetTombstone") => {
-            return Err(error(match tweet.get("reason").and_then(Value::as_str) {
-                Some("Protected") => "Twitter protected post; this session cannot access it",
-                Some("NsfwViewerHasNoStatedAge" | "NsfwLoggedOut") => {
-                    "Twitter authentication or age verification required"
-                }
-                _ => "Twitter post unavailable or inaccessible to this session",
-            }));
-        }
-        Some("Tweet") => {}
-        _ => {
-            return Err(error(
-                "Twitter post unavailable or unexpected GraphQL result",
-            ));
-        }
-    }
-    if tweet.get("rest_id").and_then(Value::as_str) != Some(requested_post_id) {
-        return Err(error("Twitter response does not match the requested post"));
-    }
-    let legacy = tweet
-        .get("legacy")
-        .ok_or_else(|| error("Twitter post media fields missing"))?;
-    if legacy
-        .get("id_str")
-        .and_then(Value::as_str)
-        .is_some_and(|id| id != requested_post_id)
-    {
-        return Err(error("Twitter response does not match the requested post"));
-    }
-    if legacy.get("retweeted_status_id_str").is_some()
-        || tweet.get("retweeted_status_result").is_some()
-        || legacy.get("retweeted_status_result").is_some()
-    {
-        return Err(error(
-            "native Twitter retweet expansion is unsupported; use --extractor compatibility",
-        ));
-    }
-    let items = legacy
-        .pointer("/extended_entities/media")
-        .and_then(Value::as_array)
-        .filter(|m| !m.is_empty())
-        .ok_or_else(|| error("Twitter post has no downloadable media"))?;
     let username = tweet
         .pointer("/core/user_results/result/core/screen_name")
         .or_else(|| tweet.pointer("/core/user_results/result/legacy/screen_name"))
@@ -602,7 +567,7 @@ pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media
             (url,extension)
         } else { return Err(error("unsupported Twitter media type")); };
         Ok(Media { url, job: crate::extract::MediaJob::DirectHttp, handoff: BTreeMap::new(), category: "twitter".into(), filename: format!("{requested_post_id}_{}.{extension}",i+1),
-            metadata: Some(PostMetadata {post_id:requested_post_id.into(),media_id:(i+1).to_string(),shortcode:String::new(),username:username.clone(),caption:caption.clone(),timestamp,index:i+1}),
+            metadata: Some(PostMetadata {retweet_id:None,quoted_by_id:None,reposted_by_id:None,post_id:requested_post_id.into(),media_id:(i+1).to_string(),shortcode:String::new(),username:username.clone(),caption:caption.clone(),timestamp,index:i+1}),
             headers: BTreeMap::from([("User-Agent".into(),USER_AGENT.into()),("Referer".into(),"https://x.com/".into())]) })
     }).collect()
 }

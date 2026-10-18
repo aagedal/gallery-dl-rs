@@ -69,7 +69,7 @@ fn distinguishes_unavailable_protected_authentication_and_rate_errors_without_pa
 }
 
 #[test]
-fn unwraps_visibility_and_rejects_quoted_wrong_id_and_retweets() {
+fn unwraps_visibility_rejects_wrong_id_and_skips_retweets() {
     let mut data: Value = serde_json::from_slice(PHOTO).unwrap();
     let root = data["data"]["tweetResult"]["result"].take();
     data["data"]["tweetResult"]["result"] =
@@ -90,9 +90,8 @@ fn unwraps_visibility_and_rejects_quoted_wrong_id_and_retweets() {
     data["data"]["tweetResult"]["result"]["legacy"]["retweeted_status_id_str"] = "987654321".into();
     assert!(
         parse_response(&serde_json::to_vec(&data).unwrap(), ID)
-            .unwrap_err()
-            .to_string()
-            .contains("retweet")
+            .unwrap()
+            .is_empty()
     );
     data["data"]["tweetResult"]["result"]["legacy"]["id_str"] = "987654321".into();
     assert!(

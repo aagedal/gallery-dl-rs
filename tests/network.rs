@@ -267,6 +267,9 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
     let mut social = media.clone();
     social.category = "instagram".into();
     social.metadata = Some(PostMetadata {
+        retweet_id: None,
+        quoted_by_id: None,
+        reposted_by_id: None,
         post_id: "64".into(),
         media_id: "65".into(),
         shortcode: "BA".into(),

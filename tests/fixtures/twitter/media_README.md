@@ -24,15 +24,19 @@ lookup and timeline root; tweet IDs and owner IDs must agree with their aliases.
 Known structured timeline items/grid modules/module appends/pins are parsed in
 instruction order, never by a recursive search that could substitute quoted
 posts or recommendation payloads. Known promoted/recommendation entries and
-valid text-only tweets are skipped. Unsupported/unavailable entries and retweets
-fail explicitly. The single-post parser still selects actual direct media.
+valid text-only tweets are skipped. Retweets are skipped by default; explicit
+retweet and quote settings use the shared bounded expansion engine after outer
+owner validation. Unsupported/unavailable entries fail explicitly. Only actual
+direct media are selected.
 
 An explicit Bottom termination or well-formed entry response without a Bottom
 cursor ends traversal. An empty page with a new Bottom cursor continues. Explicit
 termination takes precedence over a repeated final cursor; other repeated or
-conflicting cursors are errors. Earlier pages survive a later failure, while a
-malformed current page yields no partial output. Fixed-size cursor digests detect
-cycles without retaining cursor strings from all pages.
+conflicting cursors are errors. Page structure, owner IDs, and cursors validate
+before output. Media/link parsing proceeds lazily per post; prior emitted media
+survive a later media or linked-post failure, including within the same page.
+Fixed-size cursor digests detect cycles without retaining cursor strings from
+all pages.
 
 Tests verify operation variables, opaque cursor escaping, account ownership,
 module ordering, explicit/end states, empty continuation, archive equivalence,
@@ -41,6 +45,6 @@ configured user agents, cookie/CSRF rotation, and API credential isolation from
 media. Transaction tests regenerate each request's token using its actual API
 path, decoded timestamp, and mask rather than checking only header presence.
 
-Other profile tabs, root-profile dispatch, retweet/quote expansion, cards/articles,
+Other profile tabs, root-profile dispatch, cards/articles,
 unknown timeline variants, dynamic operation-ID refresh, and real authenticated
 verification remain unfinished. Compatibility remains the default.

@@ -11,6 +11,8 @@ struct State {
     cursor: Option<String>,
     cursors: HashSet<[u8; 32]>,
     pending: VecDeque<Media>,
+    posts: VecDeque<(String, Value)>,
+    expansion: Option<expansion::Engine>,
     done: bool,
     budget: Duration,
 }
@@ -19,18 +21,109 @@ impl Twitter {
     /// Extract a status or lazily traverse an experimental profile media tab.
     /// Downstream pauses do not consume the cumulative active extraction budget.
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
-        if post_id(url).is_ok() {
-            let url = url.clone();
-            return stream::once(async move { self.extract(&url).await })
-                .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
-                .try_flatten()
-                .boxed();
+        if let Ok(id) = post_id(url) {
+            return match endpoint(&id) {
+                Ok(endpoint) => self.post_stream_at(endpoint, id),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            };
         }
         match timeline::input(url) {
             Ok(input) => {
                 self.media_stream(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
             }
             Err(e) => stream::once(async move { Err(e) }).boxed(),
+        }
+    }
+
+    pub(super) fn post_stream_at(&self, endpoint: Url, id: String) -> BoxStream<'_, Result<Media>> {
+        struct PostState {
+            endpoint: Url,
+            id: String,
+            engine: Option<expansion::Engine>,
+            pending: VecDeque<Media>,
+            done: bool,
+            budget: Duration,
+        }
+        let state = PostState {
+            endpoint,
+            id,
+            engine: None,
+            pending: VecDeque::new(),
+            done: false,
+            budget: self.timeout,
+        };
+        stream::unfold(state, move |mut state| async move {
+            loop {
+                if let Some(media) = state.pending.pop_front() {
+                    return Some((Ok(media), state));
+                }
+                if state.done {
+                    return None;
+                }
+                let started = tokio::time::Instant::now();
+                let result = tokio::time::timeout(state.budget, async {
+                    if state.engine.is_none() {
+                        self.ensure_transaction_at(&state.id, &state.endpoint)
+                            .await?;
+                        let bytes = self.fetch(&state.endpoint, &state.id, true).await?;
+                        let root = expansion::response_root(&bytes, &state.id)?;
+                        state.engine = Some(expansion::Engine::new(
+                            root,
+                            state.id.clone(),
+                            self.expansion,
+                            false,
+                        ));
+                    }
+                    self.expand_next(state.engine.as_mut().unwrap(), &state.endpoint)
+                        .await
+                })
+                .await
+                .unwrap_or_else(|_| Err(error("native Twitter extraction timed out")));
+                state.budget = state.budget.saturating_sub(started.elapsed());
+                match result {
+                    Ok(Some(media)) => state.pending.extend(media),
+                    Ok(None) => state.done = true,
+                    Err(e) => {
+                        state.done = true;
+                        return Some((Err(e), state));
+                    }
+                }
+            }
+        })
+        .boxed()
+    }
+
+    async fn expand_next(
+        &self,
+        engine: &mut expansion::Engine,
+        base: &Url,
+    ) -> Result<Option<Vec<Media>>> {
+        loop {
+            match engine.next()? {
+                expansion::Action::Done => return Ok(None),
+                expansion::Action::Media(mut media) => {
+                    for item in &mut media {
+                        self.network.apply_media(item);
+                    }
+                    return Ok(Some(media));
+                }
+                expansion::Action::Fetch(id) => {
+                    // Only validated decimal IDs can select another fixed API endpoint.
+                    let mut target = endpoint(&id)?;
+                    target
+                        .set_scheme(base.scheme())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    target
+                        .set_host(base.host_str())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    target
+                        .set_port(base.port())
+                        .map_err(|_| error("Twitter API origin invalid"))?;
+                    self.ensure_transaction_at(&id, &target).await?;
+                    let bytes = self.fetch(&target, &id, true).await?;
+                    engine.supply(&bytes)?;
+                }
+            }
         }
     }
 
@@ -50,6 +143,8 @@ impl Twitter {
             cursor: None,
             cursors: HashSet::new(),
             pending: VecDeque::new(),
+            posts: VecDeque::new(),
+            expansion: None,
             done: false,
             budget: self.timeout,
         };
@@ -58,7 +153,7 @@ impl Twitter {
                 if let Some(item) = state.pending.pop_front() {
                     return Some((Ok(item), state));
                 }
-                if state.done {
+                if state.done && state.posts.is_empty() && state.expansion.is_none() {
                     return None;
                 }
                 let started = tokio::time::Instant::now();
@@ -68,6 +163,8 @@ impl Twitter {
                     result.unwrap_or_else(|_| Err(error("native Twitter extraction timed out")));
                 if let Err(e) = result {
                     state.done = true;
+                    state.posts.clear();
+                    state.expansion = None;
                     return Some((Err(e), state));
                 }
             }
@@ -76,6 +173,19 @@ impl Twitter {
     }
 
     async fn media_page(&self, state: &mut State) -> Result<()> {
+        if state.expansion.is_none()
+            && let Some((id, post)) = state.posts.pop_front()
+        {
+            // Timeline parsing has already proved the outer post's owner and ID.
+            state.expansion = Some(expansion::Engine::new(post, id, self.expansion, true));
+        }
+        if let Some(engine) = state.expansion.as_mut() {
+            match self.expand_next(engine, &state.base).await? {
+                Some(media) => state.pending.extend(media),
+                None => state.expansion = None,
+            }
+            return Ok(());
+        }
         if state.owner.is_none() {
             let ProfileInput::Name(name) = &state.input else {
                 unreachable!()
@@ -93,7 +203,7 @@ impl Twitter {
         )?;
         self.ensure_transaction_at("", &endpoint).await?;
         let body = self.fetch(&endpoint, "", true).await?;
-        let page = timeline::parse_page(&body, state.owner.as_deref().unwrap())?;
+        let page = timeline::parse_posts(&body, state.owner.as_deref().unwrap())?;
         if !page.done && page.cursor.is_none() {
             return Err(error("Twitter media timeline pagination is incomplete"));
         }
@@ -104,11 +214,7 @@ impl Twitter {
                 return Err(error("Twitter media timeline cursor repeated"));
             }
         }
-        let mut media = page.media;
-        for item in &mut media {
-            self.network.apply_media(item);
-        }
-        state.pending = media.into();
+        state.posts = page.posts.into();
         state.cursor = cursor;
         state.done = page.done;
         Ok(())

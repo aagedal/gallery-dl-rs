@@ -229,7 +229,7 @@ GraphQL, selecting original-size photos and the highest-bitrate direct MP4 video
 variants in mixed-media order. IDs, username, caption, UTC timestamp, and one-based
 media indices feed metadata, filename templates, and the same stable archive keys
 as compatibility extraction. The response must match the requested root tweet;
-quoted posts and retweets are not silently substituted or expanded. Missing video
+retweets are skipped and quoted posts are not expanded by default. Missing video
 variants fail instead of returning thumbnails. Protected, missing, expired-session,
 rate-limit, and challenge responses fail explicitly.
 
@@ -250,8 +250,34 @@ well-formed entries response without a Bottom cursor, or explicit Bottom
 termination, completes traversal. Missing instructions, conflicting/repeated
 cursors, unavailable/foreign posts, and unsupported entries fail explicitly;
 earlier pages survive a late failure. Known promotions/recommendations and valid
-text-only posts are skipped. Retweets, quotes, cards/articles, and other profile
-tabs are not expanded.
+text-only posts are skipped. Cards/articles and other profile tabs remain outside
+native coverage.
+
+Scoped native configuration supports `"retweets": false` (default), `true`, or
+`"original"`, and `"quoted": false` (default) or `true`. For example:
+
+```json
+{"extractor": {"twitter": {"retweets": "original", "quoted": true}}}
+```
+
+With `retweets: true`, original media/caption use the repost's ID, username, and
+timestamp, with `retweet_id` recording the original post. With `"original"`, media
+keep the original post's identity and `reposted_by_id` records the repost ID.
+Quoted media follow their parent in source order, keep their direct-post archive
+identity, and record `quoted_by_id`. These fields are omitted when absent. Archive
+keys retain the Rust schema; this does not implement upstream's full metadata or
+archive-template language.
+
+Only explicit retweet/quote links are followed. Present aliases must agree and
+target IDs must match. Missing embedded targets are fetched lazily through the
+fixed status API; range limits and dropped streams prevent later requests.
+Traversal rejects cycles, more than eight quote links, more than sixteen total
+links, and more than four visibility wrappers. Single-post parsing is atomic;
+streaming preserves media already emitted if a later linked post fails. API and
+media requests retain their existing credential scopes and active-time budget.
+Quote expansion uses unordered date filtering because linked posts need not be
+chronological. Settings also forward to the compatibility backend when explicit;
+absent settings preserve its configuration.
 
 Timeline API IDs/features are upstream snapshots. Synthetic parser and local HTTP
 tests cover traversal, signing paths, cookie rotation, user-agent propagation,
@@ -514,7 +540,8 @@ Neither configuration file is loaded automatically.
 ```
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
-`proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
+`retweets`, `quoted`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
@@ -742,6 +769,7 @@ and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.
 `src/instagram.rs` owns the experimental native Instagram extractor;
 `src/twitter.rs` owns experimental native Twitter/X and transaction bootstrap;
+`src/twitter_expansion.rs` validates explicit retweet/quote links and media identity;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
 [fixture and manual-check notes](tests/fixtures/instagram/README.md) before
 promoting native extraction to the default.

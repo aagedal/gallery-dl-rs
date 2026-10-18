@@ -45,6 +45,9 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
     item.handoff
         .insert("_fallback".into(), "FALLBACK_SECRET".into());
     item.metadata = Some(gallery_dl_rs::extract::PostMetadata {
+        retweet_id: None,
+        quoted_by_id: None,
+        reposted_by_id: None,
         post_id: "post-1".into(),
         media_id: "media-2".into(),
         shortcode: "example".into(),

@@ -17,8 +17,12 @@ web-client Bearer authorization, CSRF, and a generated client transaction ID.
 Homepage verification metadata/loading SVG and the referenced abs.twimg.com
 ondemand script supply the transaction inputs. Script requests carry no cookies,
 CSRF, or Authorization. Single-post media order and the requested root tweet ID
-are checked; quote/retweet expansion, other profile tabs, threads, cards/articles, playlists,
-and collections remain unsupported natively. Compatibility remains the default.
+are checked. Explicit retweet/quote expansion is covered by synthetic derivatives
+in `tests/twitter_expansion.rs` and local HTTP cases in `src/twitter_profile_tests.rs`.
+These check original/repost identities, lazy missing-target requests, alias/root
+validation, bounds/cycles, scoped credentials, ranges, dates, and cancellation.
+Other profile tabs, threads, cards/articles, playlists, and collections remain
+unsupported natively. Compatibility remains the default.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol

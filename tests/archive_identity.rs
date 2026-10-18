@@ -193,3 +193,39 @@ fn compatibility_dates_normalize_to_utc_without_affecting_stable_ids() {
         }
     }
 }
+
+#[test]
+fn twitter_expansion_context_is_allowlisted_and_does_not_change_archive_identity() {
+    let plain = compatibility("twitter", json!({"tweet_id":64,"num":1}), "old");
+    let expanded = compatibility(
+        "twitter",
+        json!({"tweet_id":64,"num":1,"retweet_id":65,"quote_id":"66","private":"secret"}),
+        "new",
+    );
+    assert_eq!(plain.archive_key(), expanded.archive_key());
+    let metadata = expanded.metadata.unwrap();
+    assert_eq!(metadata.retweet_id.as_deref(), Some("65"));
+    assert_eq!(metadata.quoted_by_id.as_deref(), Some("66"));
+    for invalid in [
+        json!(0),
+        json!("001"),
+        json!("private"),
+        json!(-1),
+        json!(true),
+    ] {
+        let item = compatibility(
+            "twitter",
+            json!({"tweet_id":64,"num":1,"retweet_id":invalid,"quote_id":invalid}),
+            "a",
+        );
+        let metadata = item.metadata.unwrap();
+        assert!(metadata.retweet_id.is_none());
+        assert!(metadata.quoted_by_id.is_none());
+    }
+    let instagram = compatibility(
+        "instagram",
+        json!({"post_id":64,"media_id":65,"retweet_id":66,"quote_id":67}),
+        "a",
+    );
+    assert!(instagram.metadata.unwrap().retweet_id.is_none());
+}

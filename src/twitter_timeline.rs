@@ -111,12 +111,32 @@ pub(super) fn parse_user(bytes: &[u8], input: &ProfileInput) -> Result<String> {
 }
 
 pub(super) struct Page {
+    #[cfg(test)]
     pub(super) media: Vec<Media>,
+    pub(super) posts: Vec<(String, Value)>,
     pub(super) cursor: Option<String>,
     pub(super) done: bool,
 }
 
+#[cfg(test)]
 pub(super) fn parse_page(bytes: &[u8], owner_id: &str) -> Result<Page> {
+    let mut page = parse_posts(bytes, owner_id)?;
+    for (id, post) in std::mem::take(&mut page.posts) {
+        let mut engine = expansion::Engine::new(post, id, ExpansionOptions::default(), true);
+        loop {
+            match engine.next()? {
+                expansion::Action::Media(media) => page.media.extend(media),
+                expansion::Action::Done => break,
+                expansion::Action::Fetch(_) => {
+                    return Err(error("Twitter linked post result missing"));
+                }
+            }
+        }
+    }
+    Ok(page)
+}
+
+pub(super) fn parse_posts(bytes: &[u8], owner_id: &str) -> Result<Page> {
     if !valid_id(owner_id) {
         return Err(error("invalid Twitter timeline owner identifier"));
     }
@@ -143,7 +163,9 @@ pub(super) fn parse_page(bytes: &[u8], owner_id: &str) -> Result<Page> {
     .as_array()
     .ok_or_else(|| error("Twitter media timeline instructions are invalid"))?;
     let mut page = Page {
+        #[cfg(test)]
         media: Vec::new(),
+        posts: Vec::new(),
         cursor: None,
         done: false,
     };
@@ -357,38 +379,7 @@ fn parse_item(item: &Value, owner_id: &str, page: &mut Page) -> Result<()> {
             "Twitter timeline post does not match the requested user",
         ));
     }
-    if legacy.get("retweeted_status_id_str").is_some()
-        || tweet.get("retweeted_status_result").is_some()
-        || legacy.get("retweeted_status_result").is_some()
-    {
-        return Err(error(
-            "native Twitter retweet expansion is unsupported; use --extractor compatibility",
-        ));
-    }
-    match legacy.get("extended_entities") {
-        Some(extended) => {
-            let media = extended
-                .get("media")
-                .and_then(Value::as_array)
-                .ok_or_else(|| error("Twitter timeline post media fields malformed"))?;
-            if media.is_empty() {
-                return Ok(());
-            }
-        }
-        None => {
-            // A normal text-only post has no media collections. An entities
-            // media reference without its extended media is incomplete data.
-            if let Some(media) = legacy.pointer("/entities/media")
-                && !media.as_array().is_some_and(Vec::is_empty)
-            {
-                return Err(error("Twitter timeline post extended media missing"));
-            }
-            return Ok(());
-        }
-    }
-    let envelope = serde_json::json!({"data":{"tweetResult":{"result":original}}});
-    page.media
-        .extend(parse_response(&serde_json::to_vec(&envelope)?, id)?);
+    page.posts.push((id.into(), original.clone()));
     Ok(())
 }
 
@@ -590,12 +581,17 @@ mod tests {
         incomplete["legacy"]["entities"] = json!({"media":[{"id":"1"}]});
         let mut retweet = tweet("14");
         retweet["legacy"]["retweeted_status_id_str"] = "99".into();
+        assert!(
+            parse_page(&entries(json!([entry(retweet)])), "42")
+                .unwrap()
+                .media
+                .is_empty()
+        );
         for bad in [
             wrong_owner,
             missing_owner,
             malformed,
             incomplete,
-            retweet,
             json!({"__typename":"TweetUnavailable","reason":"PRIVATE"}),
         ] {
             let error = parse_page(&entries(json!([entry(bad)])), "42")

@@ -20,7 +20,7 @@ use gallery_dl_rs::{
     network::NetworkOptions,
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
-    twitter::Twitter,
+    twitter::{ExpansionOptions, Twitter},
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -202,6 +202,8 @@ async fn run(args: Args) -> Result<()> {
                         gallery_dl_rs::instagram::is_story_url(&url)
                             || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
                             || gallery_dl_rs::twitter::is_media_timeline_url(&url)
+                            || (extract::social_site(&url) == Some("twitter")
+                                && settings["twitter"].options.quoted == Some(true))
                     });
                     let selected_settings = extract::http_url(&source)
                         .ok()
@@ -417,6 +419,10 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_expansion(ExpansionOptions {
+                                        retweets: options.retweets.unwrap_or_default(),
+                                        quoted: options.quoted.unwrap_or(false),
+                                    })
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -463,6 +469,10 @@ fn extract_input<'a>(
                             browser: configured.browser_spec.clone(),
                             proxy: configured.network.proxy().map(str::to_owned),
                             user_agent: configured.network.user_agent().map(str::to_owned),
+                            retweets: (category == "twitter")
+                                .then_some(options.retweets)
+                                .flatten(),
+                            quoted: (category == "twitter").then_some(options.quoted).flatten(),
                         },
                     )
                 }
@@ -520,6 +530,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         },
         cookies: args.cookies.clone(),
         browser_cookies: None,
+        retweets: None,
+        quoted: None,
         proxy: args.proxy.clone(),
         user_agent: args.user_agent.clone(),
         archive: args.download_archive.clone(),

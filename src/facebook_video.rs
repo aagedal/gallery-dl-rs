@@ -84,6 +84,9 @@ pub fn parse_video(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 filename: format!("{requested_id}.{extension}"),
                 handoff: BTreeMap::new(),
                 metadata: Some(PostMetadata {
+                    retweet_id: None,
+                    quoted_by_id: None,
+                    reposted_by_id: None,
                     post_id: requested_id.into(),
                     media_id: format!("{requested_id}.{extension}"),
                     shortcode: String::new(),
