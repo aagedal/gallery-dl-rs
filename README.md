@@ -142,6 +142,39 @@ overall extraction deadline as the native pipeline. Parser/reference/local HTTP
 tests and the [Twitter fixture notes](tests/fixtures/twitter/README.md) describe
 what is verified and the remaining real-response/manual authenticated gates.
 
+## URL input files
+
+Use `-i urls.txt` / `--input-file urls.txt` to read a UTF-8 URL list; repeat the
+option for more files. Positional URLs run first, followed by files in option
+order. Paths are relative to the working directory. `-i -` reads stdin, for example:
+
+```sh
+cat urls.txt | ./target/release/gallery-dl-rs -i -
+./target/release/gallery-dl-rs -g -i first.txt -i second.txt
+```
+
+Each nonempty line supplies one URL. Leading/trailing whitespace, CRLF, and a
+first-line UTF-8 BOM are accepted. Lines beginning with `#` are ignored. A `#`
+preceded by whitespace starts an inline comment; URL fragments such as `#part`
+remain intact. Source files are never changed. Empty files succeed, and stdin can
+be listed only once.
+
+Inputs stream line by line; extraction and downloads can proceed before stdin
+reaches EOF. Only the current line (up to 64 KiB before the newline) and an 8 KiB
+read buffer are retained by the file reader. Backpressure pauses later input.
+Unread files are opened lazily, native clients initialize only when their site
+is reached, and archives open on their first selected media download. Same-path
+archive connections and site clients are reused across files. The existing
+fixed-size media deduplication digests still grow with unique emitted jobs;
+JSON inspection also retains its result array.
+
+Missing/unreadable files report an error and continue to later files. Malformed
+UTF-8, oversized lines, and inline configuration directives report a line error
+and continue after that line; affected runs return a failure status even if later
+URLs succeed. Input-file diagnostics identify the file ordinal and line number
+without echoing contents or paths. Inline `-KEY=VALUE` / `-G` options, configured
+`input-files`, and success-based comment/delete modes remain unimplemented.
+
 ## Media selection
 
 `--range '2-5,8,10:20:3'` selects media positions separately for each input URL.
@@ -418,6 +451,7 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/resume.rs` owns locked partial files and durable checkpoints;
 `src/range.rs` validates resumable HTTP representations and ranges.
 `src/selection.rs` parses file-index ranges and filters streams with early cancellation.
+`src/input.rs` reads bounded URL lines lazily from files and stdin.
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.

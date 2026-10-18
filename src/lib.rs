@@ -5,6 +5,7 @@ pub mod cookies;
 pub mod download;
 pub mod extract;
 pub mod facebook;
+pub mod input;
 pub mod instagram;
 mod messages;
 pub mod naming;

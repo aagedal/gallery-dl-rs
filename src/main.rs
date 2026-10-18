@@ -11,6 +11,7 @@ use gallery_dl_rs::{
     error,
     extract::{self, Backend},
     facebook::Facebook,
+    input::Inputs,
     instagram::Instagram,
     naming::{DirectoryTemplate, FilenameTemplate},
     selection::RangeSelection,
@@ -23,6 +24,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+use tokio::sync::OnceCell;
 
 #[derive(Parser)]
 #[command(
@@ -31,8 +33,11 @@ use std::{
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
-    #[arg(required = true)]
+    #[arg(required_unless_present = "input_files")]
     urls: Vec<String>,
+    /// Read URLs from a UTF-8 file; repeat for multiple files, or use - for stdin
+    #[arg(short = 'i', long = "input-file", value_name = "FILE")]
+    input_files: Vec<PathBuf>,
     /// Output root (default: downloads)
     #[arg(short, long)]
     destination: Option<PathBuf>,
@@ -135,65 +140,13 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     let settings = resolved_settings(&args).await?;
-    let needs_native = |category| {
-        matches!(args.extractor, Extractor::Native)
-            && args.urls.iter().any(|source| {
-                extract::http_url(source)
-                    .ok()
-                    .is_some_and(|url| extract::social_site(&url) == Some(category))
-            })
-    };
-    let instagram_settings = &settings["instagram"];
-    let native = if needs_native("instagram") {
-        Some(
-            Instagram::new(
-                instagram_settings.options.cookies.as_deref(),
-                Duration::from_secs(args.extraction_timeout),
-            )
-            .await
-            .map(|native| {
-                native
-                    .with_retries(instagram_settings.options.retries.unwrap())
-                    .with_request_timeout(instagram_settings.options.timeout.unwrap())
-            }),
-        )
-    } else {
-        None
-    };
-    let twitter_settings = &settings["twitter"];
-    let twitter = if needs_native("twitter") {
-        Some(
-            Twitter::new(
-                twitter_settings.options.cookies.as_deref(),
-                Duration::from_secs(args.extraction_timeout),
-            )
-            .await
-            .map(|twitter| {
-                twitter
-                    .with_retries(twitter_settings.options.retries.unwrap())
-                    .with_request_timeout(twitter_settings.options.timeout.unwrap())
-            }),
-        )
-    } else {
-        None
-    };
-    let facebook_settings = &settings["facebook"];
-    let facebook = if needs_native("facebook") {
-        Some(
-            Facebook::new(
-                facebook_settings.options.cookies.as_deref(),
-                Duration::from_secs(args.extraction_timeout),
-            )
-            .await
-            .map(|native| {
-                native
-                    .with_retries(facebook_settings.options.retries.unwrap())
-                    .with_request_timeout(facebook_settings.options.timeout.unwrap())
-            }),
-        )
-    } else {
-        None
-    };
+    let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
+    let extractors = Extractors::default();
+    let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
+        .values()
+        .filter_map(|settings| settings.options.archive.clone())
+        .map(|path| (path, OnceCell::new()))
+        .collect();
     let backend = Backend {
         executable: args.extractor_command.clone(),
         cookies: None,
@@ -204,26 +157,26 @@ async fn run(args: Args) -> Result<()> {
     let mut seen = HashSet::new();
     // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
-    let media = stream::iter(args.urls.iter().enumerate())
+    let media = inputs
+        .stream()
+        .enumerate()
         .flat_map(|(index, source)| {
             let failed = &failed;
-            let input = extract_input(
-                source,
-                native.as_ref(),
-                twitter.as_ref(),
-                facebook.as_ref(),
-                &backend,
-                args.extractor,
-                &settings,
-            );
-            let selection = extract::http_url(source).ok().and_then(|url| {
-                settings[extract::social_site(&url).unwrap_or("direct")]
-                    .selection
-                    .as_ref()
-            });
-            let input = match selection {
-                Some(selection) => selection.apply(input),
-                None => input,
+            let input = match source {
+                Ok(source) => {
+                    let selection = extract::http_url(&source).ok().and_then(|url| {
+                        settings[extract::social_site(&url).unwrap_or("direct")]
+                            .selection
+                            .as_ref()
+                    });
+                    let input =
+                        extract_input(source, &extractors, &backend, args.extractor, &settings);
+                    match selection {
+                        Some(selection) => selection.apply(input),
+                        None => input,
+                    }
+                }
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
             input.filter_map(move |result| {
                 std::future::ready(match result {
@@ -258,7 +211,11 @@ async fn run(args: Args) -> Result<()> {
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap());
                 let destination = settings.options.base_directory.as_ref().unwrap();
-                let archive = &settings.archive;
+                let archive = settings
+                    .options
+                    .archive
+                    .as_ref()
+                    .map(|path| (&archives[path], path));
                 let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
                     retries: settings.options.retries.unwrap(),
@@ -267,7 +224,14 @@ async fn run(args: Args) -> Result<()> {
                 };
                 async move {
                     match archive {
-                        Some(archive) => {
+                        Some((cell, path)) => {
+                            let archive = cell
+                                .get_or_init(|| Archive::open(path))
+                                .await
+                                .as_ref()
+                                .map_err(|e| {
+                                error(format!("download archive initialization failed: {e}"))
+                            })?;
                             archive
                                 .download_with_template(
                                     &client,
@@ -316,72 +280,110 @@ async fn run(args: Args) -> Result<()> {
     }
 }
 
+#[derive(Default)]
+struct Extractors {
+    instagram: OnceCell<Result<Instagram>>,
+    twitter: OnceCell<Result<Twitter>>,
+    facebook: OnceCell<Result<Facebook>>,
+}
+
 fn extract_input<'a>(
-    source: &'a str,
-    native: Option<&'a Result<Instagram>>,
-    twitter: Option<&'a Result<Twitter>>,
-    facebook: Option<&'a Result<Facebook>>,
+    source: String,
+    extractors: &'a Extractors,
     backend: &'a Backend,
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
 ) -> BoxStream<'a, Result<extract::Media>> {
-    let build = || -> Result<BoxStream<'a, Result<extract::Media>>> {
-        let url = extract::http_url(source)?;
-        // Social pages use their extractor even when the path has a media suffix.
-        if let Some(category) = extract::social_site(&url) {
+    stream::once(async move {
+        let url = extract::http_url(&source)?;
+        let input: BoxStream<'a, Result<extract::Media>> = if let Some(category) =
+            extract::social_site(&url)
+        {
+            let options = &settings[category].options;
             match extractor {
                 Extractor::Native if category == "instagram" => {
-                    let native = native
-                        .ok_or_else(|| error("native Instagram extractor was not initialized"))?
+                    let native = extractors
+                        .instagram
+                        .get_or_init(|| async {
+                            Instagram::new(options.cookies.as_deref(), backend.timeout)
+                                .await
+                                .map(|native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                })
+                        })
+                        .await
                         .as_ref()
                         .map_err(|e| {
                             error(format!("native Instagram initialization failed: {e}"))
                         })?;
-                    Ok(native.stream(&url))
+                    native.stream(&url)
                 }
                 Extractor::Native if category == "twitter" => {
-                    let twitter = twitter
-                        .ok_or_else(|| error("native Twitter extractor was not initialized"))?
+                    let native = extractors
+                        .twitter
+                        .get_or_init(|| async {
+                            Twitter::new(options.cookies.as_deref(), backend.timeout)
+                                .await
+                                .map(|native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                })
+                        })
+                        .await
                         .as_ref()
                         .map_err(|e| error(format!("native Twitter initialization failed: {e}")))?;
-                    Ok(stream::once(async move { twitter.extract(&url).await })
+                    stream::once(async move { native.extract(&url).await })
                         .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
                         .try_flatten()
-                        .boxed())
+                        .boxed()
                 }
                 Extractor::Native if category == "facebook" => {
-                    let facebook = facebook
-                        .ok_or_else(|| error("native Facebook extractor was not initialized"))?
+                    let native = extractors
+                        .facebook
+                        .get_or_init(|| async {
+                            Facebook::new(options.cookies.as_deref(), backend.timeout)
+                                .await
+                                .map(|native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                })
+                        })
+                        .await
                         .as_ref()
                         .map_err(|e| {
                             error(format!("native Facebook initialization failed: {e}"))
                         })?;
-                    Ok(stream::once(async move { facebook.extract(&url).await })
+                    stream::once(async move { native.extract(&url).await })
                         .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
                         .try_flatten()
-                        .boxed())
+                        .boxed()
                 }
-                Extractor::Native => Err(error(
-                    "native extractor unavailable; use --extractor compatibility",
-                )),
+                Extractor::Native => {
+                    return Err(error(
+                        "native extractor unavailable; use --extractor compatibility",
+                    ));
+                }
                 Extractor::Compatibility => {
                     let mut backend = backend.clone();
-                    backend.cookies = settings[category].options.cookies.clone();
-                    Ok(backend.stream(&url))
+                    backend.cookies = options.cookies.clone();
+                    backend.stream(&url)
                 }
             }
         } else if let Some(item) = extract::direct(&url) {
-            Ok(stream::once(async move { Ok(item) }).boxed())
+            stream::once(async move { Ok(item) }).boxed()
         } else {
-            Err(error(
+            return Err(error(
                 "unsupported URL; expected a social URL or direct media file",
-            ))
-        }
-    };
-    match build() {
-        Ok(items) => items,
-        Err(e) => stream::once(async move { Err(e) }).boxed(),
-    }
+            ));
+        };
+        Ok(input)
+    })
+    .try_flatten()
+    .boxed()
 }
 
 struct Settings {
@@ -389,7 +391,6 @@ struct Settings {
     filename: Option<FilenameTemplate>,
     directory: Option<DirectoryTemplate>,
     selection: Option<RangeSelection>,
-    archive: Option<Archive>,
 }
 
 async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
@@ -447,39 +448,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 filename,
                 directory,
                 selection,
-                archive: None,
             },
         );
-    }
-    // Inspection needs no archive connection or output directory. Open archives
-    // only for categories present among valid inputs, and share same-path instances.
-    if !args.get_urls && !args.dump_json {
-        let mut archives = BTreeMap::new();
-        for source in &args.urls {
-            let Ok(url) = extract::http_url(source) else {
-                continue;
-            };
-            let category = extract::social_site(&url).unwrap_or("direct");
-            let settings = settings.get_mut(category).unwrap();
-            if settings
-                .selection
-                .as_ref()
-                .is_some_and(|selection| selection.last_index().is_none())
-            {
-                continue;
-            }
-            if let Some(path) = &settings.options.archive {
-                let archive = match archives.get(path) {
-                    Some(archive) => Archive::clone(archive),
-                    None => {
-                        let archive = Archive::open(path).await?;
-                        archives.insert(path.clone(), archive.clone());
-                        archive
-                    }
-                };
-                settings.archive = Some(archive);
-            }
-        }
     }
     Ok(settings)
 }

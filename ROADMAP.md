@@ -138,6 +138,18 @@ requests. Local fixtures exercise order, backpressure, cursor encoding/errors,
 private/foreign profiles, and deadlines. Authenticated live profile pagination
 and real response fixtures remain unverified; other native collections remain.
 
+**Implemented URL input files:** repeated `-i`/`--input-file` sources follow
+positional URLs, with `-` for streaming stdin. The reader accepts whitespace,
+comments, inline comments, CRLF, and a first-line BOM; it retains a bounded line
+and buffer, applies backpressure, and yields while scanning/discarding lines.
+Recoverable line/file errors report private diagnostics and allow later inputs.
+Native clients initialize lazily by category, and shared same-path archives open
+on first selected media, allowing file-only inputs without an eager URL scan.
+Tests cover stdin before EOF, pending-read Ctrl-C, malformed/oversized lines,
+source preservation, configuration, archives/metadata, and failure continuation.
+Input-file configuration directives, configured input-files, and successful-item
+comment/delete modes remain.
+
 **Implemented file selection:** `--range` and scoped native `file-range` strings
 or lists select one-based media positions using comma unions, inclusive hyphen
 ranges, and exclusive-stop signed slices. Membership and final indices use
