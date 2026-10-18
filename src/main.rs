@@ -416,6 +416,7 @@ async fn run(args: Args) -> Result<()> {
                     | "flickr"
                     | "wallhaven"
                     | "artstation"
+                    | "pinterest"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -599,6 +600,7 @@ struct Extractors {
     flickr: OnceCell<Result<gallery_dl_rs::flickr::Flickr>>,
     wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
     artstation: OnceCell<Result<gallery_dl_rs::artstation::ArtStation>>,
+    pinterest: OnceCell<Result<gallery_dl_rs::pinterest::Pinterest>>,
 }
 
 impl Extractors {
@@ -870,6 +872,26 @@ fn extract_input<'a>(
                         .as_ref()
                         .map_err(|e| {
                             error(format!("native ArtStation initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "pinterest" => {
+                    let native = extractors
+                        .pinterest
+                        .get_or_init(|| async {
+                            gallery_dl_rs::pinterest::Pinterest::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Pinterest initialization failed: {e}"))
                         })?;
                     native.events(&url)
                 }
@@ -1176,6 +1198,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "flickr",
         "wallhaven",
         "artstation",
+        "pinterest",
         "direct",
     ] {
         let options = defaults

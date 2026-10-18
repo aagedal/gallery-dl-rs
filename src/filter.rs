@@ -370,6 +370,7 @@ fn context_parts(
                 | "flickr"
                 | "wallhaven"
                 | "artstation"
+                | "pinterest"
         ) || crate::booru::Site::from_category(category).is_some()
         {
             values.insert("id".into(), identifier(&post.post_id));

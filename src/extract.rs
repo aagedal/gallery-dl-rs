@@ -152,6 +152,17 @@ impl Media {
                     serde_json::json!([blog, post.post_id, post.media_id]).to_string(),
                 )
             }
+            // Pinterest files are identified by pin ID and index.
+            "pinterest" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::pinterest::valid_id(&post.post_id) {
+                    return None;
+                }
+                (
+                    "pinterest",
+                    serde_json::json!([post.post_id, post.index]).to_string(),
+                )
+            }
             // ArtStation files are identified by asset ID.
             "artstation" => {
                 let post = self.metadata.as_ref()?;
@@ -352,6 +363,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if let Some(category) = crate::kemono::category(host) {
         return Some(category);
+    }
+    if crate::pinterest::is_pinterest_url(url) {
+        return Some("pinterest");
     }
     if crate::artstation::is_artstation_url(url) {
         return Some("artstation");

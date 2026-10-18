@@ -1832,6 +1832,10 @@ fn api_key_is_tumblr_flickr_and_wallhaven_only_and_never_echoed() {
         parse(r#"{"extractor":{"artstation":{"filename":"{post_id}_{media_id}.{extension}"}}}"#)
             .is_ok()
     );
+    assert!(
+        parse(r#"{"extractor":{"pinterest":{"filename":"{post_id}_{index}.{extension}"}}}"#)
+            .is_ok()
+    );
     let config =
         parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"},"flickr":{"api-key":"f00d"},"wallhaven":{"api-key":"beef"}}}"#)
             .unwrap();
@@ -1856,6 +1860,7 @@ fn api_key_is_tumblr_flickr_and_wallhaven_only_and_never_echoed() {
         r#"{"extractor":{"tumblr":{"api-key":7}}}"#,
         r#"{"extractor":{"flickr":{"api-key":"abc-123"}}}"#,
         r#"{"extractor":{"artstation":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"pinterest":{"api-key":"abc123"}}}"#,
         r#"{"extractor":{"wallhaven":{"api-key":"abc 123"}}}"#,
     ] {
         let error = parse(json).err().unwrap().to_string();

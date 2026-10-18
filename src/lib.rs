@@ -28,6 +28,7 @@ pub mod mastodon;
 mod messages;
 pub mod naming;
 pub mod network;
+pub mod pinterest;
 pub mod pixiv;
 pub mod post_selection;
 mod range;
