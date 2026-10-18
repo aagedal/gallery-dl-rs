@@ -142,8 +142,8 @@ fn zero_concurrency_is_rejected() {
 fn native_selection_rejects_unsupported_inputs_without_running_backend() {
     for url in [
         "https://x.com/person/",
-        "https://facebook.com/photo/?fbid=1",
-        "https://instagram.com/person/",
+        "https://facebook.com/person/videos/",
+        "https://instagram.com/person/stories/",
     ] {
         let output = binary()
             .args([
@@ -632,6 +632,8 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
     for url in [
         "https://x.com/person/status/123",
         "https://instagram.com/p/BA/",
+        "https://instagram.com/person/",
+        "https://facebook.com/photo/?fbid=1",
     ] {
         let output = binary()
             .arg("--cookies")

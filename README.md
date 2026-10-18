@@ -7,8 +7,8 @@ An early Rust implementation of a gallery downloader, inspired by
 **This is a working foundation, not a native Rust replacement for gallery-dl yet.**
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
-its JSON messages. Experimental native Instagram and Twitter/X single-post
-extractors are available with `--extractor native`; authenticated live post
+its JSON messages. Experimental native Instagram posts/profile feeds, Facebook
+photos, and Twitter/X single-post extractors are available with `--extractor native`; authenticated live post
 extraction has not yet been verified.
 
 ## Build and run
@@ -62,9 +62,11 @@ ignored. `--extractor-command /path/to/gallery-dl` selects another executable;
 it is invoked directly, without a shell.
 
 `--extractor compatibility` is the default. `--extractor native` experimentally
-supports Instagram `/p/`, `/reel/`, and `/tv/` posts and Twitter/X single-status
-URLs. Facebook, profiles, stories, threads, and albums still need the compatibility backend. There is no automatic
-fallback. Native mode rejects `--config`, which contains gallery-dl settings.
+supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
+`/USERNAME/feed/` profiles, Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
+`/USER/photos/ALBUM/ID` photo permalinks, and Twitter/X single-status URLs.
+Other profiles, stories, threads, albums, and Facebook videos still need the
+compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
 The native Instagram extractor reads Netscape cookies scoped to the API URL's domain, path,
@@ -83,7 +85,7 @@ missing posts. `--retries` controls additional attempts for native HTTP 429,
 HTTP 5xx, and send/read transport failures as well as downloads. Authentication,
 missing-post, rejected-redirect, and parser errors are not retried; this includes
 rate-limit payloads returned with HTTP 200. `--extraction-timeout` bounds the entire
-native operation, including backoff and cooldown waits, with a 16 MiB response
+native operation’s active time, including backoff and cooldown waits, with a 16 MiB response
 limit per attempt. `--timeout` also bounds each native HTTP request (default 60
 seconds), inside that overall deadline. Library callers retain zero retries with
 `Instagram::new` and can opt in with `with_retries`; `with_request_timeout` sets a
@@ -95,6 +97,26 @@ variants fail extraction rather than silently downloading a partial post or vide
 thumbnail. JSON includes post/media IDs, shortcode, username, caption, timestamp,
 and a one-based carousel index. Media requests carry user-agent/referer headers;
 Instagram session cookies are never copied to media hosts.
+
+Native Instagram profile traversal resolves the requested username to an ID and
+fetches REST feed pages in order. Each post must belong to that ID. The extractor
+retains at most one bounded response page and its parsed jobs; later pages are
+requested only as downstream consumers drain the current page. Consumer pauses
+are excluded from the cumulative extraction timeout. Missing/repeated pagination
+cursors and inaccessible private profiles fail explicitly; results from earlier
+pages remain available after a late failure. `Instagram::stream` supports these
+collections; the collecting `extract` API remains single-post. Profile fixtures
+are synthetic; live authenticated pagination remains unverified.
+
+Native Facebook accepts only a Photo JSON object with the requested ID and its
+own `image.uri`, never a global image or Open Graph preview. It selects the largest
+identity-bound image and emits available metadata plus stable archive identities.
+Cookies remain scoped to Facebook page requests; media receives user-agent and
+referer only. Requests have bounded redirects, retries, cooldowns, response size,
+and deadlines. Albums and videos are not implemented. An anonymous public page
+check on 2026-10-18 returned no identity-bound photo; successful live extraction
+and sanitized real response fixtures remain required. See the
+[Facebook fixture notes](tests/fixtures/facebook/README.md).
 
 Native Twitter/X requires current `x.com` Netscape `auth_token` and `ct0` cookies;
 it does not log in or use a guest session. It requests the exact status through
@@ -214,7 +236,7 @@ directory templates, automatic discovery, and postprocessors remain unimplemente
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,
   shortcode, username, caption, timestamp, and carousel index). Post metadata is
-  provided by native Instagram/Twitter and allowlisted compatibility Instagram,
+  provided by native Instagram/Facebook/Twitter and allowlisted compatibility Instagram,
   Twitter/X, and Facebook fields when available. Compatibility timestamps are
   retained only when numeric; formatted backend dates are omitted. Instagram
   uses site post/media IDs, Twitter uses tweet ID and file number, and Facebook
@@ -266,7 +288,7 @@ directory templates, automatic discovery, and postprocessors remain unimplemente
   retries controlled by `--retries`. Retry-After accepts seconds or an HTTP date;
   missing/invalid values use exponential backoff. Concurrent downloads share
   cooldowns by origin (scheme, host, and port), including cooldowns reported on a
-  final attempt. Native Instagram and Twitter reuse the same scheduler implementation, sharing cooldowns
+  final attempt. Native Instagram, Facebook, and Twitter reuse the same scheduler implementation, sharing cooldowns
   across calls on an extractor instance and recording them even on a final
   attempt. Requests already in flight can finish. `--timeout` bounds each media
   attempt, including its redirect chain and cooldown waits; longer cooldowns fail

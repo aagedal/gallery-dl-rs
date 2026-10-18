@@ -1,4 +1,4 @@
-//! Experimental native single-post extraction using Instagram's web REST API.
+//! Experimental native post and profile extraction using Instagram's web REST API.
 use crate::{
     Result,
     cookies::CookieJar,
@@ -6,10 +6,15 @@ use crate::{
     extract::{Media, PostMetadata, http_url},
     transport::{RateLimits, Redirects, retry_after},
 };
+use futures_util::{
+    StreamExt, TryStreamExt,
+    stream::{self, BoxStream},
+};
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet, VecDeque},
     path::Path,
     sync::Mutex,
     time::{Duration, SystemTime},
@@ -71,13 +76,16 @@ impl Instagram {
     }
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
-        tokio::time::timeout(self.timeout, async {
+        let data = self.request_json(endpoint, code, self.timeout).await?;
+        parse_value(&data, code)
+    }
+
+    async fn request_json(&self, endpoint: &Url, referer: &str, budget: Duration) -> Result<Value> {
+        tokio::time::timeout(budget, async {
             for attempt in 0..=self.retries {
-                match self.attempt(endpoint, code, attempt).await {
-                    Ok(media) => return Ok(media),
+                match self.attempt(endpoint, referer, attempt).await {
+                    Ok(data) => return Ok(data),
                     Err(failure) if failure.retry && attempt < self.retries => {
-                        // Transport failures have no response to establish a cooldown.
-                        // Also yield between attempts when Retry-After is zero.
                         tokio::time::sleep(backoff(attempt)).await;
                     }
                     Err(failure) => return Err(failure.error),
@@ -89,12 +97,149 @@ impl Instagram {
         .map_err(|_| error("native Instagram extraction timed out"))?
     }
 
+    /// Lazily traverse posts or a profile feed. Only the current response page is
+    /// buffered; downstream pauses do not consume the active extraction budget.
+    pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
+        if shortcode(url).is_ok() {
+            let url = url.clone();
+            return stream::once(async move { self.extract(&url).await })
+                .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
+                .try_flatten()
+                .boxed();
+        }
+        match profile_username(url) {
+            Ok(username) => self.profile_stream(
+                username,
+                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
+            ),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        }
+    }
+
+    fn profile_stream(&self, username: String, base: Url) -> BoxStream<'_, Result<Media>> {
+        let state = ProfileState {
+            username,
+            base,
+            user_id: None,
+            cursor: None,
+            seen: HashSet::new(),
+            pending: VecDeque::new(),
+            done: false,
+            budget: self.timeout,
+        };
+        stream::unfold(state, move |mut state| async move {
+            loop {
+                if let Some(item) = state.pending.pop_front() {
+                    return Some((Ok(item), state));
+                }
+                if state.done {
+                    return None;
+                }
+                let started = tokio::time::Instant::now();
+                let result =
+                    tokio::time::timeout(state.budget, self.profile_page(&mut state)).await;
+                state.budget = state.budget.saturating_sub(started.elapsed());
+                let result =
+                    result.unwrap_or_else(|_| Err(error("native Instagram extraction timed out")));
+                if let Err(e) = result {
+                    state.done = true;
+                    return Some((Err(e), state));
+                }
+            }
+        })
+        .boxed()
+    }
+
+    async fn profile_page(&self, state: &mut ProfileState) -> Result<()> {
+        if state.user_id.is_none() {
+            let mut endpoint = state.base.join("users/web_profile_info/")?;
+            endpoint
+                .query_pairs_mut()
+                .append_pair("username", &state.username);
+            let data = self.request_json(&endpoint, "", state.budget).await?;
+            validate_response(&data)?;
+            let user = data
+                .pointer("/data/user")
+                .ok_or_else(|| error("Instagram profile unavailable"))?;
+            if !user
+                .get("username")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.eq_ignore_ascii_case(&state.username))
+            {
+                return Err(error(
+                    "Instagram response does not match the requested profile",
+                ));
+            }
+            if user.get("is_private").and_then(Value::as_bool) == Some(true)
+                && user.get("followed_by_viewer").and_then(Value::as_bool) != Some(true)
+            {
+                return Err(error(
+                    "Instagram private profile requires an authorized session; refresh --cookies",
+                ));
+            }
+            state.user_id = Some(identifier(user.get("id"))?);
+            return Ok(());
+        }
+        let user_id = state.user_id.as_deref().unwrap();
+        let mut endpoint = state.base.join(&format!("feed/user/{user_id}/"))?;
+        endpoint.query_pairs_mut().append_pair("count", "30");
+        if let Some(cursor) = &state.cursor {
+            endpoint.query_pairs_mut().append_pair("max_id", cursor);
+        }
+        let data = self.request_json(&endpoint, "", state.budget).await?;
+        validate_response(&data)?;
+        let posts = data
+            .get("items")
+            .and_then(Value::as_array)
+            .ok_or_else(|| error("Instagram profile feed items are missing"))?;
+        let more = data
+            .get("more_available")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| error("Instagram profile pagination state is missing"))?;
+        let cursor = if more {
+            let cursor = data
+                .get("next_max_id")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty() && s.len() <= 8192)
+                .ok_or_else(|| {
+                    error("Instagram profile pagination cursor is missing or invalid")
+                })?;
+            if !state
+                .seen
+                .insert(<[u8; 32]>::from(Sha256::digest(cursor.as_bytes())))
+            {
+                return Err(error("Instagram profile pagination cursor repeated"));
+            }
+            Some(cursor.to_owned())
+        } else {
+            None
+        };
+        let mut pending = VecDeque::new();
+        for post in posts {
+            if identifier(post.pointer("/user/pk"))? != user_id {
+                return Err(error(
+                    "Instagram feed post does not match the requested profile",
+                ));
+            }
+            let code = post
+                .get("code")
+                .and_then(Value::as_str)
+                .ok_or_else(|| error("Instagram feed post shortcode is missing"))?;
+            media_id(code)?;
+            pending.extend(parse_post(post, code)?);
+        }
+        state.pending = pending;
+        state.cursor = cursor;
+        state.done = !more;
+        Ok(())
+    }
+
     async fn attempt(
         &self,
         endpoint: &Url,
         code: &str,
         attempt: u8,
-    ) -> std::result::Result<Vec<Media>, Failure> {
+    ) -> std::result::Result<Value, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
@@ -106,7 +251,11 @@ impl Instagram {
                 .header(header::ACCEPT, "application/json")
                 .header(
                     header::REFERER,
-                    format!("https://www.instagram.com/p/{code}/"),
+                    if code.is_empty() {
+                        "https://www.instagram.com/".into()
+                    } else {
+                        format!("https://www.instagram.com/p/{code}/")
+                    },
                 )
                 .header("X-IG-App-ID", "936619743392459")
                 .header("X-Requested-With", "XMLHttpRequest")
@@ -181,8 +330,51 @@ impl Instagram {
             }
             body.extend_from_slice(&chunk);
         }
-        parse_response(&body, code).map_err(Into::into)
+        let data: Value = serde_json::from_slice(&body).map_err(|_| {
+            error("Instagram returned a web page or invalid JSON; login may be required")
+        })?;
+        Ok(data)
     }
+}
+
+struct ProfileState {
+    username: String,
+    base: Url,
+    user_id: Option<String>,
+    cursor: Option<String>,
+    seen: HashSet<[u8; 32]>,
+    pending: VecDeque<Media>,
+    done: bool,
+    budget: Duration,
+}
+
+pub fn profile_username(url: &Url) -> Result<String> {
+    let parts: Vec<_> = url.path().trim_matches('/').split('/').collect();
+    let username = parts[0];
+    if !matches!(url.scheme(), "http" | "https")
+        || !matches!(
+            url.host_str(),
+            Some("instagram.com" | "www.instagram.com" | "m.instagram.com")
+        )
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || !(parts.len() == 1 || (parts.len() == 2 && parts[1] == "feed"))
+        || username.is_empty()
+        || username.len() > 30
+        || !username
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.'))
+        || matches!(
+            username.to_ascii_lowercase().as_str(),
+            "p" | "reel" | "reels" | "tv" | "explore" | "accounts" | "stories" | "direct"
+        )
+    {
+        return Err(error(
+            "native Instagram supports posts and profile feeds; use --extractor compatibility for other URLs",
+        ));
+    }
+    Ok(username.into())
 }
 
 fn backoff(attempt: u8) -> Duration {
@@ -254,6 +446,10 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
     let data: Value = serde_json::from_slice(bytes).map_err(|_| {
         error("Instagram returned a web page or invalid JSON; login may be required")
     })?;
+    parse_value(&data, code)
+}
+
+fn validate_response(data: &Value) -> Result<()> {
     let message = data.get("message").and_then(Value::as_str).unwrap_or("");
     if data.get("challenge").is_some()
         || matches!(
@@ -278,6 +474,11 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
             "Instagram could not return this post; it may be unavailable or inaccessible",
         ));
     }
+    Ok(())
+}
+
+fn parse_value(data: &Value, code: &str) -> Result<Vec<Media>> {
+    validate_response(data)?;
     let posts = data
         .get("items")
         .and_then(Value::as_array)
@@ -289,6 +490,10 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
             "Instagram response does not match the requested post",
         ));
     }
+    parse_post(post, code)
+}
+
+fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
     let post_id = identifier(post.get("pk"))?;
     let kind = post.get("media_type").and_then(Value::as_u64);
     let children: Vec<&Value> = if kind == Some(8) {
@@ -1046,3 +1251,7 @@ mod transport_tests {
         server.join().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "instagram_profile_tests.rs"]
+mod profile_tests;

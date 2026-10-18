@@ -28,3 +28,11 @@ Record date, URL shape, result, media count/types, and account-access conditions
 without storing session values or signed media URLs. Create sanitized real response
 fixtures before considering native mode verified. Confirm Facebook/Twitter still
 work through `--extractor compatibility` independently.
+
+Profile tests in `src/instagram_profile_tests.rs` synthesize `web_profile_info`
+identity responses and `feed/user/{id}/` pages based on the same upstream REST
+protocol. They cover opaque cursor encoding, ordered pages, current-page
+backpressure, late cursor failures, owner validation, private profiles, and active
+timeouts. They are not live captures. Before claiming profile support, verify
+an accessible profile spanning multiple pages and compare post counts/order,
+including a carousel/video, an empty profile, and an authorized private profile.

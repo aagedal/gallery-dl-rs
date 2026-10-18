@@ -10,6 +10,7 @@ use gallery_dl_rs::{
     download::{self, DownloadOptions, Outcome},
     error,
     extract::{self, Backend},
+    facebook::Facebook,
     instagram::Instagram,
     naming::FilenameTemplate,
     twitter::Twitter,
@@ -25,7 +26,7 @@ use std::{
 #[derive(Parser)]
 #[command(
     version,
-    about = "Rust gallery downloader with experimental native Instagram and Twitter/X extractors"
+    about = "Rust gallery downloader with experimental native Instagram, Facebook, and Twitter/X extractors"
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
@@ -166,6 +167,23 @@ async fn run(args: Args) -> Result<()> {
     } else {
         None
     };
+    let facebook_settings = &settings["facebook"];
+    let facebook = if needs_native("facebook") {
+        Some(
+            Facebook::new(
+                facebook_settings.options.cookies.as_deref(),
+                Duration::from_secs(args.extraction_timeout),
+            )
+            .await
+            .map(|native| {
+                native
+                    .with_retries(facebook_settings.options.retries.unwrap())
+                    .with_request_timeout(facebook_settings.options.timeout.unwrap())
+            }),
+        )
+    } else {
+        None
+    };
     let backend = Backend {
         executable: args.extractor_command.clone(),
         cookies: None,
@@ -183,6 +201,7 @@ async fn run(args: Args) -> Result<()> {
                 source,
                 native.as_ref(),
                 twitter.as_ref(),
+                facebook.as_ref(),
                 &backend,
                 args.extractor,
                 &settings,
@@ -281,6 +300,7 @@ fn extract_input<'a>(
     source: &'a str,
     native: Option<&'a Result<Instagram>>,
     twitter: Option<&'a Result<Twitter>>,
+    facebook: Option<&'a Result<Facebook>>,
     backend: &'a Backend,
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
@@ -297,10 +317,7 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Instagram initialization failed: {e}"))
                         })?;
-                    Ok(stream::once(async move { native.extract(&url).await })
-                        .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
-                        .try_flatten()
-                        .boxed())
+                    Ok(native.stream(&url))
                 }
                 Extractor::Native if category == "twitter" => {
                     let twitter = twitter
@@ -312,8 +329,20 @@ fn extract_input<'a>(
                         .try_flatten()
                         .boxed())
                 }
+                Extractor::Native if category == "facebook" => {
+                    let facebook = facebook
+                        .ok_or_else(|| error("native Facebook extractor was not initialized"))?
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Facebook initialization failed: {e}"))
+                        })?;
+                    Ok(stream::once(async move { facebook.extract(&url).await })
+                        .map_ok(|items| stream::iter(items.into_iter().map(Ok)))
+                        .try_flatten()
+                        .boxed())
+                }
                 Extractor::Native => Err(error(
-                    "native extraction currently supports Instagram and Twitter/X single posts only; use --extractor compatibility",
+                    "native extractor unavailable; use --extractor compatibility",
                 )),
                 Extractor::Compatibility => {
                     let mut backend = backend.clone();

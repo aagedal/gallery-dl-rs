@@ -4,6 +4,7 @@ pub mod config;
 pub mod cookies;
 pub mod download;
 pub mod extract;
+pub mod facebook;
 pub mod instagram;
 mod messages;
 pub mod naming;

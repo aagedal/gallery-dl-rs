@@ -19,6 +19,13 @@ shared extraction interface that emits media, post metadata, and child URLs.
   Compatibility remains the default until those checks are complete.
 - Facebook: photo permalinks and albums first, then video posts. Establish tested
   URL coverage and distinguish login pages from successful extraction.
+  **Implemented experimentally:** single-photo permalink extraction from matching
+  Photo objects in embedded Relay JSON, largest direct image selection, metadata,
+  stable archive identity, scoped rotating cookies, and bounded transport.
+  Synthetic parser and local HTTP fixtures cover identity validation and errors.
+  Anonymous public check on 2026-10-18 returned no identity-bound photo; it did
+  not verify successful extraction. Real response fixtures, successful live
+  extraction, albums, and videos remain required.
 - Twitter/X: single-post photos and direct video variants, including mixed-media
   posts and explicit unavailable/protected-post errors.
   **Implemented experimentally:** authenticated single-status GraphQL extraction,
@@ -116,9 +123,20 @@ and process waits, excluding downstream backpressure. The collecting library API
 remains, alongside `Backend::stream`. Tests cover chunk boundaries, parser bounds,
 early output, producer backpressure, diagnostics, failed exits/trailers, timeouts,
 and lazy startup/drop cancellation. Upstream's resolved-array job still collects
-internally before writing; native collection traversal/pagination is still needed
+internally before writing; native collection traversal is required
 for end-to-end streaming without that external memory cost. Native single-post
 extractors still buffer one post. Range resume is described below.
+
+**Implemented experimental native pagination:** Instagram profiles resolve a
+username to an ID, then request REST feed pages with opaque URL-encoded cursors.
+Only one bounded response page and its jobs are retained, with no next-page
+prefetch while current jobs remain. Owner identity, cursor presence, and cursor
+cycles are checked; cursor history stores fixed-size digests. The cumulative
+active timeout includes requests/retries/cooldowns and excludes downstream
+pauses. Earlier pages survive late failures; dropping the stream cancels pending
+requests. Local fixtures exercise order, backpressure, cursor encoding/errors,
+private/foreign profiles, and deadlines. Authenticated live profile pagination
+and real response fixtures remain unverified; other native collections remain.
 
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and
@@ -134,7 +152,7 @@ processes can download the same initial miss; writes are idempotent and do not
 reserve jobs. The format is separate from Python gallery-dl archives. Tests cover
 rotation, identity separation, privacy, persistence, concurrent writes, foreign
 databases, failure recovery, and CLI behavior. Full extraction still occurs before
-archive filtering; native collection pagination remains.
+archive filtering; broader native collection pagination remains.
 
 **Implemented resume step:** opt-in `--resume` retains direct HTTP partial files
 under a hidden category-local directory. Strong ETags or conservative strong
@@ -179,7 +197,7 @@ fractional timeouts, retry counts, and separate compatibility configuration.
 Full configuration compatibility, discovery, directory templates, and
 postprocessors remain.
 
-Native Instagram and Twitter session initialization failures now remain local to
+Native Instagram, Facebook, and Twitter session initialization failures now remain local to
 their inputs, allowing unrelated direct links and other inputs to proceed.
 
 ### Companion yt-dlp-rs integration
