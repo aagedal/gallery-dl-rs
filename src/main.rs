@@ -103,6 +103,9 @@ struct Args {
     /// Set new files' modification times from a metadata date field, e.g. date
     #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "date")]
     mtime: Option<String>,
+    /// Maximum download rate in bytes per second, e.g. 500k or 2.5M
+    #[arg(short = 'r', long, value_parser = parse_size)]
+    limit_rate: Option<u64>,
     /// Seconds to wait before each download, as SECONDS or MIN-MAX
     #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
     sleep: Option<gallery_dl_rs::sleep::SleepRange>,
@@ -377,7 +380,8 @@ async fn run(args: Args) -> Result<()> {
             .with_resume(args.resume)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
-            .with_sleep(args.sleep);
+            .with_sleep(args.sleep)
+            .with_rate_limit(args.limit_rate);
         let aborted = &aborted;
         let results = media
             .map(|(index, item)| {

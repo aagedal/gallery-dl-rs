@@ -31,6 +31,58 @@ pub struct DownloadClient {
     mtime_http: bool,
     mtime_field: Option<String>,
     sleep: Option<crate::sleep::SleepRange>,
+    /// Maximum body bytes per second for each download.
+    rate: Option<u64>,
+}
+
+/// Per-attempt state shared between the attempt and its deadline. Throttling
+/// pauses extend the deadline so rate limits cannot cause timeouts.
+struct Io {
+    remote: std::sync::atomic::AtomicBool,
+    paused: std::sync::atomic::AtomicU64,
+    received: std::sync::atomic::AtomicU64,
+    rate: Option<u64>,
+    started: std::time::Instant,
+}
+
+impl Io {
+    fn new(rate: Option<u64>) -> Self {
+        Self {
+            remote: false.into(),
+            paused: 0.into(),
+            received: 0.into(),
+            rate,
+            started: std::time::Instant::now(),
+        }
+    }
+    fn set_remote(&self, value: bool) {
+        self.remote
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn remote(&self) -> bool {
+        self.remote.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn deadline(&self, limit: Duration) -> std::time::Instant {
+        let paused = self.paused.load(std::sync::atomic::Ordering::Relaxed);
+        self.started + limit + Duration::from_nanos(paused)
+    }
+    /// Delay until the bytes received in this attempt fit the rate limit.
+    async fn throttle(&self, bytes: usize) {
+        let Some(rate) = self.rate else { return };
+        let total = self
+            .received
+            .fetch_add(bytes as u64, std::sync::atomic::Ordering::Relaxed)
+            + bytes as u64;
+        let target = Duration::from_secs_f64(total as f64 / rate as f64);
+        let elapsed = self.started.elapsed();
+        if let Some(wait) = target.checked_sub(elapsed).filter(|wait| !wait.is_zero()) {
+            self.paused.fetch_add(
+                u64::try_from(wait.as_nanos()).unwrap_or(u64::MAX),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            tokio::time::sleep(wait).await;
+        }
+    }
 }
 
 /// Modification time policy for newly published files.
@@ -110,6 +162,12 @@ impl DownloadClient {
         self
     }
 
+    /// Limit each download's body to this many bytes per second.
+    pub fn with_rate_limit(mut self, rate: Option<u64>) -> Self {
+        self.rate = rate.filter(|rate| *rate > 0);
+        self
+    }
+
     /// Wait before each network download, after archive and existing-file checks.
     pub fn with_sleep(mut self, sleep: Option<crate::sleep::SleepRange>) -> Self {
         self.sleep = sleep;
@@ -158,6 +216,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         mtime_http: true,
         mtime_field: None,
         sleep: None,
+        rate: None,
     })
 }
 
@@ -597,45 +656,33 @@ async fn download_candidate(
     for attempt in 0..=retries {
         // Only a timeout while awaiting the network may advance candidates.
         // Disk/checkpoint/publication timeouts must preserve this representation.
-        let mut remote_io = false;
-        let result = tokio::time::timeout(client.wait_limit, async {
+        let io = Io::new(client.rate);
+        let attempt_future = async {
             match partial {
                 Some(partial) => {
-                    attempt_resume(
-                        client,
-                        media,
-                        headers,
-                        path,
-                        partial,
-                        limits,
-                        mtime,
-                        &mut remote_io,
-                    )
-                    .await
+                    attempt_resume(client, media, headers, path, partial, limits, mtime, &io).await
                 }
                 None => {
-                    attempt_download(
-                        client,
-                        media,
-                        headers,
-                        parent,
-                        path,
-                        limits,
-                        mtime,
-                        &mut remote_io,
-                    )
-                    .await
+                    attempt_download(client, media, headers, parent, path, limits, mtime, &io).await
                 }
             }
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err(Failure {
-                error: error("media download attempt timed out"),
-                retry: remote_io,
-                fallback: remote_io,
-            })
-        });
+        };
+        tokio::pin!(attempt_future);
+        let result = loop {
+            let deadline = io.deadline(client.wait_limit);
+            tokio::select! {
+                result = &mut attempt_future => break result,
+                _ = tokio::time::sleep_until(deadline.into()) => {
+                    if std::time::Instant::now() >= io.deadline(client.wait_limit) {
+                        break Err(Failure {
+                            error: error("media download attempt timed out"),
+                            retry: io.remote(),
+                            fallback: io.remote(),
+                        });
+                    }
+                }
+            }
+        };
         match result {
             Ok(outcome) => return Ok(outcome),
             Err(failure) if failure.retry && attempt < retries => {
@@ -718,11 +765,11 @@ async fn attempt_download(
     path: &Path,
     limits: SizeLimits,
     mtime: Mtime,
-    remote_io: &mut bool,
+    io: &Io,
 ) -> std::result::Result<Outcome, Failure> {
-    *remote_io = true;
+    io.set_remote(true);
     let response = request_media(client, media, headers).await;
-    *remote_io = false;
+    io.set_remote(false);
     let response = response?;
     check_status(client, media, &response, false)?;
     if response
@@ -748,9 +795,9 @@ async fn attempt_download(
     let mut stream = response.bytes_stream();
     let mut received = 0u64;
     loop {
-        *remote_io = true;
+        io.set_remote(true);
         let chunk = stream.next().await;
-        *remote_io = false;
+        io.set_remote(false);
         let Some(chunk) = chunk else { break };
         let chunk = chunk?;
         received = received
@@ -763,6 +810,7 @@ async fn attempt_download(
             return Ok(Outcome::Filtered(rejection));
         }
         file.write_all(&chunk).await?;
+        io.throttle(chunk.len()).await;
     }
     if expected.is_some_and(|length| length != received) {
         return Err(Failure {
@@ -816,7 +864,13 @@ async fn request_media(
         let response = client
             .http
             .get(target.clone())
-            .timeout(client.wait_limit)
+            // Rate-limited bodies may outlast the attempt limit; the attempt's
+            // extended deadline enforces it instead.
+            .timeout(if client.rate.is_some() {
+                Duration::from_secs(u32::MAX as u64)
+            } else {
+                client.wait_limit
+            })
             .headers(headers.clone())
             .send()
             .await?;
@@ -907,7 +961,7 @@ async fn attempt_resume(
     partial: &mut crate::resume::Partial,
     limits: SizeLimits,
     mtime: Mtime,
-    remote_io: &mut bool,
+    io: &Io,
 ) -> std::result::Result<Outcome, Failure> {
     let mut restarted = false;
     loop {
@@ -955,9 +1009,9 @@ async fn attempt_resume(
                 )?,
             );
         }
-        *remote_io = true;
+        io.set_remote(true);
         let response = request_media(client, media, &headers).await;
-        *remote_io = false;
+        io.set_remote(false);
         let response = response?;
         if !(response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
             && checkpoint.is_some())
@@ -1045,9 +1099,9 @@ async fn attempt_resume(
         let mut stream = response.bytes_stream();
         let mut received = 0u64;
         loop {
-            *remote_io = true;
+            io.set_remote(true);
             let chunk = stream.next().await;
-            *remote_io = false;
+            io.set_remote(false);
             let Some(chunk) = chunk else { break };
             let chunk = chunk?;
             received = received
@@ -1067,6 +1121,7 @@ async fn attempt_resume(
                 retry: false,
                 fallback: false,
             })?;
+            io.throttle(chunk.len()).await;
         }
         if expected.is_some_and(|expected| received != expected) {
             return Err(Failure {

@@ -35,6 +35,10 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
 }
 
 fn server() -> (String, thread::JoinHandle<()>) {
+    server_with(RESPONSE.to_vec())
+}
+
+fn server_with(response: Vec<u8>) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -61,7 +65,7 @@ fn server() -> (String, thread::JoinHandle<()>) {
             assert!(read > 0 && request.len() < 65536);
             request.extend_from_slice(&bytes[..read]);
         }
-        socket.write_all(RESPONSE).unwrap();
+        let _ = socket.write_all(&response);
     });
     (format!("http://{address}/image.jpg"), handle)
 }
@@ -147,4 +151,35 @@ async fn sleep_waits_before_network_downloads_but_not_existing_files() {
         .unwrap();
     assert!(matches!(outcome, Outcome::Skipped(_)));
     assert!(start.elapsed() < Duration::from_millis(300));
+}
+
+#[tokio::test]
+async fn rate_limits_slow_bodies_without_tripping_the_attempt_timeout() {
+    let body = vec![b'x'; 3000];
+    let mut response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(&body);
+    let client = download::client(Duration::from_millis(500))
+        .unwrap()
+        .with_rate_limit(Some(2000));
+    let root = tempfile::tempdir().unwrap();
+    let (url, handle) = server_with(response);
+    let start = Instant::now();
+    let outcome = download::download(&client, root.path(), &item(&url, None), 0)
+        .await
+        .unwrap();
+    handle.join().unwrap();
+    // 3000 bytes at 2000 B/s take at least one second beyond the first chunk.
+    assert!(
+        start.elapsed() >= Duration::from_millis(900),
+        "{:?}",
+        start.elapsed()
+    );
+    let Outcome::Downloaded(path) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(std::fs::read(path).unwrap(), body);
 }
