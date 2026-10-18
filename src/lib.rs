@@ -19,6 +19,7 @@ pub mod filter;
 pub mod imgur;
 pub mod input;
 pub mod instagram;
+pub mod kemono;
 pub mod mastodon;
 mod messages;
 pub mod naming;

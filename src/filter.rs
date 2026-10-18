@@ -350,9 +350,16 @@ fn context_parts(
             );
         }
         if let Some(instance) = &post.instance {
-            values.insert("instance".into(), text(instance.as_str()));
+            if matches!(category, "kemono" | "coomer") {
+                values.insert("service".into(), text(instance.as_str()));
+                if let Some(user) = &post.username {
+                    values.insert("user".into(), text(user.clone()));
+                }
+            } else {
+                values.insert("instance".into(), text(instance.as_str()));
+            }
         }
-        if matches!(category, "facebook" | "mastodon")
+        if matches!(category, "facebook" | "mastodon" | "kemono" | "coomer")
             || crate::booru::Site::from_category(category).is_some()
         {
             values.insert("id".into(), identifier(&post.post_id));

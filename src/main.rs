@@ -221,7 +221,8 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
             && url.host_str() == Some("i.imgur.com")
             && file
             || *site == "reddit" && url.host_str() == Some("i.redd.it") && file
-            || (gallery_dl_rs::booru::Site::from_category(site).is_some() || *site == "mastodon")
+            || (gallery_dl_rs::booru::Site::from_category(site).is_some()
+                || matches!(*site, "mastodon" | "kemono" | "coomer"))
                 && file)
     })
 }
@@ -394,6 +395,8 @@ async fn run(args: Args) -> Result<()> {
                     | "gelbooru"
                     | "safebooru"
                     | "mastodon"
+                    | "kemono"
+                    | "coomer"
             ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -569,6 +572,7 @@ struct Extractors {
     reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
     mastodon: OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>,
+    kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
 }
 
 impl Extractors {
@@ -771,6 +775,22 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Mastodon initialization failed: {e}"))
                         })?;
+                    native.events(&url)
+                }
+                Extractor::Native if matches!(category, "kemono" | "coomer") => {
+                    let native = extractors
+                        .kemono
+                        .get_or_init(|| async {
+                            gallery_dl_rs::kemono::Kemono::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Kemono initialization failed: {e}")))?;
                     native.events(&url)
                 }
                 Extractor::Native
@@ -976,6 +996,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "gelbooru",
         "safebooru",
         "mastodon",
+        "kemono",
+        "coomer",
         "direct",
     ] {
         let options = defaults

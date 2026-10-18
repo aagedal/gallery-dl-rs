@@ -108,6 +108,24 @@ impl Media {
                     serde_json::json!([instance, post.media_id]).to_string(),
                 )
             }
+            // Kemono/Coomer file hashes are scoped to their service, creator and post.
+            category @ ("kemono" | "coomer") => {
+                let post = self.metadata.as_ref()?;
+                let service = post.instance.as_deref()?;
+                let user = post.username.as_deref()?;
+                if crate::kemono::category(self.url.host_str()?) != Some(category)
+                    || !crate::kemono::valid_service(service)
+                    || !crate::kemono::valid_id(user)
+                    || !crate::kemono::valid_id(&post.post_id)
+                    || !crate::kemono::valid_hash(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    category,
+                    serde_json::json!([service, user, post.post_id, post.media_id]).to_string(),
+                )
+            }
             // Booru files are identified by their site and post ID.
             category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
                 let post = self.metadata.as_ref()?;
@@ -208,7 +226,8 @@ pub struct PostMetadata {
     pub reposted_by_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub article: Option<crate::twitter::ArticleMetadata>,
-    /// Mastodon instance host the status was fetched from.
+    /// Mastodon instance host the status was fetched from, or Kemono/Coomer
+    /// service name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
 }
@@ -261,6 +280,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     let host = url.host_str()?;
     if crate::mastodon::INSTANCES.contains(&host) {
         return Some("mastodon");
+    }
+    if let Some(category) = crate::kemono::category(host) {
+        return Some(category);
     }
     for (domain, category) in [
         ("instagram.com", "instagram"),

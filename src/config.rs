@@ -326,6 +326,8 @@ struct RawExtractor {
     gelbooru: Box<RawOptions>,
     safebooru: Box<RawOptions>,
     mastodon: Box<RawOptions>,
+    kemono: Box<RawOptions>,
+    coomer: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
 
@@ -447,6 +449,8 @@ impl Config {
                 "gelbooru",
                 "safebooru",
                 "mastodon",
+                "kemono",
+                "coomer",
                 "direct",
             ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
@@ -559,6 +563,8 @@ impl Config {
             ("gelbooru", extractor.gelbooru),
             ("safebooru", extractor.safebooru),
             ("mastodon", extractor.mastodon),
+            ("kemono", extractor.kemono),
+            ("coomer", extractor.coomer),
             ("direct", extractor.direct),
         ] {
             // Boxed: unoptimized builds overflow the stack with inline settings.
@@ -585,6 +591,8 @@ impl Config {
                 | "gelbooru"
                 | "safebooru"
                 | "mastodon"
+                | "kemono"
+                | "coomer"
                 | "direct"
         ) {
             return Err(error("unsupported native configuration category"));

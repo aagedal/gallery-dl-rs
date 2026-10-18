@@ -850,7 +850,11 @@ async fn request_media(
     headers: &HeaderMap,
 ) -> std::result::Result<reqwest::Response, Failure> {
     let mut target = media.url.clone();
-    let mut redirects = Redirects::new(&target);
+    // Kemono/Coomer serve files from the root host, which redirects to an
+    // `nN.` CDN subdomain; those requests carry no credentials.
+    let mut redirects = Redirects::new(&target).allow_subdomains(
+        matches!(media.category.as_str(), "kemono" | "coomer") && media.headers.is_empty(),
+    );
     let response = loop {
         client
             .rate_limits

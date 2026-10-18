@@ -13,13 +13,39 @@ use url::Url;
 /// Never include a Location value in diagnostics: it can contain credentials.
 pub(crate) struct Redirects {
     visited: Vec<Url>,
+    subdomains: bool,
 }
 
 impl Redirects {
     pub(crate) fn new(url: &Url) -> Self {
         let mut url = url.clone();
         url.set_fragment(None);
-        Self { visited: vec![url] }
+        Self {
+            visited: vec![url],
+            subdomains: false,
+        }
+    }
+
+    /// Also accept HTTPS redirects from an HTTPS origin to a subdomain of its
+    /// host (e.g. `kemono.cr` to the `n1.kemono.cr` file CDN). Only use for
+    /// requests that carry no credentials.
+    pub(crate) fn allow_subdomains(mut self, allow: bool) -> Self {
+        self.subdomains = allow;
+        self
+    }
+
+    fn subdomain_of_origin(&self, target: &Url) -> bool {
+        let origin = &self.visited[0];
+        self.subdomains
+            && origin.scheme() == "https"
+            && target.scheme() == "https"
+            && origin.port().is_none()
+            && target.port().is_none()
+            && matches!(
+                (origin.host(), target.host()),
+                (Some(url::Host::Domain(base)), Some(url::Host::Domain(host)))
+                    if host.strip_suffix(base).is_some_and(|prefix| prefix.ends_with('.'))
+            )
     }
 
     pub(crate) fn next(
@@ -53,7 +79,7 @@ impl Redirects {
         if !matches!(target.scheme(), "http" | "https")
             || !target.username().is_empty()
             || target.password().is_some()
-            || target.origin() != self.visited[0].origin()
+            || target.origin() != self.visited[0].origin() && !self.subdomain_of_origin(&target)
         {
             return Err(error(
                 "HTTP redirect requires the same origin and no URL credentials",
@@ -136,6 +162,36 @@ pub(crate) fn retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Durati
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subdomain_redirects_are_opt_in_and_https_only() {
+        let origin = Url::parse("https://kemono.cr/data/ab/x.png").unwrap();
+        let hop = |redirects: Redirects, location: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(reqwest::header::LOCATION, location.parse().unwrap());
+            let mut redirects = redirects;
+            redirects.next(&origin, reqwest::StatusCode::FOUND, &headers)
+        };
+        let allowed = || Redirects::new(&origin).allow_subdomains(true);
+        assert!(hop(Redirects::new(&origin), "https://n1.kemono.cr/data/x").is_err());
+        assert_eq!(
+            hop(allowed(), "https://n1.kemono.cr/data/x")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "https://n1.kemono.cr/data/x"
+        );
+        for bad in [
+            "http://n1.kemono.cr/x",
+            "https://n1.kemono.cr:8443/x",
+            "https://evilkemono.cr/x",
+            "https://kemono.cr.evil.example/x",
+            "https://user@n1.kemono.cr/x",
+            "https://example.com/x",
+        ] {
+            assert!(hop(allowed(), bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn redirects_resolve_relative_urls_and_bound_loops_and_hops() {
