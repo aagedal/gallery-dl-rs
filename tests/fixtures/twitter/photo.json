@@ -1,0 +1,32 @@
+{
+  "data": {
+    "tweetResult": {
+      "result": {
+        "__typename": "Tweet",
+        "rest_id": "1234567890",
+        "core": {
+          "user_results": {
+            "result": {
+              "legacy": {
+                "screen_name": "fixture_user"
+              }
+            }
+          }
+        },
+        "legacy": {
+          "id_str": "1234567890",
+          "full_text": "Synthetic post",
+          "created_at": "Tue Nov 14 22:13:20 +0000 2023",
+          "extended_entities": {
+            "media": [
+              {
+                "type": "photo",
+                "media_url_https": "https://pbs.example/media/fixture.jpg"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

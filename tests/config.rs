@@ -1,0 +1,1784 @@
+use gallery_dl_rs::config::{Config, MAX_CONFIG_BYTES, Options};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+fn directory() -> PathBuf {
+    std::env::temp_dir().join("gallery-dl-config-fixtures")
+}
+
+fn parse(json: &str) -> gallery_dl_rs::Result<Config> {
+    Config::parse(json.as_bytes(), &directory())
+}
+
+#[test]
+fn defaults_are_sparse_and_cli_values_take_precedence() {
+    let empty = parse("{}").unwrap();
+    assert_eq!(empty.resolve("direct").unwrap(), Options::default());
+    let config =
+        parse(r#"{"extractor":{"retries":4,"timeout":2.5,"filename":"{name}.{extension}"}}"#)
+            .unwrap();
+    let settings = config.resolve("instagram").unwrap();
+    assert_eq!(settings.timeout, Some(Duration::from_millis(2500)));
+    assert_eq!(settings.retries, Some(4));
+    let overrides = Options {
+        retries: Some(0),
+        base_directory: Some("/cli".into()),
+        ..Options::default()
+    };
+    let merged = settings.overlay(&overrides);
+    assert_eq!(merged.retries, Some(0));
+    assert_eq!(merged.timeout, settings.timeout);
+    assert_eq!(merged.filename, settings.filename);
+    assert_eq!(merged.base_directory, Some("/cli".into()));
+}
+
+#[test]
+fn category_overrides_defaults_and_global_overrides_category() {
+    let config = parse(r#"{"timeout":9,"extractor":{"retries":2,"timeout":3,"filename":"{filename}","instagram":{"retries":0,"timeout":5},"twitter":{"filename":"twitter.{extension}"},"facebook":{"retries":7},"direct":{"retries":1}}}"#).unwrap();
+    for (category, retries) in [
+        ("instagram", 0),
+        ("twitter", 2),
+        ("facebook", 7),
+        ("direct", 1),
+    ] {
+        let settings = config.resolve(category).unwrap();
+        assert_eq!(settings.retries, Some(retries));
+        assert_eq!(settings.timeout, Some(Duration::from_secs(9)));
+    }
+    assert_eq!(
+        config.resolve("twitter").unwrap().filename.as_deref(),
+        Some("twitter.{extension}")
+    );
+    assert!(config.resolve("not-supported-secret").is_err());
+}
+
+#[test]
+fn literal_paths_resolve_against_configuration_directory() {
+    let absolute = directory().join("absolute/history.sqlite");
+    let settings = parse(
+        &serde_json::json!({"extractor": {
+            "base-directory": "../downloads", "cookies": "cookies.txt", "archive": absolute
+        }})
+        .to_string(),
+    )
+    .unwrap()
+    .resolve("instagram")
+    .unwrap();
+    assert_eq!(
+        settings.base_directory,
+        Some(directory().join("../downloads"))
+    );
+    assert_eq!(settings.cookies, Some(directory().join("cookies.txt")));
+    assert_eq!(settings.archive, Some(absolute));
+    assert!(Config::parse(b"{}", Path::new("relative")).is_err());
+}
+
+#[test]
+fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
+    let config = parse(r#"{"extractor":{"cookies":"default.txt","instagram":{"cookies":["firefox","profiles/instagram"]},"twitter":{"cookies":["firefox","profiles/x",null,"none"]}}}"#).unwrap();
+    for (category, profile) in [("instagram", "instagram"), ("twitter", "x")] {
+        let selected = config.resolve(category).unwrap();
+        assert!(selected.cookies.is_none());
+        assert_eq!(
+            selected.browser_cookies,
+            Some(directory().join("profiles").join(profile))
+        );
+        let cli = selected.overlay(&Options {
+            cookies: Some("cli.txt".into()),
+            ..Default::default()
+        });
+        assert_eq!(cli.cookies, Some("cli.txt".into()));
+        assert!(cli.browser_cookies.is_none());
+    }
+    assert!(
+        config
+            .resolve("facebook")
+            .unwrap()
+            .browser_cookies
+            .is_none()
+    );
+    assert_eq!(
+        config.resolve("facebook").unwrap().cookies,
+        Some(directory().join("default.txt"))
+    );
+    let config = parse(
+        r#"{"extractor":{"cookies":["firefox","default-profile"],"twitter":{"cookies":"x.txt"}}}"#,
+    )
+    .unwrap();
+    let selected = config.resolve("twitter").unwrap();
+    assert!(selected.browser_cookies.is_none());
+    assert_eq!(selected.cookies, Some(directory().join("x.txt")));
+    let global = parse(r#"{"cookies":["firefox","global-profile"],"extractor":{"cookies":"default.txt","twitter":{"cookies":"x.txt"}}}"#).unwrap();
+    let selected = global.resolve("twitter").unwrap();
+    assert!(selected.cookies.is_none());
+    assert_eq!(
+        selected.browser_cookies,
+        Some(directory().join("global-profile"))
+    );
+}
+
+#[test]
+fn browser_cookie_arrays_validate_every_scope_without_private_diagnostics() {
+    use serde_json::json;
+    for source in [
+        json!([]),
+        json!(["firefox"]),
+        json!(["chrome", "private-profile"]),
+        json!(["firefox", null]),
+        json!(["firefox", ""]),
+        json!(["firefox", "~private-profile"]),
+        json!(["firefox", "$private-profile"]),
+        json!(["firefox", "private-profile::container"]),
+        json!(["firefox", "private-profile", "private-keyring"]),
+        json!(["firefox", "private-profile", null, "private-container"]),
+        json!(["firefox", "private-profile", null, null, ".x.com"]),
+    ] {
+        for document in [
+            json!({"cookies":source}),
+            json!({"extractor":{"cookies":source}}),
+            json!({"extractor":{"twitter":{"cookies":source}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-"), "{message}");
+        }
+    }
+    for suffix in [
+        vec![],
+        vec![json!(null)],
+        vec![json!(null), json!(null)],
+        vec![json!(null), json!("none")],
+    ] {
+        let mut source = vec![json!("firefox"), json!("private-profile")];
+        source.extend(suffix);
+        let selected = parse(&json!({"cookies":source}).to_string())
+            .unwrap()
+            .resolve("direct")
+            .unwrap();
+        assert_eq!(
+            selected.browser_cookies,
+            Some(directory().join("private-profile"))
+        );
+        assert!(!format!("{selected:?}").contains("private-profile"));
+    }
+    assert!(parse(r#"{"cookies":"a.txt","cookies":["firefox","private-profile"]}"#).is_err());
+}
+
+#[test]
+fn unsupported_schema_and_values_fail_without_echoing_private_input() {
+    for json in [
+        r#"{"secret-key":"secret-value"}"#,
+        r#"{"extractor":{"secret-key":"secret-value"}}"#,
+        r#"{"extractor":{"instagram":{"secret-key":"secret-value"}}}"#,
+        r#"{"extractor":{"instagram":{"post":{"cookies":"secret-value"}}}}"#,
+        r#"{"extractor":{"pixiv":{"cookies":"secret-value"}}}"#,
+        r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
+        r#"{"extractor":{"cookies":["secret-value"]}}"#,
+        r#"{"extractor":{"filename":{"secret-value":"{filename}"}}}"#,
+        r#"{"extractor":{"filename":"{secret-value}"}}"#,
+        r#"{"extractor":{"filename":"secret-value/{filename}"}}"#,
+        r#"{"extractor":{"postprocessors":[{"name":"exec","command":"secret-value"}]}}"#,
+        r#"{"extractor":{"archive":"postgresql://secret-value"}}"#,
+        r#"{"extractor":{"archive":"$secret-value"}}"#,
+        r#"{"extractor":{"archive":"~secret-value"}}"#,
+        r#"{"extractor":{"archive":["{secret-value}"]}}"#,
+        r#"{"extractor":{"archive":"{secret-value}"}}"#,
+        r#"{"timeout":"secret-value"}"#,
+        r#"{"retries":"secret-value"}"#,
+        r#"{"secret-key":secret-value}"#,
+        r#"{"extractor":null}"#,
+        r#"{"extractor":{"instagram":null}}"#,
+        r#"{"extractor":{"cookies":null}}"#,
+        r#"{"filename":null}"#,
+        r#"{"timeout":null}"#,
+        r#"{"retries":null}"#,
+        r#"{"base-directory":null}"#,
+    ] {
+        let message = parse(json).unwrap_err().to_string();
+        assert!(!message.contains("secret-key"), "{message}");
+        assert!(!message.contains("secret-value"), "{message}");
+    }
+}
+
+#[test]
+fn bounds_types_duplicate_keys_and_malformed_json_are_rejected() {
+    for json in [
+        "[]",
+        "null",
+        "{} trailing",
+        "{",
+        r#"{"extractor":[]}"#,
+        r#"{"retries":-1}"#,
+        r#"{"retries":11}"#,
+        r#"{"retries":1.5}"#,
+        r#"{"retries":true}"#,
+        r#"{"timeout":0}"#,
+        r#"{"timeout":-1}"#,
+        r#"{"timeout":1e100}"#,
+        r#"{"timeout":1e-100}"#,
+        r#"{"filename":""}"#,
+        r#"{"cookies":""}"#,
+        r#"{"cookies":"bad\u0000path"}"#,
+        r#"{"retries":1,"retries":2}"#,
+        r#"{"extractor":{"retries":1,"retries":2}}"#,
+        r#"{"extractor":{"instagram":{"retries":1,"retries":2}}}"#,
+        r#"{"extractor":{"instagram":{},"instagram":{}}}"#,
+    ] {
+        assert!(parse(json).is_err(), "accepted: {json}");
+    }
+    let mut large = vec![b' '; MAX_CONFIG_BYTES + 1];
+    large[..2].copy_from_slice(b"{}");
+    assert!(Config::parse(&large, &directory()).is_err());
+    assert_eq!(
+        parse(r#"{"retries":10,"timeout":0.001}"#)
+            .unwrap()
+            .resolve("direct")
+            .unwrap()
+            .timeout,
+        Some(Duration::from_millis(1))
+    );
+}
+
+#[tokio::test]
+async fn file_loading_anchors_paths_and_enforces_size_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    tokio::fs::write(&path, br#"{"cookies":"cookies.txt"}"#)
+        .await
+        .unwrap();
+    let expected = tokio::fs::canonicalize(dir.path())
+        .await
+        .unwrap()
+        .join("cookies.txt");
+    assert_eq!(
+        Config::load(&path)
+            .await
+            .unwrap()
+            .resolve("twitter")
+            .unwrap()
+            .cookies,
+        Some(expected)
+    );
+    tokio::fs::write(&path, vec![b' '; MAX_CONFIG_BYTES + 1])
+        .await
+        .unwrap();
+    assert!(
+        Config::load(&path)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("1 MiB")
+    );
+    let secret_path = dir.path().join("secret-path");
+    assert!(
+        !Config::load(&secret_path)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("secret-path")
+    );
+}
+
+#[test]
+fn directory_templates_resolve_scopes_and_preserve_explicit_empty_overrides() {
+    let config = parse(
+        r#"{"extractor":{"directory":["{category}","{username}"],"instagram":{"directory":[]},"twitter":{"directory":["tweets","{post_id}"]}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        config.resolve("direct").unwrap().directory,
+        Some(vec!["{category}".into(), "{username}".into()])
+    );
+    assert_eq!(config.resolve("instagram").unwrap().directory, Some(vec![]));
+    assert_eq!(
+        config.resolve("twitter").unwrap().directory,
+        Some(vec!["tweets".into(), "{post_id}".into()])
+    );
+    let settings = config.resolve("twitter").unwrap();
+    assert_eq!(
+        settings.overlay(&Options::default()).directory,
+        settings.directory
+    );
+    assert_eq!(
+        settings
+            .overlay(&Options {
+                directory: Some(vec![]),
+                ..Options::default()
+            })
+            .directory,
+        Some(vec![])
+    );
+    let global = parse(r#"{"directory":[],"extractor":{"directory":["{category}"],"instagram":{"directory":["posts"]}}}"#).unwrap();
+    assert_eq!(global.resolve("instagram").unwrap().directory, Some(vec![]));
+}
+
+#[test]
+fn directory_templates_reject_invalid_types_paths_and_unknown_fields_privately() {
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!("secret-value"),
+        serde_json::json!({"secret-key":"secret-value"}),
+        serde_json::json!([null]),
+        serde_json::json!([42]),
+        serde_json::json!([""]),
+        serde_json::json!([".."]),
+        serde_json::json!(["/secret-value"]),
+        serde_json::json!(["secret-value/child"]),
+        serde_json::json!(["{secret-value}"]),
+        serde_json::json!(["secret-value\0"]),
+        serde_json::json!(vec!["secret-value"; 33]),
+        serde_json::json!(["secret-value".repeat(8193)]),
+    ] {
+        for json in [
+            serde_json::json!({"directory":value}),
+            serde_json::json!({"extractor":{"directory":value}}),
+            serde_json::json!({"extractor":{"instagram":{"directory":value}}}),
+        ] {
+            let message = parse(&json.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("secret-value"), "{message}");
+            assert!(!message.contains("secret-key"), "{message}");
+        }
+    }
+    for json in [
+        r#"{"directory":[],"directory":["posts"]}"#,
+        r#"{"extractor":{"directory":[],"directory":["posts"]}}"#,
+        r#"{"extractor":{"instagram":{"directory":[],"directory":["posts"]}}}"#,
+    ] {
+        assert!(parse(json).is_err());
+    }
+}
+
+#[test]
+fn media_ranges_follow_scopes_and_explicit_overrides() {
+    let config =
+        parse(r#"{"extractor":{"file-range":"1-3","twitter":{"file-range":["5","8-10"]}}}"#)
+            .unwrap();
+    assert_eq!(
+        config.resolve("instagram").unwrap().file_range.as_deref(),
+        Some("1-3")
+    );
+    assert_eq!(
+        config.resolve("twitter").unwrap().file_range.as_deref(),
+        Some("5,8-10")
+    );
+    let global = parse(r#"{"file-range":"4:","extractor":{"file-range":"1"}}"#).unwrap();
+    let settings = global.resolve("direct").unwrap();
+    assert_eq!(settings.file_range.as_deref(), Some("4:"));
+    assert_eq!(
+        settings
+            .overlay(&Options {
+                file_range: Some("1".into()),
+                ..Default::default()
+            })
+            .file_range
+            .as_deref(),
+        Some("1")
+    );
+    for value in [serde_json::json!([]), serde_json::json!("")] {
+        let config = parse(
+            &serde_json::json!({"file-range":value,"extractor":{"file-range":"0"}}).to_string(),
+        )
+        .unwrap();
+        let spec = config.resolve("direct").unwrap().file_range.unwrap();
+        assert!(
+            gallery_dl_rs::selection::RangeSelection::parse(&spec)
+                .unwrap()
+                .contains(1)
+        );
+    }
+}
+
+#[test]
+fn media_range_validation_never_quotes_private_specs() {
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!(42),
+        serde_json::json!({"secret":"secret"}),
+        serde_json::json!([42]),
+        serde_json::json!("secret"),
+        serde_json::json!("1::0"),
+        serde_json::json!("1".repeat(4097)),
+    ] {
+        for doc in [
+            serde_json::json!({"file-range":value}),
+            serde_json::json!({"extractor":{"file-range":value}}),
+            serde_json::json!({"extractor":{"twitter":{"file-range":value}}}),
+        ] {
+            let message = parse(&doc.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("secret"));
+        }
+    }
+    assert!(parse(r#"{"file-range":"1","file-range":"2"}"#).is_err());
+}
+
+#[test]
+fn size_limits_support_bytes_units_and_explicit_zero_overlays() {
+    let config = parse(r#"{"filesize-min":"2.5k","extractor":{"filesize-max":"1M","direct":{"filesize-max":9000}}}"#).unwrap();
+    let direct = config.resolve("direct").unwrap();
+    assert_eq!(direct.filesize_min, Some(2560));
+    assert_eq!(direct.filesize_max, Some(9000));
+    assert_eq!(
+        config.resolve("instagram").unwrap().filesize_max,
+        Some(1048576)
+    );
+    assert_eq!(
+        direct
+            .overlay(&Options {
+                filesize_max: Some(0),
+                ..Default::default()
+            })
+            .filesize_max,
+        Some(0)
+    );
+    assert_eq!(
+        parse(r#"{"filesize-min":1.5}"#)
+            .unwrap()
+            .resolve("direct")
+            .unwrap()
+            .filesize_min,
+        Some(2)
+    );
+}
+
+#[test]
+fn invalid_size_configuration_fails_without_echoing_values() {
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!([]),
+        serde_json::json!(-1),
+        serde_json::json!("private-limit"),
+        serde_json::json!("1e9999"),
+        serde_json::json!("18446744073709551616"),
+    ] {
+        for field in ["filesize-min", "filesize-max"] {
+            let message = parse(&serde_json::json!({field:value}).to_string())
+                .unwrap_err()
+                .to_string();
+            assert!(!message.contains("private-limit"));
+        }
+    }
+    assert!(parse(r#"{"filesize-min":1,"filesize-min":2}"#).is_err());
+}
+
+#[test]
+fn date_limits_resolve_scopes_and_preserve_epoch_zero() {
+    let config =
+        parse(r#"{"extractor":{"date-before":"2000-01-01","twitter":{"date-after":0}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.date_before, Some(946684800));
+    assert_eq!(twitter.date_after, Some(0));
+    assert_eq!(config.resolve("instagram").unwrap().date_after, None);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                date_after: Some(-1),
+                ..Default::default()
+            })
+            .date_after,
+        Some(-1)
+    );
+    let global = parse(r#"{"date-before":123,"extractor":{"date-before":456}}"#).unwrap();
+    assert_eq!(global.resolve("direct").unwrap().date_before, Some(123));
+}
+
+#[test]
+fn date_limits_reject_invalid_private_values_and_duplicate_keys() {
+    for field in ["date-before", "date-after"] {
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(false),
+            serde_json::json!(1.5),
+            serde_json::json!([]),
+            serde_json::json!("private-date"),
+            serde_json::json!("2025-02-29"),
+            serde_json::json!("2026-01-01T24:00:00"),
+            serde_json::json!("18446744073709551615"),
+        ] {
+            for doc in [
+                serde_json::json!({(field):value}),
+                serde_json::json!({"extractor":{(field):value}}),
+                serde_json::json!({"extractor":{"instagram":{(field):value}}}),
+            ] {
+                let message = parse(&doc.to_string()).unwrap_err().to_string();
+                assert!(!message.contains("private-date"));
+            }
+        }
+    }
+    assert!(parse(r#"{"date-before":1,"date-before":2}"#).is_err());
+}
+
+#[test]
+fn invalid_network_values_fail_privately_in_every_scope() {
+    for (field, value) in [
+        ("proxy", serde_json::json!(null)),
+        ("proxy", serde_json::json!(["private"])),
+        (
+            "proxy",
+            serde_json::json!("http://user:private@proxy.test/path"),
+        ),
+        (
+            "proxy",
+            serde_json::json!("socks5://user:private@proxy.test"),
+        ),
+        ("user-agent", serde_json::json!(false)),
+        ("user-agent", serde_json::json!("")),
+        (
+            "user-agent",
+            serde_json::json!("private\r\nInjected: value"),
+        ),
+    ] {
+        for doc in [
+            serde_json::json!({(field):value}),
+            serde_json::json!({"extractor":{(field):value}}),
+            serde_json::json!({"extractor":{"instagram":{(field):value}}}),
+        ] {
+            assert!(
+                !parse(&doc.to_string())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("private")
+            );
+        }
+    }
+    assert!(parse(r#"{"proxy":"","proxy":"http://proxy.test"}"#).is_err());
+    let options =
+        parse(r#"{"proxy":"http://user:private@proxy.test","user-agent":"private-agent"}"#)
+            .unwrap()
+            .resolve("direct")
+            .unwrap();
+    assert!(!format!("{options:?}").contains("private"));
+}
+
+#[test]
+fn twitter_expansion_settings_follow_scopes_and_preserve_false_overlays() {
+    use gallery_dl_rs::twitter::RetweetMode;
+    let config = parse(
+        r#"{"extractor":{"retweets":true,"quoted":true,"twitter":{"retweets":"original","quoted":false},"instagram":{"retweets":false}}}"#,
+    )
+    .unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.retweets, Some(RetweetMode::Original));
+    assert_eq!(twitter.quoted, Some(false));
+    assert_eq!(
+        config.resolve("facebook").unwrap().retweets,
+        Some(RetweetMode::Repost)
+    );
+    assert_eq!(config.resolve("facebook").unwrap().quoted, Some(true));
+    assert_eq!(
+        config.resolve("instagram").unwrap().retweets,
+        Some(RetweetMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = twitter.overlay(&Options {
+        retweets: Some(RetweetMode::Skip),
+        quoted: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(disabled.retweets, Some(RetweetMode::Skip));
+    assert_eq!(disabled.quoted, Some(false));
+    let global = parse(
+        r#"{"retweets":false,"quoted":false,"extractor":{"retweets":true,"quoted":true,"twitter":{"retweets":"original","quoted":true}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let settings = global.resolve(category).unwrap();
+        assert_eq!(settings.retweets, Some(RetweetMode::Skip));
+        assert_eq!(settings.quoted, Some(false));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.retweets, None);
+    assert_eq!(absent.quoted, None);
+}
+
+#[test]
+fn twitter_expansion_configuration_rejects_types_privately_in_all_scopes() {
+    use serde_json::json;
+    for (field, value) in [
+        ("retweets", json!(null)),
+        ("retweets", json!(0)),
+        ("retweets", json!(1)),
+        ("retweets", json!([])),
+        ("retweets", json!({"private-key":"private-value"})),
+        ("retweets", json!("private-value")),
+        ("retweets", json!("true")),
+        ("retweets", json!("Original")),
+        ("quoted", json!(null)),
+        ("quoted", json!(0)),
+        ("quoted", json!([])),
+        ("quoted", json!({"private-key":"private-value"})),
+        ("quoted", json!("private-value")),
+        ("quoted", json!("false")),
+    ] {
+        for document in [
+            json!({(field):value}),
+            json!({"extractor":{(field):value}}),
+            json!({"extractor":{"twitter":{(field):value}}}),
+            json!({"extractor":{"instagram":{(field):value}}}),
+            json!({"extractor":{"facebook":{(field):value}}}),
+            json!({"extractor":{"direct":{(field):value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key"), "{message}");
+            assert!(!message.contains("private-value"), "{message}");
+        }
+    }
+}
+
+#[test]
+fn twitter_expansion_configuration_rejects_duplicate_keys() {
+    for field in ["retweets", "quoted"] {
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}
+
+#[test]
+fn twitter_profile_settings_follow_scopes_and_preserve_false_overlays() {
+    use gallery_dl_rs::twitter::ReplyMode;
+    let config = parse(
+        r#"{"extractor":{"pinned":true,"replies":true,"twitter":{"pinned":false,"replies":"self"},"instagram":{"replies":false}}}"#,
+    )
+    .unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.pinned, Some(false));
+    assert_eq!(twitter.replies, Some(ReplyMode::SelfOnly));
+    assert_eq!(config.resolve("facebook").unwrap().pinned, Some(true));
+    assert_eq!(
+        config.resolve("facebook").unwrap().replies,
+        Some(ReplyMode::All)
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().replies,
+        Some(ReplyMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = twitter.overlay(&Options {
+        pinned: Some(false),
+        replies: Some(ReplyMode::Skip),
+        ..Default::default()
+    });
+    assert_eq!(disabled.pinned, Some(false));
+    assert_eq!(disabled.replies, Some(ReplyMode::Skip));
+    let enabled = disabled.overlay(&Options {
+        pinned: Some(true),
+        replies: Some(ReplyMode::All),
+        ..Default::default()
+    });
+    assert_eq!(enabled.pinned, Some(true));
+    assert_eq!(enabled.replies, Some(ReplyMode::All));
+    let global = parse(
+        r#"{"pinned":false,"replies":false,"extractor":{"pinned":true,"replies":true,"twitter":{"pinned":true,"replies":"self"}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let settings = global.resolve(category).unwrap();
+        assert_eq!(settings.pinned, Some(false));
+        assert_eq!(settings.replies, Some(ReplyMode::Skip));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.pinned, None);
+    assert_eq!(absent.replies, None);
+}
+
+#[test]
+fn twitter_profile_configuration_rejects_types_privately_in_all_scopes() {
+    use serde_json::json;
+    for (field, value) in [
+        ("pinned", json!(null)),
+        ("pinned", json!(0)),
+        ("pinned", json!(1)),
+        ("pinned", json!([])),
+        ("pinned", json!({"private-key":"private-value"})),
+        ("pinned", json!("private-value")),
+        ("pinned", json!("false")),
+        ("replies", json!(null)),
+        ("replies", json!(0)),
+        ("replies", json!(1)),
+        ("replies", json!([])),
+        ("replies", json!({"private-key":"private-value"})),
+        ("replies", json!("private-value")),
+        ("replies", json!("true")),
+        ("replies", json!("Self")),
+    ] {
+        for document in [
+            json!({(field):value}),
+            json!({"extractor":{(field):value}}),
+            json!({"extractor":{"twitter":{(field):value}}}),
+            json!({"extractor":{"instagram":{(field):value}}}),
+            json!({"extractor":{"facebook":{(field):value}}}),
+            json!({"extractor":{"direct":{(field):value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key"), "{message}");
+            assert!(!message.contains("private-value"), "{message}");
+        }
+    }
+}
+
+#[test]
+fn twitter_profile_configuration_rejects_duplicate_keys() {
+    for field in ["pinned", "replies"] {
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}
+
+#[test]
+fn twitter_search_configuration_preserves_scopes_aliases_and_explicit_zero() {
+    use gallery_dl_rs::twitter::{SearchPagination, SearchProduct, TimelineStrategy};
+    let config = parse(r#"{"extractor":{"strategy":"media","search-pagination":"cursor","search-results":"top","search-limit":50,"search-stop":8,"twitter":{"strategy":"with_replies","search-pagination":"dt","search-results":"LiVe","search-limit":1,"search-stop":0}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.strategy, Some(TimelineStrategy::Replies));
+    assert_eq!(twitter.search_pagination, Some(SearchPagination::Date));
+    assert_eq!(twitter.search_results, Some(SearchProduct::Latest));
+    assert_eq!(twitter.search_limit, Some(1));
+    assert_eq!(twitter.search_stop, Some(0));
+    let generic = config.resolve("instagram").unwrap();
+    assert_eq!(generic.strategy, Some(TimelineStrategy::Media));
+    assert_eq!(generic.search_pagination, Some(SearchPagination::Cursor));
+    assert_eq!(generic.search_results, Some(SearchProduct::Top));
+    assert_eq!(generic.search_limit, Some(50));
+    assert_eq!(generic.search_stop, Some(8));
+    let global = parse(r#"{"strategy":"auto","search-pagination":"maxid","search-results":"user","search-limit":100,"search-stop":"auto","extractor":{"twitter":{"strategy":"tweets","search-pagination":"cursor","search-results":"media","search-limit":1,"search-stop":0}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let settings = global.resolve(category).unwrap();
+        assert_eq!(settings.strategy, Some(TimelineStrategy::Auto));
+        assert_eq!(settings.search_pagination, Some(SearchPagination::MaxId));
+        assert_eq!(settings.search_results, Some(SearchProduct::People));
+        assert_eq!(settings.search_limit, Some(100));
+        assert_eq!(settings.search_stop, Some(3));
+    }
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let overrides = Options {
+        strategy: Some(TimelineStrategy::Tweets),
+        search_pagination: Some(SearchPagination::MaxId),
+        search_results: Some(SearchProduct::Lists),
+        search_limit: Some(20),
+        search_stop: Some(0),
+        ..Default::default()
+    };
+    let overlaid = twitter.overlay(&overrides);
+    assert_eq!(overlaid.strategy, overrides.strategy);
+    assert_eq!(overlaid.search_pagination, overrides.search_pagination);
+    assert_eq!(overlaid.search_results, overrides.search_results);
+    assert_eq!(overlaid.search_limit, overrides.search_limit);
+    assert_eq!(overlaid.search_stop, overrides.search_stop);
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.strategy, None);
+    assert_eq!(absent.search_pagination, None);
+    assert_eq!(absent.search_results, None);
+    assert_eq!(absent.search_limit, None);
+    assert_eq!(absent.search_stop, None);
+    for (field, aliases) in [
+        ("strategy", vec!["auto", "media", "tweets", "with_replies"]),
+        (
+            "search-pagination",
+            vec![
+                "max_id", "maxid", "id", "cursor", "until", "date", "datetime", "dt",
+            ],
+        ),
+        (
+            "search-results",
+            vec![
+                "Latest", "live", "Top", "Media", "People", "user", "Lists", "list",
+            ],
+        ),
+    ] {
+        for alias in aliases {
+            assert!(parse(&serde_json::json!({(field):alias}).to_string()).is_ok());
+        }
+    }
+    assert_eq!(
+        parse(r#"{"search-stop":128}"#)
+            .unwrap()
+            .resolve("twitter")
+            .unwrap()
+            .search_stop,
+        Some(128)
+    );
+}
+
+#[test]
+fn twitter_search_configuration_rejects_invalid_and_duplicate_values_privately() {
+    use serde_json::json;
+    for field in [
+        "strategy",
+        "search-pagination",
+        "search-results",
+        "limit",
+        "search-limit",
+        "search-stop",
+    ] {
+        let mut invalid = vec![
+            json!(null),
+            json!(true),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+        ];
+        if matches!(field, "strategy" | "search-pagination" | "search-results") {
+            invalid.extend([json!(0), json!(1)]);
+        } else {
+            invalid.extend([json!(-1), json!(1.5), json!("20"), json!(129), json!(1000)]);
+            if matches!(field, "limit" | "search-limit") {
+                invalid.extend([json!(0), json!(101), json!("auto")]);
+            }
+        }
+        for value in invalid {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let duplicate = format!(r#""{field}":null,"{field}":null"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+    for document in [
+        r#"{"strategy":"Auto"}"#,
+        r#"{"search-pagination":"MAX_ID"}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}
+
+#[test]
+fn twitter_collection_limit_is_sparse_scoped_and_independent_from_search_limit() {
+    let scoped =
+        parse(r#"{"extractor":{"limit":1,"search-limit":20,"twitter":{"limit":100}}}"#).unwrap();
+    let twitter = scoped.resolve("twitter").unwrap();
+    assert_eq!(twitter.limit, Some(100));
+    assert_eq!(twitter.search_limit, Some(20));
+    assert_eq!(scoped.resolve("instagram").unwrap().limit, Some(1));
+    let global = parse(r#"{"limit":50,"extractor":{"limit":1,"twitter":{"limit":100}}}"#).unwrap();
+    assert_eq!(global.resolve("twitter").unwrap().limit, Some(50));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                limit: Some(1),
+                ..Default::default()
+            })
+            .limit,
+        Some(1)
+    );
+    assert_eq!(parse("{}").unwrap().resolve("twitter").unwrap().limit, None);
+}
+
+#[test]
+fn twitter_collection_limit_rejects_duplicate_valid_values_in_every_scope() {
+    for document in [
+        r#"{"limit":1,"limit":100}"#,
+        r#"{"extractor":{"limit":1,"limit":100}}"#,
+        r#"{"extractor":{"twitter":{"limit":1,"limit":100}}}"#,
+        r#"{"extractor":{"instagram":{"limit":1,"limit":100}}}"#,
+        r#"{"extractor":{"facebook":{"limit":1,"limit":100}}}"#,
+        r#"{"extractor":{"direct":{"limit":1,"limit":100}}}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}
+
+#[test]
+fn twitter_status_options_are_sparse_and_resolve_all_scopes() {
+    use gallery_dl_rs::twitter::{ConversationMode, TweetEndpoint};
+    let config = parse(r#"{"extractor":{"tweet-endpoint":"restid","conversations":true,"twitter":{"tweet-endpoint":"detail","conversations":"accessible"}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.tweet_endpoint, Some(TweetEndpoint::Detail));
+    assert_eq!(twitter.conversations, Some(ConversationMode::Accessible));
+    let facebook = config.resolve("facebook").unwrap();
+    assert_eq!(facebook.tweet_endpoint, Some(TweetEndpoint::RestId));
+    assert_eq!(facebook.conversations, Some(ConversationMode::All));
+    let global = parse(r#"{"tweet-endpoint":"auto","conversations":false,"extractor":{"tweet-endpoint":"restid","conversations":true,"twitter":{"tweet-endpoint":"detail","conversations":"accessible"}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let resolved = global.resolve(category).unwrap();
+        assert_eq!(resolved.tweet_endpoint, Some(TweetEndpoint::Auto));
+        assert_eq!(resolved.conversations, Some(ConversationMode::Off));
+    }
+    let overrides = Options {
+        tweet_endpoint: Some(TweetEndpoint::RestId),
+        conversations: Some(ConversationMode::Off),
+        ..Options::default()
+    };
+    let overlaid = twitter.overlay(&overrides);
+    assert_eq!(overlaid.tweet_endpoint, overrides.tweet_endpoint);
+    assert_eq!(overlaid.conversations, overrides.conversations);
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.tweet_endpoint, None);
+    assert_eq!(absent.conversations, None);
+}
+
+#[test]
+fn twitter_status_configuration_rejects_malformed_and_duplicate_values_privately() {
+    use serde_json::json;
+    for field in ["tweet-endpoint", "conversations"] {
+        let mut invalid = vec![
+            json!(null),
+            json!(0),
+            json!(1),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+            json!("Auto"),
+        ];
+        if field == "tweet-endpoint" {
+            invalid.extend([json!(true), json!(false), json!("rest_id")]);
+        } else {
+            invalid.extend([json!("true"), json!("Accessible")]);
+        }
+        for value in invalid {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let value = if field == "tweet-endpoint" {
+            "\"auto\""
+        } else {
+            "false"
+        };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}
+
+#[test]
+fn twitter_thread_settings_follow_scopes_and_preserve_false_overlays() {
+    let config = parse(
+        r#"{"extractor":{"expand":true,"unique":true,"twitter":{"expand":false,"unique":false}}}"#,
+    )
+    .unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!((twitter.expand, twitter.unique), (Some(false), Some(false)));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(
+        (inherited.expand, inherited.unique),
+        (Some(true), Some(true))
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = inherited.overlay(&Options {
+        expand: Some(false),
+        unique: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(
+        (disabled.expand, disabled.unique),
+        (Some(false), Some(false))
+    );
+    let root = parse(r#"{"expand":false,"unique":false,"extractor":{"expand":true,"unique":true,"twitter":{"expand":true,"unique":true}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!((options.expand, options.unique), (Some(false), Some(false)));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!((absent.expand, absent.unique), (None, None));
+}
+
+#[test]
+fn twitter_thread_settings_reject_types_and_duplicates_privately_in_every_scope() {
+    use serde_json::json;
+    for field in ["expand", "unique"] {
+        for value in [
+            json!(null),
+            json!(0),
+            json!(1),
+            json!("false"),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+        ] {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(!message.contains("private-key"));
+                assert!(!message.contains("private-value"));
+            }
+        }
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}
+
+#[test]
+fn twitter_media_settings_resolve_scopes_and_preserve_false_overlays() {
+    use gallery_dl_rs::twitter::VideoMode;
+    let config = parse(r#"{"extractor":{"videos":true,"previews":true,"twitter":{"videos":"ytdl","previews":false},"instagram":{"videos":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(
+        (twitter.videos, twitter.previews),
+        (Some(VideoMode::Ytdl), Some(false))
+    );
+    let inherited = config.resolve("facebook").unwrap();
+    assert_eq!(
+        (inherited.videos, inherited.previews),
+        (Some(VideoMode::Files), Some(true))
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().videos,
+        Some(VideoMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = twitter.overlay(&Options {
+        videos: Some(VideoMode::Skip),
+        previews: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(
+        (disabled.videos, disabled.previews),
+        (Some(VideoMode::Skip), Some(false))
+    );
+    let root = parse(r#"{"videos":false,"previews":false,"extractor":{"videos":true,"previews":true,"twitter":{"videos":"ytdl","previews":true}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!(
+            (options.videos, options.previews),
+            (Some(VideoMode::Skip), Some(false))
+        );
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!((absent.videos, absent.previews), (None, None));
+}
+
+#[test]
+fn twitter_media_settings_reject_malformed_and_duplicate_values_privately() {
+    use serde_json::json;
+    for field in ["videos", "previews"] {
+        let mut values = vec![
+            json!(null),
+            json!(0),
+            json!(1),
+            json!("false"),
+            json!("true"),
+            json!([]),
+            json!({"private-key":"private-value"}),
+            json!("private-value"),
+        ];
+        values.push(if field == "videos" {
+            json!("Ytdl")
+        } else {
+            json!("ytdl")
+        });
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}
+
+#[test]
+fn twitter_card_settings_resolve_scopes_and_clear_inherited_blacklists() {
+    use gallery_dl_rs::twitter::CardMode;
+    let config = parse(r#"{"extractor":{"cards":true,"cards-blacklist":["summary","player"],"twitter":{"cards":"ytdl","cards-blacklist":[]},"instagram":{"cards":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.cards, Some(CardMode::Ytdl));
+    assert_eq!(twitter.cards_blacklist, Some(vec![]));
+    let inherited = config.resolve("facebook").unwrap();
+    assert_eq!(inherited.cards, Some(CardMode::Files));
+    assert_eq!(
+        inherited.cards_blacklist,
+        Some(vec!["summary".into(), "player".into()])
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().cards,
+        Some(CardMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = inherited.overlay(&Options {
+        cards: Some(CardMode::Skip),
+        cards_blacklist: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(disabled.cards, Some(CardMode::Skip));
+    assert_eq!(disabled.cards_blacklist, Some(vec![]));
+    let root = parse(r#"{"cards":false,"cards-blacklist":[],"extractor":{"cards":true,"cards-blacklist":["summary"],"twitter":{"cards":"ytdl","cards-blacklist":["player"]}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!(options.cards, Some(CardMode::Skip));
+        assert_eq!(options.cards_blacklist, Some(vec![]));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.cards, None);
+    assert_eq!(absent.cards_blacklist, None);
+    let duplicate_values = parse(r#"{"cards-blacklist":["summary","summary"]}"#)
+        .unwrap()
+        .resolve("twitter")
+        .unwrap();
+    assert_eq!(
+        duplicate_values.cards_blacklist.unwrap(),
+        ["summary", "summary"]
+    );
+    let max = serde_json::json!({"cards-blacklist":vec!["x".repeat(2048); 256]});
+    assert!(parse(&max.to_string()).is_ok());
+}
+
+#[test]
+fn twitter_card_settings_reject_private_malformed_values_and_duplicate_keys() {
+    use serde_json::json;
+    let bad_cards = [
+        json!(null),
+        json!(0),
+        json!("true"),
+        json!("Ytdl"),
+        json!([]),
+        json!({"private-key":"private-value"}),
+        json!("private-value"),
+    ];
+    let bad_blacklists = [
+        json!(null),
+        json!(false),
+        json!("private-value"),
+        json!({"private-key":"private-value"}),
+        json!(["valid", 1]),
+        json!([""]),
+        json!(["private-value\n"]),
+        json!(["private-value\u{7f}"]),
+        json!(["x".repeat(2049)]),
+        json!(vec!["private-value"; 257]),
+    ];
+    for (field, values) in [
+        ("cards", bad_cards.as_slice()),
+        ("cards-blacklist", bad_blacklists.as_slice()),
+    ] {
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(
+                    !message.contains("private-key") && !message.contains("private-value"),
+                    "{message}"
+                );
+            }
+        }
+        let value = if field == "cards" { "false" } else { "[]" };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}
+
+#[test]
+fn twitter_unavailable_is_sparse_strict_and_preserves_false_precedence() {
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().unavailable,
+        None
+    );
+    let config =
+        parse(r#"{"extractor":{"unavailable":true,"twitter":{"unavailable":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.unavailable, Some(false));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.unavailable, Some(true));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        inherited
+            .overlay(&Options {
+                unavailable: Some(false),
+                ..Default::default()
+            })
+            .unavailable,
+        Some(false)
+    );
+    assert_eq!(parse(r#"{"unavailable":false,"extractor":{"unavailable":true,"twitter":{"unavailable":true}}}"#).unwrap().resolve("twitter").unwrap().unavailable, Some(false));
+    for value in [
+        json!(null),
+        json!(1),
+        json!("false"),
+        json!([]),
+        json!({"private-key":"private-value"}),
+    ] {
+        for document in [
+            json!({"unavailable":value}),
+            json!({"extractor":{"unavailable":value}}),
+            json!({"extractor":{"twitter":{"unavailable":value}}}),
+            json!({"extractor":{"instagram":{"unavailable":value}}}),
+            json!({"extractor":{"facebook":{"unavailable":value}}}),
+            json!({"extractor":{"direct":{"unavailable":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key") && !message.contains("private-value"));
+        }
+    }
+    for document in [
+        r#"{"unavailable":false,"unavailable":true}"#,
+        r#"{"extractor":{"unavailable":false,"unavailable":true}}"#,
+        r#"{"extractor":{"twitter":{"unavailable":false,"unavailable":true}}}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}
+
+#[test]
+fn twitter_article_flags_are_sparse_scoped_and_accept_canonical_aliases() {
+    use gallery_dl_rs::twitter::ArticleOptions;
+    let disabled = ArticleOptions::disabled();
+    let config = parse(r#"{"extractor":{"articles":true,"twitter":{"articles":[" html ","metadata","document","meta"]},"instagram":{"articles":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    let selected = ArticleOptions {
+        metadata: true,
+        cover: false,
+        media: false,
+        html: true,
+        document: true,
+    };
+    assert_eq!(twitter.articles, Some(selected));
+    assert_eq!(
+        config.resolve("facebook").unwrap().articles,
+        Some(ArticleOptions::default())
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().articles,
+        Some(disabled)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                articles: Some(disabled),
+                ..Default::default()
+            })
+            .articles,
+        Some(disabled)
+    );
+    let root = parse(
+        r#"{"articles":false,"extractor":{"articles":true,"twitter":{"articles":"cover,media"}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        assert_eq!(root.resolve(category).unwrap().articles, Some(disabled));
+    }
+    for value in [
+        serde_json::json!(""),
+        serde_json::json!("  "),
+        serde_json::json!([]),
+    ] {
+        let document =
+            serde_json::json!({"extractor":{"articles":true,"twitter":{"articles":value}}});
+        assert_eq!(
+            parse(&document.to_string())
+                .unwrap()
+                .resolve("twitter")
+                .unwrap()
+                .articles,
+            Some(disabled)
+        );
+    }
+    let equivalent = parse(r#"{"articles":" meta, html, doc "}"#)
+        .unwrap()
+        .resolve("twitter")
+        .unwrap();
+    assert_eq!(equivalent.articles, Some(selected));
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().articles,
+        None
+    );
+    assert!(parse(&serde_json::json!({"articles":vec!["meta";32]}).to_string()).is_ok());
+}
+
+#[test]
+fn twitter_article_flags_reject_malformed_values_privately_in_all_scopes() {
+    use serde_json::json;
+    for value in [
+        json!(null),
+        json!(0),
+        json!({"private-key":"private-value"}),
+        json!([true]),
+        json!(["meta", 1]),
+        json!("private-value"),
+        json!("Meta"),
+        json!("meta,,cover"),
+        json!([""]),
+        json!(["meta,cover"]),
+        json!(["meta\n"]),
+        json!(vec!["meta"; 33]),
+        json!(["x".repeat(129)]),
+    ] {
+        for document in [
+            json!({"articles":value}),
+            json!({"extractor":{"articles":value}}),
+            json!({"extractor":{"twitter":{"articles":value}}}),
+            json!({"extractor":{"instagram":{"articles":value}}}),
+            json!({"extractor":{"facebook":{"articles":value}}}),
+            json!({"extractor":{"direct":{"articles":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key") && !message.contains("private-value"));
+        }
+    }
+    for document in [
+        r#"{"articles":true,"articles":false}"#,
+        r#"{"extractor":{"articles":[],"articles":true}}"#,
+        r#"{"extractor":{"twitter":{"articles":"html","articles":"doc"}}}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}
+
+#[test]
+fn image_size_order_replaces_scopes_and_fallback_preserves_explicit_false() {
+    use serde_json::json;
+    let config = parse(r#"{"extractor":{"size":["orig","large"],"fallback":true,"twitter":{"size":" medium,small ","fallback":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.size.as_ref().unwrap().sizes(), ["medium", "small"]);
+    assert_eq!(twitter.fallback, Some(false));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.size.as_ref().unwrap().sizes(), ["orig", "large"]);
+    assert_eq!(inherited.fallback, Some(true));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let overlay = inherited.overlay(&Options {
+        size: twitter.size.clone(),
+        fallback: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(overlay, twitter);
+    let root = parse(r#"{"size":["4096x4096"],"fallback":false,"extractor":{"size":"large","fallback":true,"twitter":{"size":"small","fallback":true}}}"#).unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let options = root.resolve(category).unwrap();
+        assert_eq!(options.size.as_ref().unwrap().sizes(), ["4096x4096"]);
+        assert_eq!(options.fallback, Some(false));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.size, None);
+    assert_eq!(absent.fallback, None);
+    assert!(parse(&json!({"size":vec!["x".repeat(32);32]}).to_string()).is_ok());
+    assert!(parse(&json!({"size":["custom_size-2"]}).to_string()).is_ok());
+}
+
+#[test]
+fn image_size_and_fallback_configuration_reject_invalid_private_values_and_duplicate_keys() {
+    use serde_json::json;
+    let bad_size = [
+        json!(null),
+        json!(true),
+        json!(1),
+        json!([]),
+        json!(""),
+        json!("orig,,large"),
+        json!(["orig", 1]),
+        json!(["private-value\n"]),
+        json!("private-value/path"),
+        json!(["x".repeat(33)]),
+        json!(vec!["orig"; 33]),
+    ];
+    let bad_fallback = [
+        json!(null),
+        json!(0),
+        json!("false"),
+        json!([]),
+        json!({"private-key":"private-value"}),
+    ];
+    for (field, values) in [
+        ("size", bad_size.as_slice()),
+        ("fallback", bad_fallback.as_slice()),
+    ] {
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(!message.contains("private-key") && !message.contains("private-value"));
+            }
+        }
+        let value = if field == "size" { "\"orig\"" } else { "false" };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}
+
+#[test]
+fn file_filter_scopes_replace_clauses_and_resolve_image_filter_alias_within_each_layer() {
+    let config = parse(r#"{"extractor":{"file-filter":"width > 10","image-filter":"height > 10","twitter":{"file-filter":[],"image-filter":["width > 20","height > 20"]},"instagram":{"image-filter":"width > 30"}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(
+        twitter.file_filter,
+        Some(vec!["width > 20".into(), "height > 20".into()])
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().file_filter,
+        Some(vec!["width > 30".into()])
+    );
+    assert_eq!(
+        config.resolve("facebook").unwrap().file_filter,
+        Some(vec!["width > 10".into()])
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        twitter
+            .overlay(&Options {
+                file_filter: Some(vec![]),
+                ..Default::default()
+            })
+            .file_filter,
+        Some(vec![])
+    );
+    let primary = parse(r#"{"file-filter":["width > 50"],"image-filter":"height > 50","extractor":{"twitter":{"file-filter":"width > 1"}}}"#).unwrap();
+    assert_eq!(
+        primary.resolve("twitter").unwrap().file_filter,
+        Some(vec!["width > 50".into()])
+    );
+    for empty in [serde_json::json!(""), serde_json::json!([])] {
+        let clear = serde_json::json!({"file-filter":empty,"extractor":{"file-filter":"width > 1","twitter":{"image-filter":"height > 1"}}});
+        for category in ["twitter", "instagram", "facebook", "direct"] {
+            assert_eq!(
+                parse(&clear.to_string())
+                    .unwrap()
+                    .resolve(category)
+                    .unwrap()
+                    .file_filter,
+                Some(vec![])
+            );
+        }
+        let alias = serde_json::json!({"file-filter":empty,"image-filter":"height > 99"});
+        assert_eq!(
+            parse(&alias.to_string())
+                .unwrap()
+                .resolve("twitter")
+                .unwrap()
+                .file_filter,
+            Some(vec!["height > 99".into()])
+        );
+    }
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().file_filter,
+        None
+    );
+    assert!(parse(&serde_json::json!({"file-filter":vec!["width > 0";32]}).to_string()).is_ok());
+}
+
+#[test]
+fn file_filter_aliases_reject_private_invalid_syntax_types_bounds_and_duplicate_keys() {
+    use serde_json::json;
+    for field in ["file-filter", "image-filter"] {
+        for value in [
+            json!(null),
+            json!(false),
+            json!(1),
+            json!({"private-key":"private-value"}),
+            json!([1]),
+            json!([""]),
+            json!(["width > 0", ""]),
+            json!("width >"),
+            json!("PRIVATE-FILTER-VALUE + )"),
+            json!(vec!["width > 0"; 33]),
+            json!(format!("width > 0{}", " ".repeat(16 * 1024))),
+            json!(vec![format!("width > 0{}", " ".repeat(16 * 1024 - 9)); 5]),
+        ] {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                for private in ["private-key", "private-value", "PRIVATE-FILTER-VALUE"] {
+                    assert!(!message.contains(private));
+                }
+            }
+        }
+        let duplicate = format!(r#""{field}":"width > 0","{field}":"width > 1""#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}
+
+#[test]
+fn post_selection_scopes_replace_and_clear_independently_from_file_selection() {
+    let config = parse(r#"{"extractor":{"post-range":"1-3","post-filter":"post_id > 100","file-range":"5","file-filter":"width > 1000","twitter":{"post-range":["2","4-6"],"post-filter":["post_id > 200","count > 0"]}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.post_range.as_deref(), Some("2,4-6"));
+    assert_eq!(
+        twitter.post_filter,
+        Some(vec!["post_id > 200".into(), "count > 0".into()])
+    );
+    assert_eq!(twitter.file_range.as_deref(), Some("5"));
+    assert_eq!(twitter.file_filter, Some(vec!["width > 1000".into()]));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.post_range.as_deref(), Some("1-3"));
+    assert_eq!(inherited.post_filter, Some(vec!["post_id > 100".into()]));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let explicit = twitter.overlay(&Options {
+        post_range: Some("7:".into()),
+        post_filter: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(explicit.post_range.as_deref(), Some("7:"));
+    assert_eq!(explicit.post_filter, Some(vec![]));
+    assert_eq!(explicit.file_filter, twitter.file_filter);
+    for empty in [serde_json::json!(""), serde_json::json!([])] {
+        let root = serde_json::json!({"post-range":empty,"post-filter":empty,"extractor":{"post-range":"0","post-filter":"False","twitter":{"post-range":"2","post-filter":"True"}}});
+        for category in ["twitter", "instagram", "facebook", "direct"] {
+            let resolved = parse(&root.to_string()).unwrap().resolve(category).unwrap();
+            assert_eq!(resolved.post_range.as_deref(), Some(":"));
+            assert_eq!(resolved.post_filter, Some(vec![]));
+        }
+    }
+    let absent = parse("{}").unwrap().resolve("direct").unwrap();
+    assert_eq!(absent.post_range, None);
+    assert_eq!(absent.post_filter, None);
+    assert!(
+        parse(
+            &serde_json::json!({"post-range":vec!["1";256],"post-filter":vec!["count > 0";32]})
+                .to_string()
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn post_selection_invalid_types_syntax_and_bounds_fail_privately_in_all_scopes() {
+    use serde_json::json;
+    let ranges = [
+        json!(null),
+        json!(false),
+        json!(1),
+        json!({"private-key":"private-value"}),
+        json!([1]),
+        json!("PRIVATE-POST-VALUE"),
+        json!("1::0"),
+        json!("1".repeat(4097)),
+        json!(vec!["1"; 257]),
+    ];
+    let filters = [
+        json!(null),
+        json!(false),
+        json!(1),
+        json!({"private-key":"private-value"}),
+        json!([1]),
+        json!([""]),
+        json!("PRIVATE-POST-VALUE > )"),
+        json!(vec!["True"; 33]),
+        json!(format!("True{}", " ".repeat(16 * 1024))),
+        json!(vec![format!("True{}", " ".repeat(16 * 1024 - 4)); 5]),
+    ];
+    for (field, values) in [
+        ("post-range", ranges.as_slice()),
+        ("post-filter", filters.as_slice()),
+    ] {
+        for value in values {
+            for document in [
+                json!({(field):value}),
+                json!({"extractor":{(field):value}}),
+                json!({"extractor":{"twitter":{(field):value}}}),
+                json!({"extractor":{"instagram":{(field):value}}}),
+                json!({"extractor":{"facebook":{(field):value}}}),
+                json!({"extractor":{"direct":{(field):value}}}),
+            ] {
+                let message = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(message.contains(field), "{message}");
+                for private in ["private-key", "private-value", "PRIVATE-POST-VALUE"] {
+                    assert!(!message.contains(private));
+                }
+            }
+        }
+        let value = if field == "post-range" {
+            "\"1\""
+        } else {
+            "\"True\""
+        };
+        let duplicate = format!(r#""{field}":{value},"{field}":{value}"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err());
+        }
+    }
+}
+
+#[test]
+fn text_tweet_settings_are_sparse_scoped_and_preserve_explicit_false() {
+    let config =
+        parse(r#"{"extractor":{"text-tweets":true,"twitter":{"text-tweets":false}}}"#).unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.text_tweets, Some(false));
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(inherited.text_tweets, Some(true));
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    assert_eq!(
+        inherited
+            .overlay(&Options {
+                text_tweets: Some(false),
+                ..Default::default()
+            })
+            .text_tweets,
+        Some(false)
+    );
+    let root = parse(
+        r#"{"text-tweets":false,"extractor":{"text-tweets":true,"twitter":{"text-tweets":true}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        assert_eq!(root.resolve(category).unwrap().text_tweets, Some(false));
+    }
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().text_tweets,
+        None
+    );
+}
+
+#[test]
+fn text_tweet_configuration_rejects_private_types_and_duplicate_keys() {
+    use serde_json::json;
+    for value in [
+        json!(null),
+        json!(1),
+        json!("false"),
+        json!([]),
+        json!({"private-key":"PRIVATE-TEXT-VALUE"}),
+    ] {
+        for document in [
+            json!({"text-tweets":value}),
+            json!({"extractor":{"text-tweets":value}}),
+            json!({"extractor":{"twitter":{"text-tweets":value}}}),
+            json!({"extractor":{"instagram":{"text-tweets":value}}}),
+            json!({"extractor":{"facebook":{"text-tweets":value}}}),
+            json!({"extractor":{"direct":{"text-tweets":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(message.contains("text-tweets"));
+            assert!(!message.contains("private-key") && !message.contains("PRIVATE-TEXT-VALUE"));
+        }
+    }
+    for document in [
+        r#"{"text-tweets":true,"text-tweets":false}"#,
+        r#"{"extractor":{"text-tweets":false,"text-tweets":true}}"#,
+        r#"{"extractor":{"twitter":{"text-tweets":false,"text-tweets":true}}}"#,
+    ] {
+        assert!(parse(document).is_err());
+    }
+}

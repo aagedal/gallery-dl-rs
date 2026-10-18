@@ -28,3 +28,25 @@ Record date, URL shape, result, media count/types, and account-access conditions
 without storing session values or signed media URLs. Create sanitized real response
 fixtures before considering native mode verified. Confirm Facebook/Twitter still
 work through `--extractor compatibility` independently.
+
+Profile tests in `src/instagram_profile_tests.rs` synthesize `web_profile_info`
+identity responses and `feed/user/{id}/` pages based on the same upstream REST
+protocol. They cover opaque cursor encoding, ordered pages, current-page
+backpressure, late cursor failures, owner validation, private profiles, and active
+timeouts. They are not live captures. Before claiming profile support, verify
+an accessible profile spanning multiple pages and compare post counts/order,
+including a carousel/video, an empty profile, and an authorized private profile.
+
+Stories, highlight lists/shared highlights, and the signed-in story tray now have
+separate [synthetic protocol and verification notes](stories_README.md). Their
+authenticated live verification remains pending as well.
+
+Explicit posts/reels/tagged/saved collections have separate
+[synthetic request and pagination notes](collections_README.md), including POST
+transport and source-order date filtering. Their live verification also remains pending.
+
+`tests/instagram_file_metadata.rs` adds synthetic selected-variant metadata cases:
+per-child dimensions and originals, video duration in seconds, accessibility text,
+invalid optional values, and unchanged request/archive identities. Existing local
+profile and story tests confirm these fields survive their shared parser paths.
+Dimensions describe the selected API variant; no media bytes are probed.

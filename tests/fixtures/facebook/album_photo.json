@@ -1,0 +1,1 @@
+{"data":{"photo":{"__typename":"Photo","id":"456","url":"https://www.facebook.com/photo/?fbid=456&set=a.123","image":{"uri":"https://cdn.example.test/456.jpg","width":1920,"height":1080},"nextMediaAfterNodeId":{"__typename":"Photo","id":"457"}}}}

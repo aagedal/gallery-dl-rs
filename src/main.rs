@@ -1,29 +1,93 @@
 use clap::{Parser, ValueEnum};
-use futures_util::{StreamExt, stream};
+use futures_util::{
+    StreamExt, TryStreamExt,
+    stream::{self, BoxStream},
+};
 use gallery_dl_rs::{
     Result,
+    archive::{Archive, ArchiveOutcome},
+    browser::FirefoxProfile,
+    config::{Config, Options as ConfigOptions},
+    cookies::CookieJar,
+    date::{DateFilter, parse_date},
     download::{self, DownloadOptions, Outcome},
     error,
-    extract::{self, Backend},
+    event::{self, ExtractionEvent},
+    extract::{self, Backend, BackendOptions},
+    facebook::Facebook,
+    filter::FilterExpression,
+    input::Inputs,
     instagram::Instagram,
+    naming::{DirectoryTemplate, FilenameTemplate},
+    network::NetworkOptions,
+    post_selection::PostSelection,
+    selection::RangeSelection,
+    size::{SizeLimits, parse_bytes},
+    twitter::{
+        CardOptions, ConversationMode, ExpansionOptions, MediaOptions, ProfileOptions,
+        StatusOptions, ThreadOptions, TimelineOptions, Twitter,
+    },
 };
 use sha2::{Digest, Sha256};
-use std::{cell::Cell, collections::HashSet, path::PathBuf, time::Duration};
+use std::{
+    cell::Cell,
+    collections::{BTreeMap, HashSet},
+    path::PathBuf,
+    time::Duration,
+};
+use tokio::sync::OnceCell;
 
 #[derive(Parser)]
 #[command(
     version,
-    about = "Rust gallery downloader with an optional native Instagram extractor"
+    about = "Rust gallery downloader with experimental native Instagram, Facebook, and Twitter/X extractors"
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
-    #[arg(required = true)]
+    #[arg(required_unless_present = "input_files")]
     urls: Vec<String>,
-    #[arg(short, long, default_value = "downloads")]
-    destination: PathBuf,
+    /// Read URLs from a UTF-8 file; repeat for multiple files, or use - for stdin
+    #[arg(short = 'i', long = "input-file", value_name = "FILE")]
+    input_files: Vec<PathBuf>,
+    /// Output root (default: downloads)
+    #[arg(short, long)]
+    destination: Option<PathBuf>,
+    /// Exact download directory, overriding configured folder components
+    #[arg(short = 'D', long = "directory", conflicts_with_all = ["destination", "directory"])]
+    exact_directory: Option<PathBuf>,
     /// Maximum simultaneous downloads
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=32))]
     jobs: u8,
+    /// Select one-based file positions per input (e.g. 5, 8-20, or 1:24:3)
+    #[arg(long = "range", allow_hyphen_values = true)]
+    file_range: Option<String>,
+    /// Select files with a metadata expression; repeat to require all expressions
+    #[arg(long = "filter", value_name = "EXPR", allow_hyphen_values = true)]
+    file_filter: Vec<String>,
+    /// Select one-based post positions per input
+    #[arg(long = "post-range", allow_hyphen_values = true)]
+    post_range: Option<String>,
+    /// Select posts before file filtering; repeat to require all expressions
+    #[arg(long = "post-filter", value_name = "EXPR", allow_hyphen_values = true)]
+    post_filter: Vec<String>,
+    /// Emit metadata for native X posts without media
+    #[arg(long, conflicts_with = "no_text_tweets")]
+    text_tweets: bool,
+    /// Disable configured X text-post output
+    #[arg(long, conflicts_with = "text_tweets")]
+    no_text_tweets: bool,
+    /// Process posts created before this UTC date or Unix timestamp (exclusive)
+    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
+    date_before: Option<i64>,
+    /// Stop this input at a post on or before this UTC date or Unix timestamp
+    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
+    date_after: Option<i64>,
+    /// Minimum media size in bytes or binary units, e.g. 500k or 2.5M
+    #[arg(long, value_parser = parse_size)]
+    filesize_min: Option<u64>,
+    /// Maximum media size in bytes or binary units (0 disables this bound)
+    #[arg(long, value_parser = parse_size)]
+    filesize_max: Option<u64>,
     /// Print media URLs without downloading (still performs extraction)
     #[arg(short = 'g', long, conflicts_with = "dump_json")]
     get_urls: bool,
@@ -33,32 +97,74 @@ struct Args {
     /// Save post metadata in a JSON sidecar beside each completed media file
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
     write_metadata: bool,
+    /// SQLite history of completed media (gallery-dl-rs format)
+    #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
+    download_archive: Option<PathBuf>,
+    /// Native filename template, e.g. '{post_id}_{index:03}.{extension}'
+    #[arg(short = 'f', long, conflicts_with_all = ["get_urls", "dump_json"])]
+    filename: Option<String>,
+    /// Folder component template; repeat for nested folders (replaces category)
+    #[arg(long = "directory-template", allow_hyphen_values = true)]
+    directory: Vec<String>,
+    /// Retain validated partial HTTP media for retries and later invocations
+    #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
+    resume: bool,
     /// Netscape session cookies for social extraction
     #[arg(short = 'C', long)]
     cookies: Option<PathBuf>,
-    /// Social extractor; native currently supports Instagram single posts only
+    /// Browser session: native accepts firefox:PROFILE_PATH; compatibility delegates
+    #[arg(long, conflicts_with = "cookies")]
+    cookies_from_browser: Option<String>,
+    /// HTTP(S) proxy URL; an empty string disables environment proxies
+    #[arg(long)]
+    proxy: Option<String>,
+    /// Override the User-Agent for extraction and media HTTP requests
+    #[arg(short = 'a', long)]
+    user_agent: Option<String>,
+    /// Social extractor; native supports experimental Instagram collections/stories/posts, Facebook media/albums, and X posts/profile tabs
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
     #[arg(short, long)]
     config: Option<PathBuf>,
+    /// Explicit native JSON settings (separate from compatibility backend config)
+    #[arg(long)]
+    native_config: Option<PathBuf>,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
-    /// Total seconds allowed for each social URL's extraction
+    /// Seconds for native extraction or active compatibility reading (excludes backpressure)
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
-    /// Seconds allowed per media attempt and per rate-limit wait
-    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..))]
-    timeout: u64,
-    /// Additional download/native extraction attempts on rate limits, server or transport errors
-    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=10))]
-    retries: u8,
+    /// Seconds per media attempt/native HTTP request (default: 60)
+    #[arg(long, value_parser = parse_timeout)]
+    timeout: Option<Duration>,
+    /// Additional download/native extraction attempts (default: 2)
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=10))]
+    retries: Option<u8>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Extractor {
     Compatibility,
     Native,
+}
+
+fn parse_date_arg(value: &str) -> std::result::Result<i64, String> {
+    parse_date(value).map_err(|e| e.to_string())
+}
+
+fn parse_size(value: &str) -> std::result::Result<u64, String> {
+    parse_bytes(value).map_err(|e| e.to_string())
+}
+
+fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
+    let invalid = || "timeout must be positive finite seconds within the clock range".to_owned();
+    let seconds = value.parse::<f64>().map_err(|_| invalid())?;
+    let timeout = Duration::try_from_secs_f64(seconds).map_err(|_| invalid())?;
+    if timeout.is_zero() || std::time::Instant::now().checked_add(timeout).is_none() {
+        return Err(invalid());
+    }
+    Ok(timeout)
 }
 
 #[tokio::main]
@@ -88,50 +194,122 @@ async fn run(args: Args) -> Result<()> {
             "--config is only supported with --extractor compatibility",
         ));
     }
-    let native = if matches!(args.extractor, Extractor::Native) {
-        Some(
-            Instagram::new(
-                args.cookies.as_deref(),
-                Duration::from_secs(args.extraction_timeout),
-            )
-            .await?
-            .with_retries(args.retries),
-        )
-    } else {
-        None
-    };
+    let settings = resolved_settings(&args).await?;
+    let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
+    let extractors = Extractors::default();
+    let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
+        .values()
+        .filter_map(|settings| settings.options.archive.clone())
+        .map(|path| (path, OnceCell::new()))
+        .collect();
     let backend = Backend {
-        executable: args.extractor_command,
-        cookies: args.cookies,
-        config: args.config,
+        executable: args.extractor_command.clone(),
+        cookies: None,
+        config: args.config.clone(),
         timeout: Duration::from_secs(args.extraction_timeout),
     };
     let failed = Cell::new(0);
     let mut seen = HashSet::new();
-    // Pull one input at a time, retaining only its results and active downloads.
+    // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
-    let media = stream::iter(args.urls.iter().enumerate())
-        .then(|(index, source)| {
-            let native = &native;
-            let backend = &backend;
+    let media = inputs
+        .stream()
+        .enumerate()
+        .flat_map(|(index, source)| {
             let failed = &failed;
-            async move {
-                let result = extract_input(source, native.as_ref(), backend).await;
-                match result {
-                    Ok(items) => items,
+            let input = match source {
+                Ok(source) => {
+                    let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
+                        gallery_dl_rs::instagram::is_story_url(&url)
+                            || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
+                            || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
+                            || gallery_dl_rs::twitter::is_search_url(&url)
+                            || gallery_dl_rs::twitter::is_collection_url(&url)
+                            || (extract::social_site(&url) == Some("twitter")
+                                && (settings["twitter"].options.quoted == Some(true)
+                                    || settings["twitter"].options.expand == Some(true)
+                                    || (gallery_dl_rs::twitter::post_id(&url).is_ok()
+                                        && matches!(
+                                            settings["twitter"].options.conversations,
+                                            Some(
+                                                ConversationMode::All
+                                                    | ConversationMode::Accessible
+                                            )
+                                        ))))
+                    });
+                    let selected_settings = extract::http_url(&source)
+                        .ok()
+                        .map(|url| &settings[extract::social_site(&url).unwrap_or("direct")]);
+                    let input =
+                        extract_input(source, &extractors, &backend, args.extractor, &settings);
+                    match selected_settings {
+                        Some(settings) => {
+                            let input = if let Some(selection) = &settings.post_selection {
+                                selection.apply(
+                                    input,
+                                    settings.options.date_before,
+                                    settings.options.date_after,
+                                    unordered_dates,
+                                )
+                            } else {
+                                let input = event::media_only(input);
+                                if settings.options.date_before.is_some()
+                                    || settings.options.date_after.is_some()
+                                {
+                                    if unordered_dates {
+                                        settings.dates.apply_unordered(input)
+                                    } else {
+                                        settings.dates.apply(input)
+                                    }
+                                } else {
+                                    input
+                                }
+                            };
+                            let input = match &settings.filter {
+                                Some(filter) => filter.apply(input),
+                                None => input,
+                            };
+                            match &settings.selection {
+                                Some(selection) => selection.apply(input),
+                                None => input,
+                            }
+                        }
+                        None => event::media_only(input),
+                    }
+                }
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            };
+            input.filter_map(move |result| {
+                std::future::ready(match result {
+                    Ok(item) => Some(item),
                     Err(e) => {
                         eprintln!("extraction failed for input {}: {e}", index + 1);
                         failed.set(failed.get() + 1);
-                        Vec::new()
+                        None
                     }
-                }
-            }
+                })
+            })
         })
-        .flat_map(stream::iter)
+        .map(|mut item| {
+            settings[item.category.as_str()]
+                .network
+                .apply_media(&mut item);
+            item
+        })
         .filter(|item| {
-            // Keep fixed-size digests instead of retaining URLs, headers, or inline manifests.
-            let identity: [u8; 32] = Sha256::digest(item.identity().as_bytes()).into();
-            std::future::ready(seen.insert(identity))
+            if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
+                return std::future::ready(true);
+            }
+            let mut identity = item.identity();
+            // Distinct social files can share a URL and request context.
+            if matches!(item.category.as_str(), "instagram" | "twitter" | "facebook")
+                && let Some(file_key) = item.archive_key()
+            {
+                identity = serde_json::json!([file_key, identity]).to_string();
+            }
+            // Retain only fixed-size digests, without URLs, headers, or manifests.
+            let digest: [u8; 32] = Sha256::digest(identity.as_bytes()).into();
+            std::future::ready(seen.insert(digest))
         });
     tokio::pin!(media);
     if args.dump_json {
@@ -142,26 +320,81 @@ async fn run(args: Args) -> Result<()> {
             println!("{}", item.url);
         }
     } else {
-        let client = download::client(Duration::from_secs(args.timeout))?;
-        let results =
-            media
-                .map(|item| {
-                    let client = &client;
-                    let destination = &args.destination;
-                    let options = DownloadOptions {
-                        retries: args.retries,
-                        write_metadata: args.write_metadata,
-                    };
-                    async move {
-                        download::download_with_options(client, destination, &item, options).await
+        let client = download::client(Duration::from_secs(60))?.with_resume(args.resume);
+        let results = media
+            .map(|item| {
+                let settings = &settings[item.category.as_str()];
+                let client = client
+                    .clone()
+                    .with_timeout(settings.options.timeout.unwrap())
+                    .with_fallback(settings.options.fallback.unwrap_or(true));
+                let cell = &settings.download_client;
+                let destination = settings.options.base_directory.as_ref().unwrap();
+                let archive = settings
+                    .options
+                    .archive
+                    .as_ref()
+                    .map(|path| (&archives[path], path));
+                let filename = settings.filename.as_ref();
+                let options = DownloadOptions {
+                    retries: settings.options.retries.unwrap(),
+                    limits: settings.limits,
+                    write_metadata: args.write_metadata,
+                    directory: settings.directory.as_ref(),
+                };
+                async move {
+                    let client = cell
+                        .get_or_init(|| async { client.with_network(&settings.network) })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("media HTTP client initialization failed: {e}"))
+                        })?;
+                    match archive {
+                        Some((cell, path)) => {
+                            let archive = cell
+                                .get_or_init(|| Archive::open(path))
+                                .await
+                                .as_ref()
+                                .map_err(|e| {
+                                error(format!("download archive initialization failed: {e}"))
+                            })?;
+                            archive
+                                .download_with_template(
+                                    client,
+                                    destination,
+                                    &item,
+                                    options,
+                                    filename,
+                                )
+                                .await
+                        }
+                        None => download::download_with_template(
+                            client,
+                            destination,
+                            &item,
+                            options,
+                            filename,
+                        )
+                        .await
+                        .map(ArchiveOutcome::Completed),
                     }
-                })
-                .buffer_unordered(args.jobs as usize);
+                }
+            })
+            .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
         while let Some(result) = results.next().await {
             match result {
-                Ok(Outcome::Downloaded(path)) => eprintln!("downloaded {}", path.display()),
-                Ok(Outcome::Skipped(path)) => eprintln!("skipped {}", path.display()),
+                Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
+                    eprintln!("downloaded {}", path.display())
+                }
+                Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
+                    eprintln!("skipped {}", path.display())
+                }
+                Ok(ArchiveOutcome::Completed(Outcome::Filtered(reason))) => {
+                    eprintln!("filtered media: {reason}")
+                }
+                Ok(ArchiveOutcome::AlreadyArchived) => eprintln!("skipped archived media"),
                 Err(e) => {
                     eprintln!("download failed: {e}");
                     failed.set(failed.get() + 1);
@@ -177,29 +410,382 @@ async fn run(args: Args) -> Result<()> {
     }
 }
 
-async fn extract_input(
-    source: &str,
-    native: Option<&Instagram>,
-    backend: &Backend,
-) -> Result<Vec<extract::Media>> {
-    let url = extract::http_url(source)?;
-    // Social pages always go through their extractor, even if their path
-    // happens to end with a media extension.
-    if extract::social_site(&url).is_some() {
-        match native {
-            Some(native) if extract::social_site(&url) == Some("instagram") => {
-                native.extract(&url).await
-            }
-            Some(_) => Err(error(
-                "native extraction currently supports Instagram single posts only; use --extractor compatibility",
-            )),
-            None => backend.extract(&url).await,
+#[derive(Default)]
+struct Extractors {
+    instagram: OnceCell<Result<Instagram>>,
+    twitter: OnceCell<Result<Twitter>>,
+    facebook: OnceCell<Result<Facebook>>,
+}
+
+impl Extractors {
+    async fn cookie_jar(&self, settings: &Settings, site: &str) -> Result<CookieJar> {
+        if let Some(browser) = &settings.browser {
+            return browser.load(site).await;
         }
-    } else if let Some(item) = extract::direct(&url) {
-        Ok(vec![item])
-    } else {
-        Err(error(
-            "unsupported URL; expected a social URL or direct media file",
-        ))
+        match &settings.options.cookies {
+            Some(path) => CookieJar::parse(&tokio::fs::read_to_string(path).await?),
+            None => Ok(CookieJar::default()),
+        }
     }
+}
+
+fn extract_input<'a>(
+    source: String,
+    extractors: &'a Extractors,
+    backend: &'a Backend,
+    extractor: Extractor,
+    settings: &'a BTreeMap<&str, Settings>,
+) -> BoxStream<'a, Result<ExtractionEvent>> {
+    stream::once(async move {
+        let url = extract::http_url(&source)?;
+        let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
+            extract::social_site(&url)
+        {
+            let configured = &settings[category];
+            let options = &configured.options;
+            match extractor {
+                Extractor::Native if category == "instagram" => {
+                    let native = extractors
+                        .instagram
+                        .get_or_init(|| async {
+                            Instagram::from_cookie_jar(
+                                extractors.cookie_jar(configured, "instagram.com").await?,
+                                backend.timeout,
+                            )
+                            .and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Instagram initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "twitter" => {
+                    let native = extractors
+                        .twitter
+                        .get_or_init(|| async {
+                            Twitter::from_cookie_jar(
+                                extractors.cookie_jar(configured, "x.com").await?,
+                                backend.timeout,
+                            )
+                            .and_then(|native| {
+                                native
+                                    .with_expansion(ExpansionOptions {
+                                        retweets: options.retweets.unwrap_or_default(),
+                                        quoted: options.quoted.unwrap_or(false),
+                                    })
+                                    .with_text_tweets(options.text_tweets.unwrap_or(false))
+                                    .with_image_options(options.size.clone().unwrap_or_default())
+                                    .with_article_options(options.articles.unwrap_or_default())
+                                    .with_card_options(CardOptions {
+                                        mode: options.cards.unwrap_or_default(),
+                                        blacklist: options
+                                            .cards_blacklist
+                                            .clone()
+                                            .unwrap_or_default(),
+                                    })
+                                    .with_media_options(MediaOptions {
+                                        videos: options.videos.unwrap_or_default(),
+                                        previews: options.previews.unwrap_or(false),
+                                        unavailable: options.unavailable.unwrap_or(false),
+                                    })
+                                    .with_thread_options(ThreadOptions {
+                                        expand: options.expand.unwrap_or(false),
+                                        unique: options.unique.unwrap_or(true),
+                                    })
+                                    .with_status_options(StatusOptions {
+                                        endpoint: options.tweet_endpoint.unwrap_or_default(),
+                                        conversations: options.conversations.unwrap_or_default(),
+                                    })
+                                    .with_timeline_options(TimelineOptions {
+                                        limit: options.limit.unwrap_or(50),
+                                        strategy: options.strategy.unwrap_or_default(),
+                                        search_pagination: options
+                                            .search_pagination
+                                            .unwrap_or_default(),
+                                        search_product: options.search_results.unwrap_or_default(),
+                                        search_limit: options.search_limit.unwrap_or(20),
+                                        search_stop: options.search_stop.unwrap_or(3),
+                                    })
+                                    .with_profile_options(ProfileOptions {
+                                        pinned: options.pinned.unwrap_or_default(),
+                                        replies: options.replies.unwrap_or_default(),
+                                    })
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Twitter initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "facebook" => {
+                    let native = extractors
+                        .facebook
+                        .get_or_init(|| async {
+                            Facebook::from_cookie_jar(
+                                extractors.cookie_jar(configured, "facebook.com").await?,
+                                backend.timeout,
+                            )
+                            .and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Facebook initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native => {
+                    return Err(error(
+                        "native extractor unavailable; use --extractor compatibility",
+                    ));
+                }
+                Extractor::Compatibility => {
+                    let mut backend = backend.clone();
+                    backend.cookies = options.cookies.clone();
+                    backend.events_with_options(
+                        &url,
+                        BackendOptions {
+                            browser: configured.browser_spec.clone(),
+                            proxy: configured.network.proxy().map(str::to_owned),
+                            user_agent: configured.network.user_agent().map(str::to_owned),
+                            retweets: (category == "twitter")
+                                .then_some(options.retweets)
+                                .flatten(),
+                            quoted: (category == "twitter").then_some(options.quoted).flatten(),
+                            expand: (category == "twitter").then_some(options.expand).flatten(),
+                            unique: (category == "twitter").then_some(options.unique).flatten(),
+                            text_tweets: (category == "twitter")
+                                .then_some(options.text_tweets)
+                                .flatten(),
+                            unavailable: (category == "twitter")
+                                .then_some(options.unavailable)
+                                .flatten(),
+                            size: (category == "twitter")
+                                .then(|| options.size.clone())
+                                .flatten(),
+                            fallback: options.fallback,
+                            articles: (category == "twitter")
+                                .then_some(options.articles)
+                                .flatten(),
+                            cards: (category == "twitter").then_some(options.cards).flatten(),
+                            cards_blacklist: (category == "twitter")
+                                .then(|| options.cards_blacklist.clone())
+                                .flatten(),
+                            videos: (category == "twitter").then_some(options.videos).flatten(),
+                            previews: (category == "twitter")
+                                .then_some(options.previews)
+                                .flatten(),
+                            tweet_endpoint: (category == "twitter")
+                                .then_some(options.tweet_endpoint)
+                                .flatten(),
+                            conversations: (category == "twitter")
+                                .then_some(options.conversations)
+                                .flatten(),
+                            pinned: (category == "twitter").then_some(options.pinned).flatten(),
+                            replies: (category == "twitter").then_some(options.replies).flatten(),
+                            strategy: (category == "twitter")
+                                .then_some(options.strategy)
+                                .flatten(),
+                            search_pagination: (category == "twitter")
+                                .then_some(options.search_pagination)
+                                .flatten(),
+                            search_results: (category == "twitter")
+                                .then_some(options.search_results)
+                                .flatten(),
+                            limit: (category == "twitter").then_some(options.limit).flatten(),
+                            search_limit: (category == "twitter")
+                                .then_some(options.search_limit)
+                                .flatten(),
+                            search_stop: (category == "twitter")
+                                .then_some(options.search_stop)
+                                .flatten(),
+                        },
+                    )
+                }
+            }
+        } else if let Some(item) = extract::direct(&url) {
+            stream::iter(event::group(vec![item], "direct").into_iter().map(Ok)).boxed()
+        } else {
+            return Err(error(
+                "unsupported URL; expected a social URL or direct media file",
+            ));
+        };
+        Ok(input)
+    })
+    .try_flatten()
+    .boxed()
+}
+
+struct Settings {
+    options: ConfigOptions,
+    browser: Option<FirefoxProfile>,
+    browser_spec: Option<String>,
+    filename: Option<FilenameTemplate>,
+    directory: Option<DirectoryTemplate>,
+    selection: Option<RangeSelection>,
+    filter: Option<FilterExpression>,
+    post_selection: Option<PostSelection>,
+    dates: DateFilter,
+    network: NetworkOptions,
+    download_client: OnceCell<Result<download::DownloadClient>>,
+    limits: SizeLimits,
+}
+
+async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
+    let config = match &args.native_config {
+        Some(path) => Config::load(path).await?,
+        None => Config::default(),
+    };
+    let defaults = ConfigOptions {
+        base_directory: Some(PathBuf::from("downloads")),
+        retries: Some(2),
+        timeout: Some(Duration::from_secs(60)),
+        ..ConfigOptions::default()
+    };
+    let overrides = ConfigOptions {
+        base_directory: args
+            .exact_directory
+            .clone()
+            .or_else(|| args.destination.clone()),
+        filename: args.filename.clone(),
+        file_range: args.file_range.clone(),
+        file_filter: (!args.file_filter.is_empty()).then(|| args.file_filter.clone()),
+        post_range: args.post_range.clone(),
+        post_filter: (!args.post_filter.is_empty()).then(|| args.post_filter.clone()),
+        date_before: args.date_before,
+        date_after: args.date_after,
+        directory: if args.exact_directory.is_some() {
+            Some(Vec::new())
+        } else {
+            (!args.directory.is_empty()).then(|| args.directory.clone())
+        },
+        cookies: args.cookies.clone(),
+        browser_cookies: None,
+        retweets: None,
+        quoted: None,
+        expand: None,
+        unique: None,
+        videos: None,
+        previews: None,
+        unavailable: None,
+        text_tweets: if args.text_tweets {
+            Some(true)
+        } else if args.no_text_tweets {
+            Some(false)
+        } else {
+            None
+        },
+        size: None,
+        fallback: None,
+        articles: None,
+        cards: None,
+        cards_blacklist: None,
+        tweet_endpoint: None,
+        conversations: None,
+        pinned: None,
+        replies: None,
+        strategy: None,
+        search_pagination: None,
+        search_results: None,
+        limit: None,
+        search_limit: None,
+        search_stop: None,
+        proxy: args.proxy.clone(),
+        user_agent: args.user_agent.clone(),
+        archive: args.download_archive.clone(),
+        filesize_min: args.filesize_min,
+        filesize_max: args.filesize_max,
+        retries: args.retries,
+        timeout: args.timeout,
+    };
+    let mut settings = BTreeMap::new();
+    for category in ["instagram", "twitter", "facebook", "direct"] {
+        let options = defaults
+            .overlay(&config.resolve(category)?)
+            .overlay(&overrides);
+        let browser_spec = args.cookies_from_browser.clone().or_else(|| {
+            options.browser_cookies.as_ref().map(|profile| {
+                // Config parsing has already checked that this path is UTF-8.
+                format!("firefox:{}", profile.display())
+            })
+        });
+        let browser = if matches!(args.extractor, Extractor::Native) {
+            browser_spec
+                .as_deref()
+                .map(FirefoxProfile::parse)
+                .transpose()?
+        } else {
+            None
+        };
+        let filename = options
+            .filename
+            .as_deref()
+            .map(FilenameTemplate::parse)
+            .transpose()?;
+        let directory = options
+            .directory
+            .as_deref()
+            .map(DirectoryTemplate::parse)
+            .transpose()?;
+        let selection = options
+            .file_range
+            .as_deref()
+            .map(RangeSelection::parse)
+            .transpose()?;
+        let filter = options
+            .file_filter
+            .as_deref()
+            .map(FilterExpression::parse_all)
+            .transpose()?;
+        let post_range = options
+            .post_range
+            .as_deref()
+            .map(RangeSelection::parse)
+            .transpose()
+            .map_err(|_| error("invalid post range"))?;
+        let post_filter = options
+            .post_filter
+            .as_deref()
+            .filter(|clauses| !clauses.is_empty())
+            .map(FilterExpression::parse_all)
+            .transpose()?;
+        let post_selection = (post_range.is_some() || post_filter.is_some())
+            .then(|| PostSelection::new(post_range, post_filter));
+        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
+        let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
+        let dates = DateFilter::new(options.date_before, options.date_after)?;
+        settings.insert(
+            category,
+            Settings {
+                options,
+                browser,
+                browser_spec,
+                filename,
+                directory,
+                selection,
+                filter,
+                post_selection,
+                dates,
+                network,
+                download_client: OnceCell::new(),
+                limits,
+            },
+        );
+    }
+    Ok(settings)
 }

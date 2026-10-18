@@ -1,0 +1,58 @@
+{
+  "data": {
+    "tweetResult": {
+      "result": {
+        "__typename": "Tweet",
+        "rest_id": "1234567890",
+        "core": {
+          "user_results": {
+            "result": {
+              "legacy": {
+                "screen_name": "fixture_user"
+              }
+            }
+          }
+        },
+        "legacy": {
+          "id_str": "1234567890",
+          "full_text": "Synthetic post",
+          "created_at": "Tue Nov 14 22:13:20 +0000 2023",
+          "extended_entities": {
+            "media": [
+              {
+                "type": "photo",
+                "media_url_https": "https://pbs.example/media/fixture.jpg"
+              },
+              {
+                "type": "video",
+                "media_url_https": "https://pbs.example/thumbnail.jpg",
+                "video_info": {
+                  "variants": [
+                    {
+                      "content_type": "application/x-mpegURL",
+                      "url": "https://video.example/v.m3u8"
+                    },
+                    {
+                      "content_type": "video/mp4",
+                      "bitrate": 256000,
+                      "url": "https://video.example/low.mp4"
+                    },
+                    {
+                      "content_type": "video/mp4",
+                      "bitrate": 2176000,
+                      "url": "https://video.example/high.mp4?tag=1"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "photo",
+                "media_url_https": "https://pbs.example/media/fixture.jpg"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

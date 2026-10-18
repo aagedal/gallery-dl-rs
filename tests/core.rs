@@ -23,10 +23,11 @@ fn media(url: &str) -> Media {
     }
 }
 
-fn with_metadata() -> download::DownloadOptions {
+fn with_metadata() -> download::DownloadOptions<'static> {
     download::DownloadOptions {
         retries: 0,
         write_metadata: true,
+        ..Default::default()
     }
 }
 
@@ -44,6 +45,13 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
     item.handoff
         .insert("_fallback".into(), "FALLBACK_SECRET".into());
     item.metadata = Some(gallery_dl_rs::extract::PostMetadata {
+        file: None,
+        community: None,
+        community_archive: false,
+        retweet_id: None,
+        quoted_by_id: None,
+        reposted_by_id: None,
+        article: None,
         post_id: "post-1".into(),
         media_id: "media-2".into(),
         shortcode: "example".into(),
@@ -133,6 +141,7 @@ async fn metadata_failure_keeps_completed_media_and_can_be_repaired() {
         download::DownloadOptions {
             retries: 2,
             write_metadata: true,
+            ..Default::default()
         },
     )
     .await
