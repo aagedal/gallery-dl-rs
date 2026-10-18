@@ -1,4 +1,4 @@
-//! Experimental authenticated X posts and profile media timelines.
+//! Experimental authenticated X posts and profile timelines.
 //! GraphQL operation IDs/features are upstream snapshots, not a stable API.
 //! Transaction bootstrap follows the upstream web client and may change without notice.
 use crate::{
@@ -32,14 +32,30 @@ use std::{
     sync::Mutex,
     time::{Duration, SystemTime},
 };
-pub use timeline::is_media_timeline_url;
+pub use timeline::{is_media_timeline_url, is_profile_timeline_url};
 use url::Url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
+/// Select which reply posts are emitted, following the upstream profile context.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReplyMode {
+    #[default]
+    All,
+    Skip,
+    SelfOnly,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProfileOptions {
+    pub pinned: bool,
+    pub replies: ReplyMode,
+}
+
 pub struct Twitter {
     expansion: ExpansionOptions,
+    profile_options: ProfileOptions,
     client: Client,
     network: NetworkOptions,
     cookies: Mutex<CookieJar>,
@@ -69,6 +85,7 @@ impl Twitter {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
             expansion: ExpansionOptions::default(),
+            profile_options: ProfileOptions::default(),
             network: NetworkOptions::default(),
             cookies: Mutex::new(cookies),
             timeout,
@@ -83,6 +100,11 @@ impl Twitter {
     /// Select repost identity and opt into explicit quoted-post traversal.
     pub fn with_expansion(mut self, options: ExpansionOptions) -> Self {
         self.expansion = options;
+        self
+    }
+
+    pub fn with_profile_options(mut self, options: ProfileOptions) -> Self {
+        self.profile_options = options;
         self
     }
 
@@ -424,7 +446,7 @@ fn valid_id(id: &str) -> bool {
         && !id.starts_with('0')
 }
 
-/// Parse first-party single-post URLs. `Twitter::stream` also handles media tabs.
+/// Parse first-party single-post URLs. `Twitter::stream` also handles explicit profile tabs.
 pub fn post_id(url: &Url) -> Result<String> {
     if !matches!(url.scheme(), "http" | "https")
         || !matches!(
@@ -1333,3 +1355,7 @@ mod tests {
 #[cfg(test)]
 #[path = "twitter_profile_tests.rs"]
 mod profile_tests;
+
+#[cfg(test)]
+#[path = "twitter_reply_tests.rs"]
+mod reply_tests;

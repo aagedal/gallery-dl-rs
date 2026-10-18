@@ -201,6 +201,8 @@ pub struct BackendOptions {
     pub user_agent: Option<String>,
     pub retweets: Option<crate::twitter::RetweetMode>,
     pub quoted: Option<bool>,
+    pub pinned: Option<bool>,
+    pub replies: Option<crate::twitter::ReplyMode>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -273,6 +275,17 @@ impl Backend {
         }
         if let Some(quoted) = options.quoted {
             command.arg("--option").arg(format!("quoted={quoted}"));
+        }
+        if let Some(pinned) = options.pinned {
+            command.arg("--option").arg(format!("pinned={pinned}"));
+        }
+        if let Some(replies) = options.replies {
+            let value = match replies {
+                crate::twitter::ReplyMode::All => "true",
+                crate::twitter::ReplyMode::Skip => "false",
+                crate::twitter::ReplyMode::SelfOnly => "\"self\"",
+            };
+            command.arg("--option").arg(format!("replies={value}"));
         }
         command.args([
             "--option",

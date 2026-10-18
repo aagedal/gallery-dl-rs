@@ -38,6 +38,10 @@ pub struct Options {
     pub retweets: Option<crate::twitter::RetweetMode>,
     /// Include media from quoted posts.
     pub quoted: Option<bool>,
+    /// Include the pinned post in account timelines.
+    pub pinned: Option<bool>,
+    /// Which reply posts to include in account timelines.
+    pub replies: Option<crate::twitter::ReplyMode>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
     pub cookies: Option<PathBuf>,
@@ -78,6 +82,8 @@ impl Options {
             date_after: overrides.date_after.or(self.date_after),
             retweets: overrides.retweets.or(self.retweets),
             quoted: overrides.quoted.or(self.quoted),
+            pinned: overrides.pinned.or(self.pinned),
+            replies: overrides.replies.or(self.replies),
             directory: overrides
                 .directory
                 .clone()
@@ -127,6 +133,8 @@ struct RawRoot {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    pinned: Field,
+    replies: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -149,6 +157,8 @@ struct RawExtractor {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    pinned: Field,
+    replies: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -174,6 +184,8 @@ struct RawOptions {
     date_after: Field,
     retweets: Field,
     quoted: Field,
+    pinned: Field,
+    replies: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -262,6 +274,8 @@ impl Config {
             date_after: root.date_after,
             retweets: root.retweets,
             quoted: root.quoted,
+            pinned: root.pinned,
+            replies: root.replies,
             directory: root.directory,
             cookies: root.cookies,
             proxy: root.proxy,
@@ -282,6 +296,8 @@ impl Config {
             date_after: extractor.date_after,
             retweets: extractor.retweets,
             quoted: extractor.quoted,
+            pinned: extractor.pinned,
+            replies: extractor.replies,
             directory: extractor.directory,
             cookies: extractor.cookies,
             proxy: extractor.proxy,
@@ -340,6 +356,24 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration quoted must be a boolean")),
+        };
+        let pinned = match self.pinned.0 {
+            None => None,
+            Some(Value::Bool(value)) => Some(value),
+            Some(_) => return Err(error("native configuration pinned must be a boolean")),
+        };
+        let replies = match self.replies.0 {
+            None => None,
+            Some(Value::Bool(true)) => Some(crate::twitter::ReplyMode::All),
+            Some(Value::Bool(false)) => Some(crate::twitter::ReplyMode::Skip),
+            Some(Value::String(value)) if value == "self" => {
+                Some(crate::twitter::ReplyMode::SelfOnly)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration replies must be a boolean or self",
+                ));
+            }
         };
         let file_range = match self.file_range.0 {
             None => None,
@@ -440,6 +474,8 @@ impl RawOptions {
             date_after: date(self.date_after)?,
             retweets,
             quoted,
+            pinned,
+            replies,
             directory: templates,
             filesize_min: size(self.filesize_min)?,
             filesize_max: size(self.filesize_max)?,

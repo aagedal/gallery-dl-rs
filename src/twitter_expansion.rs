@@ -153,6 +153,8 @@ pub(super) struct Engine {
     jobs: VecDeque<Job>,
     options: ExpansionOptions,
     allow_empty: bool,
+    replies: ReplyMode,
+    profile_owner: Option<String>,
 }
 
 impl Engine {
@@ -175,7 +177,15 @@ impl Engine {
             }]),
             options,
             allow_empty,
+            replies: ReplyMode::All,
+            profile_owner: None,
         }
+    }
+
+    pub(super) fn with_replies(mut self, replies: ReplyMode, owner: Option<String>) -> Self {
+        self.replies = replies;
+        self.profile_owner = owner;
+        self
     }
 
     pub(super) fn supply(&mut self, bytes: &[u8]) -> Result<()> {
@@ -276,6 +286,13 @@ impl Engine {
                     repost_quote: None,
                 });
             }
+            if !keep_reply(
+                job.repost.as_ref().unwrap_or(tweet),
+                self.replies,
+                self.profile_owner.as_deref(),
+            )? {
+                return Ok(Action::Media(Vec::new()));
+            }
             let mut media = parse_tweet_media(tweet, &job.id, self.allow_empty || has_quote)?;
             for item in &mut media {
                 let metadata = item.metadata.as_mut().unwrap();
@@ -301,4 +318,39 @@ impl Engine {
             return Ok(Action::Media(media));
         }
     }
+}
+
+fn keep_reply(tweet: &Value, mode: ReplyMode, profile_owner: Option<&str>) -> Result<bool> {
+    if mode == ReplyMode::All {
+        return Ok(true);
+    }
+    let Some(recipient) = tweet
+        .pointer("/legacy/in_reply_to_user_id_str")
+        .filter(|v| !v.is_null())
+    else {
+        return Ok(true);
+    };
+    let recipient = recipient
+        .as_str()
+        .filter(|id| valid_id(id))
+        .ok_or_else(|| error("Twitter reply recipient identifier invalid"))?;
+    if mode == ReplyMode::Skip {
+        return Ok(false);
+    }
+    let authors: Vec<_> = [
+        tweet.pointer("/legacy/user_id_str"),
+        tweet.pointer("/core/user_results/result/rest_id"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let author = authors
+        .first()
+        .and_then(|v| v.as_str())
+        .filter(|id| valid_id(id))
+        .ok_or_else(|| error("Twitter reply author identifier missing or invalid"))?;
+    if authors.iter().any(|v| v.as_str() != Some(author)) {
+        return Err(error("Twitter reply author fields conflict"));
+    }
+    Ok(author == profile_owner.unwrap_or(recipient))
 }

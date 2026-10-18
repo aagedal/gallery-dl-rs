@@ -842,3 +842,471 @@ async fn quote_cycle_errors_without_refetching_the_ancestor() {
     assert!(stream.next().await.is_none());
     assert_eq!(server.count(), 2);
 }
+
+fn authored(mut value: Value, owner: &str) -> Value {
+    value["legacy"]["user_id_str"] = owner.into();
+    value["core"]["user_results"]["result"]["rest_id"] = owner.into();
+    value
+}
+
+fn reply(id: &str, owner: &str, to: &str) -> Value {
+    let mut value = authored(tweet(id), owner);
+    value["legacy"]["in_reply_to_status_id_str"] = "90".into();
+    value["legacy"]["in_reply_to_user_id_str"] = to.into();
+    value
+}
+
+fn post_ids(media: &[Media]) -> Vec<&str> {
+    media
+        .iter()
+        .map(|item| item.metadata.as_ref().unwrap().post_id.as_str())
+        .collect()
+}
+
+#[tokio::test]
+async fn explicit_profile_tabs_request_their_operations_lazily_and_preserve_page_order() {
+    use timeline::ProfileTab;
+    for (tab, operation) in [
+        (ProfileTab::Tweets, "/E8Wq-_jFSaU7hxVcuOPR9g/UserTweets"),
+        (
+            ProfileTab::Replies,
+            "/-O3QOHrVn1aOm_cF5wyTCQ/UserTweetsAndReplies",
+        ),
+        (
+            ProfileTab::Highlights,
+            "/gmHw9geMTncZ7jeLLUUNOw/UserHighlightsTweets",
+        ),
+    ] {
+        let server = Server::new(vec![
+            Response::json(page(vec![tweet("100"), tweet("101")], Some("next+/="))),
+            Response::json(page(vec![tweet("102")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let mut stream = native.profile_stream(input("id:42"), tab, server.base.clone());
+        assert_eq!(server.count(), 0);
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first.metadata.unwrap().post_id, "100");
+        assert_eq!(server.count(), 1);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(server.count(), 1);
+        let rest: Vec<_> = stream.try_collect().await.unwrap();
+        assert_eq!(post_ids(&rest), ["101", "102"]);
+        let urls = server.urls();
+        assert_eq!(urls.len(), 2);
+        for url in &urls {
+            assert!(url.path().ends_with(operation), "{}", url.path());
+            let vars = variables(url);
+            assert_eq!(vars["userId"], "42");
+            assert_eq!(vars["count"], 50);
+            assert_eq!(vars["includePromotedContent"], false);
+            assert_eq!(vars["withVoice"], true);
+            let toggles: Value = serde_json::from_str(
+                &url.query_pairs()
+                    .find(|(key, _)| key == "fieldToggles")
+                    .unwrap()
+                    .1,
+            )
+            .unwrap();
+            assert_eq!(toggles["withArticlePlainText"], false);
+            if matches!(tab, ProfileTab::Tweets) {
+                assert_eq!(vars["withQuickPromoteEligibilityTweetFields"], false);
+            }
+            if matches!(tab, ProfileTab::Replies) {
+                assert_eq!(vars["withCommunity"], true);
+            }
+        }
+        assert!(variables(&urls[0]).get("cursor").is_none());
+        assert_eq!(variables(&urls[1])["cursor"], "next+/=");
+        assert_scoped_expansion_requests(&server, &native);
+    }
+}
+
+#[tokio::test]
+async fn profile_tabs_keep_foreign_conversation_context_but_reject_conflicting_author_aliases() {
+    for tab in [
+        timeline::ProfileTab::Tweets,
+        timeline::ProfileTab::Replies,
+        timeline::ProfileTab::Highlights,
+    ] {
+        let server = Server::new(vec![Response::json(page(
+            vec![authored(tweet("100"), "99"), tweet("101")],
+            None,
+        ))]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let items: Vec<_> = native
+            .profile_stream(input("id:42"), tab, server.base.clone())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), ["100", "101"]);
+
+        let mut conflicting = authored(tweet("102"), "99");
+        conflicting["core"]["user_results"]["result"]["rest_id"] = "42".into();
+        let server = Server::new(vec![Response::json(page(vec![conflicting], None))]);
+        let mut stream = native.profile_stream(input("id:42"), tab, server.base.clone());
+        assert!(stream.next().await.unwrap().is_err());
+        assert!(stream.next().await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn pinned_profile_posts_are_opt_in_and_precede_regular_posts_when_enabled() {
+    for pinned in [false, true] {
+        let mut body = page(vec![tweet("101")], None);
+        body["data"]["user"]["result"]["timeline"]["timeline"]["instructions"]
+            .as_array_mut()
+            .unwrap()
+            .insert(
+                0,
+                json!({"type":"TimelinePinEntry","entry":entry(tweet("100"))}),
+            );
+        let mut responses = Vec::new();
+        if pinned {
+            responses.push(Response::json(user()));
+        }
+        responses.push(Response::json(body));
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3)).await;
+        let native = if pinned {
+            native.with_profile_options(ProfileOptions {
+                pinned,
+                replies: ReplyMode::All,
+            })
+        } else {
+            native
+        };
+        let items: Vec<_> = native
+            .profile_stream(
+                input("id:42"),
+                timeline::ProfileTab::Tweets,
+                server.base.clone(),
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            post_ids(&items),
+            if pinned {
+                vec!["100", "101"]
+            } else {
+                vec!["101"]
+            }
+        );
+    }
+}
+
+#[tokio::test]
+async fn reply_modes_filter_profile_replies_using_the_requested_profile_owner() {
+    for (mode, expected) in [
+        (ReplyMode::All, vec!["100", "101", "102", "103"]),
+        (ReplyMode::Skip, vec!["100"]),
+        (ReplyMode::SelfOnly, vec!["100", "101", "103"]),
+    ] {
+        let server = Server::new(vec![Response::json(page(
+            vec![
+                tweet("100"),
+                reply("101", "42", "99"),
+                reply("102", "99", "42"),
+                reply("103", "42", "42"),
+            ],
+            None,
+        ))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_profile_options(ProfileOptions {
+                pinned: false,
+                replies: mode,
+            });
+        let items: Vec<_> = native
+            .profile_stream(
+                input("id:42"),
+                timeline::ProfileTab::Replies,
+                server.base.clone(),
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(post_ids(&items), expected);
+    }
+}
+
+#[tokio::test]
+async fn duplicate_media_across_pins_pages_and_quotes_is_suppressed_per_profile_input() {
+    let mut first = page(vec![tweet("100"), quoted_tweet("101", "102")], Some("next"));
+    first["data"]["user"]["result"]["timeline"]["timeline"]["instructions"]
+        .as_array_mut()
+        .unwrap()
+        .insert(
+            0,
+            json!({"type":"TimelinePinEntry","entry":entry(tweet("100"))}),
+        );
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(first),
+        Response::json(post_response(tweet("102"))),
+        Response::json(page(vec![tweet("102"), tweet("103")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_expansion(expansion_options(RetweetMode::Skip))
+        .with_profile_options(ProfileOptions {
+            pinned: true,
+            replies: ReplyMode::All,
+        });
+    let items: Vec<_> = native
+        .profile_stream(
+            input("id:42"),
+            timeline::ProfileTab::Tweets,
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "101", "102", "103"]);
+    assert_eq!(server.count(), 4);
+
+    let second = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100")], None)),
+    ]);
+    let items: Vec<_> = native
+        .profile_stream(
+            input("id:42"),
+            timeline::ProfileTab::Tweets,
+            second.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+}
+
+#[tokio::test]
+async fn standalone_reply_filter_uses_the_posts_own_author_for_self_only() {
+    for (mode, author, target, expected) in [
+        (ReplyMode::All, "42", "99", true),
+        (ReplyMode::Skip, "42", "42", false),
+        (ReplyMode::SelfOnly, "42", "42", true),
+        (ReplyMode::SelfOnly, "42", "99", false),
+        (ReplyMode::SelfOnly, "99", "99", true),
+    ] {
+        let server = Server::new(vec![Response::json(post_response(reply(
+            "100", author, target,
+        )))]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_profile_options(ProfileOptions {
+                pinned: false,
+                replies: mode,
+            });
+        let items: Vec<_> = native
+            .post_stream_at(local_post_endpoint(&server, "100"), "100".into())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(items.len(), usize::from(expected));
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn inferred_page_pin_reorders_only_first_page_after_numeric_metadata_lookup() {
+    let mut first = page(vec![tweet("100"), tweet("101")], Some("next"));
+    first["data"]["user"]["result"]["legacy"]["pinned_tweet_ids_str"] = json!(["101"]);
+    let mut second = page(vec![tweet("102"), tweet("103")], None);
+    second["data"]["user"]["result"]["legacy"]["pinned_tweet_ids_str"] = json!(["103"]);
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(first),
+        Response::json(second),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_profile_options(ProfileOptions {
+            pinned: true,
+            replies: ReplyMode::All,
+        });
+    let items: Vec<_> = native
+        .profile_stream(
+            input("id:42"),
+            timeline::ProfileTab::Tweets,
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["101", "100", "102", "103"]);
+    assert_eq!(server.count(), 3);
+    let urls = server.urls();
+    assert!(
+        urls[0]
+            .path()
+            .ends_with("/8r5oa_2vD0WkhIAOkY4TTA/UserByRestId")
+    );
+    assert_eq!(variables(&urls[0])["userId"], "42");
+    assert!(
+        urls[1..]
+            .iter()
+            .all(|url| url.path().ends_with("/UserTweets"))
+    );
+}
+
+#[tokio::test]
+async fn inferred_lookup_pin_is_retained_when_first_profile_page_omits_pin_ids() {
+    let mut lookup = user();
+    lookup["data"]["user"]["result"]["legacy"]["pinned_tweet_ids_str"] = json!(["101"]);
+    let server = Server::new(vec![
+        Response::json(lookup),
+        Response::json(page(vec![tweet("100"), tweet("101")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_profile_options(ProfileOptions {
+            pinned: true,
+            replies: ReplyMode::All,
+        });
+    let items: Vec<_> = native
+        .profile_stream(
+            input("fixture"),
+            timeline::ProfileTab::Tweets,
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["101", "100"]);
+    assert_eq!(server.count(), 2);
+    assert!(server.urls()[0].path().ends_with("/UserByScreenName"));
+}
+
+#[tokio::test]
+async fn default_pin_setting_ignores_malformed_lookup_and_page_hints() {
+    let mut lookup = user();
+    lookup["data"]["user"]["result"]["legacy"]["pinned_tweet_ids_str"] =
+        json!("private malformed pin hint");
+    let mut body = page(vec![tweet("100"), tweet("101")], None);
+    body["data"]["user"]["result"]["legacy"]["pinned_tweet_ids_str"] = json!([false]);
+    let server = Server::new(vec![Response::json(lookup), Response::json(body)]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let items: Vec<_> = native
+        .profile_stream(
+            input("fixture"),
+            timeline::ProfileTab::Tweets,
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100", "101"]);
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn enabled_pin_setting_rejects_malformed_hints_without_exposing_values() {
+    for from_lookup in [false, true] {
+        let mut body = if from_lookup {
+            user()
+        } else {
+            page(vec![tweet("100")], None)
+        };
+        body["data"]["user"]["result"]["legacy"]["pinned_tweet_ids_str"] =
+            json!(["private malformed pin hint"]);
+        let mut responses = Vec::new();
+        if !from_lookup {
+            responses.push(Response::json(user()));
+        }
+        responses.push(Response::json(body));
+        let server = Server::new(responses);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_profile_options(ProfileOptions {
+                pinned: true,
+                replies: ReplyMode::All,
+            });
+        let mut stream = native.profile_stream(
+            input(if from_lookup { "fixture" } else { "id:42" }),
+            timeline::ProfileTab::Tweets,
+            server.base.clone(),
+        );
+        let error = stream.next().await.unwrap().unwrap_err().to_string();
+        assert!(error.contains("pinned"));
+        assert!(!error.contains("private malformed pin hint"));
+        assert!(stream.next().await.is_none());
+        assert_eq!(server.count(), if from_lookup { 1 } else { 2 });
+    }
+}
+
+#[tokio::test]
+async fn numeric_pin_lookup_validates_owner_and_uses_metadata_pin_hint() {
+    for matches_owner in [false, true] {
+        let mut lookup = user();
+        lookup["data"]["user"]["result"]["legacy"]["pinned_tweet_ids_str"] = json!(["101"]);
+        if !matches_owner {
+            lookup["data"]["user"]["result"]["rest_id"] = "99".into();
+        }
+        let server = Server::new(vec![
+            Response::json(lookup),
+            Response::json(page(vec![tweet("100"), tweet("101")], None)),
+        ]);
+        let native = extractor(Duration::from_secs(3))
+            .await
+            .with_profile_options(ProfileOptions {
+                pinned: true,
+                replies: ReplyMode::All,
+            });
+        let mut stream = native.profile_stream(
+            input("id:42"),
+            timeline::ProfileTab::Tweets,
+            server.base.clone(),
+        );
+        assert_eq!(server.count(), 0);
+        if matches_owner {
+            let items: Vec<_> = stream.try_collect().await.unwrap();
+            assert_eq!(post_ids(&items), ["101", "100"]);
+            assert_eq!(server.count(), 2);
+        } else {
+            assert!(stream.next().await.unwrap().is_err());
+            assert!(stream.next().await.is_none());
+            assert_eq!(server.count(), 1);
+        }
+        assert!(server.urls()[0].path().ends_with("/UserByRestId"));
+        assert_eq!(variables(&server.urls()[0])["userId"], "42");
+    }
+}
+
+#[tokio::test]
+async fn duplicate_post_batches_keep_first_media_siblings_and_skip_refreshed_extra_media() {
+    let mut original = tweet("100");
+    let first_photo = original["legacy"]["extended_entities"]["media"][0].clone();
+    let mut second_photo = first_photo.clone();
+    second_photo["media_url_https"] = "https://pbs.example/media/second.jpg".into();
+    original["legacy"]["extended_entities"]["media"] = json!([first_photo, second_photo]);
+    let mut refreshed = original.clone();
+    let mut third_photo = refreshed["legacy"]["extended_entities"]["media"][0].clone();
+    third_photo["media_url_https"] = "https://pbs.example/media/third.jpg".into();
+    refreshed["legacy"]["extended_entities"]["media"]
+        .as_array_mut()
+        .unwrap()
+        .push(third_photo);
+    let server = Server::new(vec![
+        Response::json(page(vec![original], Some("next"))),
+        Response::json(page(vec![refreshed, tweet("101")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let mut stream = native.profile_stream(
+        input("id:42"),
+        timeline::ProfileTab::Tweets,
+        server.base.clone(),
+    );
+    let first = stream.next().await.unwrap().unwrap();
+    let second = stream.next().await.unwrap().unwrap();
+    assert_eq!(server.count(), 1);
+    assert_eq!(first.metadata.as_ref().unwrap().post_id, "100");
+    assert_eq!(first.metadata.as_ref().unwrap().index, 1);
+    assert_eq!(second.metadata.as_ref().unwrap().post_id, "100");
+    assert_eq!(second.metadata.as_ref().unwrap().index, 2);
+    assert_ne!(first.url, second.url);
+    let rest: Vec<_> = stream.try_collect().await.unwrap();
+    assert_eq!(post_ids(&rest), ["101"]);
+    assert_eq!(server.count(), 2);
+}

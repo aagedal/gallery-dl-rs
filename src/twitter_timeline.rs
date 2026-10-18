@@ -1,4 +1,4 @@
-//! Identity-bound parsing of the X media timeline GraphQL envelope.
+//! Identity-bound parsing of explicit X profile timeline GraphQL envelopes.
 //! No recursive search: quoted posts and recommendation payloads are not posts.
 use super::*;
 
@@ -8,14 +8,34 @@ pub(super) enum ProfileInput {
     Id(String),
 }
 
-pub fn is_media_timeline_url(url: &Url) -> bool {
-    input(url).is_ok()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProfileTab {
+    Media,
+    Tweets,
+    Replies,
+    Highlights,
 }
 
+pub fn is_media_timeline_url(url: &Url) -> bool {
+    matches!(profile_input(url), Ok((_, ProfileTab::Media)))
+}
+
+pub fn is_profile_timeline_url(url: &Url) -> bool {
+    profile_input(url).is_ok()
+}
+
+#[cfg(test)]
 pub(super) fn input(url: &Url) -> Result<ProfileInput> {
+    match profile_input(url)? {
+        (user, ProfileTab::Media) => Ok(user),
+        _ => Err(error("native Twitter media timeline URL required")),
+    }
+}
+
+pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
     let invalid = || {
         error(
-            "native Twitter media timelines require a first-party /USER/media URL; use --extractor compatibility for other URLs",
+            "native Twitter profile timelines require a first-party /USER/media, /USER/tweets, /USER/with_replies, or /USER/highlights URL; use --extractor compatibility for other URLs",
         )
     };
     if !matches!(url.scheme(), "http" | "https")
@@ -37,20 +57,28 @@ pub(super) fn input(url: &Url) -> Result<ProfileInput> {
         return Err(invalid());
     }
     let path = url.path().strip_suffix('/').unwrap_or(url.path());
-    let mut parts = path.split('/');
-    match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(""), Some(user), Some("media"), None) => {
-            if let Some(id) = user.strip_prefix("id:") {
-                if valid_id(id) {
-                    return Ok(ProfileInput::Id(id.into()));
-                }
-            } else if valid_name(user) {
-                return Ok(ProfileInput::Name(user.into()));
-            }
-            Err(invalid())
+    let parts: Vec<_> = path.split('/').collect();
+    let ["", user, tab] = parts.as_slice() else {
+        return Err(invalid());
+    };
+    let tab = match *tab {
+        "media" => ProfileTab::Media,
+        "tweets" => ProfileTab::Tweets,
+        "with_replies" => ProfileTab::Replies,
+        "highlights" => ProfileTab::Highlights,
+        _ => return Err(invalid()),
+    };
+    let user = if let Some(id) = user.strip_prefix("id:") {
+        if !valid_id(id) {
+            return Err(invalid());
         }
-        _ => Err(invalid()),
-    }
+        ProfileInput::Id(id.into())
+    } else if valid_name(user) {
+        ProfileInput::Name((*user).into())
+    } else {
+        return Err(invalid());
+    };
+    Ok((user, tab))
 }
 
 fn valid_name(name: &str) -> bool {
@@ -110,17 +138,46 @@ pub(super) fn parse_user(bytes: &[u8], input: &ProfileInput) -> Result<String> {
     Ok(id.into())
 }
 
+pub(super) fn user_pin(bytes: &[u8], owner_id: &str) -> Result<Option<String>> {
+    let data = document(bytes)?;
+    let user = data
+        .pointer("/data/user/result")
+        .ok_or_else(|| error("Twitter user result missing"))?;
+    if user["__typename"] != "User" || user["rest_id"].as_str() != Some(owner_id) {
+        return Err(error("Twitter response does not match the requested user"));
+    }
+    pinned_id(user)
+}
+
+fn pinned_id(user: &Value) -> Result<Option<String>> {
+    let Some(value) = user
+        .pointer("/legacy/pinned_tweet_ids_str")
+        .filter(|v| !v.is_null())
+    else {
+        return Ok(None);
+    };
+    let ids = value
+        .as_array()
+        .filter(|ids| ids.len() <= 32)
+        .ok_or_else(|| error("Twitter pinned post identifiers malformed"))?;
+    if ids.iter().any(|id| !id.as_str().is_some_and(valid_id)) {
+        return Err(error("Twitter pinned post identifier invalid"));
+    }
+    Ok(ids.first().and_then(Value::as_str).map(str::to_owned))
+}
+
 pub(super) struct Page {
     #[cfg(test)]
     pub(super) media: Vec<Media>,
     pub(super) posts: Vec<(String, Value)>,
     pub(super) cursor: Option<String>,
     pub(super) done: bool,
+    tab: ProfileTab,
 }
 
 #[cfg(test)]
 pub(super) fn parse_page(bytes: &[u8], owner_id: &str) -> Result<Page> {
-    let mut page = parse_posts(bytes, owner_id)?;
+    let mut page = parse_profile_posts(bytes, owner_id, ProfileTab::Media, true)?;
     for (id, post) in std::mem::take(&mut page.posts) {
         let mut engine = expansion::Engine::new(post, id, ExpansionOptions::default(), true);
         loop {
@@ -136,7 +193,23 @@ pub(super) fn parse_page(bytes: &[u8], owner_id: &str) -> Result<Page> {
     Ok(page)
 }
 
-pub(super) fn parse_posts(bytes: &[u8], owner_id: &str) -> Result<Page> {
+#[cfg(test)]
+pub(super) fn parse_profile_posts(
+    bytes: &[u8],
+    owner_id: &str,
+    tab: ProfileTab,
+    pinned: bool,
+) -> Result<Page> {
+    parse_profile_posts_with_pin(bytes, owner_id, tab, pinned, None)
+}
+
+pub(super) fn parse_profile_posts_with_pin(
+    bytes: &[u8],
+    owner_id: &str,
+    tab: ProfileTab,
+    pinned: bool,
+    pinned_hint: Option<&str>,
+) -> Result<Page> {
     if !valid_id(owner_id) {
         return Err(error("invalid Twitter timeline owner identifier"));
     }
@@ -168,7 +241,9 @@ pub(super) fn parse_posts(bytes: &[u8], owner_id: &str) -> Result<Page> {
         posts: Vec::new(),
         cursor: None,
         done: false,
+        tab,
     };
+    let mut pinned_entry = None;
     let mut entries_seen = false;
     for instruction in instructions {
         match instruction.get("type").and_then(Value::as_str) {
@@ -193,13 +268,16 @@ pub(super) fn parse_posts(bytes: &[u8], owner_id: &str) -> Result<Page> {
                 }
             }
             Some("TimelinePinEntry") => {
-                parse_entry(
-                    instruction
+                entries_seen = true;
+                if pinned {
+                    let entry = instruction
                         .get("entry")
-                        .ok_or_else(|| error("Twitter pinned timeline entry missing"))?,
-                    owner_id,
-                    &mut page,
-                )?;
+                        .ok_or_else(|| error("Twitter pinned timeline entry missing"))?;
+                    if pinned_entry.is_some() {
+                        return Err(error("Twitter pinned timeline entries conflict"));
+                    }
+                    pinned_entry = Some(entry);
+                }
             }
             Some("TimelineReplaceEntry") => {
                 let entry = instruction
@@ -231,6 +309,23 @@ pub(super) fn parse_posts(bytes: &[u8], owner_id: &str) -> Result<Page> {
             }
             _ => return Err(error("unsupported Twitter media timeline instruction")),
         }
+    }
+    let inferred_pin = if pinned && pinned_entry.is_none() {
+        pinned_id(user)?.or_else(|| pinned_hint.map(str::to_owned))
+    } else {
+        None
+    };
+    if let Some(entry) = pinned_entry {
+        let ordinary = std::mem::take(&mut page.posts);
+        parse_entry(entry, owner_id, &mut page)?;
+        page.posts.extend(ordinary);
+        entries_seen = true;
+    }
+    if let Some(id) = inferred_pin
+        && let Some(index) = page.posts.iter().position(|(post_id, _)| post_id == &id)
+    {
+        let post = page.posts.remove(index);
+        page.posts.insert(0, post);
     }
     if !entries_seen && !page.done && page.cursor.is_none() {
         return Err(error(
@@ -374,7 +469,17 @@ fn parse_item(item: &Value, owner_id: &str, page: &mut Page) -> Result<()> {
     .into_iter()
     .flatten()
     .collect();
-    if owners.is_empty() || owners.iter().any(|v| v.as_str() != Some(owner_id)) {
+    let author = owners
+        .first()
+        .and_then(|v| v.as_str())
+        .filter(|id| valid_id(id))
+        .ok_or_else(|| error("Twitter timeline post owner identifier missing or invalid"))?;
+    if owners.iter().any(|v| v.as_str() != Some(author)) {
+        return Err(error("Twitter timeline post owner fields conflict"));
+    }
+    // Conversation modules on posts/replies/highlights can include other authors.
+    // The enclosing user result binds membership; each post still proves its own ID.
+    if page.tab == ProfileTab::Media && author != owner_id {
         return Err(error(
             "Twitter timeline post does not match the requested user",
         ));
@@ -416,6 +521,69 @@ mod tests {
     }
     fn parse(bytes: Vec<u8>) -> Page {
         parse_page(&bytes, "42").unwrap()
+    }
+
+    #[test]
+    fn explicit_profile_tabs_accept_only_valid_first_party_paths() {
+        for (route, tab) in [
+            ("media", ProfileTab::Media),
+            ("tweets", ProfileTab::Tweets),
+            ("with_replies", ProfileTab::Replies),
+            ("highlights", ProfileTab::Highlights),
+        ] {
+            for user in ["User_123", "id:42"] {
+                let url = Url::parse(&format!(
+                    "https://twitter.com/{user}/{route}/?s=20#fragment"
+                ))
+                .unwrap();
+                let (_, actual) = profile_input(&url).unwrap();
+                assert_eq!(actual, tab);
+                assert!(is_profile_timeline_url(&url));
+                assert_eq!(is_media_timeline_url(&url), tab == ProfileTab::Media);
+            }
+        }
+        for url in [
+            "https://x.com/user",
+            "https://x.com/user/timeline",
+            "https://x.com/user/likes",
+            "https://x.com/user/tweets/extra",
+            "https://x.com/user/with-replies",
+            "https://x.com/id:0/tweets",
+            "https://x.com/id:042/tweets",
+            "https://x.com/a%2fb/highlights",
+            "https://x.com/a/tweets//",
+            "https://x.com.evil/a/tweets",
+            "https://user:secret@x.com/a/tweets",
+            "https://x.com:444/a/tweets",
+        ] {
+            assert!(!is_profile_timeline_url(&Url::parse(url).unwrap()), "{url}");
+        }
+    }
+
+    #[test]
+    fn pins_are_skipped_without_parsing_when_disabled_and_validate_when_enabled() {
+        let bytes = page(json!([{"type":"TimelinePinEntry","entry":{"private":"secret"}}]));
+        let parsed = parse_profile_posts(&bytes, "42", ProfileTab::Tweets, false).unwrap();
+        assert!(parsed.posts.is_empty());
+        assert!(parsed.done);
+        let message = parse_profile_posts(&bytes, "42", ProfileTab::Tweets, true)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!message.contains("secret"));
+        let bytes = page(json!([
+            {"type":"TimelineAddEntries","entries":[entry(tweet("11"))]},
+            {"type":"TimelinePinEntry","entry":entry(tweet("10"))}
+        ]));
+        let parsed = parse_profile_posts(&bytes, "42", ProfileTab::Tweets, true).unwrap();
+        assert_eq!(
+            parsed
+                .posts
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            ["10", "11"]
+        );
     }
 
     #[test]

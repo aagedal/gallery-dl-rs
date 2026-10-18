@@ -316,6 +316,92 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
 
 #[cfg(unix)]
 #[test]
+fn twitter_profile_config_is_forwarded_only_when_explicit_and_only_for_twitter() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &script,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$PROFILE_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (settings, expected) in [
+        (serde_json::json!({}), vec![]),
+        (
+            serde_json::json!({"extractor":{"twitter":{"pinned":true,"replies":"self"}}}),
+            vec!["pinned=true", "replies=\"self\""],
+        ),
+        (
+            serde_json::json!({"extractor":{"pinned":true,"replies":true,"twitter":{"pinned":false,"replies":false}}}),
+            vec!["pinned=false", "replies=false"],
+        ),
+        (
+            serde_json::json!({"pinned":true,"replies":true,"extractor":{"twitter":{"pinned":false,"replies":false}}}),
+            vec!["pinned=true", "replies=true"],
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for (url, twitter) in [
+            ("https://x.com/user/tweets", true),
+            ("https://instagram.com/p/example/", false),
+        ] {
+            let output = binary()
+                .env("PROFILE_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&script)
+                .args(["-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let arguments: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = arguments
+                .windows(2)
+                .filter(|pair| pair[0] == "--option")
+                .map(|pair| pair[1])
+                .filter(|value| value.starts_with("pinned=") || value.starts_with("replies="))
+                .collect();
+            assert_eq!(forwarded, if twitter { expected.clone() } else { vec![] });
+            assert_eq!(&arguments[arguments.len() - 2..], &["--", url]);
+        }
+    }
+
+    std::fs::remove_file(&log).unwrap();
+    for settings in [
+        serde_json::json!({"pinned":"PRIVATE-PINNED-DETAIL"}),
+        serde_json::json!({"extractor":{"twitter":{"replies":"PRIVATE-REPLY-DETAIL"}}}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let output = binary()
+            .env("PROFILE_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&script)
+            .args(["-g", "https://x.com/user/with_replies"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-"));
+        assert!(!log.exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn social_backend_is_invoked_without_a_shell() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
@@ -679,6 +765,12 @@ fn native_twitter_reports_authentication_without_launching_backend_and_continues
         "https://x.com/person/status/123",
         "https://x.com/person/media",
         "https://x.com/id:42/media",
+        "https://x.com/person/tweets",
+        "https://x.com/person/with_replies",
+        "https://x.com/person/highlights",
+        "https://x.com/id:42/tweets",
+        "https://x.com/id:42/with_replies",
+        "https://x.com/id:42/highlights",
     ] {
         let output = binary()
             .args([
@@ -712,6 +804,9 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
     for url in [
         "https://x.com/person/status/123",
         "https://x.com/person/media",
+        "https://x.com/person/tweets",
+        "https://x.com/person/with_replies",
+        "https://x.com/person/highlights",
         "https://instagram.com/p/BA/",
         "https://instagram.com/person/",
         "https://facebook.com/photo/?fbid=1",

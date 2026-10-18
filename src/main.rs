@@ -20,7 +20,7 @@ use gallery_dl_rs::{
     network::NetworkOptions,
     selection::RangeSelection,
     size::{SizeLimits, parse_bytes},
-    twitter::{ExpansionOptions, Twitter},
+    twitter::{ExpansionOptions, ProfileOptions, Twitter},
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -100,7 +100,7 @@ struct Args {
     /// Override the User-Agent for extraction and media HTTP requests
     #[arg(short = 'a', long)]
     user_agent: Option<String>,
-    /// Social extractor; native supports experimental Instagram collections/stories/posts, Facebook media/albums, and X posts/media
+    /// Social extractor; native supports experimental Instagram collections/stories/posts, Facebook media/albums, and X posts/profile tabs
     #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
@@ -201,7 +201,7 @@ async fn run(args: Args) -> Result<()> {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
                         gallery_dl_rs::instagram::is_story_url(&url)
                             || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
-                            || gallery_dl_rs::twitter::is_media_timeline_url(&url)
+                            || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || (extract::social_site(&url) == Some("twitter")
                                 && settings["twitter"].options.quoted == Some(true))
                     });
@@ -423,6 +423,10 @@ fn extract_input<'a>(
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
                                     })
+                                    .with_profile_options(ProfileOptions {
+                                        pinned: options.pinned.unwrap_or_default(),
+                                        replies: options.replies.unwrap_or_default(),
+                                    })
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -473,6 +477,8 @@ fn extract_input<'a>(
                                 .then_some(options.retweets)
                                 .flatten(),
                             quoted: (category == "twitter").then_some(options.quoted).flatten(),
+                            pinned: (category == "twitter").then_some(options.pinned).flatten(),
+                            replies: (category == "twitter").then_some(options.replies).flatten(),
                         },
                     )
                 }
@@ -532,6 +538,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         browser_cookies: None,
         retweets: None,
         quoted: None,
+        pinned: None,
+        replies: None,
         proxy: args.proxy.clone(),
         user_agent: args.user_agent.clone(),
         archive: args.download_archive.clone(),

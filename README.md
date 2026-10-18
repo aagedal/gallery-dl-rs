@@ -8,7 +8,7 @@ An early Rust implementation of a gallery downloader, inspired by
 The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
 extraction defaults to a separately installed `gallery-dl` executable and reads
 its JSON messages. Experimental native Instagram posts/collections/stories/highlights, Facebook
-photos/albums/videos, and Twitter/X posts/media timelines are available with `--extractor native`; authenticated live post
+photos/albums/videos, and Twitter/X posts/profile timelines are available with `--extractor native`; authenticated live post
 extraction has not yet been verified.
 
 ## Build and run
@@ -67,7 +67,8 @@ supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
 stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
 `/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
 `/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
-`/USER/videos/ID` videos, and Twitter/X single-status and `/USER/media` URLs.
+`/USER/videos/ID` videos, and Twitter/X single-status plus `/USER/media`, `/USER/tweets`, `/USER/with_replies`,
+and `/USER/highlights` URLs.
 Other profiles, threads, and album listings still need the
 compatibility backend. There is no automatic fallback. Native mode rejects `--config`, which contains gallery-dl settings.
 Use `--native-config` for settings applied by Rust with either extractor backend.
@@ -233,25 +234,42 @@ retweets are skipped and quoted posts are not expanded by default. Missing video
 variants fail instead of returning thumbnails. Protected, missing, expired-session,
 rate-limit, and challenge responses fail explicitly.
 
-Experimental X media timelines use `Twitter::stream` and the native CLI at
-`/USERNAME/media` or `/id:USER_ID/media` on X/Twitter hosts. Username lookup uses
-`UserByScreenName`; an explicit numeric ID skips that lookup. The `UserMedia`
-response must identify the requested account, and every non-promoted post must
-belong to it. Structured timeline entries, grid modules, appended module items,
-pins, replacement cursors, and explicit termination preserve media source order.
-Each post uses the same media parser and archive identity as single-post extraction.
+Experimental X profile timelines use `Twitter::stream` and the native CLI at
+`/USERNAME/media`, `/USERNAME/tweets`, `/USERNAME/with_replies`, and
+`/USERNAME/highlights`, with equivalent `/id:USER_ID/TAB` forms on X/Twitter hosts.
+Username lookup uses `UserByScreenName`. Numeric IDs skip lookup by default;
+`pinned: true` requests `UserByRestId` metadata to identify the pinned post.
+The response must identify the requested account. Media-tab posts must belong to
+it; posts/replies/highlights may include conversation authors, whose IDs must
+still agree with their own aliases. Structured entries, conversation/grid
+modules, appended module items, replacement cursors, and explicit termination
+preserve source order. Each post shares single-post media and archive handling.
 
-Only the current bounded page and parsed jobs are retained, plus fixed-size
-cursor-history digests. Later pages wait until the current jobs drain; dropping
-the stream or reaching a file range stops later requests. Active extraction time
-includes profile lookup, transaction bootstrap, requests, and retries, excluding
-consumer pauses. Empty pages with an advancing Bottom cursor continue. A
-well-formed entries response without a Bottom cursor, or explicit Bottom
-termination, completes traversal. Missing instructions, conflicting/repeated
-cursors, unavailable/foreign posts, and unsupported entries fail explicitly;
-earlier pages survive a late failure. Known promotions/recommendations and valid
-text-only posts are skipped. Cards/articles and other profile tabs remain outside
-native coverage.
+The stream retains one bounded page, pending jobs, and sets of fixed-size cursor
+and emitted-post identity digests. All media siblings from a post's first
+occurrence are kept; overlapping pages, pins, and quote expansion do not emit the
+same post again within that input. Later pages wait until current jobs drain;
+dropping the stream or reaching a file range stops later requests. Active
+extraction time includes profile lookup, transaction bootstrap, requests, and
+retries, excluding consumer pauses. Empty pages with an advancing Bottom cursor
+continue. A well-formed entries response without a Bottom cursor, or explicit
+Bottom termination, completes traversal. Missing instructions, conflicting or
+repeated cursors, unavailable posts, inconsistent identities, and unsupported
+entries fail explicitly; emitted media survive a later failure. Known promotions,
+recommendations, and valid text-only posts are skipped.
+
+Scoped Twitter settings include `"pinned": false` (default) or `true`, and
+`"replies": true` (default), `false`, or `"self"`. Pins are opt-in and precede
+regular first-page posts, whether supplied as a pin instruction or identified in
+user metadata. With `replies: false`, reply posts are skipped. With `"self"`, a
+profile feed retains replies authored by that profile, while a standalone status
+retains replies addressed to its own author. Quote posts are filtered
+independently. These settings also forward to compatibility extraction only when
+explicitly configured. Profile tabs use unordered date filtering so pins and
+conversation context cannot hide later qualifying media.
+
+Root-profile dispatch and `/timeline` search fallback, likes, cards/articles,
+configurable duplicate handling, and other collection routes remain unfinished.
 
 Scoped native configuration supports `"retweets": false` (default), `true`, or
 `"original"`, and `"quoted": false` (default) or `true`. For example:
@@ -462,7 +480,7 @@ bound, drops the extractor, and proceeds to the next input. This assumes newest
 first ordering; an older pinned or out-of-order post can end traversal early.
 Already selected downloads finish normally.
 
-Recognized Instagram story, highlight, story-tray, reels, tagged, and saved-collection URLs, plus X media timelines, use source-order date
+Recognized Instagram story, highlight, story-tray, reels, tagged, and saved-collection URLs, plus X profile timelines, use source-order date
 filtering with either extractor backend: `--date-after` skips older items and
 continues scanning. This avoids dropping newer items later in an ascending or
 mixed-order source. Library users can select the same behavior with
@@ -541,7 +559,7 @@ Neither configuration file is loaded automatically.
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
-`retweets`, `quoted`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`retweets`, `quoted`, `pinned`, `replies`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under `extractor.instagram`,
 `extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then

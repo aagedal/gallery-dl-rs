@@ -643,3 +643,103 @@ fn twitter_expansion_configuration_rejects_duplicate_keys() {
         }
     }
 }
+
+#[test]
+fn twitter_profile_settings_follow_scopes_and_preserve_false_overlays() {
+    use gallery_dl_rs::twitter::ReplyMode;
+    let config = parse(
+        r#"{"extractor":{"pinned":true,"replies":true,"twitter":{"pinned":false,"replies":"self"},"instagram":{"replies":false}}}"#,
+    )
+    .unwrap();
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.pinned, Some(false));
+    assert_eq!(twitter.replies, Some(ReplyMode::SelfOnly));
+    assert_eq!(config.resolve("facebook").unwrap().pinned, Some(true));
+    assert_eq!(
+        config.resolve("facebook").unwrap().replies,
+        Some(ReplyMode::All)
+    );
+    assert_eq!(
+        config.resolve("instagram").unwrap().replies,
+        Some(ReplyMode::Skip)
+    );
+    assert_eq!(twitter.overlay(&Options::default()), twitter);
+    let disabled = twitter.overlay(&Options {
+        pinned: Some(false),
+        replies: Some(ReplyMode::Skip),
+        ..Default::default()
+    });
+    assert_eq!(disabled.pinned, Some(false));
+    assert_eq!(disabled.replies, Some(ReplyMode::Skip));
+    let enabled = disabled.overlay(&Options {
+        pinned: Some(true),
+        replies: Some(ReplyMode::All),
+        ..Default::default()
+    });
+    assert_eq!(enabled.pinned, Some(true));
+    assert_eq!(enabled.replies, Some(ReplyMode::All));
+    let global = parse(
+        r#"{"pinned":false,"replies":false,"extractor":{"pinned":true,"replies":true,"twitter":{"pinned":true,"replies":"self"}}}"#,
+    )
+    .unwrap();
+    for category in ["twitter", "instagram", "facebook", "direct"] {
+        let settings = global.resolve(category).unwrap();
+        assert_eq!(settings.pinned, Some(false));
+        assert_eq!(settings.replies, Some(ReplyMode::Skip));
+    }
+    let absent = parse("{}").unwrap().resolve("twitter").unwrap();
+    assert_eq!(absent.pinned, None);
+    assert_eq!(absent.replies, None);
+}
+
+#[test]
+fn twitter_profile_configuration_rejects_types_privately_in_all_scopes() {
+    use serde_json::json;
+    for (field, value) in [
+        ("pinned", json!(null)),
+        ("pinned", json!(0)),
+        ("pinned", json!(1)),
+        ("pinned", json!([])),
+        ("pinned", json!({"private-key":"private-value"})),
+        ("pinned", json!("private-value")),
+        ("pinned", json!("false")),
+        ("replies", json!(null)),
+        ("replies", json!(0)),
+        ("replies", json!(1)),
+        ("replies", json!([])),
+        ("replies", json!({"private-key":"private-value"})),
+        ("replies", json!("private-value")),
+        ("replies", json!("true")),
+        ("replies", json!("Self")),
+    ] {
+        for document in [
+            json!({(field):value}),
+            json!({"extractor":{(field):value}}),
+            json!({"extractor":{"twitter":{(field):value}}}),
+            json!({"extractor":{"instagram":{(field):value}}}),
+            json!({"extractor":{"facebook":{(field):value}}}),
+            json!({"extractor":{"direct":{(field):value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(!message.contains("private-key"), "{message}");
+            assert!(!message.contains("private-value"), "{message}");
+        }
+    }
+}
+
+#[test]
+fn twitter_profile_configuration_rejects_duplicate_keys() {
+    for field in ["pinned", "replies"] {
+        let duplicate = format!(r#""{field}":false,"{field}":true"#);
+        for document in [
+            format!("{{{duplicate}}}"),
+            format!("{{\"extractor\":{{{duplicate}}}}}"),
+            format!("{{\"extractor\":{{\"twitter\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"instagram\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"facebook\":{{{duplicate}}}}}}}"),
+            format!("{{\"extractor\":{{\"direct\":{{{duplicate}}}}}}}"),
+        ] {
+            assert!(parse(&document).is_err(), "accepted {document}");
+        }
+    }
+}

@@ -68,22 +68,28 @@ shared extraction interface that emits media, post metadata, and child URLs.
   GraphQL photo/video/mixed responses and a successful live authenticated download.
   Compatibility remains the default. Scoped retweet modes and quote expansion
   now share an identity-checked,
-  bounded traversal engine across single posts and media timelines. Missing
+  bounded traversal engine across single posts and profile timelines. Missing
   embedded targets fetch lazily; range/drop cancellation avoids later requests.
   Original and quoted media preserve direct-post archive identities; repost mode
   retains the repost identity. Parser, scoped configuration, compatibility
   forwarding, and local HTTP tests cover these paths. Live authenticated
-  expansion remains unverified. Other profile tabs, threads, and cards/articles
-  remain outside native coverage.
-  **Implemented experimental profile media:** `/USER/media` and numeric ID forms
-  stream `UserMedia` pages after identity-bound `UserByScreenName` resolution when
-  needed. Structured items/grid/module/pin/cursor instructions, owner validation,
-  unchanged post/archive identities, advancing empty pages, source-order dates,
-  cursor-loop errors, page identity/cursor validation, backpressure, active budgets, and cancellation
-  have synthetic/local coverage. Operation-specific signing, scoped cookie/CSRF
-  updates, and configured API/media user agents are tested. Authenticated live
-  traversal, real response fixtures, dynamic operation refresh, broader timeline
-  variants/tabs, and configurable timeline expansion remain.
+  expansion remains unverified. Threads and cards/articles remain outside native
+  coverage.
+  **Implemented experimental profile tabs:** `/USER/media`, `/USER/tweets`,
+  `/USER/with_replies`, `/USER/highlights`, and numeric ID forms stream their
+  operation-specific pages. Username lookup uses identity-bound `UserByScreenName`;
+  numeric IDs skip lookup unless pins require `UserByRestId` metadata. Structured
+  entries, grid/conversation modules, pin instructions, inferred pin IDs, appended
+  modules, and cursor/end instructions have synthetic/local coverage. Media-tab
+  owners remain strict; other tabs allow validated conversation authors. Scoped
+  `pinned` and `replies` settings follow upstream defaults, with independent quote
+  selection and standalone/profile self-reply behavior. Per-input post dedup keeps
+  media siblings while suppressing overlapping pages/pins/quotes. Backpressure,
+  source-order date/range selection, active budgets, cancellation, credential
+  scoping, and compatibility forwarding are tested. Authenticated live traversal,
+  real response fixtures, root-profile dispatch and `/timeline` search fallback,
+  likes/other collection routes, configurable uniqueness, and dynamic operation
+  refresh remain unfinished.
 
 Before calling a site supported natively, require sanitized response fixtures for
 single-media and multi-media posts, authentication failures, missing posts, and

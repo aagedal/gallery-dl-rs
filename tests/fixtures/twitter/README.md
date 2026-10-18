@@ -21,8 +21,10 @@ are checked. Explicit retweet/quote expansion is covered by synthetic derivative
 in `tests/twitter_expansion.rs` and local HTTP cases in `src/twitter_profile_tests.rs`.
 These check original/repost identities, lazy missing-target requests, alias/root
 validation, bounds/cycles, scoped credentials, ranges, dates, and cancellation.
-Other profile tabs, threads, cards/articles, playlists, and collections remain
-unsupported natively. Compatibility remains the default.
+Posts/replies/highlights tabs have synthetic/local coverage described in
+[the profile timeline notes](media_README.md). Root-profile search fallback,
+threads, cards/articles, playlists, and other collections remain unsupported
+natively. Compatibility remains the default.
 
 `transaction-home.html` and `transaction-script.js` are deliberately small
 synthetic shapes. The fixed transaction vector uses key bytes 0..31, protocol
@@ -49,7 +51,7 @@ verifies public bootstrap only, **not authenticated extraction**. The retained
 module fixture is a minimal sanitized HTML shape with a replaced bundle hash;
 full downloaded public pages/assets are kept outside the repository.
 
-Experimental native profile media now has separate
+Experimental native profile tabs have separate
 [synthetic timeline protocol notes](media_README.md). Local HTTP tests exercise
 lazy traversal and account/transaction identity. Successful authenticated media
 timeline extraction and sanitized real response fixtures remain unverified.
