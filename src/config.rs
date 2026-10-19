@@ -362,6 +362,7 @@ struct RawExtractor {
     pinterest: Box<RawOptions>,
     newgrounds: Box<RawOptions>,
     furaffinity: Box<RawOptions>,
+    weasyl: Box<RawOptions>,
     vsco: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
@@ -503,6 +504,7 @@ impl Config {
                 "pinterest",
                 "newgrounds",
                 "furaffinity",
+                "weasyl",
                 "vsco",
                 "direct",
             ] {
@@ -639,12 +641,15 @@ impl Config {
             ("pinterest", extractor.pinterest),
             ("newgrounds", extractor.newgrounds),
             ("furaffinity", extractor.furaffinity),
+            ("weasyl", extractor.weasyl),
             ("vsco", extractor.vsco),
             ("direct", extractor.direct),
         ] {
-            if !matches!(name, "tumblr" | "flickr" | "wallhaven") && settings.api_key.0.is_some() {
+            if !matches!(name, "tumblr" | "flickr" | "wallhaven" | "weasyl")
+                && settings.api_key.0.is_some()
+            {
                 return Err(error(
-                    "native configuration api-key is only supported for tumblr, flickr and wallhaven",
+                    "native configuration api-key is only supported for tumblr, flickr, wallhaven and weasyl",
                 ));
             }
             if name != "pixiv" && settings.refresh_token.0.is_some() {
@@ -698,6 +703,7 @@ impl Config {
                 | "pinterest"
                 | "newgrounds"
                 | "furaffinity"
+                | "weasyl"
                 | "vsco"
                 | "direct"
         ) {

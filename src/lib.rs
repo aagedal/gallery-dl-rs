@@ -44,6 +44,7 @@ pub mod tumblr;
 pub mod twitter;
 pub mod vsco;
 pub mod wallhaven;
+pub mod weasyl;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;

@@ -171,6 +171,14 @@ impl Media {
                 }
                 ("vsco", serde_json::json!([post.media_id]).to_string())
             }
+            // Weasyl files are identified by submission ID.
+            "weasyl" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::weasyl::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("weasyl", serde_json::json!([post.media_id]).to_string())
+            }
             // Fur Affinity files are identified by submission ID.
             "furaffinity" => {
                 let post = self.metadata.as_ref()?;
@@ -393,6 +401,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     }
     if crate::vsco::is_vsco_url(url) {
         return Some("vsco");
+    }
+    if crate::weasyl::is_weasyl_url(url) {
+        return Some("weasyl");
     }
     if crate::furaffinity::is_furaffinity_url(url) {
         return Some("furaffinity");

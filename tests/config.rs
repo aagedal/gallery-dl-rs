@@ -1827,7 +1827,7 @@ fn conditional_templates_preserve_order_and_replace_whole_settings() {
 }
 
 #[test]
-fn api_key_is_tumblr_flickr_and_wallhaven_only_and_never_echoed() {
+fn api_key_is_tumblr_flickr_wallhaven_and_weasyl_only_and_never_echoed() {
     assert!(
         parse(r#"{"extractor":{"artstation":{"filename":"{post_id}_{media_id}.{extension}"}}}"#)
             .is_ok()
@@ -1843,7 +1843,7 @@ fn api_key_is_tumblr_flickr_and_wallhaven_only_and_never_echoed() {
     assert!(parse(r#"{"extractor":{"furaffinity":{"filename":"{post_id}.{extension}"}}}"#).is_ok());
     assert!(parse(r#"{"extractor":{"vsco":{"filename":"{media_id}.{extension}"}}}"#).is_ok());
     let config =
-        parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"},"flickr":{"api-key":"f00d"},"wallhaven":{"api-key":"beef"}}}"#)
+        parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"},"flickr":{"api-key":"f00d"},"wallhaven":{"api-key":"beef"},"weasyl":{"api-key":"cafe"}}}"#)
             .unwrap();
     assert_eq!(
         config.resolve("wallhaven").unwrap().api_key.as_deref(),
@@ -1856,6 +1856,10 @@ fn api_key_is_tumblr_flickr_and_wallhaven_only_and_never_echoed() {
     assert_eq!(
         config.resolve("tumblr").unwrap().api_key.as_deref(),
         Some("abc123")
+    );
+    assert_eq!(
+        config.resolve("weasyl").unwrap().api_key.as_deref(),
+        Some("cafe")
     );
     assert_eq!(config.resolve("reddit").unwrap().api_key, None);
     for json in [
@@ -1871,6 +1875,7 @@ fn api_key_is_tumblr_flickr_and_wallhaven_only_and_never_echoed() {
         r#"{"extractor":{"furaffinity":{"api-key":"abc123"}}}"#,
         r#"{"extractor":{"vsco":{"api-key":"abc123"}}}"#,
         r#"{"extractor":{"wallhaven":{"api-key":"abc 123"}}}"#,
+        r#"{"extractor":{"weasyl":{"api-key":"abc-123"}}}"#,
     ] {
         let error = parse(json).err().unwrap().to_string();
         assert!(!error.contains("abc"), "{error}");
