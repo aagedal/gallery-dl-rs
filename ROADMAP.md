@@ -584,6 +584,17 @@ listings via page scraping and XHR listing pages. Remaining: login/cookies
 overview, upstream's `flash`, `format` and `include` options, and tags/rating/
 score metadata.
 
+**Implemented experimental native Fur Affinity:** submissions, galleries and
+scraps via page scraping with optional `a`/`b` session cookies. Remaining:
+favorites, search, user profile/journals, followed users, upstream's
+`descriptions`, `external`, `include` and `layout` options, and tags/
+description metadata.
+
+**Implemented experimental native Weasyl:** submissions and user galleries via
+the API with an optional `api-key`. Remaining: folders, journals, favorites,
+characters, multi-file/non-visual submissions, and upstream's `metadata`
+option.
+
 **Implemented experimental native ArtStation:** projects and user portfolios
 via site JSON with browser-like headers. Remaining: Cloudflare challenges,
 video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,

@@ -364,7 +364,7 @@ the title, with `published_time` and width/height. Default filenames are
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
 uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`, never
+`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`, never
 echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
 `photos.getSizes`: "Original" or the largest photo; videos pick the best
 stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
@@ -444,6 +444,28 @@ movies and games are unsupported; there is no login, so adult-rated posts are
 skipped. HTTPS on `*.ngfiles.com` only. `post_id` is the image's numeric ID,
 `media_id` `POSTID_INDEX`, `username` the URL user, caption the title. Default
 filenames are `{post_id}_{index}.{extension}`; archive identity is `media_id`.
+
+Experimental native Fur Affinity extraction (`--extractor native`,
+`furaffinity` category) scrapes `www.furaffinity.net/view/ID/` and `/full/ID/`
+(the `Download` link, title, `/user/` artist, `popup_date` and rating).
+`/gallery/USER/` and `/scraps/USER/` page `/gallery/USER/N/` `<figure
+id="sid-ID">` items until a page adds no new IDs (capped at 200 pages) and
+fetch every submission. Session cookies `a`/`b` from `--cookies` or
+`--cookies-from-browser` are sent to the site only; without them mature
+submissions are skipped. HTTPS on `d.furaffinity.net`/`*.facdn.net` only.
+`post_id`/`media_id` is the submission ID, `username` the artist, caption the
+title. Default filenames are `{post_id}.{extension}`; archive identity is the
+submission ID.
+
+Experimental native Weasyl extraction (`--extractor native`, `weasyl`
+category) uses the API: `weasyl.com/~USER/submissions/ID/...` and
+`/submission/ID` read `api/submissions/ID/view`; `/~USER` and `/~USER/gallery`
+page `api/users/USER/gallery?nextid=N` until `nextid` is null (capped at 200
+pages). An optional `extractor.weasyl.api-key` is sent as `X-Weasyl-API-Key`
+(never echoed). Submissions without `media.submission` are skipped; HTTPS on
+`*.weasyl.com` only. `post_id`/`media_id` is `submitid`, `username`
+`owner_login`, caption the title, timestamp `posted_at`. Default filenames are
+`{post_id}.{extension}`; archive identity is the submission ID.
 
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
