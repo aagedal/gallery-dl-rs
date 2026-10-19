@@ -56,6 +56,199 @@ impl Media {
     pub fn archive_key(&self) -> Option<String> {
         let (namespace, identity) = match self.category.as_str() {
             "direct" => ("url", self.identity()),
+            // Imgur media IDs are global; the album or gallery is not part of it.
+            "imgur" => {
+                let post = self.metadata.as_ref()?;
+                let id = &post.media_id;
+                if !matches!(id.len(), 5 | 7) || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                    return None;
+                }
+                ("imgur", serde_json::json!([id]).to_string())
+            }
+            // Blob CIDs are content addresses scoped to the author's repository.
+            "bluesky" => {
+                let post = self.metadata.as_ref()?;
+                let did = self
+                    .url
+                    .query_pairs()
+                    .find(|(key, _)| key == "did")
+                    .map(|(_, did)| did.into_owned())?;
+                if !crate::bluesky::valid_did(&did) || !crate::bluesky::valid_cid(&post.media_id) {
+                    return None;
+                }
+                (
+                    "bluesky",
+                    serde_json::json!([did, post.media_id]).to_string(),
+                )
+            }
+            // Reddit media IDs are scoped to their submission.
+            "reddit" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::reddit::valid_id(&post.post_id)
+                    || !crate::reddit::valid_media_id(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    "reddit",
+                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                )
+            }
+            // Mastodon attachment IDs are scoped to their instance.
+            "mastodon" => {
+                let post = self.metadata.as_ref()?;
+                let instance = post.instance.as_deref()?;
+                if !crate::mastodon::INSTANCES.contains(&instance)
+                    || !crate::mastodon::valid_id(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    "mastodon",
+                    serde_json::json!([instance, post.media_id]).to_string(),
+                )
+            }
+            // Kemono/Coomer file hashes are scoped to their service, creator and post.
+            category @ ("kemono" | "coomer") => {
+                let post = self.metadata.as_ref()?;
+                let service = post.instance.as_deref()?;
+                let user = post.username.as_deref()?;
+                if crate::kemono::category(self.url.host_str()?) != Some(category)
+                    || !crate::kemono::valid_service(service)
+                    || !crate::kemono::valid_id(user)
+                    || !crate::kemono::valid_id(&post.post_id)
+                    || !crate::kemono::valid_hash(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    category,
+                    serde_json::json!([service, user, post.post_id, post.media_id]).to_string(),
+                )
+            }
+            // Image host file IDs are global per site.
+            category @ ("pixeldrain" | "catbox" | "imgbox" | "postimg") => {
+                let post = self.metadata.as_ref()?;
+                let site = crate::imagehosts::Site::from_category(category)?;
+                if !site.media_host(&self.url)
+                    || !crate::imagehosts::valid_media_id(site, &post.media_id)
+                {
+                    return None;
+                }
+                (category, serde_json::json!([post.media_id]).to_string())
+            }
+            // Tumblr media IDs are path hashes scoped to their blog and post.
+            "tumblr" => {
+                let post = self.metadata.as_ref()?;
+                let blog = post.username.as_deref()?;
+                if !crate::tumblr::valid_blog(blog)
+                    || !crate::tumblr::valid_id(&post.post_id)
+                    || !crate::tumblr::valid_media_id(&post.media_id)
+                {
+                    return None;
+                }
+                (
+                    "tumblr",
+                    serde_json::json!([blog, post.post_id, post.media_id]).to_string(),
+                )
+            }
+            // Pinterest files are identified by pin ID and index.
+            "pinterest" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::pinterest::valid_id(&post.post_id) {
+                    return None;
+                }
+                (
+                    "pinterest",
+                    serde_json::json!([post.post_id, post.index]).to_string(),
+                )
+            }
+            // VSCO files are identified by media ID.
+            "vsco" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::vsco::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("vsco", serde_json::json!([post.media_id]).to_string())
+            }
+            // Weasyl files are identified by submission ID.
+            "weasyl" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::weasyl::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("weasyl", serde_json::json!([post.media_id]).to_string())
+            }
+            // Fur Affinity files are identified by submission ID.
+            "furaffinity" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::furaffinity::valid_id(&post.media_id) {
+                    return None;
+                }
+                (
+                    "furaffinity",
+                    serde_json::json!([post.media_id]).to_string(),
+                )
+            }
+            // Newgrounds files are identified by media ID.
+            "newgrounds" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::newgrounds::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("newgrounds", serde_json::json!([post.media_id]).to_string())
+            }
+            // ArtStation files are identified by asset ID.
+            "artstation" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::artstation::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("artstation", serde_json::json!([post.media_id]).to_string())
+            }
+            // Wallhaven files are identified by wallpaper ID.
+            "wallhaven" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::wallhaven::valid_id(&post.media_id) {
+                    return None;
+                }
+                ("wallhaven", serde_json::json!([post.media_id]).to_string())
+            }
+            // Flickr files are identified by photo ID.
+            "flickr" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::flickr::valid_id(&post.post_id) {
+                    return None;
+                }
+                ("flickr", serde_json::json!([post.post_id]).to_string())
+            }
+            // DeviantArt files are identified by deviation UUID.
+            "deviantart" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::deviantart::valid_uuid(&post.post_id) {
+                    return None;
+                }
+                ("deviantart", serde_json::json!([post.post_id]).to_string())
+            }
+            // Pixiv files are identified by illustration ID and page.
+            "pixiv" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::pixiv::valid_media_id(&post.post_id, &post.media_id) {
+                    return None;
+                }
+                (
+                    "pixiv",
+                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                )
+            }
+            // Booru files are identified by their site and post ID.
+            category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
+                let post = self.metadata.as_ref()?;
+                if !crate::booru::valid_id(&post.post_id) {
+                    return None;
+                }
+                (category, serde_json::json!([post.post_id]).to_string())
+            }
             category @ ("instagram" | "twitter" | "facebook") => {
                 let post = self.metadata.as_ref()?;
                 if !decimal_id(&post.post_id) {
@@ -148,6 +341,10 @@ pub struct PostMetadata {
     pub reposted_by_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub article: Option<crate::twitter::ArticleMetadata>,
+    /// Mastodon instance host the status was fetched from, or Kemono/Coomer
+    /// service name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -196,10 +393,62 @@ pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
 
 pub fn social_site(url: &Url) -> Option<&'static str> {
     let host = url.host_str()?;
+    if crate::mastodon::INSTANCES.contains(&host) {
+        return Some("mastodon");
+    }
+    if let Some(category) = crate::kemono::category(host) {
+        return Some(category);
+    }
+    if crate::vsco::is_vsco_url(url) {
+        return Some("vsco");
+    }
+    if crate::weasyl::is_weasyl_url(url) {
+        return Some("weasyl");
+    }
+    if crate::furaffinity::is_furaffinity_url(url) {
+        return Some("furaffinity");
+    }
+    if crate::newgrounds::is_newgrounds_url(url) {
+        return Some("newgrounds");
+    }
+    if crate::pinterest::is_pinterest_url(url) {
+        return Some("pinterest");
+    }
+    if crate::artstation::is_artstation_url(url) {
+        return Some("artstation");
+    }
+    if crate::wallhaven::is_wallhaven_url(url) {
+        return Some("wallhaven");
+    }
+    if crate::flickr::is_flickr_url(url) {
+        return Some("flickr");
+    }
+    if crate::deviantart::is_deviantart_url(url) {
+        return Some("deviantart");
+    }
+    if crate::pixiv::is_pixiv_url(url) {
+        return Some("pixiv");
+    }
+    if crate::tumblr::is_blog_url(url) {
+        return Some("tumblr");
+    }
+    if let Some(site) = crate::imagehosts::Site::from_host(host) {
+        return Some(site.category());
+    }
     for (domain, category) in [
         ("instagram.com", "instagram"),
         ("facebook.com", "facebook"),
         ("fb.watch", "facebook"),
+        ("bsky.app", "bluesky"),
+        ("imgur.com", "imgur"),
+        ("reddit.com", "reddit"),
+        ("redd.it", "reddit"),
+        ("danbooru.donmai.us", "danbooru"),
+        ("e621.net", "e621"),
+        ("e926.net", "e621"),
+        ("gelbooru.com", "gelbooru"),
+        ("safebooru.org", "safebooru"),
+        ("imgur.io", "imgur"),
         ("twitter.com", "twitter"),
         ("x.com", "twitter"),
     ] {
@@ -765,6 +1014,7 @@ fn compatibility_metadata(
         quoted_by_id: context_id("quote_id"),
         reposted_by_id: None,
         article: compatibility_article(data.get("article")),
+        instance: None,
         post_id,
         media_id,
         shortcode,

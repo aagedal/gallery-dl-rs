@@ -212,6 +212,261 @@ Legacy and modern progressive MP4 delivery fields provide HD/SD selection when
 there is no inline DASH manifest. Existing authenticated transport and configured
 user-agent settings apply to video requests and both emitted files.
 
+Experimental native Imgur extraction (`--extractor native`, category `imgur`)
+accepts single images (`i.imgur.com/ID.ext`, `imgur.com/ID`), albums
+(`imgur.com/a/ID`, `/a/title-ID`) and gallery posts (`/gallery/ID`,
+`/gallery/slug-ID`, `/t/TAG/ID`). It reads Imgur's public `post/v1` API with
+the anonymous web client ID used upstream; no cookies are needed. Galleries use
+the albums endpoint and fall back to the media endpoint on 404. File URLs are
+rebuilt as `https://i.imgur.com/{id}.{ext}` (`jpeg` becomes `jpg`; animated GIFs
+use the MP4 rendition, like upstream's default `mp4` option). Each post is one
+group: `post_id` is the album/gallery ID (or image ID), `media_id`/`id` the image
+ID, `index` is 1-based, `timestamp` comes from `created_at`, `username` from the
+account and `caption` from the image or post description/title. Default
+filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. User
+profiles, favorites, subreddit listings, searches and tag listings are rejected
+as unsupported. Compatibility mode sends Imgur URLs to the backend.
+
+Experimental native Bluesky extraction (`--extractor native`, category
+`bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
+feeds (`bsky.app/profile/NAME`, `/media`, `/posts`), where NAME is a handle or
+DID. It reads the public, unauthenticated AppView (`public.api.bsky.app`):
+handles resolve via `com.atproto.identity.resolveHandle`, posts via
+`getPostThread` and feeds via `getAuthorFeed` (`posts_with_media` for the bare
+profile and `/media`, `posts_no_replies` for `/posts`; cursor pagination capped
+at 1,000 pages of 100). Images and videos (also inside `recordWithMedia`) are
+downloaded as full-size blobs from
+`https://bsky.social/xrpc/com.atproto.sync.getBlob?did=DID&cid=CID`, built from
+validated identifiers only. Reposts, pinned entries and media-free posts are
+skipped in feeds; quoted posts are not followed. `post_id` is the record key,
+`media_id`/`id` the blob CID, `username` the handle, `caption` the post text,
+`timestamp` from `createdAt`; files carry aspect-ratio width/height, alt text
+and MIME type. Default filenames are `{post_id}_{index}.{extension}`; archive
+identity is (DID, CID). Compatibility mode sends Bluesky URLs to the backend.
+
+Experimental native Reddit extraction (`--extractor native`, category `reddit`)
+accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),
+subreddit listings (hot/new/top/rising/controversial, `?t=` kept), and user
+submissions (`/user/NAME`, `/u/NAME`) via the public `.json` endpoints, paging
+with `after` up to 100 pages. It downloads `i.redd.it` images, galleries in
+`gallery_data` order, `v.redd.it` fallback MP4s (video only: Reddit serves audio
+as separate DASH), and external links to direct media files; self posts,
+crossposts, deleted posts, and other external sites are skipped. Plain `i.redd.it`
+file links stay direct downloads in both modes. OAuth, comment/selftext link
+scanning, searches, multireddits, and upstream's reddit options are not implemented.
+
+Experimental native booru extraction (`--extractor native`) covers categories
+`danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and
+`safebooru` (safebooru.org): single posts (`/posts/ID`,
+`index.php?page=post&s=view&id=ID`), tag searches (`/posts?tags=...`,
+`index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID`).
+Danbooru/e621 page with an id cursor (`page=bID`, 200 per page) and Gelbooru-style
+sites with `pid` (100 per page), both capped at 100 pages; pools are fetched in
+pool order, up to 10,000 posts. Posts without a file URL (deleted, banned,
+restricted) are skipped, and files are accepted only from the site's own HTTPS
+CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
+space-separated tag string, `username` the uploader name when the API provides
+one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{extension}`;
+archive identity is (category, post ID). File size, rating, score and per-category
+tags are not exposed. No API keys or logins are sent, so Gelbooru may refuse
+unauthenticated API requests and restricted content stays hidden. Plain CDN file
+links stay direct downloads.
+
+Experimental native Mastodon extraction (`--extractor native`) covers
+mastodon.social, pawoo.net and baraag.net under one `mastodon` category (upstream
+uses separate `mastodon.social`, `pawoo` and `baraag` categories; the host is
+exposed as `instance`). Supported: statuses (`/@USER/ID`, `/web/statuses/ID`)
+and user media timelines (`/@USER`, `/@USER/media`, including `@user@remote`
+accounts) via the public REST API, 40 per page with Link/`max_id` paging capped
+at 100 pages. Image, GIFV, video and audio attachments are downloaded from any
+HTTPS CDN host without API headers or cookies; reblogs and media-less statuses
+are skipped (a media-less single status is an error). `post_id` is the status
+ID, `media_id` the attachment ID, `username` the account `acct`, caption the
+status HTML with tags stripped. Default filenames are
+`{post_id}_{media_id}.{extension}`; archive identity is (instance, attachment ID).
+No access tokens are sent, so private/followers-only content stays hidden.
+
+Experimental native Kemono/Coomer extraction (`--extractor native`) covers
+kemono.cr/.su/.party (`kemono` category) and coomer.st/.su/.party (`coomer`).
+Supported: posts (`/SERVICE/user/USER/post/ID`) and creator listings
+(`/SERVICE/user/USER`, offset paging 50 per page, capped at 200 pages) via the
+`/api/v1` API with `Accept: text/css`. The post `file` and `attachments` are
+downloaded from `https://HOST/data/PATH` (redirects to `nN.HOST` CDN subdomains
+are allowed for these categories only), with identical paths deduplicated.
+`post_id` is the post ID, `media_id` the file hash, `username` the creator ID,
+`service` the service, caption the title, date from `published`/`added`, and the
+file description is the original name. Default filenames are
+`{post_id}_{index:02}.{extension}`; archive identity is (service, creator, post,
+hash). Plain `/data/` file links stay direct downloads.
+
+Experimental native image host extraction (`--extractor native`), one category
+per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
+`/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`); `catbox` albums
+(`/c/ID`, file links and `<h1>` title from the page); `imgbox` galleries
+(`/g/ID`, thumbnails mapped to `imagesN.imgbox.com/.../ID_o.EXT`) and image pages
+(`/ID`); `postimg` (postimg.cc/postimages.org) image pages (download link, else
+`og:image`) and galleries (thumbnail links, each image page fetched; capped at
+1000). Media must be HTTPS on the site's CDN. `post_id` is the file/list/album/
+gallery ID, `media_id` the file ID, caption the title (or file name), file
+`media_type` the MIME type and description the original name. Filenames are
+`{media_id}.{extension}` for single files and `{post_id}_{index:02}.{extension}`
+otherwise; archive identity is (category, file ID). Plain CDN file links
+(files.catbox.moe, i.postimg.cc, images2.imgbox.com) stay direct downloads.
+
+Experimental native Tumblr extraction (`--extractor native`, `tumblr`
+category) covers blog listings (`BLOG.tumblr.com`, `/posts`,
+`www.tumblr.com/BLOG`), single posts (`/post/ID[/slug]`,
+`www.tumblr.com/BLOG/ID`) and tags (`/tagged/TAG`) via API v2
+(`/v2/blog/BLOG.tumblr.com/posts`, legacy format, reblogs included, offset
+paging capped at 200 pages). It uses upstream's public API key unless
+`extractor.tumblr.api-key` is set (accepted only in the `tumblr` category).
+Media: photo `original_size` (else the widest `alt_sizes`), `video_url`, direct
+`audio_url`, and inline `<img>` images; all must be HTTPS on
+`*.media.tumblr.com` (audio also `a.tumblr.com`). `post_id` is the post ID,
+`media_id` a hash of the media path, `username` the blog name, caption the
+summary (or caption with HTML stripped), with timestamp and width/height.
+Default filenames are `{post_id}_{index}.{extension}`; archive identity is
+(blog, post, media ID). Plain media links stay direct downloads.
+
+Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
+requires `extractor.pixiv.refresh-token` (accepted only in the `pixiv`
+category, never echoed); without it Pixiv URLs fail before any network access.
+The token is exchanged via upstream's iOS App OAuth refresh grant and the
+access token cached in memory (refreshed once on `invalid_grant`). Supported:
+`www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
+`illust/detail`) and `users/ID` (illustrations then manga),
+`users/ID/illustrations`, `users/ID/manga` (`user/illusts`, `next_url` paging
+capped at 200 pages per type). Media are original `i.pximg.net` files
+(`meta_single_page`/`meta_pages`) downloaded with
+`Referer: https://app-api.pixiv.net/` (same-origin redirects only). Ugoira
+animations fail for single works and are skipped in listings. `post_id`/`id` is
+the illustration ID, `media_id` `ID_pN`, `username` the account, caption the
+title plus HTML-stripped caption, with `create_date` timestamp and page-0
+width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
+is (illustration, page). Plain `i.pximg.net` links stay direct downloads and
+usually fail without the Referer.
+
+Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
+category) uses the OAuth2 API with a client-credentials token (upstream's public
+client unless `extractor.deviantart.client-id`/`client-secret` are set; accepted
+only in the `deviantart` category, never echoed), cached for the run and
+refreshed once on HTTP 401. Supported: `www.deviantart.com/USER/art/SLUG-ID`
+(UUID from the page's `DeviantArt://deviation/UUID` app link, then
+`deviation/UUID`), `USER`, `USER/gallery[/all]` (`gallery/all`) and
+`USER/gallery/FOLDER/NAME` (folder UUID matched by name via `gallery/folders`);
+legacy `USER.deviantart.com` hosts are normalized. Listings use offset paging
+capped at 200 pages. Media are `content.src`, or the `deviation/download`
+original for downloadable deviations; HTTPS on `*.wixmp.com`/`*.deviantart.net`
+only. Deviations without image content (literature, journals) are skipped.
+`post_id`/`media_id`/`id` is the deviation UUID, `username` the author, caption
+the title, with `published_time` and width/height. Default filenames are
+`{post_id}.{extension}`; archive identity is the UUID.
+
+Experimental native Flickr extraction (`--extractor native`, `flickr` category)
+uses the REST API with upstream's default public key unless
+`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`, never
+echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
+`photos.getSizes`: "Original" or the largest photo; videos pick the best
+stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
+`photos/USER` (`urls.lookupUser` + `people.getPhotos`) and `flic.kr/p/CODE`
+(base58 photo ID). Listings page 500 per page, capped at 200 pages, using
+`url_o/k/h/l` extras; videos cost one `getSizes` call each. Media must be HTTPS
+on `*.staticflickr.com` (videos also `*.flickr.com`). API `stat: fail` replies
+map to errors (code 1 not found, 100 invalid key). `post_id`/`media_id`/`id` is
+the photo ID, `username` the owner, caption the title, timestamp the upload
+date, with width/height and photo/video type. Default filenames are
+`{post_id}.{extension}`; archive identity is the photo ID. Plain
+`staticflickr.com` links stay direct downloads.
+
+Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
+category) uses the public API (`/api/v1`). Supported: `wallhaven.cc/w/ID` and
+`whvn.cc/ID` (`w/ID`), `wallhaven.cc/search?...` (same query forwarded to
+`search`), `user/USER/uploads` (search `q=@USER`) and
+`user/USER/favorites/ID` (`collections/USER/ID`); listings follow
+`meta.last_page`, capped at 200 pages. An optional `extractor.wallhaven.api-key`
+is sent as `X-API-Key` (never echoed); NSFW and private collections require it
+(HTTP 401 maps to an api-key hint). Media are `data.path`, HTTPS on
+`w.wallhaven.cc` only. `post_id`/`media_id`/`id` is the wallpaper ID,
+`username` the uploader and caption the space-joined tags (single wallpapers
+only; listing items carry neither), timestamp `created_at`, with
+width/height. Default filenames are `wallhaven-{id}.{extension}`; archive
+identity is the wallpaper ID. Plain `w.wallhaven.cc` links stay direct.
+
+Experimental native ArtStation extraction (`--extractor native`, `artstation`
+category) uses the site JSON: `www.artstation.com/artwork/HASH` and
+`USER.artstation.com/projects/HASH` (`projects/HASH.json`), and portfolios
+`www.artstation.com/USER[/albums/all]` or `USER.artstation.com`
+(`users/USER/projects.json?page=N` until `total_count`, capped at 200 pages,
+then each project's JSON). ArtStation sits behind Cloudflare: requests send a
+browser User-Agent, Accept and Referer, but may still be blocked (HTTP 403
+reports this). Only `image` assets are downloaded, using `image_url` as-is
+(no `4k` rewrite), HTTPS on `cdn*.artstation.com` only; covers, video/player
+embeds (YouTube etc.) and 3D/other assets are skipped. `post_id`/`id` is the
+project hash, `media_id` the asset ID, `username` the artist, caption the
+title, timestamp `published_at`, index 1-based per project, with width/height.
+Default filenames are `{post_id}_{media_id}.{extension}`; archive identity is
+the asset ID. Plain CDN links stay direct.
+
+Experimental native Pinterest extraction (`--extractor native`, `pinterest`
+category) uses the web resource API (`resource/NAME/get/?source_url=..&data=..`
+with upstream's XHR headers, including a pinned `X-APP-VERSION` that Pinterest
+may eventually reject). Supported on `pinterest.com` and an explicit list of
+country domains/subdomains: `/pin/ID/` (`PinResource`), `/USER/BOARD/`
+(`BoardResource` then `BoardFeedResource`), `/USER/pins/` (`UserPinsResource`)
+and `pin.it/CODE` (resolved via the `url_shortener` redirect). Feeds follow the
+bookmark until `-end-`, capped at 200 pages. Media are story-pin image/video
+blocks, else the largest MP4 in `videos.video_list` (HLS-only videos are
+skipped), else `images.orig`; HTTPS on `i.pinimg.com`/`v*.pinimg.com` only.
+Promoted pins and pins without media are skipped. `post_id`/`id` is the pin
+ID, `media_id` the pin ID (`ID_N` for multi-block story pins), `username` the
+pinner, caption title/grid title/description, timestamp `created_at`, index
+1-based, with width/height. Default filenames are `{post_id}_{index}.{extension}`;
+archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
+
+Experimental native VSCO extraction (`--extractor native`, `vsco` category)
+reads the page-embedded `window.__PRELOADED_STATE__` JSON, which is
+undocumented and fragile. `vsco.co/USER/media/ID` uses `medias.byId`;
+`vsco.co/USER` and `/USER/gallery` take the site ID and anonymous `tkn` bearer
+token from that state and page `api/3.0/medias/profile` by cursor (capped at
+200 pages). Images use `responsiveUrl` with an `https://` prefix; videos are
+kept only as progressive MP4 (HLS is skipped). HTTPS on `*.vsco.co` only.
+`post_id`/`media_id` is the media ID, `username` the `permaSubdomain`, caption
+the description, timestamp `uploadDate`, with width/height. Default filenames
+are `{media_id}.{extension}`; archive identity is the media ID.
+
+Experimental native Newgrounds extraction (`--extractor native`, `newgrounds`
+category) scrapes art pages `www.newgrounds.com/art/view/USER/SLUG` (main
+image from `<div class="image">` or `og:image`, extra images from `imageData`
+/`art-images`, title from `og:title`, date from `itemprop="datePublished"`).
+`USER.newgrounds.com/art` pages `art/page/N` with `X-Requested-With:
+XMLHttpRequest` (capped at 200 pages) and fetches every listed post. Audio,
+movies and games are unsupported; there is no login, so adult-rated posts are
+skipped. HTTPS on `*.ngfiles.com` only. `post_id` is the image's numeric ID,
+`media_id` `POSTID_INDEX`, `username` the URL user, caption the title. Default
+filenames are `{post_id}_{index}.{extension}`; archive identity is `media_id`.
+
+Experimental native Fur Affinity extraction (`--extractor native`,
+`furaffinity` category) scrapes `www.furaffinity.net/view/ID/` and `/full/ID/`
+(the `Download` link, title, `/user/` artist, `popup_date` and rating).
+`/gallery/USER/` and `/scraps/USER/` page `/gallery/USER/N/` `<figure
+id="sid-ID">` items until a page adds no new IDs (capped at 200 pages) and
+fetch every submission. Session cookies `a`/`b` from `--cookies` or
+`--cookies-from-browser` are sent to the site only; without them mature
+submissions are skipped. HTTPS on `d.furaffinity.net`/`*.facdn.net` only.
+`post_id`/`media_id` is the submission ID, `username` the artist, caption the
+title. Default filenames are `{post_id}.{extension}`; archive identity is the
+submission ID.
+
+Experimental native Weasyl extraction (`--extractor native`, `weasyl`
+category) uses the API: `weasyl.com/~USER/submissions/ID/...` and
+`/submission/ID` read `api/submissions/ID/view`; `/~USER` and `/~USER/gallery`
+page `api/users/USER/gallery?nextid=N` until `nextid` is null (capped at 200
+pages). An optional `extractor.weasyl.api-key` is sent as `X-Weasyl-API-Key`
+(never echoed). Submissions without `media.submission` are skipped; HTTPS on
+`*.weasyl.com` only. `post_id`/`media_id` is `submitid`, `username`
+`owner_login`, caption the title, timestamp `posted_at`. Default filenames are
+`{post_id}.{extension}`; archive identity is the submission ID.
+
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
 SegmentBase initialization/index byte ranges refer to the same complete file.
@@ -946,10 +1201,25 @@ timeouts outside the monotonic clock's range or precision are rejected.
 
 Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, null settings
 (except the optional browser-array placeholders described above),
-unsupported types, hooks, environment expansion, and conditional values fail
+unsupported types, hooks, environment expansion, and other conditional values fail
 explicitly. Filenames use the native template subset described below; archive
-files use the Rust archive format. Full gallery-dl configuration compatibility,
-conditional directory templates, automatic discovery, and postprocessors remain unimplemented.
+files use the Rust archive format.
+
+Like upstream, `filename` may be an object mapping filter expressions to
+templates and `directory` an object mapping them to component lists, e.g.
+`{"filename": {"media_type == 'video'": "{post_id}.{extension}", "": "{filename}"}}`.
+Conditions are tried in file order with the `--filter` evaluator; the first match
+wins, then the `""` entry, then the default name or category folder. Condition
+errors (such as missing keys) fail that file. A plain value or CLI flag in a
+narrower scope replaces an inherited object entirely.
+
+Without `--native-config`, the first existing file among `$GALLERY_DL_RS_CONFIG`,
+`$XDG_CONFIG_HOME/gallery-dl-rs/config.json` (or `~/.config/...`), and
+`~/.gallery-dl-rs.conf` is loaded (`%APPDATA%\gallery-dl-rs\config.json` and
+`%USERPROFILE%\gallery-dl-rs.conf` on Windows). `--native-config-ignore` skips
+discovery. Upstream gallery-dl configuration files are never read natively. Full gallery-dl
+configuration compatibility and postprocessors remain
+unimplemented.
 
 ## Current behavior
 
@@ -991,6 +1261,24 @@ conditional directory templates, automatic discovery, and postprocessors remain 
   Remove an unused checkpoint directory only while no downloads are running.
   Without `--resume`, failed or cancelled partials are removed as before.
   This flag conflicts with `-g` and `-j`.
+- Like upstream, newly downloaded files take their modification time from HTTP
+  `Last-Modified`; `--no-mtime` disables this. `--mtime [NAME]` (default `date`)
+  instead uses a numeric metadata timestamp, falling back to `Last-Modified` when
+  absent. Times are applied before atomic publication; existing files are untouched.
+- `--exec CMD` runs a shell command (`sh -c`, or `cmd /C` on Windows) after
+  each newly downloaded file, replacing `{}` with the shell-quoted path;
+  `--exec-after CMD` runs once at the end. Both are repeatable; failures count
+  as failed operations. Upstream's metadata fields in commands are not supported.
+- `-r RATE`/`--limit-rate RATE` (e.g. `500k`, `2.5M`) caps each download's body
+  rate. Throttling pauses extend that attempt's `--timeout` deadline, so slow
+  limits do not cause timeouts.
+- `--sleep SECONDS` or `--sleep MIN-MAX` waits (uniformly within the range)
+  before each network download, after archive and existing-file checks, outside
+  the per-attempt timeout.
+- `-T N`/`--terminate N` stops all inputs successfully after N consecutive files
+  were skipped as existing or archived (counted in completion order). `-A N`/`--abort N`
+  stops only the current input: its extraction ends and queued, unstarted
+  downloads are dropped, while later inputs continue.
 - `--write-metadata` saves `<media filename>.json` beside completed media, including
   files skipped because they already exist. Sidecars have `schema_version: 1`,
   `category`, the saved `filename`, and optional `metadata` (post/media IDs,

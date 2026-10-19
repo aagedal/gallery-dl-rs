@@ -513,6 +513,109 @@ Add native configuration and filename templates, then prioritize additional site
 Integrate the companion **yt-dlp-rs** project for video extraction and segmented
 downloads. Document compatibility differences as features land.
 
+**Implemented experimental native Imgur:** single images, albums and gallery
+posts via the public `post/v1` API, with shared retries, timeouts, network
+options and Retry-After cooldowns. Not yet: user profiles, favorites,
+subreddits, searches, tag listings, and the upstream `mp4` option (animated GIFs
+always use MP4).
+
+**Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
+Safebooru posts and tag searches, plus Danbooru/e621 pools. Remaining: API
+key/login credentials, favorites/popular/artist views, Gelbooru pools, notes,
+`tags`/`metadata` options, and file-size/rating metadata.
+
+**Implemented experimental native Mastodon:** statuses and user media
+timelines on mastodon.social, pawoo.net and baraag.net (single `mastodon`
+category). Remaining: access tokens, arbitrary instances, bookmarks/favorites/
+lists/hashtags/followed views, card images, `reblogs`/`replies`/`text-posts`
+options, and per-instance categories.
+
+**Implemented experimental native Kemono/Coomer:** posts and creator post
+listings with deduplicated files. Remaining: creator names, favorites,
+Discord servers, search/tag/popular views, revisions, comments/DMs, inline
+content images, archive/link extraction from post text, cookies/login, and
+upstream options (`duplicates`, `revisions`, `max-posts`, `endpoint`).
+
+**Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
+lists, albums, galleries and image pages. Remaining: Pixeldrain API keys,
+`#item=N` selection, filesystem (`/d/`) links and other domains; Catbox file
+`/c/` descriptions; imgbox per-image metadata (width/height); Postimg
+JS-paginated gallery pages beyond the server-rendered listing.
+
+**Implemented experimental native Tumblr:** blog listings, single posts and
+tagged listings via API v2 with an overridable `api-key`. Remaining: OAuth and
+private/dashboard blogs, likes/search/day views, NPF posts, upstream's
+highest-resolution image rewriting (`s2048x3072`/`_1280` to original),
+external audio/video, `reblogs`/`posts`/`inline`/`external`/`original`/
+`fallback-delay` options, and custom-domain blogs.
+
+**Implemented experimental native Pixiv:** artworks and user illustration/manga
+works via the App API with a `refresh-token`. Remaining: ugoira (frame ZIP and
+delays), bookmarks/favorites, following, rankings, searches, novels, sketch,
+pixivision, series, user avatars/backgrounds, upstream metadata options
+(`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
+
+**Implemented experimental native DeviantArt:** deviations, user galleries and
+folders via the OAuth2 API (client credentials, overridable `client-id`/
+`client-secret`). Remaining: user OAuth (refresh tokens) and private/premium
+content, literature/journal text, favorites, collections, scraps, stash, tags,
+search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
+and metadata options, and upstream's `{title}_{index}` filenames.
+
+**Implemented experimental native Wallhaven:** wallpapers, searches, user
+uploads and collections via the API (optional `api-key`). Remaining: per-item
+`w/ID` metadata (tags/uploader) for listings, collection lists, upstream's
+`{category}_{id}_{resolution}` filenames and `metadata` option.
+
+**Implemented experimental native Pinterest:** pins, boards, user pins and
+`pin.it` links via the resource API. Remaining: login/cookies and CSRF token,
+board sections, secret boards, search, related pins, created/saved/all-pins
+listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
+`videos` and `domain` options.
+
+**Implemented experimental native VSCO:** single media and user galleries via
+the page preloaded state and `medias/profile` API. Remaining: HLS videos
+(upstream ytdl), collections, journals, spaces, avatars, and upstream's
+`videos` option.
+
+**Implemented experimental native Newgrounds:** art posts and user art
+listings via page scraping and XHR listing pages. Remaining: login/cookies
+(adult posts), audio, movies/games, favorites, following, search, user
+overview, upstream's `flash`, `format` and `include` options, and tags/rating/
+score metadata.
+
+**Implemented experimental native Fur Affinity:** submissions, galleries and
+scraps via page scraping with optional `a`/`b` session cookies. Remaining:
+favorites, search, user profile/journals, followed users, upstream's
+`descriptions`, `external`, `include` and `layout` options, and tags/
+description metadata.
+
+**Implemented experimental native Weasyl:** submissions and user galleries via
+the API with an optional `api-key`. Remaining: folders, journals, favorites,
+characters, multi-file/non-visual submissions, and upstream's `metadata`
+option.
+
+**Implemented experimental native ArtStation:** projects and user portfolios
+via site JSON with browser-like headers. Remaining: Cloudflare challenges,
+video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
+albums by ID, collections, challenges, search/artwork listings, following.
+
+**Implemented experimental native Flickr:** photos, videos, albums, user
+photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
+Remaining: OAuth/private content, favorites, galleries, groups, tags/search,
+album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
+`videos` options, and album metadata on listed items.
+
+**Implemented experimental native Reddit:** submissions, galleries, subreddit
+and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
+DASH audio, comment scanning, external-site recursion, and reddit options.
+
+**Implemented experimental native Bluesky:** single posts and author
+media/posts feeds via the public AppView, with full-size `getBlob` images and
+videos. Not yet: likes, custom feeds, lists, searches, quoted-post media,
+authentication, PDS-specific blob hosts (blobs always use `bsky.social`), and
+upstream's `include`, `reposts`, `quoted` and `videos` options.
+
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook
 selections retain available file dimensions, original dimensions, seconds-based
 duration, bitrate, media type, description/alt text, sensitivity, and source
@@ -572,6 +675,19 @@ same resulting path. Tests cover configuration/CLI precedence, empty lists,
 unsafe metadata, limits, missing-field side effects, and resumed archived media
 with sidecars in nested folders. Conditional templates and the full upstream
 format language remain.
+
+**Implemented conditional templates:** object-valued `filename` and `directory`
+settings map filter expressions to templates in configuration order (JSON key
+order is preserved), with `""` as the default and the normal name or category
+folder as the final fallback. Conditions share the `--filter` evaluator and fail
+the file on evaluation errors. Plain values in narrower scopes or CLI flags
+replace inherited conditional settings as a whole.
+
+**Implemented modification times:** new files take HTTP `Last-Modified` times by
+default (`--no-mtime` disables), and `--mtime [NAME]` mirrors upstream's mtime
+postprocessor using a metadata date field. Times are set on the temporary or
+resume file before publication, including resumed 416 completions via the saved
+date validator and inline text from metadata.
 
 Native Instagram, Facebook, and Twitter session initialization failures now remain local to
 their inputs, allowing unrelated direct links and other inputs to proceed.

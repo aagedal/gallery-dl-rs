@@ -537,3 +537,50 @@ async fn empty_media_selection_opens_no_archive_or_destination() {
     assert!(!root.path().join("output").exists());
     assert!(!root.path().join("missing-parent").exists());
 }
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn default_native_configuration_is_discovered_and_can_be_ignored() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let xdg = root.path().join("xdg");
+    std::fs::create_dir_all(xdg.join("gallery-dl-rs")).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    // An unknown setting proves the file was loaded, because parsing rejects it.
+    std::fs::write(xdg.join("gallery-dl-rs/config.json"), br#"{"bogus":1}"#).unwrap();
+    let run = |extra: &[&str], vars: &[(&str, &Path)]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+        command
+            .kill_on_drop(true)
+            .env_remove("GALLERY_DL_RS_CONFIG")
+            .env("HOME", &home)
+            .env_remove("XDG_CONFIG_HOME")
+            .args(extra)
+            .args(["-g", "http://127.0.0.1:1/a.jpg"]);
+        for (name, value) in vars {
+            command.env(name, value);
+        }
+        command
+    };
+    assert!(
+        !output(&mut run(&[], &[("XDG_CONFIG_HOME", &xdg)]))
+            .await
+            .status
+            .success()
+    );
+    success(
+        &output(&mut run(
+            &["--native-config-ignore"],
+            &[("XDG_CONFIG_HOME", &xdg)],
+        ))
+        .await,
+    );
+    // Without XDG_CONFIG_HOME, ~/.config is searched, then ~/.gallery-dl-rs.conf.
+    success(&output(&mut run(&[], &[])).await);
+    std::fs::write(home.join(".gallery-dl-rs.conf"), br#"{"bogus":1}"#).unwrap();
+    assert!(!output(&mut run(&[], &[])).await.status.success());
+    // An explicit environment path takes precedence; explicit flags bypass discovery.
+    let valid = config(root.path(), serde_json::json!({"retries": 1}));
+    success(&output(&mut run(&[], &[("GALLERY_DL_RS_CONFIG", &valid)])).await);
+    success(&output(&mut run(&["--native-config", valid.to_str().unwrap()], &[])).await);
+}

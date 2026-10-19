@@ -1,0 +1,1109 @@
+//! Experimental native booru extraction for Danbooru, e621/e926, Gelbooru
+//! and Safebooru.
+//!
+//! Mirrors gallery_dl/extractor/danbooru.py (Danbooru and e621 dialects) and
+//! gelbooru.py / gelbooru_v02.py (Gelbooru and Safebooru) through their public
+//! JSON APIs. Single posts, tag searches and (Danbooru/e621) pools are
+//! supported. Posts without a file URL (deleted, banned or login-restricted)
+//! are skipped silently, and media URLs are only accepted from each site's own
+//! CDN hosts.
+use crate::{
+    Result, error,
+    event::{ExtractionEvent, group},
+    extract::{Media, MediaJob, PostMetadata},
+    file_metadata::FileMetadata,
+    network::NetworkOptions,
+    transport::{RateLimits, Redirects, retry_after},
+};
+use futures_util::{
+    StreamExt,
+    stream::{self, BoxStream},
+};
+use reqwest::{Client, StatusCode, header};
+use serde_json::Value;
+use std::{
+    collections::{BTreeMap, HashMap, VecDeque},
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
+use url::Url;
+
+/// e621 rejects requests without a descriptive User-Agent.
+const USER_AGENT: &str = concat!(
+    "gallery-dl-rs/",
+    env!("CARGO_PKG_VERSION"),
+    " (native booru extractor)"
+);
+const MAX_RESPONSE: usize = 16 * 1024 * 1024;
+/// Bound listings to 100 pages (20,000 Danbooru/e621 or 10,000 Gelbooru posts).
+const MAX_PAGES: usize = 100;
+const MAX_TAGS: usize = 1024;
+/// Pool members fetched per `id:` query.
+const POOL_CHUNK: usize = 100;
+const MAX_POOL: usize = 10_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Site {
+    Danbooru,
+    E621,
+    Gelbooru,
+    Safebooru,
+}
+
+impl Site {
+    pub fn from_category(category: &str) -> Option<Self> {
+        Some(match category {
+            "danbooru" => Self::Danbooru,
+            "e621" => Self::E621,
+            "gelbooru" => Self::Gelbooru,
+            "safebooru" => Self::Safebooru,
+            _ => return None,
+        })
+    }
+
+    pub fn category(self) -> &'static str {
+        match self {
+            Self::Danbooru => "danbooru",
+            Self::E621 => "e621",
+            Self::Gelbooru => "gelbooru",
+            Self::Safebooru => "safebooru",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Danbooru => "Danbooru",
+            Self::E621 => "e621",
+            Self::Gelbooru => "Gelbooru",
+            Self::Safebooru => "Safebooru",
+        }
+    }
+
+    fn danbooru_dialect(self) -> bool {
+        matches!(self, Self::Danbooru | Self::E621)
+    }
+
+    fn page_limit(self) -> usize {
+        if self.danbooru_dialect() { 200 } else { 100 }
+    }
+
+    /// HTTPS CDN hosts that may serve this site's files.
+    fn media_host(self, host: &str) -> bool {
+        match self {
+            Self::Danbooru => host == "cdn.donmai.us" || host.ends_with(".donmai.us"),
+            Self::E621 => host == "static1.e621.net" || host.ends_with(".e621.net"),
+            Self::Gelbooru => host.ends_with(".gelbooru.com"),
+            Self::Safebooru => host == "safebooru.org" || host.ends_with(".safebooru.org"),
+        }
+    }
+}
+
+/// A supported booru input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Post { id: u64 },
+    Tags { tags: String },
+    Pool { id: u64 },
+}
+
+fn post_id(raw: &str) -> Option<u64> {
+    (1..=12)
+        .contains(&raw.len())
+        .then(|| raw.bytes().all(|b| b.is_ascii_digit()))
+        .filter(|ok| *ok)
+        .and_then(|_| raw.parse().ok())
+        .filter(|id| *id > 0)
+}
+
+/// Booru post IDs are positive decimal integers.
+pub fn valid_id(raw: &str) -> bool {
+    post_id(raw).is_some_and(|id| id.to_string() == raw)
+}
+
+fn valid_tags(tags: &str) -> bool {
+    !tags.trim().is_empty() && tags.len() <= MAX_TAGS && !tags.chars().any(char::is_control)
+}
+
+/// Classify a booru URL for `site`, returning the target and API origin.
+pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
+    let unsupported = || {
+        error(match site {
+            Site::Danbooru | Site::E621 => {
+                "unsupported booru URL; expected a post (/posts/ID), tag search (/posts?tags=...) or pool (/pools/ID) link"
+            }
+            Site::Gelbooru | Site::Safebooru => {
+                "unsupported booru URL; expected index.php?page=post&s=view&id=ID or index.php?page=post&s=list&tags=..."
+            }
+        })
+    };
+    if !matches!(url.scheme(), "http" | "https")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(unsupported());
+    }
+    let host = url.host_str().ok_or_else(unsupported)?;
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    let root = match (site, host) {
+        (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => "https://danbooru.donmai.us/",
+        (Site::E621, "e621.net") => "https://e621.net/",
+        (Site::E621, "e926.net") => "https://e926.net/",
+        (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/",
+        (Site::Safebooru, "safebooru.org") => "https://safebooru.org/",
+        _ => return Err(unsupported()),
+    };
+    let query = |key: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+    };
+    let segments: Vec<_> = url
+        .path_segments()
+        .map(|s| s.filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    let target = if site.danbooru_dialect() {
+        match segments.as_slice() {
+            ["posts", id] => post_id(id).map(|id| Target::Post { id }),
+            ["pools", id] => post_id(id).map(|id| Target::Pool { id }),
+            ["posts"] => query("tags")
+                .filter(|t| valid_tags(t))
+                .map(|tags| Target::Tags { tags }),
+            _ => None,
+        }
+    } else {
+        match (
+            segments.as_slice(),
+            query("page").as_deref(),
+            query("s").as_deref(),
+        ) {
+            (["index.php"] | [], Some("post"), Some("view")) => query("id")
+                .and_then(|id| post_id(&id))
+                .map(|id| Target::Post { id }),
+            (["index.php"] | [], Some("post"), Some("list")) => query("tags")
+                .filter(|t| valid_tags(t))
+                .map(|tags| Target::Tags { tags }),
+            _ => None,
+        }
+    };
+    Ok((target.ok_or_else(unsupported)?, Url::parse(root).unwrap()))
+}
+
+fn string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn number(value: Option<&Value>) -> Option<u64> {
+    let value = value?;
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+        .filter(|v| *v > 0)
+}
+
+fn valid_md5(md5: &str) -> bool {
+    md5.len() == 32 && md5.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn valid_extension(ext: &str) -> bool {
+    (1..=5).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+fn media_url(site: Site, raw: &str) -> Option<Url> {
+    let url = Url::parse(raw).ok()?;
+    let host = url.host_str()?;
+    (url.scheme() == "https"
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && site.media_host(host))
+    .then_some(url)
+}
+
+fn url_extension(url: &Url) -> Option<String> {
+    let name = url.path_segments()?.next_back()?;
+    let (_, ext) = name.rsplit_once('.')?;
+    let ext = ext.to_ascii_lowercase();
+    valid_extension(&ext).then_some(ext)
+}
+
+/// Parse Gelbooru's `Sat Jan 02 03:04:05 -0500 2024` timestamps.
+fn gelbooru_date(raw: &str) -> Option<i64> {
+    let parts: Vec<_> = raw.split_whitespace().collect();
+    let [_, month, day, time, offset, year] = parts.as_slice() else {
+        return None;
+    };
+    let month = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    .iter()
+    .position(|m| m == month)?
+        + 1;
+    let day: u8 = day.parse().ok()?;
+    crate::date::parse_date(&format!("{year}-{month:02}-{day:02}T{time}{offset}")).ok()
+}
+
+fn timestamp(site: Site, post: &Value) -> Option<i64> {
+    let raw = string(post, "created_at")?;
+    if site.danbooru_dialect() {
+        crate::date::parse_date(raw).ok()
+    } else {
+        gelbooru_date(raw).or_else(|| crate::date::parse_date(raw).ok())
+    }
+}
+
+/// Space-separated tags; e621 groups them by category.
+fn tags(site: Site, post: &Value) -> Option<String> {
+    let tags = match site {
+        Site::E621 => {
+            let groups = post.get("tags")?.as_object()?;
+            let all: Vec<_> = groups
+                .values()
+                .filter_map(Value::as_array)
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            all.join(" ")
+        }
+        Site::Danbooru => string(post, "tag_string")?.to_owned(),
+        Site::Gelbooru | Site::Safebooru => string(post, "tags")?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    (!tags.is_empty()).then_some(tags)
+}
+
+/// Parse one post object. Posts without a usable file yield `None`.
+pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
+    let id = number(post.get("id"))?;
+    let (url, md5, ext, width, height, size) = match site {
+        Site::Danbooru => (
+            media_url(site, string(post, "file_url")?)?,
+            string(post, "md5"),
+            string(post, "file_ext"),
+            number(post.get("image_width")),
+            number(post.get("image_height")),
+            number(post.get("file_size")),
+        ),
+        Site::E621 => {
+            let file = post.get("file")?;
+            (
+                media_url(site, string(file, "url")?)?,
+                string(file, "md5"),
+                string(file, "ext"),
+                number(file.get("width")),
+                number(file.get("height")),
+                number(file.get("size")),
+            )
+        }
+        Site::Gelbooru => (
+            media_url(site, string(post, "file_url")?)?,
+            string(post, "md5"),
+            None,
+            number(post.get("width")),
+            number(post.get("height")),
+            None,
+        ),
+        Site::Safebooru => {
+            let directory = string(post, "directory")?;
+            let image = string(post, "image")?;
+            let safe = |s: &str, dot: bool| {
+                s.len() <= 128
+                    && s.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || dot && b == b'.'
+                    })
+                    && !s.starts_with('.')
+            };
+            if !safe(directory, false) || !safe(image, true) {
+                return None;
+            }
+            (
+                media_url(
+                    site,
+                    &format!("https://safebooru.org/images/{directory}/{image}"),
+                )?,
+                string(post, "hash").or_else(|| string(post, "md5")),
+                None,
+                number(post.get("width")),
+                number(post.get("height")),
+                None,
+            )
+        }
+    };
+    let md5 = md5.map(str::to_ascii_lowercase).filter(|m| valid_md5(m));
+    let ext = ext
+        .map(str::to_ascii_lowercase)
+        .filter(|e| valid_extension(e))
+        .or_else(|| url_extension(&url))?;
+    let ext = if ext == "jpeg" { "jpg".into() } else { ext };
+    let id = id.to_string();
+    let media_id = md5.clone().unwrap_or_else(|| id.clone());
+    let category = site.category();
+    let username = match site {
+        Site::Danbooru | Site::E621 => string(post, "uploader_name"),
+        Site::Gelbooru | Site::Safebooru => string(post, "owner"),
+    }
+    .map(Arc::from);
+    let media_type = match ext.as_str() {
+        "jpg" | "png" | "gif" | "webp" | "avif" => {
+            Some(format!("image/{}", ext.replace("jpg", "jpeg")))
+        }
+        "mp4" | "webm" => Some(format!("video/{ext}")),
+        _ => None,
+    };
+    let _ = size; // FileMetadata has no byte-size field; see README.
+    Some(Media {
+        url,
+        job: MediaJob::DirectHttp,
+        category: category.into(),
+        filename: format!("{category}_{id}_{media_id}.{ext}"),
+        metadata: Some(PostMetadata {
+            file: Some(FileMetadata {
+                width,
+                height,
+                media_type: media_type.map(Arc::from),
+                ..FileMetadata::default()
+            }),
+            post_id: id,
+            media_id,
+            username,
+            caption: tags(site, post).map(Arc::from),
+            timestamp: timestamp(site, post),
+            index: 1,
+            ..PostMetadata::default()
+        }),
+        headers: BTreeMap::new(),
+        handoff: BTreeMap::new(),
+    })
+}
+
+fn invalid(site: Site) -> crate::Error {
+    error(format!("{} returned invalid JSON", site.name()))
+}
+
+/// Extract the raw post objects from a single-post or listing response.
+pub fn posts(site: Site, bytes: &[u8]) -> Result<Vec<Value>> {
+    if site == Site::Safebooru && bytes.iter().all(u8::is_ascii_whitespace) {
+        // Safebooru answers an empty result with an empty body.
+        return Ok(Vec::new());
+    }
+    let body: Value = serde_json::from_slice(bytes).map_err(|_| invalid(site))?;
+    let list = match (site, body) {
+        (Site::Danbooru | Site::Safebooru, Value::Array(list)) => list,
+        (Site::Danbooru, post @ Value::Object(_)) => vec![post],
+        (Site::E621, Value::Object(mut body)) => {
+            match (body.remove("posts"), body.remove("post")) {
+                (Some(Value::Array(list)), _) => list,
+                (_, Some(post @ Value::Object(_))) => vec![post],
+                _ => return Err(invalid(site)),
+            }
+        }
+        (Site::Gelbooru, Value::Object(mut body)) => match body.remove("post") {
+            Some(Value::Array(list)) => list,
+            Some(post @ Value::Object(_)) => vec![post],
+            None => Vec::new(),
+            _ => return Err(invalid(site)),
+        },
+        _ => return Err(invalid(site)),
+    };
+    Ok(list)
+}
+
+/// Parse a `/pools/ID.json` response into ordered post IDs.
+pub fn pool_ids(site: Site, bytes: &[u8]) -> Result<Vec<u64>> {
+    let body: Value = serde_json::from_slice(bytes).map_err(|_| invalid(site))?;
+    let ids = body
+        .get("post_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid(site))?;
+    Ok(ids
+        .iter()
+        .filter_map(|id| number(Some(id)))
+        .take(MAX_POOL)
+        .collect())
+}
+
+pub struct Booru {
+    site: Site,
+    client: Client,
+    network: NetworkOptions,
+    api_root: Option<Url>,
+    timeout: Duration,
+    request_timeout: Duration,
+    retries: u8,
+    rate_limits: RateLimits,
+}
+
+enum Cursor {
+    /// Danbooru/e621 `page=bID` cursor, the lowest ID seen so far.
+    Before(Option<u64>),
+    /// Gelbooru `pid` page number.
+    Page(usize),
+    /// Remaining pool members in pool order.
+    Pool(VecDeque<u64>),
+}
+
+struct State {
+    root: Url,
+    tags: String,
+    cursor: Cursor,
+    pages: usize,
+    done: bool,
+    pending: VecDeque<ExtractionEvent>,
+}
+
+impl Booru {
+    pub fn new(site: Site, timeout: Duration) -> Result<Self> {
+        Ok(Self {
+            site,
+            client: NetworkOptions::default().client(USER_AGENT, timeout)?,
+            network: NetworkOptions::default(),
+            api_root: None,
+            timeout,
+            request_timeout: timeout,
+            retries: 0,
+            rate_limits: RateLimits::default(),
+        })
+    }
+
+    /// Apply proxy and user-agent settings to API requests and emitted media.
+    pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
+        self.client = network.client(USER_AGENT, self.timeout)?;
+        self.network = network.clone();
+        Ok(self)
+    }
+
+    /// Additional attempts for HTTP 429/5xx and transport failures.
+    pub fn with_retries(mut self, retries: u8) -> Self {
+        self.retries = retries;
+        self
+    }
+
+    /// Bound each HTTP request separately from the per-call deadline.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
+    }
+
+    /// Override the API origin; intended for local tests.
+    pub fn with_api_root(mut self, root: Url) -> Self {
+        self.api_root = Some(root);
+        self
+    }
+
+    async fn call(&self, root: &Url, path: &str, query: &[(&str, &str)]) -> Result<Vec<u8>> {
+        let mut endpoint = root.join(path).expect("validated booru path");
+        if !query.is_empty() {
+            endpoint.query_pairs_mut().extend_pairs(query);
+        }
+        tokio::time::timeout(self.timeout, self.request(&endpoint))
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.site.name())))?
+    }
+
+    fn dapi<'q>(extra: &[(&'q str, &'q str)]) -> Vec<(&'q str, &'q str)> {
+        let mut query = vec![
+            ("page", "dapi"),
+            ("s", "post"),
+            ("q", "index"),
+            ("json", "1"),
+        ];
+        query.extend_from_slice(extra);
+        query
+    }
+
+    async fn post(&self, root: &Url, id: u64) -> Result<Vec<Value>> {
+        let id = id.to_string();
+        let body = if self.site.danbooru_dialect() {
+            self.call(root, &format!("posts/{id}.json"), &[]).await?
+        } else {
+            self.call(root, "index.php", &Self::dapi(&[("id", &id)]))
+                .await?
+        };
+        let posts = posts(self.site, &body)?;
+        if !posts
+            .iter()
+            .any(|p| number(p.get("id")).map(|v| v.to_string()) == Some(id.clone()))
+        {
+            return Err(error(format!("{} post not found", self.site.name())));
+        }
+        Ok(posts)
+    }
+
+    fn emit(&self, state: &mut State, raw: &[Value]) {
+        for post in raw {
+            if let Some(mut media) = parse_post(self.site, post) {
+                self.network.apply_media(&mut media);
+                state
+                    .pending
+                    .extend(group(vec![media], self.site.category()));
+            }
+        }
+    }
+
+    async fn next_page(&self, state: &mut State) -> Result<()> {
+        let limit = self.site.page_limit();
+        let limit_text = limit.to_string();
+        state.pages += 1;
+        if state.pages >= MAX_PAGES {
+            state.done = true;
+        }
+        match &mut state.cursor {
+            Cursor::Before(before) => {
+                let page = before.map(|id| format!("b{id}"));
+                let mut query = vec![("tags", state.tags.as_str()), ("limit", &limit_text)];
+                if let Some(page) = &page {
+                    query.push(("page", page));
+                }
+                let body = self.call(&state.root, "posts.json", &query).await?;
+                let raw = posts(self.site, &body)?;
+                let lowest = raw.iter().filter_map(|p| number(p.get("id"))).min();
+                if raw.is_empty() || lowest.is_none() || lowest >= *before && before.is_some() {
+                    state.done = true;
+                }
+                *before = lowest;
+                self.emit(state, &raw);
+            }
+            Cursor::Page(pid) => {
+                let pid_text = pid.to_string();
+                *pid += 1;
+                let query = Self::dapi(&[
+                    ("tags", &state.tags),
+                    ("limit", &limit_text),
+                    ("pid", &pid_text),
+                ]);
+                let body = self.call(&state.root, "index.php", &query).await?;
+                let raw = posts(self.site, &body)?;
+                if raw.len() < limit {
+                    state.done = true;
+                }
+                self.emit(state, &raw);
+            }
+            Cursor::Pool(ids) => {
+                let chunk: Vec<u64> = ids.drain(..ids.len().min(POOL_CHUNK)).collect();
+                if ids.is_empty() {
+                    state.done = true;
+                }
+                if chunk.is_empty() {
+                    return Ok(());
+                }
+                let tags = format!(
+                    "id:{}",
+                    chunk
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                let query = [("tags", tags.as_str()), ("limit", &limit_text)];
+                let body = self.call(&state.root, "posts.json", &query).await?;
+                let mut by_id: HashMap<u64, Value> = posts(self.site, &body)?
+                    .into_iter()
+                    .filter_map(|p| Some((number(p.get("id"))?, p)))
+                    .collect();
+                let ordered: Vec<_> = chunk.iter().filter_map(|id| by_id.remove(id)).collect();
+                self.emit(state, &ordered);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
+        crate::event::media_only(self.events(url))
+    }
+
+    /// Emit one post boundary per booru post; listings paginate lazily.
+    pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let (target, root) = match target(self.site, url) {
+            Ok(parsed) => parsed,
+            Err(e) => return stream::once(async move { Err(e) }).boxed(),
+        };
+        let root = self.api_root.clone().unwrap_or(root);
+        let (tags, cursor) = match target {
+            Target::Post { id } => {
+                return stream::once(async move {
+                    let raw = self.post(&root, id).await?;
+                    let mut state = State {
+                        root,
+                        tags: String::new(),
+                        cursor: Cursor::Page(0),
+                        pages: 0,
+                        done: true,
+                        pending: VecDeque::new(),
+                    };
+                    self.emit(&mut state, &raw);
+                    if state.pending.is_empty() {
+                        return Err(error(format!(
+                            "{} post has no downloadable file (deleted, banned or restricted)",
+                            self.site.name()
+                        )));
+                    }
+                    Ok::<_, crate::Error>(stream::iter(state.pending.into_iter().map(Ok)))
+                })
+                .map(|result| match result {
+                    Ok(events) => events.boxed(),
+                    Err(e) => stream::once(async move { Err(e) }).boxed(),
+                })
+                .flatten()
+                .boxed();
+            }
+            Target::Tags { tags } if self.site.danbooru_dialect() => (tags, Cursor::Before(None)),
+            Target::Tags { tags } => (tags, Cursor::Page(0)),
+            Target::Pool { id } => {
+                return stream::once(async move {
+                    let body = self.call(&root, &format!("pools/{id}.json"), &[]).await?;
+                    let ids = pool_ids(self.site, &body)?;
+                    Ok::<_, crate::Error>(self.listing(State {
+                        root,
+                        tags: String::new(),
+                        done: ids.is_empty(),
+                        cursor: Cursor::Pool(ids.into()),
+                        pages: 0,
+                        pending: VecDeque::new(),
+                    }))
+                })
+                .map(|result| match result {
+                    Ok(events) => events,
+                    Err(e) => stream::once(async move { Err(e) }).boxed(),
+                })
+                .flatten()
+                .boxed();
+            }
+        };
+        self.listing(State {
+            root,
+            tags,
+            cursor,
+            pages: 0,
+            done: false,
+            pending: VecDeque::new(),
+        })
+    }
+
+    fn listing(&self, state: State) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::unfold(Some(state), move |state| async move {
+            let mut state = state?;
+            loop {
+                if let Some(event) = state.pending.pop_front() {
+                    return Some((Ok(event), Some(state)));
+                }
+                if state.done {
+                    return None;
+                }
+                if let Err(e) = self.next_page(&mut state).await {
+                    return Some((Err(e), None));
+                }
+            }
+        })
+        .boxed()
+    }
+
+    async fn request(&self, endpoint: &Url) -> Result<Vec<u8>> {
+        for attempt in 0..=self.retries {
+            match self.attempt(endpoint, attempt).await {
+                Ok(body) => return Ok(body),
+                Err(failure) if failure.retry && attempt < self.retries => {
+                    tokio::time::sleep(backoff(attempt)).await;
+                }
+                Err(failure) => return Err(failure.error),
+            }
+        }
+        unreachable!()
+    }
+
+    async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
+        let name = self.site.name();
+        let mut target = endpoint.clone();
+        let mut redirects = Redirects::new(endpoint);
+        let mut response = loop {
+            self.rate_limits.wait(&target, self.timeout).await?;
+            let response = self
+                .client
+                .get(target.clone())
+                .timeout(self.request_timeout)
+                .header(header::ACCEPT, "application/json")
+                .send()
+                .await
+                .map_err(|_| {
+                    Failure::transient(format!("{name} request failed; check network access"))
+                })?;
+            match redirects.next(response.url(), response.status(), response.headers())? {
+                Some(next) => target = next,
+                None => break response,
+            }
+        };
+        let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            let delay = retry_after(response.headers(), SystemTime::now());
+            self.rate_limits
+                .defer(endpoint, delay.unwrap_or_else(|| backoff(attempt)));
+            return Err(Failure::transient(
+                if status == StatusCode::TOO_MANY_REQUESTS {
+                    match delay {
+                        Some(delay) => {
+                            format!("{name} rate limit; retry after {} seconds", delay.as_secs())
+                        }
+                        None => format!("{name} rate limit; retry later"),
+                    }
+                } else {
+                    format!("{name} returned HTTP {status}")
+                },
+            ));
+        }
+        if matches!(status.as_u16(), 404 | 410) {
+            return Err(error(format!("{name} post or pool not found")).into());
+        }
+        if matches!(status.as_u16(), 401 | 403) {
+            return Err(error(format!(
+                "{name} refused access (login, API key or a descriptive User-Agent may be required)"
+            ))
+            .into());
+        }
+        if !status.is_success() {
+            return Err(error(format!("{name} returned HTTP {status}")).into());
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| Failure::transient(format!("could not read {name} response")))?
+        {
+            if body.len() + chunk.len() > MAX_RESPONSE {
+                return Err(error(format!("{name} response exceeded 16 MiB")).into());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+}
+
+fn backoff(attempt: u8) -> Duration {
+    Duration::from_millis(250 * (1u64 << attempt.min(6)))
+}
+
+struct Failure {
+    error: crate::Error,
+    retry: bool,
+}
+
+impl Failure {
+    fn transient(message: impl Into<String>) -> Self {
+        Self {
+            error: error(message),
+            retry: true,
+        }
+    }
+}
+
+impl From<crate::Error> for Failure {
+    fn from(error: crate::Error) -> Self {
+        Self {
+            error,
+            retry: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread::{self, JoinHandle},
+    };
+
+    const MD5: &str = "0123456789abcdef0123456789abcdef";
+
+    fn danbooru_post(id: u64) -> Value {
+        json!({"id": id, "created_at": "2024-01-02T03:04:05.123-05:00", "md5": MD5,
+               "file_ext": "png", "image_width": 800, "image_height": 600, "file_size": 1234,
+               "tag_string": "1girl solo", "uploader_name": "alice",
+               "file_url": format!("https://cdn.donmai.us/original/01/23/{MD5}.png")})
+    }
+
+    fn e621_post(id: u64) -> Value {
+        json!({"id": id, "created_at": "2024-01-02T08:04:05.000Z",
+               "file": {"url": format!("https://static1.e621.net/data/01/23/{MD5}.webm"),
+                        "ext": "webm", "md5": MD5, "width": 1920, "height": 1080, "size": 9},
+               "tags": {"general": ["a", "b"], "artist": ["c"]}})
+    }
+
+    #[test]
+    fn parses_danbooru_post() {
+        let media = parse_post(Site::Danbooru, &danbooru_post(123)).unwrap();
+        assert_eq!(media.filename, format!("danbooru_123_{MD5}.png"));
+        let meta = media.metadata.as_ref().unwrap();
+        assert_eq!(meta.post_id, "123");
+        assert_eq!(meta.media_id, MD5);
+        assert_eq!(meta.username.as_deref(), Some("alice"));
+        assert_eq!(meta.caption.as_deref(), Some("1girl solo"));
+        assert_eq!(meta.timestamp, Some(1704182645));
+        assert_eq!(meta.index, 1);
+        let file = meta.file.as_ref().unwrap();
+        assert_eq!((file.width, file.height), (Some(800), Some(600)));
+        assert!(media.archive_key().unwrap().starts_with("danbooru:v1:"));
+    }
+
+    #[test]
+    fn parses_e621_wrapped_responses() {
+        let single = json!({"post": e621_post(5)}).to_string();
+        let raw = posts(Site::E621, single.as_bytes()).unwrap();
+        let media = parse_post(Site::E621, &raw[0]).unwrap();
+        assert_eq!(media.filename, format!("e621_5_{MD5}.webm"));
+        let meta = media.metadata.as_ref().unwrap();
+        assert_eq!(meta.caption.as_deref(), Some("a b c"));
+        assert_eq!(meta.timestamp, Some(1704182645));
+        let list = json!({"posts": [e621_post(5), e621_post(4)]}).to_string();
+        assert_eq!(posts(Site::E621, list.as_bytes()).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn parses_gelbooru_and_safebooru_posts() {
+        let body = json!({"@attributes": {"count": 1}, "post": [{"id": 7, "md5": MD5,
+            "file_url": format!("https://img3.gelbooru.com/images/01/23/{MD5}.jpeg"),
+            "width": 10, "height": 20, "tags": " a  b ", "owner": "bob",
+            "created_at": "Tue Jan 02 03:04:05 -0500 2024"}]})
+        .to_string();
+        let raw = posts(Site::Gelbooru, body.as_bytes()).unwrap();
+        let media = parse_post(Site::Gelbooru, &raw[0]).unwrap();
+        assert_eq!(media.filename, format!("gelbooru_7_{MD5}.jpg"));
+        let meta = media.metadata.as_ref().unwrap();
+        assert_eq!(meta.caption.as_deref(), Some("a b"));
+        assert_eq!(meta.username.as_deref(), Some("bob"));
+        assert_eq!(meta.timestamp, Some(1704182645));
+        assert!(
+            posts(Site::Gelbooru, b"{\"@attributes\":{}}")
+                .unwrap()
+                .is_empty()
+        );
+
+        let body = json!([{"id": 9, "directory": "1234", "image": "abc.png", "hash": MD5,
+                           "width": 1, "height": 2, "tags": "x", "owner": "carol"}])
+        .to_string();
+        let raw = posts(Site::Safebooru, body.as_bytes()).unwrap();
+        let media = parse_post(Site::Safebooru, &raw[0]).unwrap();
+        assert_eq!(
+            media.url.as_str(),
+            "https://safebooru.org/images/1234/abc.png"
+        );
+        assert_eq!(media.filename, format!("safebooru_9_{MD5}.png"));
+        assert!(posts(Site::Safebooru, b"").unwrap().is_empty());
+        let evil = json!({"id": 9, "directory": "..", "image": "x.png"});
+        assert!(parse_post(Site::Safebooru, &evil).is_none());
+    }
+
+    #[test]
+    fn skips_missing_or_foreign_files() {
+        let mut deleted = danbooru_post(1);
+        deleted.as_object_mut().unwrap().remove("file_url");
+        let mut foreign = danbooru_post(2);
+        foreign["file_url"] = json!("https://evil.example/x.png");
+        let mut plain = danbooru_post(3);
+        plain["file_url"] = json!("http://cdn.donmai.us/x.png");
+        for post in [deleted, foreign, plain] {
+            assert!(parse_post(Site::Danbooru, &post).is_none());
+        }
+        let mut e621 = e621_post(4);
+        e621["file"]["url"] = Value::Null;
+        assert!(parse_post(Site::E621, &e621).is_none());
+        let gel = json!({"id": 5, "file_url": "https://gelbooru.com.evil.test/a.jpg"});
+        assert!(parse_post(Site::Gelbooru, &gel).is_none());
+    }
+
+    #[test]
+    fn classifies_supported_urls() {
+        let t = |site, raw: &str| target(site, &Url::parse(raw).unwrap()).map(|(t, _)| t);
+        assert_eq!(
+            t(Site::Danbooru, "https://danbooru.donmai.us/posts/123?q=x").unwrap(),
+            Target::Post { id: 123 }
+        );
+        assert_eq!(
+            t(Site::Danbooru, "https://danbooru.donmai.us/posts?tags=a+b").unwrap(),
+            Target::Tags { tags: "a b".into() }
+        );
+        assert_eq!(
+            t(Site::E621, "https://e926.net/pools/42").unwrap(),
+            Target::Pool { id: 42 }
+        );
+        let (_, root) =
+            target(Site::E621, &Url::parse("https://e926.net/posts/1").unwrap()).unwrap();
+        assert_eq!(root.as_str(), "https://e926.net/");
+        assert_eq!(
+            t(
+                Site::Gelbooru,
+                "https://gelbooru.com/index.php?page=post&s=view&id=9"
+            )
+            .unwrap(),
+            Target::Post { id: 9 }
+        );
+        assert_eq!(
+            t(
+                Site::Safebooru,
+                "https://safebooru.org/index.php?page=post&s=list&tags=cat"
+            )
+            .unwrap(),
+            Target::Tags { tags: "cat".into() }
+        );
+        for (site, raw) in [
+            (Site::Danbooru, "https://danbooru.donmai.us/posts"),
+            (Site::Danbooru, "https://danbooru.donmai.us/posts/abc"),
+            (Site::Danbooru, "https://danbooru.donmai.us:444/posts/1"),
+            (Site::Danbooru, "https://safebooru.donmai.us/posts/1"),
+            (Site::E621, "https://e621.net/users/1"),
+            (
+                Site::Gelbooru,
+                "https://gelbooru.com/index.php?page=pool&s=show&id=1",
+            ),
+            (
+                Site::Gelbooru,
+                "https://gelbooru.com/index.php?page=post&s=view&id=0",
+            ),
+            (
+                Site::Safebooru,
+                "https://safebooru.org/index.php?page=post&s=list&tags=",
+            ),
+        ] {
+            assert!(t(site, raw).is_err(), "{raw}");
+        }
+    }
+
+    fn response(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn serve(responses: Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let task = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for reply in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert_ne!(count, 0);
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                requests.push(String::from_utf8(request).unwrap());
+                let _ = stream.write_all(&reply);
+            }
+            requests
+        });
+        (root, task)
+    }
+
+    fn booru(site: Site, root: Url) -> Booru {
+        Booru::new(site, Duration::from_secs(5))
+            .unwrap()
+            .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
+            .unwrap()
+            .with_api_root(root)
+    }
+
+    #[tokio::test]
+    async fn fetches_e621_post_with_retries_and_user_agent() {
+        let body = json!({"post": e621_post(5)}).to_string();
+        let (root, server) = serve(vec![
+            response("429 Too Many Requests", "Retry-After: 0\r\n", b""),
+            response("200 OK", "", body.as_bytes()),
+        ]);
+        let events: Vec<_> = booru(Site::E621, root)
+            .with_retries(1)
+            .events(&Url::parse("https://e621.net/posts/5").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 3, "{events:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /posts/5.json "));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("user-agent: gallery-dl-rs/")
+        );
+    }
+
+    #[tokio::test]
+    async fn paginates_danbooru_tags_with_id_cursor() {
+        let page1: Vec<_> = (0..200).map(|i| danbooru_post(1000 - i)).collect();
+        let page1 = Value::Array(page1).to_string();
+        let (root, server) = serve(vec![
+            response("200 OK", "", page1.as_bytes()),
+            response("200 OK", "", b"[]"),
+        ]);
+        let media: Vec<_> = booru(Site::Danbooru, root)
+            .stream(&Url::parse("https://danbooru.donmai.us/posts?tags=cat").unwrap())
+            .collect()
+            .await;
+        assert_eq!(media.len(), 200);
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /posts.json?tags=cat&limit=200 "));
+        assert!(requests[1].contains("&page=b801 "));
+    }
+
+    #[tokio::test]
+    async fn fetches_pool_in_order_and_gelbooru_pages() {
+        let (root, server) = serve(vec![
+            response("200 OK", "", br#"{"id": 42, "post_ids": [3, 1, 2]}"#),
+            response(
+                "200 OK",
+                "",
+                Value::Array(vec![danbooru_post(1), danbooru_post(2), danbooru_post(3)])
+                    .to_string()
+                    .as_bytes(),
+            ),
+        ]);
+        let ids: Vec<_> = booru(Site::Danbooru, root)
+            .stream(&Url::parse("https://danbooru.donmai.us/pools/42").unwrap())
+            .map(|m| m.unwrap().metadata.unwrap().post_id)
+            .collect()
+            .await;
+        assert_eq!(ids, ["3", "1", "2"]);
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /posts.json?tags=id%3A3%2C1%2C2&limit=200 "));
+
+        let (root, server) = serve(vec![response("200 OK", "", b"[]")]);
+        let media: Vec<_> = booru(Site::Safebooru, root)
+            .stream(
+                &Url::parse("https://safebooru.org/index.php?page=post&s=list&tags=cat").unwrap(),
+            )
+            .collect()
+            .await;
+        assert!(media.is_empty());
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with(
+            "GET /index.php?page=dapi&s=post&q=index&json=1&tags=cat&limit=100&pid=0 "
+        ));
+    }
+
+    #[tokio::test]
+    async fn terminal_errors_are_not_retried() {
+        let (root, server) = serve(vec![response("403 Forbidden", "", b"{}")]);
+        let error = booru(Site::Gelbooru, root)
+            .with_retries(3)
+            .stream(&Url::parse("https://gelbooru.com/index.php?page=post&s=view&id=1").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err();
+        assert!(error.to_string().contains("refused"));
+        assert!(!error.to_string().contains("127.0.0.1"));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+}

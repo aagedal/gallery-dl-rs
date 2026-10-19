@@ -349,8 +349,54 @@ fn context_parts(
                     .map_or(Value::Int(0), |value| identifier(value)),
             );
         }
-        if category == "facebook" {
+        if let Some(instance) = &post.instance {
+            if matches!(category, "kemono" | "coomer") {
+                values.insert("service".into(), text(instance.as_str()));
+                if let Some(user) = &post.username {
+                    values.insert("user".into(), text(user.clone()));
+                }
+            } else {
+                values.insert("instance".into(), text(instance.as_str()));
+            }
+        }
+        if matches!(
+            category,
+            "facebook"
+                | "mastodon"
+                | "kemono"
+                | "coomer"
+                | "pixiv"
+                | "deviantart"
+                | "flickr"
+                | "wallhaven"
+                | "artstation"
+                | "pinterest"
+                | "newgrounds"
+                | "furaffinity"
+                | "weasyl"
+                | "vsco"
+        ) || crate::booru::Site::from_category(category).is_some()
+        {
             values.insert("id".into(), identifier(&post.post_id));
+        }
+        if matches!(
+            category,
+            "imgur"
+                | "bluesky"
+                | "reddit"
+                | "tumblr"
+                | "pixeldrain"
+                | "catbox"
+                | "imgbox"
+                | "postimg"
+        ) {
+            // Upstream `id` is the image ID for files and the post ID otherwise.
+            let id = if media.is_some() {
+                &post.media_id
+            } else {
+                &post.post_id
+            };
+            values.insert("id".into(), text(id.as_str()));
         }
         values.insert(
             "date".into(),

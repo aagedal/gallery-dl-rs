@@ -172,10 +172,11 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"secret-key":"secret-value"}}"#,
         r#"{"extractor":{"instagram":{"secret-key":"secret-value"}}}"#,
         r#"{"extractor":{"instagram":{"post":{"cookies":"secret-value"}}}}"#,
-        r#"{"extractor":{"pixiv":{"cookies":"secret-value"}}}"#,
+        r#"{"extractor":{"weibo":{"cookies":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
-        r#"{"extractor":{"filename":{"secret-value":"{filename}"}}}"#,
+        r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
+        r#"{"extractor":{"filename":{"1":["secret-value"]}}}"#,
         r#"{"extractor":{"filename":"{secret-value}"}}"#,
         r#"{"extractor":{"filename":"secret-value/{filename}"}}"#,
         r#"{"extractor":{"postprocessors":[{"name":"exec","command":"secret-value"}]}}"#,
@@ -1780,5 +1781,145 @@ fn text_tweet_configuration_rejects_private_types_and_duplicate_keys() {
         r#"{"extractor":{"twitter":{"text-tweets":false,"text-tweets":true}}}"#,
     ] {
         assert!(parse(document).is_err());
+    }
+}
+
+#[test]
+fn conditional_templates_preserve_order_and_replace_whole_settings() {
+    let config = parse(
+        r#"{"extractor":{"filename":{"index > 1":"b.{extension}","index > 0":"a.{extension}","":"{filename}"},"directory":{"username == 'x'":["x"],"":["{category}"]},"twitter":{"filename":"t.{extension}","directory":["t"]}}}"#,
+    )
+    .unwrap();
+    let direct = config.resolve("direct").unwrap();
+    assert_eq!(direct.filename.as_deref(), Some("{filename}"));
+    assert_eq!(
+        direct.filename_conditions,
+        Some(vec![
+            ("index > 1".to_string(), "b.{extension}".to_string()),
+            ("index > 0".to_string(), "a.{extension}".to_string()),
+        ])
+    );
+    assert_eq!(direct.directory, Some(vec!["{category}".to_string()]));
+    assert_eq!(
+        direct.directory_conditions,
+        Some(vec![("username == 'x'".to_string(), vec!["x".to_string()])])
+    );
+    // A plain category value replaces inherited conditional settings.
+    let twitter = config.resolve("twitter").unwrap();
+    assert_eq!(twitter.filename.as_deref(), Some("t.{extension}"));
+    assert_eq!(twitter.filename_conditions, None);
+    assert_eq!(twitter.directory_conditions, None);
+    // An explicit CLI filename replaces the inherited conditions, too.
+    let cli = direct.overlay(&Options {
+        filename: Some("{name}".into()),
+        ..Options::default()
+    });
+    assert_eq!(cli.filename_conditions, None);
+    for bad in [
+        r#"{"filename":{"index ==":"x"}}"#,
+        r#"{"filename":{"1":"a/b"}}"#,
+        r#"{"filename":{"1":1}}"#,
+        r#"{"directory":{"1":"x"}}"#,
+        r#"{"directory":{"1":["../x"]}}"#,
+    ] {
+        assert!(parse(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn api_key_is_tumblr_flickr_wallhaven_and_weasyl_only_and_never_echoed() {
+    assert!(
+        parse(r#"{"extractor":{"artstation":{"filename":"{post_id}_{media_id}.{extension}"}}}"#)
+            .is_ok()
+    );
+    assert!(
+        parse(r#"{"extractor":{"pinterest":{"filename":"{post_id}_{index}.{extension}"}}}"#)
+            .is_ok()
+    );
+    assert!(
+        parse(r#"{"extractor":{"newgrounds":{"filename":"{post_id}_{index}.{extension}"}}}"#)
+            .is_ok()
+    );
+    assert!(parse(r#"{"extractor":{"furaffinity":{"filename":"{post_id}.{extension}"}}}"#).is_ok());
+    assert!(parse(r#"{"extractor":{"vsco":{"filename":"{media_id}.{extension}"}}}"#).is_ok());
+    let config =
+        parse(r#"{"extractor":{"tumblr":{"api-key":"abc123"},"flickr":{"api-key":"f00d"},"wallhaven":{"api-key":"beef"},"weasyl":{"api-key":"cafe"}}}"#)
+            .unwrap();
+    assert_eq!(
+        config.resolve("wallhaven").unwrap().api_key.as_deref(),
+        Some("beef")
+    );
+    assert_eq!(
+        config.resolve("flickr").unwrap().api_key.as_deref(),
+        Some("f00d")
+    );
+    assert_eq!(
+        config.resolve("tumblr").unwrap().api_key.as_deref(),
+        Some("abc123")
+    );
+    assert_eq!(
+        config.resolve("weasyl").unwrap().api_key.as_deref(),
+        Some("cafe")
+    );
+    assert_eq!(config.resolve("reddit").unwrap().api_key, None);
+    for json in [
+        r#"{"api-key":"abc123"}"#,
+        r#"{"extractor":{"api-key":"abc123"}}"#,
+        r#"{"extractor":{"reddit":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"tumblr":{"api-key":"abc 123!"}}}"#,
+        r#"{"extractor":{"tumblr":{"api-key":7}}}"#,
+        r#"{"extractor":{"flickr":{"api-key":"abc-123"}}}"#,
+        r#"{"extractor":{"artstation":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"pinterest":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"newgrounds":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"furaffinity":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"vsco":{"api-key":"abc123"}}}"#,
+        r#"{"extractor":{"wallhaven":{"api-key":"abc 123"}}}"#,
+        r#"{"extractor":{"weasyl":{"api-key":"abc-123"}}}"#,
+    ] {
+        let error = parse(json).err().unwrap().to_string();
+        assert!(!error.contains("abc"), "{error}");
+    }
+}
+
+#[test]
+fn refresh_token_is_pixiv_only_and_never_echoed() {
+    let config = parse(r#"{"extractor":{"pixiv":{"refresh-token":"abc_123-x"}}}"#).unwrap();
+    assert_eq!(
+        config.resolve("pixiv").unwrap().refresh_token.as_deref(),
+        Some("abc_123-x")
+    );
+    assert_eq!(config.resolve("tumblr").unwrap().refresh_token, None);
+    for json in [
+        r#"{"refresh-token":"abc123"}"#,
+        r#"{"extractor":{"refresh-token":"abc123"}}"#,
+        r#"{"extractor":{"tumblr":{"refresh-token":"abc123"}}}"#,
+        r#"{"extractor":{"pixiv":{"refresh-token":"abc 123!"}}}"#,
+        r#"{"extractor":{"pixiv":{"refresh-token":7}}}"#,
+    ] {
+        let error = parse(json).err().unwrap().to_string();
+        assert!(!error.contains("abc"), "{error}");
+    }
+}
+
+#[test]
+fn client_credentials_are_deviantart_only_and_never_echoed() {
+    let config =
+        parse(r#"{"extractor":{"deviantart":{"client-id":"123","client-secret":"abcdef0"}}}"#)
+            .unwrap();
+    let resolved = config.resolve("deviantart").unwrap();
+    assert_eq!(resolved.client_id.as_deref(), Some("123"));
+    assert_eq!(resolved.client_secret.as_deref(), Some("abcdef0"));
+    assert_eq!(config.resolve("pixiv").unwrap().client_secret, None);
+    for json in [
+        r#"{"client-secret":"abc123"}"#,
+        r#"{"extractor":{"client-id":"123"}}"#,
+        r#"{"extractor":{"pixiv":{"client-secret":"abc123"}}}"#,
+        r#"{"extractor":{"deviantart":{"client-id":"abc1"}}}"#,
+        r#"{"extractor":{"deviantart":{"client-secret":"abc 123!"}}}"#,
+        r#"{"extractor":{"deviantart":{"client-secret":7}}}"#,
+    ] {
+        let error = parse(json).err().unwrap().to_string();
+        assert!(!error.contains("abc"), "{error}");
     }
 }

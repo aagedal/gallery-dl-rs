@@ -66,10 +66,35 @@ enum Part {
 /// names use the downloader's ASCII alphabet.
 #[derive(Clone, Debug)]
 pub struct FilenameTemplate {
-    parts: Vec<Part>,
+    parts: Option<Vec<Part>>,
+    /// Upstream-style conditional formats: the first matching filter selects
+    /// its template; otherwise `parts`, then the default name, applies.
+    conditions: Vec<(crate::filter::FilterExpression, Vec<Part>)>,
 }
 
 impl FilenameTemplate {
+    /// Parse `(filter, template)` pairs in order with an optional default.
+    pub fn parse_conditional(
+        conditions: &[(String, String)],
+        default: Option<&str>,
+    ) -> Result<Self> {
+        if conditions.len() > 32 {
+            return Err(error("filename template has too many conditions"));
+        }
+        Ok(Self {
+            parts: default.map(Self::parse).transpose()?.and_then(|t| t.parts),
+            conditions: conditions
+                .iter()
+                .map(|(filter, template)| {
+                    Ok((
+                        crate::filter::FilterExpression::parse(filter)?,
+                        Self::parse(template)?.parts.unwrap_or_default(),
+                    ))
+                })
+                .collect::<Result<_>>()?,
+        })
+    }
+
     pub fn parse(template: &str) -> Result<Self> {
         if template.is_empty() || matches!(template, "." | "..") {
             return Err(error("filename template must produce a basename"));
@@ -123,11 +148,34 @@ impl FilenameTemplate {
         if !literal.is_empty() {
             parts.push(Part::Literal(literal));
         }
-        Ok(Self { parts })
+        Ok(Self {
+            parts: Some(parts),
+            conditions: Vec::new(),
+        })
     }
 
+    /// Render, failing if no condition matches and no default exists.
     pub fn render(&self, media: &Media) -> Result<String> {
-        self.render_with(media, &mut None)
+        self.render_optional(media)?
+            .ok_or_else(|| error("no filename template condition matched"))
+    }
+
+    /// Render, or `None` when the default filename policy should apply.
+    pub fn render_optional(&self, media: &Media) -> Result<Option<String>> {
+        let mut context = None;
+        match self.select(media)? {
+            Some(parts) => Self::render_parts(parts, media, &mut context).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    fn select(&self, media: &Media) -> Result<Option<&[Part]>> {
+        for (filter, parts) in &self.conditions {
+            if filter.matches(media)? {
+                return Ok(Some(parts));
+            }
+        }
+        Ok(self.parts.as_deref())
     }
 
     fn render_with(
@@ -135,8 +183,19 @@ impl FilenameTemplate {
         media: &Media,
         context: &mut Option<BTreeMap<String, crate::filter::Value>>,
     ) -> Result<String> {
+        let parts = self
+            .select(media)?
+            .ok_or_else(|| error("no filename template condition matched"))?;
+        Self::render_parts(parts, media, context)
+    }
+
+    fn render_parts(
+        parts: &[Part],
+        media: &Media,
+        context: &mut Option<BTreeMap<String, crate::filter::Value>>,
+    ) -> Result<String> {
         let mut output = String::new();
-        for part in &self.parts {
+        for part in parts {
             match part {
                 Part::Literal(value) => output.push_str(value),
                 Part::Field(field) => {
@@ -213,10 +272,36 @@ fn safe_char(c: char) -> char {
 /// separators, absolute prefixes, or parent-directory components.
 #[derive(Clone, Debug)]
 pub struct DirectoryTemplate {
-    components: Vec<FilenameTemplate>,
+    components: Option<Vec<FilenameTemplate>>,
+    conditions: Vec<(crate::filter::FilterExpression, Vec<FilenameTemplate>)>,
 }
 
 impl DirectoryTemplate {
+    /// Parse `(filter, components)` pairs in order with an optional default.
+    pub fn parse_conditional(
+        conditions: &[(String, Vec<String>)],
+        default: Option<&[String]>,
+    ) -> Result<Self> {
+        if conditions.len() > 32 {
+            return Err(error("directory template has too many conditions"));
+        }
+        Ok(Self {
+            components: default
+                .map(Self::parse)
+                .transpose()?
+                .and_then(|t| t.components),
+            conditions: conditions
+                .iter()
+                .map(|(filter, components)| {
+                    Ok((
+                        crate::filter::FilterExpression::parse(filter)?,
+                        Self::parse(components)?.components.unwrap_or_default(),
+                    ))
+                })
+                .collect::<Result<_>>()?,
+        })
+    }
+
     pub fn parse(components: &[String]) -> Result<Self> {
         if components.len() > 32
             || components
@@ -226,18 +311,33 @@ impl DirectoryTemplate {
             return Err(error("directory template exceeds component limits"));
         }
         Ok(Self {
-            components: components
-                .iter()
-                .map(|s| FilenameTemplate::parse(s))
-                .collect::<Result<_>>()?,
+            components: Some(
+                components
+                    .iter()
+                    .map(|s| FilenameTemplate::parse(s))
+                    .collect::<Result<_>>()?,
+            ),
+            conditions: Vec::new(),
         })
     }
 
-    pub fn render(&self, media: &Media) -> Result<PathBuf> {
+    /// Render, or `None` when no condition matches and no default exists,
+    /// selecting the normal category directory.
+    pub fn render(&self, media: &Media) -> Result<Option<PathBuf>> {
+        let mut selected = self.components.as_deref();
+        for (filter, components) in &self.conditions {
+            if filter.matches(media)? {
+                selected = Some(components);
+                break;
+            }
+        }
+        let Some(components) = selected else {
+            return Ok(None);
+        };
         let mut output = PathBuf::new();
         let mut bytes = 0;
         let mut context = None;
-        for component in &self.components {
+        for component in components {
             let component = component.render_with(media, &mut context)?;
             bytes += component.len() + 1;
             if bytes > 3072 {
@@ -245,7 +345,7 @@ impl DirectoryTemplate {
             }
             output.push(component);
         }
-        Ok(output)
+        Ok(Some(output))
     }
 }
 

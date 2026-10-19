@@ -18,6 +18,7 @@ fn media() -> Media {
             quoted_by_id: None,
             reposted_by_id: None,
             article: None,
+            instance: None,
             post_id: "123".into(),
             media_id: "456".into(),
             shortcode: "BA".into(),
@@ -270,14 +271,14 @@ fn directory_components_replace_category_and_cannot_add_paths() {
             .unwrap();
     assert_eq!(
         template.render(&item).unwrap(),
-        std::path::PathBuf::from("instagram/_.._A___B/123")
+        Some(std::path::PathBuf::from("instagram/_.._A___B/123"))
     );
     assert_eq!(
         DirectoryTemplate::parse(&[])
             .unwrap()
             .render(&item)
             .unwrap(),
-        std::path::PathBuf::new()
+        Some(std::path::PathBuf::new())
     );
     for bad in [
         "",
@@ -304,7 +305,7 @@ fn directory_limits_and_reserved_names_apply_to_each_component() {
     let reserved = DirectoryTemplate::parse(&["CON".into(), "LPT1.jpg".into()]).unwrap();
     assert_eq!(
         reserved.render(&media()).unwrap(),
-        std::path::PathBuf::from("_CON/_LPT1.jpg")
+        Some(std::path::PathBuf::from("_CON/_LPT1.jpg"))
     );
 }
 
@@ -453,4 +454,82 @@ fn nested_metadata_and_lists_are_addressable() {
         };
         assert_eq!(rendered.unwrap(), expected, "{template}");
     }
+}
+
+#[test]
+fn conditional_templates_select_the_first_matching_filter() {
+    let template = FilenameTemplate::parse_conditional(
+        &[
+            (
+                "username == 'bob'".into(),
+                "bob_{post_id}.{extension}".into(),
+            ),
+            ("index >= 2".into(), "late_{index}.{extension}".into()),
+            ("username == 'alice'".into(), "alice.{extension}".into()),
+        ],
+        Some("{filename}"),
+    )
+    .unwrap();
+    let mut item = media();
+    assert_eq!(template.render(&item).unwrap(), "late_2.jpg");
+    item.metadata.as_mut().unwrap().index = 1;
+    assert_eq!(template.render(&item).unwrap(), "alice.jpg");
+    item.metadata.as_mut().unwrap().username = Some("carol".into());
+    assert_eq!(template.render(&item).unwrap(), "native.photo.jpg");
+
+    // Without a default, unmatched media keep the normal naming policy.
+    let bare =
+        FilenameTemplate::parse_conditional(&[("index > 5".into(), "x.jpg".into())], None).unwrap();
+    assert_eq!(bare.render_optional(&item).unwrap(), None);
+    assert!(bare.render(&item).is_err());
+    let root = std::path::Path::new("/root");
+    assert_eq!(
+        gallery_dl_rs::download::destination_with_template(root, &item, &bare).unwrap(),
+        gallery_dl_rs::download::destination(root, &item)
+    );
+
+    // Missing keys in a condition fail the file, as upstream does.
+    let missing =
+        FilenameTemplate::parse_conditional(&[("nope == 1".into(), "x.jpg".into())], None).unwrap();
+    assert!(missing.render_optional(&item).is_err());
+    for bad in [
+        ("index ==".to_string(), "x".to_string()),
+        ("1".into(), "a/b".into()),
+    ] {
+        assert!(FilenameTemplate::parse_conditional(&[bad], None).is_err());
+    }
+}
+
+#[test]
+fn conditional_directories_fall_back_to_category_folders() {
+    let directory = DirectoryTemplate::parse_conditional(
+        &[
+            (
+                "username == 'alice'".into(),
+                vec!["people".into(), "{username}".into()],
+            ),
+            ("index == 9".into(), vec![]),
+        ],
+        None,
+    )
+    .unwrap();
+    let mut item = media();
+    assert_eq!(
+        directory.render(&item).unwrap(),
+        Some(std::path::Path::new("people").join("alice"))
+    );
+    item.metadata.as_mut().unwrap().username = None;
+    item.metadata.as_mut().unwrap().index = 9;
+    assert_eq!(
+        directory.render(&item).unwrap(),
+        Some(std::path::PathBuf::new())
+    );
+    item.metadata.as_mut().unwrap().index = 1;
+    assert_eq!(directory.render(&item).unwrap(), None);
+    let root = std::path::Path::new("/root");
+    assert_eq!(
+        gallery_dl_rs::download::destination_with_templates(root, &item, None, Some(&directory))
+            .unwrap(),
+        gallery_dl_rs::download::destination(root, &item)
+    );
 }

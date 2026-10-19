@@ -28,6 +28,88 @@ pub struct DownloadClient {
     resume: bool,
     fallback: bool,
     network: NetworkOptions,
+    mtime_http: bool,
+    mtime_field: Option<String>,
+    sleep: Option<crate::sleep::SleepRange>,
+    /// Maximum body bytes per second for each download.
+    rate: Option<u64>,
+}
+
+/// Per-attempt state shared between the attempt and its deadline. Throttling
+/// pauses extend the deadline so rate limits cannot cause timeouts.
+struct Io {
+    remote: std::sync::atomic::AtomicBool,
+    paused: std::sync::atomic::AtomicU64,
+    received: std::sync::atomic::AtomicU64,
+    rate: Option<u64>,
+    started: std::time::Instant,
+}
+
+impl Io {
+    fn new(rate: Option<u64>) -> Self {
+        Self {
+            remote: false.into(),
+            paused: 0.into(),
+            received: 0.into(),
+            rate,
+            started: std::time::Instant::now(),
+        }
+    }
+    fn set_remote(&self, value: bool) {
+        self.remote
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn remote(&self) -> bool {
+        self.remote.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn deadline(&self, limit: Duration) -> std::time::Instant {
+        let paused = self.paused.load(std::sync::atomic::Ordering::Relaxed);
+        self.started + limit + Duration::from_nanos(paused)
+    }
+    /// Delay until the bytes received in this attempt fit the rate limit.
+    async fn throttle(&self, bytes: usize) {
+        let Some(rate) = self.rate else { return };
+        let total = self
+            .received
+            .fetch_add(bytes as u64, std::sync::atomic::Ordering::Relaxed)
+            + bytes as u64;
+        let target = Duration::from_secs_f64(total as f64 / rate as f64);
+        let elapsed = self.started.elapsed();
+        if let Some(wait) = target.checked_sub(elapsed).filter(|wait| !wait.is_zero()) {
+            self.paused.fetch_add(
+                u64::try_from(wait.as_nanos()).unwrap_or(u64::MAX),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            tokio::time::sleep(wait).await;
+        }
+    }
+}
+
+/// Modification time policy for newly published files.
+#[derive(Clone, Copy)]
+struct Mtime {
+    /// A metadata-derived time, which takes precedence over HTTP headers.
+    fixed: Option<SystemTime>,
+    http: bool,
+}
+
+impl Mtime {
+    fn select(self, headers: &HeaderMap) -> Option<SystemTime> {
+        self.fixed.or_else(|| {
+            self.http
+                .then(|| headers.get(reqwest::header::LAST_MODIFIED))
+                .flatten()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| httpdate::parse_http_date(value).ok())
+        })
+    }
+}
+
+fn set_mtime(file: &std::fs::File, time: Option<SystemTime>) -> std::io::Result<()> {
+    match time {
+        Some(time) => file.set_modified(time),
+        None => Ok(()),
+    }
 }
 
 impl DownloadClient {
@@ -67,6 +149,50 @@ impl DownloadClient {
         self
     }
 
+    /// Set new files' modification times from HTTP `Last-Modified` (default).
+    pub fn with_http_mtime(mut self, enabled: bool) -> Self {
+        self.mtime_http = enabled;
+        self
+    }
+
+    /// Set new files' modification times from a metadata date field, such as
+    /// `date`, overriding `Last-Modified`. Absent or non-numeric values are ignored.
+    pub fn with_metadata_mtime(mut self, field: Option<String>) -> Self {
+        self.mtime_field = field;
+        self
+    }
+
+    /// Limit each download's body to this many bytes per second.
+    pub fn with_rate_limit(mut self, rate: Option<u64>) -> Self {
+        self.rate = rate.filter(|rate| *rate > 0);
+        self
+    }
+
+    /// Wait before each network download, after archive and existing-file checks.
+    pub fn with_sleep(mut self, sleep: Option<crate::sleep::SleepRange>) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
+    fn mtime(&self, media: &Media) -> Mtime {
+        let fixed = self.mtime_field.as_ref().and_then(|field| {
+            let seconds = match crate::filter::context(media).get(field.as_str())? {
+                crate::filter::Value::Int(value) => i64::try_from(*value).ok()?,
+                crate::filter::Value::Float(value) if value.is_finite() => *value as i64,
+                _ => return None,
+            };
+            if seconds >= 0 {
+                SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds as u64))
+            } else {
+                SystemTime::UNIX_EPOCH.checked_sub(Duration::from_secs(seconds.unsigned_abs()))
+            }
+        });
+        Mtime {
+            fixed,
+            http: self.mtime_http,
+        }
+    }
+
     /// Retain validated partial HTTP downloads for retries and later invocations.
     pub fn with_resume(mut self, enabled: bool) -> Self {
         self.resume = enabled;
@@ -87,6 +213,10 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         resume: false,
         fallback: true,
         network: NetworkOptions::default(),
+        mtime_http: true,
+        mtime_field: None,
+        sleep: None,
+        rate: None,
     })
 }
 
@@ -125,9 +255,10 @@ pub fn destination_with_template(
     media: &Media,
     template: &FilenameTemplate,
 ) -> Result<PathBuf> {
-    Ok(root
-        .join(safe_component(&media.category))
-        .join(template.render(media)?))
+    Ok(match template.render_optional(media)? {
+        Some(name) => root.join(safe_component(&media.category)).join(name),
+        None => destination(root, media),
+    })
 }
 
 /// Render a complete destination. An explicit directory replaces the default
@@ -142,9 +273,9 @@ pub fn destination_with_templates(
         Some(template) => destination_with_template(root, media, template)?,
         None => destination(root, media),
     };
-    match directory {
+    match directory.map(|d| d.render(media)).transpose()?.flatten() {
         None => Ok(default),
-        Some(directory) => Ok(root.join(directory.render(media)?).join(
+        Some(directory) => Ok(root.join(directory).join(
             default
                 .file_name()
                 .ok_or_else(|| error("invalid media filename"))?,
@@ -339,7 +470,7 @@ async fn download_media(
         }
         let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
         tokio::fs::create_dir_all(parent).await?;
-        return write_inline_text(parent, &path, data).await;
+        return write_inline_text(parent, &path, data, client.mtime(media).fixed).await;
     }
     let parent = path.parent().ok_or_else(|| error("invalid destination"))?;
     let mut candidate = Cow::Borrowed(media);
@@ -350,6 +481,10 @@ async fn download_media(
     // Keep the primary checkpoint's reservation until the whole logical job ends.
     let mut _primary_reservation = None;
     let mut first = true;
+    let mtime = client.mtime(media);
+    if let Some(sleep) = &client.sleep {
+        sleep.wait().await;
+    }
     loop {
         if !first {
             match std::fs::symlink_metadata(&path) {
@@ -393,6 +528,7 @@ async fn download_media(
                     retries,
                     limits,
                     &mut partial,
+                    mtime,
                 )
                 .await
             }
@@ -501,6 +637,7 @@ fn next_fallback(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_candidate(
     client: &DownloadClient,
     media: &Media,
@@ -509,6 +646,7 @@ async fn download_candidate(
     retries: u8,
     limits: SizeLimits,
     partial: &mut Option<crate::resume::Partial>,
+    mtime: Mtime,
 ) -> std::result::Result<Outcome, Failure> {
     let parent = path.parent().ok_or_else(|| Failure {
         error: error("invalid destination"),
@@ -518,35 +656,33 @@ async fn download_candidate(
     for attempt in 0..=retries {
         // Only a timeout while awaiting the network may advance candidates.
         // Disk/checkpoint/publication timeouts must preserve this representation.
-        let mut remote_io = false;
-        let result = tokio::time::timeout(client.wait_limit, async {
+        let io = Io::new(client.rate);
+        let attempt_future = async {
             match partial {
                 Some(partial) => {
-                    attempt_resume(
-                        client,
-                        media,
-                        headers,
-                        path,
-                        partial,
-                        limits,
-                        &mut remote_io,
-                    )
-                    .await
+                    attempt_resume(client, media, headers, path, partial, limits, mtime, &io).await
                 }
                 None => {
-                    attempt_download(client, media, headers, parent, path, limits, &mut remote_io)
-                        .await
+                    attempt_download(client, media, headers, parent, path, limits, mtime, &io).await
                 }
             }
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err(Failure {
-                error: error("media download attempt timed out"),
-                retry: remote_io,
-                fallback: remote_io,
-            })
-        });
+        };
+        tokio::pin!(attempt_future);
+        let result = loop {
+            let deadline = io.deadline(client.wait_limit);
+            tokio::select! {
+                result = &mut attempt_future => break result,
+                _ = tokio::time::sleep_until(deadline.into()) => {
+                    if std::time::Instant::now() >= io.deadline(client.wait_limit) {
+                        break Err(Failure {
+                            error: error("media download attempt timed out"),
+                            retry: io.remote(),
+                            fallback: io.remote(),
+                        });
+                    }
+                }
+            }
+        };
         match result {
             Ok(outcome) => return Ok(outcome),
             Err(failure) if failure.retry && attempt < retries => {
@@ -558,7 +694,12 @@ async fn download_candidate(
     unreachable!()
 }
 
-async fn write_inline_text(parent: &Path, path: &Path, data: &str) -> Result<Outcome> {
+async fn write_inline_text(
+    parent: &Path,
+    path: &Path,
+    data: &str,
+    mtime: Option<SystemTime>,
+) -> Result<Outcome> {
     // TempPath removes an incomplete file if this future is cancelled.
     let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
     let mut file = tokio::fs::OpenOptions::new()
@@ -568,7 +709,9 @@ async fn write_inline_text(parent: &Path, path: &Path, data: &str) -> Result<Out
         .await?;
     file.write_all(data.as_bytes()).await?;
     file.flush().await?;
-    file.sync_all().await?;
+    let file = file.into_std().await;
+    set_mtime(&file, mtime)?;
+    file.sync_all()?;
     drop(file);
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
@@ -613,6 +756,7 @@ impl From<reqwest::Error> for Failure {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn attempt_download(
     client: &DownloadClient,
     media: &Media,
@@ -620,11 +764,12 @@ async fn attempt_download(
     parent: &Path,
     path: &Path,
     limits: SizeLimits,
-    remote_io: &mut bool,
+    mtime: Mtime,
+    io: &Io,
 ) -> std::result::Result<Outcome, Failure> {
-    *remote_io = true;
+    io.set_remote(true);
     let response = request_media(client, media, headers).await;
-    *remote_io = false;
+    io.set_remote(false);
     let response = response?;
     check_status(client, media, &response, false)?;
     if response
@@ -634,6 +779,7 @@ async fn attempt_download(
         return Err(terminal("unexpected Content-Range in full media response"));
     }
     let expected = response.content_length();
+    let modified = mtime.select(response.headers());
     validate_media(&response)?;
     if let Some(rejection) = expected.and_then(|size| limits.check(size)) {
         return Ok(Outcome::Filtered(rejection));
@@ -649,9 +795,9 @@ async fn attempt_download(
     let mut stream = response.bytes_stream();
     let mut received = 0u64;
     loop {
-        *remote_io = true;
+        io.set_remote(true);
         let chunk = stream.next().await;
-        *remote_io = false;
+        io.set_remote(false);
         let Some(chunk) = chunk else { break };
         let chunk = chunk?;
         received = received
@@ -664,6 +810,7 @@ async fn attempt_download(
             return Ok(Outcome::Filtered(rejection));
         }
         file.write_all(&chunk).await?;
+        io.throttle(chunk.len()).await;
     }
     if expected.is_some_and(|length| length != received) {
         return Err(Failure {
@@ -676,7 +823,9 @@ async fn attempt_download(
         return Ok(Outcome::Filtered(rejection));
     }
     file.flush().await?;
-    file.sync_all().await?;
+    let file = file.into_std().await;
+    set_mtime(&file, modified)?;
+    file.sync_all()?;
     drop(file);
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
@@ -701,7 +850,11 @@ async fn request_media(
     headers: &HeaderMap,
 ) -> std::result::Result<reqwest::Response, Failure> {
     let mut target = media.url.clone();
-    let mut redirects = Redirects::new(&target);
+    // Kemono/Coomer serve files from the root host, which redirects to an
+    // `nN.` CDN subdomain; those requests carry no credentials.
+    let mut redirects = Redirects::new(&target).allow_subdomains(
+        matches!(media.category.as_str(), "kemono" | "coomer") && media.headers.is_empty(),
+    );
     let response = loop {
         client
             .rate_limits
@@ -715,7 +868,13 @@ async fn request_media(
         let response = client
             .http
             .get(target.clone())
-            .timeout(client.wait_limit)
+            // Rate-limited bodies may outlast the attempt limit; the attempt's
+            // extended deadline enforces it instead.
+            .timeout(if client.rate.is_some() {
+                Duration::from_secs(u32::MAX as u64)
+            } else {
+                client.wait_limit
+            })
             .headers(headers.clone())
             .send()
             .await?;
@@ -797,6 +956,7 @@ fn terminal(message: &str) -> Failure {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn attempt_resume(
     client: &DownloadClient,
     media: &Media,
@@ -804,7 +964,8 @@ async fn attempt_resume(
     path: &Path,
     partial: &mut crate::resume::Partial,
     limits: SizeLimits,
-    remote_io: &mut bool,
+    mtime: Mtime,
+    io: &Io,
 ) -> std::result::Result<Outcome, Failure> {
     let mut restarted = false;
     loop {
@@ -852,9 +1013,9 @@ async fn attempt_resume(
                 )?,
             );
         }
-        *remote_io = true;
+        io.set_remote(true);
         let response = request_media(client, media, &headers).await;
-        *remote_io = false;
+        io.set_remote(false);
         let response = response?;
         if !(response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
             && checkpoint.is_some())
@@ -887,11 +1048,23 @@ async fn attempt_resume(
                 if let Some(rejection) = limits.check(offset) {
                     return filter_partial(partial, rejection).await;
                 }
-                return partial.publish(path).await.map_err(|error| Failure {
-                    error,
-                    retry: false,
-                    fallback: false,
-                });
+                // A 416 completion carries no representation headers; use
+                // the saved date validator when it is the only source.
+                let saved = match partial.checkpoint().map(|c| &c.validator) {
+                    Some(crate::resume::Validator::Modified(value)) if mtime.http => {
+                        httpdate::parse_http_date(value).ok()
+                    }
+                    _ => None,
+                };
+                let modified = mtime.fixed.or(saved);
+                return partial
+                    .publish(path, modified)
+                    .await
+                    .map_err(|error| Failure {
+                        error,
+                        retry: false,
+                        fallback: false,
+                    });
             }
             crate::range::Plan::Full(checkpoint) => {
                 validate_media(&response)?;
@@ -926,12 +1099,13 @@ async fn attempt_resume(
                 (offset, Some(end - offset + 1), Some(total))
             }
         };
+        let modified = mtime.select(response.headers());
         let mut stream = response.bytes_stream();
         let mut received = 0u64;
         loop {
-            *remote_io = true;
+            io.set_remote(true);
             let chunk = stream.next().await;
-            *remote_io = false;
+            io.set_remote(false);
             let Some(chunk) = chunk else { break };
             let chunk = chunk?;
             received = received
@@ -951,6 +1125,7 @@ async fn attempt_resume(
                 retry: false,
                 fallback: false,
             })?;
+            io.throttle(chunk.len()).await;
         }
         if expected.is_some_and(|expected| received != expected) {
             return Err(Failure {
@@ -966,11 +1141,14 @@ async fn attempt_resume(
             if let Some(rejection) = limits.check(completed) {
                 return filter_partial(partial, rejection).await;
             }
-            return partial.publish(path).await.map_err(|error| Failure {
-                error,
-                retry: false,
-                fallback: false,
-            });
+            return partial
+                .publish(path, modified)
+                .await
+                .map_err(|error| Failure {
+                    error,
+                    retry: false,
+                    fallback: false,
+                });
         }
         // Some servers return only part of an open-ended range. Continue within
         // this attempt's existing deadline; never publish a truncated segment.

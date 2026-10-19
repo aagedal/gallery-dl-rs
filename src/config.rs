@@ -30,6 +30,9 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 pub struct Options {
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
+    /// Ordered `(filter, template)` pairs from an object-valued `filename`;
+    /// `filename` then holds the optional `""` default. Overlaid together.
+    pub filename_conditions: Option<Vec<(String, String)>>,
     /// One-based media position ranges, applied separately to each input.
     pub file_range: Option<String>,
     /// AND-combined media filters, with an empty list clearing inherited clauses.
@@ -82,8 +85,18 @@ pub struct Options {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
+    /// Tumblr, Flickr or Wallhaven API key; only accepted in those categories.
+    pub api_key: Option<String>,
+    /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
+    pub refresh_token: Option<String>,
+    /// DeviantArt OAuth client ID; only accepted in the `deviantart` category.
+    pub client_id: Option<String>,
+    /// DeviantArt OAuth client secret; only accepted in the `deviantart` category.
+    pub client_secret: Option<String>,
     /// Relative directory components; an empty list selects the base directory.
     pub directory: Option<Vec<String>>,
+    /// Ordered `(filter, components)` pairs from an object-valued `directory`.
+    pub directory_conditions: Option<Vec<(String, Vec<String>)>>,
     pub cookies: Option<PathBuf>,
     /// Explicit Firefox profile selected by an upstream-style `cookies` array.
     /// Mutually exclusive with the cookie file during scope resolution.
@@ -113,7 +126,18 @@ impl Options {
                 .base_directory
                 .clone()
                 .or_else(|| self.base_directory.clone()),
-            filename: overrides.filename.clone().or_else(|| self.filename.clone()),
+            filename: if overrides.filename_conditions.is_some() {
+                overrides.filename.clone()
+            } else {
+                overrides.filename.clone().or_else(|| self.filename.clone())
+            },
+            filename_conditions: if overrides.filename.is_some()
+                || overrides.filename_conditions.is_some()
+            {
+                overrides.filename_conditions.clone()
+            } else {
+                self.filename_conditions.clone()
+            },
             file_range: overrides
                 .file_range
                 .clone()
@@ -158,10 +182,34 @@ impl Options {
             limit: overrides.limit.or(self.limit),
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
-            directory: overrides
-                .directory
+            api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
+            refresh_token: overrides
+                .refresh_token
                 .clone()
-                .or_else(|| self.directory.clone()),
+                .or_else(|| self.refresh_token.clone()),
+            client_id: overrides
+                .client_id
+                .clone()
+                .or_else(|| self.client_id.clone()),
+            client_secret: overrides
+                .client_secret
+                .clone()
+                .or_else(|| self.client_secret.clone()),
+            directory: if overrides.directory_conditions.is_some() {
+                overrides.directory.clone()
+            } else {
+                overrides
+                    .directory
+                    .clone()
+                    .or_else(|| self.directory.clone())
+            },
+            directory_conditions: if overrides.directory.is_some()
+                || overrides.directory_conditions.is_some()
+            {
+                overrides.directory_conditions.clone()
+            } else {
+                self.directory_conditions.clone()
+            },
             cookies: if overrides.browser_cookies.is_some() {
                 None
             } else {
@@ -288,10 +336,35 @@ struct RawExtractor {
     filesize_max: Field,
     retries: Field,
     timeout: Field,
-    instagram: RawOptions,
-    twitter: RawOptions,
-    facebook: RawOptions,
-    direct: RawOptions,
+    instagram: Box<RawOptions>,
+    twitter: Box<RawOptions>,
+    facebook: Box<RawOptions>,
+    imgur: Box<RawOptions>,
+    bluesky: Box<RawOptions>,
+    reddit: Box<RawOptions>,
+    danbooru: Box<RawOptions>,
+    e621: Box<RawOptions>,
+    gelbooru: Box<RawOptions>,
+    safebooru: Box<RawOptions>,
+    mastodon: Box<RawOptions>,
+    kemono: Box<RawOptions>,
+    coomer: Box<RawOptions>,
+    pixeldrain: Box<RawOptions>,
+    catbox: Box<RawOptions>,
+    imgbox: Box<RawOptions>,
+    postimg: Box<RawOptions>,
+    tumblr: Box<RawOptions>,
+    pixiv: Box<RawOptions>,
+    deviantart: Box<RawOptions>,
+    flickr: Box<RawOptions>,
+    wallhaven: Box<RawOptions>,
+    artstation: Box<RawOptions>,
+    pinterest: Box<RawOptions>,
+    newgrounds: Box<RawOptions>,
+    furaffinity: Box<RawOptions>,
+    weasyl: Box<RawOptions>,
+    vsco: Box<RawOptions>,
+    direct: Box<RawOptions>,
 }
 
 #[derive(Default, Deserialize)]
@@ -329,6 +402,10 @@ struct RawOptions {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    api_key: Field,
+    refresh_token: Field,
+    client_id: Field,
+    client_secret: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -400,7 +477,37 @@ impl Config {
             let extractor = extractor
                 .as_object()
                 .ok_or_else(|| error("native configuration extractor must be a JSON object"))?;
-            for name in ["instagram", "twitter", "facebook", "direct"] {
+            for name in [
+                "instagram",
+                "twitter",
+                "facebook",
+                "imgur",
+                "bluesky",
+                "reddit",
+                "danbooru",
+                "e621",
+                "gelbooru",
+                "safebooru",
+                "mastodon",
+                "kemono",
+                "coomer",
+                "pixeldrain",
+                "catbox",
+                "imgbox",
+                "postimg",
+                "tumblr",
+                "pixiv",
+                "deviantart",
+                "flickr",
+                "wallhaven",
+                "artstation",
+                "pinterest",
+                "newgrounds",
+                "furaffinity",
+                "weasyl",
+                "vsco",
+                "direct",
+            ] {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
@@ -442,6 +549,10 @@ impl Config {
             limit: root.limit,
             search_limit: root.search_limit,
             search_stop: root.search_stop,
+            api_key: Field::default(),
+            refresh_token: Field::default(),
+            client_id: Field::default(),
+            client_secret: Field::default(),
             directory: root.directory,
             cookies: root.cookies,
             proxy: root.proxy,
@@ -487,6 +598,10 @@ impl Config {
             limit: extractor.limit,
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
+            api_key: Field::default(),
+            refresh_token: Field::default(),
+            client_id: Field::default(),
+            client_secret: Field::default(),
             directory: extractor.directory,
             cookies: extractor.cookies,
             proxy: extractor.proxy,
@@ -503,9 +618,54 @@ impl Config {
             ("instagram", extractor.instagram),
             ("twitter", extractor.twitter),
             ("facebook", extractor.facebook),
+            ("imgur", extractor.imgur),
+            ("bluesky", extractor.bluesky),
+            ("reddit", extractor.reddit),
+            ("danbooru", extractor.danbooru),
+            ("e621", extractor.e621),
+            ("gelbooru", extractor.gelbooru),
+            ("safebooru", extractor.safebooru),
+            ("mastodon", extractor.mastodon),
+            ("kemono", extractor.kemono),
+            ("coomer", extractor.coomer),
+            ("pixeldrain", extractor.pixeldrain),
+            ("catbox", extractor.catbox),
+            ("imgbox", extractor.imgbox),
+            ("postimg", extractor.postimg),
+            ("tumblr", extractor.tumblr),
+            ("pixiv", extractor.pixiv),
+            ("deviantart", extractor.deviantart),
+            ("flickr", extractor.flickr),
+            ("wallhaven", extractor.wallhaven),
+            ("artstation", extractor.artstation),
+            ("pinterest", extractor.pinterest),
+            ("newgrounds", extractor.newgrounds),
+            ("furaffinity", extractor.furaffinity),
+            ("weasyl", extractor.weasyl),
+            ("vsco", extractor.vsco),
             ("direct", extractor.direct),
         ] {
-            categories.insert(name.into(), settings.resolve(directory)?);
+            if !matches!(name, "tumblr" | "flickr" | "wallhaven" | "weasyl")
+                && settings.api_key.0.is_some()
+            {
+                return Err(error(
+                    "native configuration api-key is only supported for tumblr, flickr, wallhaven and weasyl",
+                ));
+            }
+            if name != "pixiv" && settings.refresh_token.0.is_some() {
+                return Err(error(
+                    "native configuration refresh-token is only supported for pixiv",
+                ));
+            }
+            if name != "deviantart"
+                && (settings.client_id.0.is_some() || settings.client_secret.0.is_some())
+            {
+                return Err(error(
+                    "native configuration client-id and client-secret are only supported for deviantart",
+                ));
+            }
+            // Boxed: unoptimized builds overflow the stack with inline settings.
+            categories.insert(name.into(), (*settings).resolve(directory)?);
         }
         Ok(Self {
             global,
@@ -515,7 +675,38 @@ impl Config {
     }
 
     pub fn resolve(&self, category: &str) -> Result<Options> {
-        if !matches!(category, "instagram" | "twitter" | "facebook" | "direct") {
+        if !matches!(
+            category,
+            "instagram"
+                | "twitter"
+                | "facebook"
+                | "imgur"
+                | "bluesky"
+                | "reddit"
+                | "danbooru"
+                | "e621"
+                | "gelbooru"
+                | "safebooru"
+                | "mastodon"
+                | "kemono"
+                | "coomer"
+                | "pixeldrain"
+                | "catbox"
+                | "imgbox"
+                | "postimg"
+                | "tumblr"
+                | "pixiv"
+                | "deviantart"
+                | "flickr"
+                | "wallhaven"
+                | "artstation"
+                | "pinterest"
+                | "newgrounds"
+                | "furaffinity"
+                | "weasyl"
+                | "vsco"
+                | "direct"
+        ) {
             return Err(error("unsupported native configuration category"));
         }
         let settings = self.categories.get(category).map_or_else(
@@ -757,13 +948,87 @@ impl RawOptions {
             Some(Value::String(value)) if value == "auto" => Some(3),
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
-        let file_range = range_spec(self.file_range, "file-range")?;
-        let filename = match self.filename.0 {
+        let api_key = match self.api_key.0 {
             None => None,
+            Some(Value::String(key))
+                if (1..=128).contains(&key.len())
+                    && key.bytes().all(|b| b.is_ascii_alphanumeric()) =>
+            {
+                Some(key)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration api-key must be 1-128 ASCII letters or digits",
+                ));
+            }
+        };
+        let refresh_token = match self.refresh_token.0 {
+            None => None,
+            Some(Value::String(token))
+                if (1..=256).contains(&token.len())
+                    && token
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) =>
+            {
+                Some(token)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration refresh-token must be 1-256 ASCII letters, digits, '-', '_' or '.'",
+                ));
+            }
+        };
+        let credential = |field: Field, name: &str, digits: bool| match field.0 {
+            None => Ok(None),
+            Some(Value::String(value))
+                if (1..=128).contains(&value.len())
+                    && value.bytes().all(|b| {
+                        if digits {
+                            b.is_ascii_digit()
+                        } else {
+                            b.is_ascii_alphanumeric()
+                        }
+                    }) =>
+            {
+                Ok(Some(value))
+            }
+            Some(_) => Err(error(format!(
+                "native configuration {name} must be 1-128 ASCII {}",
+                if digits {
+                    "digits"
+                } else {
+                    "letters or digits"
+                }
+            ))),
+        };
+        let client_id = credential(self.client_id, "client-id", true)?;
+        let client_secret = credential(self.client_secret, "client-secret", false)?;
+        let file_range = range_spec(self.file_range, "file-range")?;
+        let (filename, filename_conditions) = match self.filename.0 {
+            None => (None, None),
             Some(Value::String(value)) => {
                 FilenameTemplate::parse(&value)
                     .map_err(|_| error("unsupported native configuration filename template"))?;
-                Some(value)
+                (Some(value), None)
+            }
+            Some(Value::Object(entries)) => {
+                let mut default = None;
+                let mut conditions = Vec::new();
+                for (filter, template) in entries {
+                    let template = template.as_str().map(str::to_owned).ok_or_else(|| {
+                        error(
+                            "native configuration filename conditions must map to string templates",
+                        )
+                    })?;
+                    if filter.is_empty() {
+                        default = Some(template);
+                    } else {
+                        conditions.push((filter, template));
+                    }
+                }
+                FilenameTemplate::parse_conditional(&conditions, default.as_deref())
+                    .map_err(|_| error("unsupported native configuration filename template"))?;
+                (default, Some(conditions))
             }
             Some(_) => {
                 return Err(error(
@@ -771,25 +1036,39 @@ impl RawOptions {
                 ));
             }
         };
-        let templates = match self.directory.0 {
-            None => None,
-            Some(Value::Array(values)) => {
-                let components: Vec<String> = values
-                    .into_iter()
-                    .map(|value| {
-                        value.as_str().map(str::to_owned).ok_or_else(|| {
-                            error("native configuration directory must be an array of string templates")
-                        })
-                    })
-                    .collect::<Result<_>>()?;
-                DirectoryTemplate::parse(&components)
+        let components = |value: Value| -> Result<Vec<String>> {
+            let invalid =
+                || error("native configuration directory must be an array of string templates");
+            let Value::Array(values) = value else {
+                return Err(invalid());
+            };
+            values
+                .into_iter()
+                .map(|value| value.as_str().map(str::to_owned).ok_or_else(invalid))
+                .collect()
+        };
+        let (templates, directory_conditions) = match self.directory.0 {
+            None => (None, None),
+            Some(Value::Object(entries)) => {
+                let mut default = None;
+                let mut conditions = Vec::new();
+                for (filter, value) in entries {
+                    let value = components(value)?;
+                    if filter.is_empty() {
+                        default = Some(value);
+                    } else {
+                        conditions.push((filter, value));
+                    }
+                }
+                DirectoryTemplate::parse_conditional(&conditions, default.as_deref())
                     .map_err(|_| error("unsupported native configuration directory template"))?;
-                Some(components)
+                (default, Some(conditions))
             }
-            Some(_) => {
-                return Err(error(
-                    "native configuration directory must be an array of string templates",
-                ));
+            Some(value) => {
+                let value = components(value)?;
+                DirectoryTemplate::parse(&value)
+                    .map_err(|_| error("unsupported native configuration directory template"))?;
+                (Some(value), None)
             }
         };
         let retries = match self.retries.0 {
@@ -829,6 +1108,7 @@ impl RawOptions {
             browser_cookies,
             archive: path(self.archive, directory, "archive")?,
             filename,
+            filename_conditions,
             file_range,
             file_filter,
             post_range,
@@ -858,7 +1138,12 @@ impl RawOptions {
             limit,
             search_limit,
             search_stop,
+            api_key,
+            refresh_token,
+            client_id,
+            client_secret,
             directory: templates,
+            directory_conditions,
             filesize_min: size(self.filesize_min)?,
             filesize_max: size(self.filesize_max)?,
             retries,

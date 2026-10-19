@@ -274,6 +274,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
         quoted_by_id: None,
         reposted_by_id: None,
         article: None,
+        instance: None,
         post_id: "64".into(),
         media_id: "65".into(),
         shortcode: "BA".into(),

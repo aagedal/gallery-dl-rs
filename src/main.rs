@@ -97,6 +97,30 @@ struct Args {
     /// Save post metadata in a JSON sidecar beside each completed media file
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
     write_metadata: bool,
+    /// Do not set new files' modification times from HTTP Last-Modified
+    #[arg(long)]
+    no_mtime: bool,
+    /// Set new files' modification times from a metadata date field, e.g. date
+    #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "date")]
+    mtime: Option<String>,
+    /// Run a shell command after each downloaded file; {} is the quoted path
+    #[arg(long, value_name = "CMD", conflicts_with_all = ["get_urls", "dump_json"])]
+    exec: Vec<String>,
+    /// Run a shell command once after all downloads finish
+    #[arg(long, value_name = "CMD", conflicts_with_all = ["get_urls", "dump_json"])]
+    exec_after: Vec<String>,
+    /// Maximum download rate in bytes per second, e.g. 500k or 2.5M
+    #[arg(short = 'r', long, value_parser = parse_size)]
+    limit_rate: Option<u64>,
+    /// Seconds to wait before each download, as SECONDS or MIN-MAX
+    #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
+    sleep: Option<gallery_dl_rs::sleep::SleepRange>,
+    /// Stop the current input after N consecutive skipped (existing or archived) files
+    #[arg(short = 'A', long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+    abort: Option<u64>,
+    /// Stop all inputs after N consecutive skipped (existing or archived) files
+    #[arg(short = 'T', long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+    terminate: Option<u64>,
     /// SQLite history of completed media (gallery-dl-rs format)
     #[arg(long, alias = "archive", conflicts_with_all = ["get_urls", "dump_json"])]
     download_archive: Option<PathBuf>,
@@ -130,6 +154,9 @@ struct Args {
     /// Explicit native JSON settings (separate from compatibility backend config)
     #[arg(long)]
     native_config: Option<PathBuf>,
+    /// Do not load the discovered default native configuration file
+    #[arg(long, conflicts_with = "native_config")]
+    native_config_ignore: bool,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
     /// Seconds for native extraction or active compatibility reading (excludes backpressure)
@@ -155,6 +182,62 @@ fn parse_date_arg(value: &str) -> std::result::Result<i64, String> {
 
 fn parse_size(value: &str) -> std::result::Result<u64, String> {
     parse_bytes(value).map_err(|e| e.to_string())
+}
+
+/// The first existing default native configuration, like upstream's search
+/// of user configuration directories. Upstream gallery-dl files are not read:
+/// the native schema is a strict subset and would reject their settings.
+fn default_native_config() -> Option<PathBuf> {
+    let var = |name| {
+        std::env::var_os(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    let mut candidates = Vec::new();
+    if let Some(path) = var("GALLERY_DL_RS_CONFIG") {
+        candidates.push(path);
+    }
+    if cfg!(windows) {
+        candidates.extend(var("APPDATA").map(|dir| dir.join("gallery-dl-rs").join("config.json")));
+        candidates.extend(var("USERPROFILE").map(|dir| dir.join("gallery-dl-rs.conf")));
+    } else {
+        let config =
+            var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|home| home.join(".config")));
+        candidates.extend(config.map(|dir| dir.join("gallery-dl-rs").join("config.json")));
+        candidates.extend(var("HOME").map(|home| home.join(".gallery-dl-rs.conf")));
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+/// Compatibility mode keeps plain Imgur file links as direct downloads, as
+/// before native Imgur support; native mode extracts them for metadata.
+/// Plain `i.redd.it` file links carry no submission context and always stay
+/// direct.
+fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
+    extract::social_site(url).filter(|site| {
+        let file = extract::direct(url).is_some();
+        !(*site == "imgur"
+            && matches!(extractor, Extractor::Compatibility)
+            && url.host_str() == Some("i.imgur.com")
+            && file
+            || *site == "reddit" && url.host_str() == Some("i.redd.it") && file
+            || (gallery_dl_rs::booru::Site::from_category(site).is_some()
+                || matches!(
+                    *site,
+                    "mastodon"
+                        | "kemono"
+                        | "coomer"
+                        | "pixeldrain"
+                        | "catbox"
+                        | "imgbox"
+                        | "postimg"
+                ))
+                && file)
+    })
+}
+
+fn parse_sleep(value: &str) -> std::result::Result<gallery_dl_rs::sleep::SleepRange, String> {
+    gallery_dl_rs::sleep::SleepRange::parse(value).map_err(|e| e.to_string())
 }
 
 fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
@@ -209,6 +292,9 @@ async fn run(args: Args) -> Result<()> {
         timeout: Duration::from_secs(args.extraction_timeout),
     };
     let failed = Cell::new(0);
+    // Inputs stopped by -A/--abort; their remaining media are neither
+    // extracted nor downloaded.
+    let aborted = std::cell::RefCell::new(HashSet::<usize>::new());
     let mut seen = HashSet::new();
     // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
@@ -217,6 +303,7 @@ async fn run(args: Args) -> Result<()> {
         .enumerate()
         .flat_map(|(index, source)| {
             let failed = &failed;
+            let aborted = &aborted;
             let input = match source {
                 Ok(source) => {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
@@ -237,9 +324,9 @@ async fn run(args: Args) -> Result<()> {
                                             )
                                         ))))
                     });
-                    let selected_settings = extract::http_url(&source)
-                        .ok()
-                        .map(|url| &settings[extract::social_site(&url).unwrap_or("direct")]);
+                    let selected_settings = extract::http_url(&source).ok().map(|url| {
+                        &settings[routed_site(&url, args.extractor).unwrap_or("direct")]
+                    });
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
@@ -279,31 +366,62 @@ async fn run(args: Args) -> Result<()> {
                 }
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
-            input.filter_map(move |result| {
-                std::future::ready(match result {
-                    Ok(item) => Some(item),
-                    Err(e) => {
-                        eprintln!("extraction failed for input {}: {e}", index + 1);
-                        failed.set(failed.get() + 1);
-                        None
-                    }
+            input
+                .take_while(move |_| std::future::ready(!aborted.borrow().contains(&index)))
+                .filter_map(move |result| {
+                    std::future::ready(match result {
+                        Ok(item) => Some((index, item)),
+                        Err(e) => {
+                            eprintln!("extraction failed for input {}: {e}", index + 1);
+                            failed.set(failed.get() + 1);
+                            None
+                        }
+                    })
                 })
-            })
         })
-        .map(|mut item| {
+        .map(|(index, mut item)| {
             settings[item.category.as_str()]
                 .network
                 .apply_media(&mut item);
-            item
+            (index, item)
         })
-        .filter(|item| {
+        .filter(|(_, item)| {
             if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
                 return std::future::ready(true);
             }
             let mut identity = item.identity();
             // Distinct social files can share a URL and request context.
-            if matches!(item.category.as_str(), "instagram" | "twitter" | "facebook")
-                && let Some(file_key) = item.archive_key()
+            if matches!(
+                item.category.as_str(),
+                "instagram"
+                    | "twitter"
+                    | "facebook"
+                    | "imgur"
+                    | "bluesky"
+                    | "reddit"
+                    | "danbooru"
+                    | "e621"
+                    | "gelbooru"
+                    | "safebooru"
+                    | "mastodon"
+                    | "kemono"
+                    | "coomer"
+                    | "pixeldrain"
+                    | "catbox"
+                    | "imgbox"
+                    | "postimg"
+                    | "tumblr"
+                    | "pixiv"
+                    | "deviantart"
+                    | "flickr"
+                    | "wallhaven"
+                    | "artstation"
+                    | "pinterest"
+                    | "newgrounds"
+                    | "furaffinity"
+                    | "weasyl"
+                    | "vsco"
+            ) && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
             }
@@ -313,16 +431,22 @@ async fn run(args: Args) -> Result<()> {
         });
     tokio::pin!(media);
     if args.dump_json {
-        let media: Vec<_> = media.collect().await;
+        let media: Vec<_> = media.map(|(_, item)| item).collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
     } else if args.get_urls {
-        while let Some(item) = media.next().await {
+        while let Some((_, item)) = media.next().await {
             println!("{}", item.url);
         }
     } else {
-        let client = download::client(Duration::from_secs(60))?.with_resume(args.resume);
+        let client = download::client(Duration::from_secs(60))?
+            .with_resume(args.resume)
+            .with_http_mtime(!args.no_mtime)
+            .with_metadata_mtime(args.mtime.clone())
+            .with_sleep(args.sleep)
+            .with_rate_limit(args.limit_rate);
+        let aborted = &aborted;
         let results = media
-            .map(|item| {
+            .map(|(index, item)| {
                 let settings = &settings[item.category.as_str()];
                 let client = client
                     .clone()
@@ -343,50 +467,91 @@ async fn run(args: Args) -> Result<()> {
                     directory: settings.directory.as_ref(),
                 };
                 async move {
-                    let client = cell
-                        .get_or_init(|| async { client.with_network(&settings.network) })
-                        .await
-                        .as_ref()
-                        .map_err(|e| {
-                            error(format!("media HTTP client initialization failed: {e}"))
-                        })?;
-                    match archive {
-                        Some((cell, path)) => {
-                            let archive = cell
-                                .get_or_init(|| Archive::open(path))
-                                .await
-                                .as_ref()
-                                .map_err(|e| {
-                                error(format!("download archive initialization failed: {e}"))
-                            })?;
-                            archive
-                                .download_with_template(
-                                    client,
-                                    destination,
-                                    &item,
-                                    options,
-                                    filename,
-                                )
-                                .await
-                        }
-                        None => download::download_with_template(
-                            client,
-                            destination,
-                            &item,
-                            options,
-                            filename,
-                        )
-                        .await
-                        .map(ArchiveOutcome::Completed),
+                    // Downloads queued before an abort are dropped unstarted.
+                    if aborted.borrow().contains(&index) {
+                        return (index, None);
                     }
+                    let result: Result<ArchiveOutcome> = async {
+                        let client = cell
+                            .get_or_init(|| async { client.with_network(&settings.network) })
+                            .await
+                            .as_ref()
+                            .map_err(|e| {
+                                error(format!("media HTTP client initialization failed: {e}"))
+                            })?;
+                        match archive {
+                            Some((cell, path)) => {
+                                let archive = cell
+                                    .get_or_init(|| Archive::open(path))
+                                    .await
+                                    .as_ref()
+                                    .map_err(|e| {
+                                        error(format!(
+                                            "download archive initialization failed: {e}"
+                                        ))
+                                    })?;
+                                archive
+                                    .download_with_template(
+                                        client,
+                                        destination,
+                                        &item,
+                                        options,
+                                        filename,
+                                    )
+                                    .await
+                            }
+                            None => download::download_with_template(
+                                client,
+                                destination,
+                                &item,
+                                options,
+                                filename,
+                            )
+                            .await
+                            .map(ArchiveOutcome::Completed),
+                        }
+                    }
+                    .await;
+                    (index, Some(result))
                 }
             })
             .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
-        while let Some(result) = results.next().await {
+        let mut skipped = 0u64;
+        let mut input_skipped = BTreeMap::<usize, u64>::new();
+        while let Some((index, result)) = results.next().await {
+            let Some(result) = result else { continue };
+            let input = input_skipped.entry(index).or_default();
+            if matches!(
+                result,
+                Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
+                    | ArchiveOutcome::AlreadyArchived)
+            ) {
+                skipped += 1;
+                *input += 1;
+            } else if matches!(
+                result,
+                Ok(ArchiveOutcome::Completed(Outcome::Downloaded(_)))
+            ) {
+                skipped = 0;
+                *input = 0;
+            }
+            if args.abort.is_some_and(|limit| *input >= limit) && aborted.borrow_mut().insert(index)
+            {
+                eprintln!(
+                    "stopping input {} after {input} consecutive skipped files",
+                    index + 1
+                );
+            }
             match result {
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
-                    eprintln!("downloaded {}", path.display())
+                    eprintln!("downloaded {}", path.display());
+                    for command in &args.exec {
+                        if let Err(e) = gallery_dl_rs::exec::run(command, Some(&path)).await {
+                            eprintln!("postprocessing failed for {}: {e}", path.display());
+                            failed.set(failed.get() + 1);
+                        }
+                    }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
                     eprintln!("skipped {}", path.display())
@@ -400,6 +565,17 @@ async fn run(args: Args) -> Result<()> {
                     failed.set(failed.get() + 1);
                 }
             }
+            if args.terminate.is_some_and(|limit| skipped >= limit) {
+                // Dropping the stream cancels pending extraction and downloads.
+                eprintln!("stopping after {skipped} consecutive skipped files");
+                break;
+            }
+        }
+    }
+    for command in &args.exec_after {
+        if let Err(e) = gallery_dl_rs::exec::run(command, None).await {
+            eprintln!("postprocessing failed: {e}");
+            failed.set(failed.get() + 1);
         }
     }
     let failed = failed.get();
@@ -415,6 +591,24 @@ struct Extractors {
     instagram: OnceCell<Result<Instagram>>,
     twitter: OnceCell<Result<Twitter>>,
     facebook: OnceCell<Result<Facebook>>,
+    imgur: OnceCell<Result<gallery_dl_rs::imgur::Imgur>>,
+    bluesky: OnceCell<Result<gallery_dl_rs::bluesky::Bluesky>>,
+    reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
+    booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
+    mastodon: OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>,
+    kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
+    imagehosts: OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>,
+    tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
+    pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
+    deviantart: OnceCell<Result<gallery_dl_rs::deviantart::DeviantArt>>,
+    flickr: OnceCell<Result<gallery_dl_rs::flickr::Flickr>>,
+    wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
+    artstation: OnceCell<Result<gallery_dl_rs::artstation::ArtStation>>,
+    pinterest: OnceCell<Result<gallery_dl_rs::pinterest::Pinterest>>,
+    newgrounds: OnceCell<Result<gallery_dl_rs::newgrounds::Newgrounds>>,
+    furaffinity: OnceCell<Result<gallery_dl_rs::furaffinity::FurAffinity>>,
+    weasyl: OnceCell<Result<gallery_dl_rs::weasyl::Weasyl>>,
+    vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
 }
 
 impl Extractors {
@@ -439,7 +633,7 @@ fn extract_input<'a>(
     stream::once(async move {
         let url = extract::http_url(&source)?;
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
-            extract::social_site(&url)
+            routed_site(&url, extractor)
         {
             let configured = &settings[category];
             let options = &configured.options;
@@ -549,6 +743,344 @@ fn extract_input<'a>(
                         })?;
                     native.events(&url)
                 }
+                Extractor::Native if category == "imgur" => {
+                    let native = extractors
+                        .imgur
+                        .get_or_init(|| async {
+                            gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Imgur initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "bluesky" => {
+                    let native = extractors
+                        .bluesky
+                        .get_or_init(|| async {
+                            gallery_dl_rs::bluesky::Bluesky::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Bluesky initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "reddit" => {
+                    let native = extractors
+                        .reddit
+                        .get_or_init(|| async {
+                            gallery_dl_rs::reddit::Reddit::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Reddit initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "mastodon" => {
+                    let native = extractors
+                        .mastodon
+                        .get_or_init(|| async {
+                            gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Mastodon initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if matches!(category, "kemono" | "coomer") => {
+                    let native = extractors
+                        .kemono
+                        .get_or_init(|| async {
+                            gallery_dl_rs::kemono::Kemono::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Kemono initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "tumblr" => {
+                    let native = extractors
+                        .tumblr
+                        .get_or_init(|| async {
+                            gallery_dl_rs::tumblr::Tumblr::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_api_key(options.api_key.as_deref())
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Tumblr initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "flickr" => {
+                    let native = extractors
+                        .flickr
+                        .get_or_init(|| async {
+                            gallery_dl_rs::flickr::Flickr::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_api_key(options.api_key.as_deref())
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Flickr initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "artstation" => {
+                    let native = extractors
+                        .artstation
+                        .get_or_init(|| async {
+                            gallery_dl_rs::artstation::ArtStation::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native ArtStation initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "vsco" => {
+                    let native = extractors
+                        .vsco
+                        .get_or_init(|| async {
+                            gallery_dl_rs::vsco::Vsco::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "weasyl" => {
+                    let native = extractors
+                        .weasyl
+                        .get_or_init(|| async {
+                            gallery_dl_rs::weasyl::Weasyl::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_api_key(options.api_key.as_deref())
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Weasyl initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "furaffinity" => {
+                    let native = extractors
+                        .furaffinity
+                        .get_or_init(|| async {
+                            gallery_dl_rs::furaffinity::FurAffinity::from_cookie_jar(
+                                extractors.cookie_jar(configured, "furaffinity.net").await?,
+                                backend.timeout,
+                            )
+                            .and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Fur Affinity initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "newgrounds" => {
+                    let native = extractors
+                        .newgrounds
+                        .get_or_init(|| async {
+                            gallery_dl_rs::newgrounds::Newgrounds::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Newgrounds initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "pinterest" => {
+                    let native = extractors
+                        .pinterest
+                        .get_or_init(|| async {
+                            gallery_dl_rs::pinterest::Pinterest::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Pinterest initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "wallhaven" => {
+                    let native = extractors
+                        .wallhaven
+                        .get_or_init(|| async {
+                            gallery_dl_rs::wallhaven::Wallhaven::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_api_key(options.api_key.as_deref())
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Wallhaven initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "deviantart" => {
+                    let native = extractors
+                        .deviantart
+                        .get_or_init(|| async {
+                            gallery_dl_rs::deviantart::DeviantArt::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_credentials(
+                                            options.client_id.as_deref(),
+                                            options.client_secret.as_deref(),
+                                        )
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native DeviantArt initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "pixiv" => {
+                    let native = extractors
+                        .pixiv
+                        .get_or_init(|| async {
+                            gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
+                                native
+                                    .with_refresh_token(options.refresh_token.as_deref())
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native Pixiv initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native
+                    if gallery_dl_rs::imagehosts::Site::from_category(category).is_some() =>
+                {
+                    let native = extractors
+                        .imagehosts
+                        .get_or_init(|| async {
+                            gallery_dl_rs::imagehosts::ImageHosts::new(backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native image host initialization failed: {e}"))
+                        })?;
+                    native.events(&url)
+                }
+                Extractor::Native
+                    if let Some(site) = gallery_dl_rs::booru::Site::from_category(category) =>
+                {
+                    let native = extractors.booru[site as usize]
+                        .get_or_init(|| async {
+                            gallery_dl_rs::booru::Booru::new(site, backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| error(format!("native booru initialization failed: {e}")))?;
+                    native.events(&url)
+                }
                 Extractor::Native => {
                     return Err(error(
                         "native extractor unavailable; use --extractor compatibility",
@@ -647,7 +1179,12 @@ struct Settings {
 }
 
 async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
-    let config = match &args.native_config {
+    let discovered = if args.native_config.is_none() && !args.native_config_ignore {
+        default_native_config()
+    } else {
+        None
+    };
+    let config = match args.native_config.as_ref().or(discovered.as_ref()) {
         Some(path) => Config::load(path).await?,
         None => Config::default(),
     };
@@ -663,6 +1200,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .clone()
             .or_else(|| args.destination.clone()),
         filename: args.filename.clone(),
+        filename_conditions: None,
         file_range: args.file_range.clone(),
         file_filter: (!args.file_filter.is_empty()).then(|| args.file_filter.clone()),
         post_range: args.post_range.clone(),
@@ -674,6 +1212,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         } else {
             (!args.directory.is_empty()).then(|| args.directory.clone())
         },
+        directory_conditions: None,
         cookies: args.cookies.clone(),
         browser_cookies: None,
         retweets: None,
@@ -705,6 +1244,10 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         limit: None,
         search_limit: None,
         search_stop: None,
+        api_key: None,
+        refresh_token: None,
+        client_id: None,
+        client_secret: None,
         proxy: args.proxy.clone(),
         user_agent: args.user_agent.clone(),
         archive: args.download_archive.clone(),
@@ -714,7 +1257,37 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         timeout: args.timeout,
     };
     let mut settings = BTreeMap::new();
-    for category in ["instagram", "twitter", "facebook", "direct"] {
+    for category in [
+        "instagram",
+        "twitter",
+        "facebook",
+        "imgur",
+        "bluesky",
+        "reddit",
+        "danbooru",
+        "e621",
+        "gelbooru",
+        "safebooru",
+        "mastodon",
+        "kemono",
+        "coomer",
+        "pixeldrain",
+        "catbox",
+        "imgbox",
+        "postimg",
+        "tumblr",
+        "pixiv",
+        "deviantart",
+        "flickr",
+        "wallhaven",
+        "artstation",
+        "pinterest",
+        "newgrounds",
+        "furaffinity",
+        "weasyl",
+        "vsco",
+        "direct",
+    ] {
         let options = defaults
             .overlay(&config.resolve(category)?)
             .overlay(&overrides);
@@ -732,16 +1305,28 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         } else {
             None
         };
-        let filename = options
-            .filename
-            .as_deref()
-            .map(FilenameTemplate::parse)
-            .transpose()?;
-        let directory = options
-            .directory
-            .as_deref()
-            .map(DirectoryTemplate::parse)
-            .transpose()?;
+        let filename = match &options.filename_conditions {
+            Some(conditions) => Some(FilenameTemplate::parse_conditional(
+                conditions,
+                options.filename.as_deref(),
+            )?),
+            None => options
+                .filename
+                .as_deref()
+                .map(FilenameTemplate::parse)
+                .transpose()?,
+        };
+        let directory = match &options.directory_conditions {
+            Some(conditions) => Some(DirectoryTemplate::parse_conditional(
+                conditions,
+                options.directory.as_deref(),
+            )?),
+            None => options
+                .directory
+                .as_deref()
+                .map(DirectoryTemplate::parse)
+                .transpose()?,
+        };
         let selection = options
             .file_range
             .as_deref()

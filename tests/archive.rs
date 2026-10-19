@@ -24,6 +24,7 @@ fn item(url: &str) -> Media {
         quoted_by_id: None,
         reposted_by_id: None,
         article: None,
+        instance: None,
         post_id: "100".into(),
         media_id: "101".into(),
         shortcode: "Example".into(),
@@ -615,4 +616,67 @@ async fn cancellation_does_not_archive_partial_media_or_keep_its_identity_locked
         ArchiveOutcome::Completed(Outcome::Downloaded(_))
     ));
     assert_eq!(records(&path), 1);
+}
+
+#[test]
+fn terminate_stops_after_consecutive_skipped_files() {
+    let root = tempfile::tempdir().unwrap();
+    let urls = [
+        "http://127.0.0.1:1/one.jpg",
+        "http://127.0.0.1:1/two.jpg",
+        "http://127.0.0.1:1/missing.jpg",
+    ];
+    for url in &urls[..2] {
+        let media = extract::direct(&extract::http_url(url).unwrap()).unwrap();
+        let saved = download::destination(root.path(), &media);
+        std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+        std::fs::write(&saved, b"existing").unwrap();
+    }
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .args(["--jobs", "1", "--retries", "0"])
+            .args(extra)
+            .arg("-d")
+            .arg(root.path())
+            .args(urls)
+            .output()
+            .unwrap()
+    };
+    let output = run(&["-T", "2"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(stderr.contains("stopping after 2 consecutive skipped files"));
+    assert!(!stderr.contains("download failed"), "{stderr}");
+    // Without a limit, the unreachable third file is attempted and fails.
+    assert!(!run(&[]).status.success());
+    assert!(!run(&["-T", "3"]).status.success());
+    assert_eq!(run(&["-T", "0"]).status.code(), Some(2));
+}
+
+#[test]
+fn abort_stops_only_the_input_with_consecutive_skips() {
+    let root = tempfile::tempdir().unwrap();
+    let existing = "http://127.0.0.1:1/existing.jpg";
+    let media = extract::direct(&extract::http_url(existing).unwrap()).unwrap();
+    let saved = download::destination(root.path(), &media);
+    std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+    std::fs::write(&saved, b"existing").unwrap();
+    let run = |flag: &str| {
+        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .args(["--jobs", "1", "--retries", "0", flag, "1", "-d"])
+            .arg(root.path())
+            .args([existing, "http://127.0.0.1:1/missing.jpg"])
+            .output()
+            .unwrap()
+    };
+    let output = run("-A");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("stopping input 1 after 1 consecutive skipped files"),
+        "{stderr}"
+    );
+    // The second input still runs and fails against the unreachable server.
+    assert!(!output.status.success());
+    assert!(stderr.contains("download failed"), "{stderr}");
+    assert!(run("-T").status.success());
 }

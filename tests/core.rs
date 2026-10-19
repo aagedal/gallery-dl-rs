@@ -52,6 +52,7 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
         quoted_by_id: None,
         reposted_by_id: None,
         article: None,
+        instance: None,
         post_id: "post-1".into(),
         media_id: "media-2".into(),
         shortcode: "example".into(),
@@ -286,6 +287,168 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.instagram.com/p/abc/", Some("instagram")),
         ("https://m.facebook.com/photo.php?fbid=1", Some("facebook")),
         ("https://fb.watch/abc/", Some("facebook")),
+        ("https://i.imgur.com/21yMxCS.png", Some("imgur")),
+        ("https://imgur.com.evil.example/a/TcBmP", None),
+        (
+            "https://bsky.app/profile/a.bsky.social/post/3kabc",
+            Some("bluesky"),
+        ),
+        ("https://bsky.app.evil.example/profile/a.bsky.social", None),
+        (
+            "https://old.reddit.com/r/pics/comments/abc12/",
+            Some("reddit"),
+        ),
+        ("https://redd.it/abc12", Some("reddit")),
+        ("https://reddit.com.evil.example/r/pics", None),
+        ("https://notreddit.com/r/pics", None),
+        ("https://danbooru.donmai.us/posts/1", Some("danbooru")),
+        ("https://e621.net/posts/1", Some("e621")),
+        ("https://e926.net/pools/1", Some("e621")),
+        (
+            "https://gelbooru.com/index.php?page=post&s=view&id=1",
+            Some("gelbooru"),
+        ),
+        ("https://safebooru.org/index.php", Some("safebooru")),
+        ("https://gelbooru.com.evil.example/index.php", None),
+        ("https://note621.net/posts/1", None),
+        ("https://mastodon.social/@alice/1", Some("mastodon")),
+        ("https://pawoo.net/@alice", Some("mastodon")),
+        ("https://baraag.net/web/statuses/1", Some("mastodon")),
+        ("https://files.mastodon.social/x.png", None),
+        ("https://mastodon.social.evil.example/@alice", None),
+        ("https://kemono.cr/patreon/user/1", Some("kemono")),
+        ("https://kemono.su/patreon/user/1/post/2", Some("kemono")),
+        ("https://coomer.st/onlyfans/user/a", Some("coomer")),
+        ("https://n1.kemono.cr/data/aa/bb/x.png", None),
+        ("https://kemono.cr.evil.example/patreon/user/1", None),
+        ("https://alice.tumblr.com/", Some("tumblr")),
+        ("https://alice.tumblr.com/post/1/slug", Some("tumblr")),
+        ("https://www.tumblr.com/alice/1", Some("tumblr")),
+        ("https://www.tumblr.com/dashboard", None),
+        ("https://www.tumblr.com/", None),
+        ("https://64.media.tumblr.com/a/b/s1280x1920/x.jpg", None),
+        ("https://va.media.tumblr.com/tumblr_x.mp4", None),
+        ("https://alice.tumblr.com.evil.example/", None),
+        (
+            "https://www.deviantart.com/alice/art/My-Art-123",
+            Some("deviantart"),
+        ),
+        ("https://alice.deviantart.com/art/x-1", Some("deviantart")),
+        (
+            "https://www.deviantart.com/alice/gallery",
+            Some("deviantart"),
+        ),
+        ("https://www.deviantart.com/alice", Some("deviantart")),
+        ("https://www.deviantart.com/", None),
+        ("https://images-wixmp-x.wixmp.com/f/a.jpg", None),
+        ("https://www.deviantart.com.evil.example/alice", None),
+        (
+            "https://www.artstation.com/artwork/LQVJr",
+            Some("artstation"),
+        ),
+        (
+            "https://alice.artstation.com/projects/LQVJr",
+            Some("artstation"),
+        ),
+        ("https://www.artstation.com/alice", Some("artstation")),
+        (
+            "https://www.artstation.com/alice/albums/all",
+            Some("artstation"),
+        ),
+        ("https://www.artstation.com/", None),
+        (
+            "https://cdna.artstation.com/p/assets/images/1/large/a.jpg",
+            None,
+        ),
+        ("https://www.artstation.com.evil.example/alice", None),
+        ("https://vsco.co/alice", Some("vsco")),
+        ("https://vsco.co/alice/gallery", Some("vsco")),
+        (
+            "https://vsco.co/alice/media/5f1b2c3d4e5f6a7b8c9d0e1f",
+            Some("vsco"),
+        ),
+        ("https://vsco.co/", None),
+        ("https://im.vsco.co/aws-us-west-2/a.jpg", None),
+        ("https://vsco.co.evil.example/alice", None),
+        (
+            "https://www.newgrounds.com/art/view/alice/ship",
+            Some("newgrounds"),
+        ),
+        ("https://alice.newgrounds.com/art", Some("newgrounds")),
+        ("https://www.newgrounds.com/portal/view/1", None),
+        ("https://www.newgrounds.com/art", None),
+        ("https://art.ngfiles.com/images/1/1_a.png", None),
+        ("https://www.newgrounds.com.evil.example/art/view/a/b", None),
+        ("https://www.furaffinity.net/view/42/", Some("furaffinity")),
+        ("https://www.furaffinity.net/full/42/", Some("furaffinity")),
+        (
+            "https://www.furaffinity.net/gallery/alice/",
+            Some("furaffinity"),
+        ),
+        (
+            "https://www.furaffinity.net/scraps/alice/2/",
+            Some("furaffinity"),
+        ),
+        ("https://www.furaffinity.net/user/alice/", None),
+        ("https://d.furaffinity.net/art/alice/1/1.alice_a.png", None),
+        ("https://www.furaffinity.net.evil.example/view/42/", None),
+        (
+            "https://www.weasyl.com/~alice/submissions/42/big",
+            Some("weasyl"),
+        ),
+        ("https://www.weasyl.com/submission/42", Some("weasyl")),
+        ("https://www.weasyl.com/~alice", Some("weasyl")),
+        ("https://www.weasyl.com/~alice/gallery", Some("weasyl")),
+        ("https://www.weasyl.com/", None),
+        ("https://cdn.weasyl.com/~alice/submissions/42/a/b.png", None),
+        ("https://www.weasyl.com.evil.example/submission/42", None),
+        ("https://www.pinterest.com/pin/123/", Some("pinterest")),
+        ("https://www.pinterest.co.uk/pin/123/", Some("pinterest")),
+        ("https://www.pinterest.com/alice/cats/", Some("pinterest")),
+        ("https://www.pinterest.com/alice/pins/", Some("pinterest")),
+        ("https://pin.it/AbC12", Some("pinterest")),
+        ("https://www.pinterest.com/", None),
+        ("https://i.pinimg.com/originals/aa/a.jpg", None),
+        ("https://www.pinterest.com.evil.example/pin/1/", None),
+        ("https://wallhaven.cc/w/94x38z", Some("wallhaven")),
+        ("https://whvn.cc/94x38z", Some("wallhaven")),
+        ("https://wallhaven.cc/search?q=cat", Some("wallhaven")),
+        ("https://wallhaven.cc/user/alice/uploads", Some("wallhaven")),
+        (
+            "https://wallhaven.cc/user/alice/favorites/7",
+            Some("wallhaven"),
+        ),
+        ("https://wallhaven.cc/", None),
+        ("https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg", None),
+        ("https://wallhaven.cc.evil.example/w/94x38z", None),
+        ("https://www.flickr.com/photos/alice/123", Some("flickr")),
+        (
+            "https://www.flickr.com/photos/alice/albums/5",
+            Some("flickr"),
+        ),
+        ("https://www.flickr.com/photos/alice", Some("flickr")),
+        ("https://flic.kr/p/FPVo9U", Some("flickr")),
+        ("https://www.flickr.com/", None),
+        ("https://live.staticflickr.com/65535/1_a_o.jpg", None),
+        ("https://www.flickr.com.evil.example/photos/alice", None),
+        ("https://www.pixiv.net/artworks/1", Some("pixiv")),
+        ("https://www.pixiv.net/en/artworks/1", Some("pixiv")),
+        (
+            "https://www.pixiv.net/member_illust.php?illust_id=1",
+            Some("pixiv"),
+        ),
+        ("https://www.pixiv.net/users/2/manga", Some("pixiv")),
+        ("https://www.pixiv.net/", None),
+        ("https://i.pximg.net/img-original/img/1_p0.png", None),
+        ("https://www.pixiv.net.evil.example/artworks/1", None),
+        ("https://pixeldrain.com/u/abc", Some("pixeldrain")),
+        ("https://catbox.moe/c/abc", Some("catbox")),
+        ("https://files.catbox.moe/abc.png", None),
+        ("https://imgbox.com/g/AbCdEfGhIj", Some("imgbox")),
+        ("https://images2.imgbox.com/ab/cd/x_o.png", None),
+        ("https://postimg.cc/gallery/abc", Some("postimg")),
+        ("https://i.postimg.cc/abc/x.png", None),
+        ("https://imgbox.com.evil.example/AbCd1234", None),
         ("https://x.com/user/status/123", Some("twitter")),
         ("https://twitter.com/user/status/123", Some("twitter")),
         ("https://notinstagram.com/p/abc", None),
@@ -764,4 +927,73 @@ async fn invalid_retry_after_uses_backoff_and_rate_limit_retries_are_bounded() {
     assert!(failure.to_string().contains("429"));
     assert!(start.elapsed() >= Duration::from_millis(250));
     assert_eq!(handle.join().unwrap().len(), 2);
+}
+
+#[test]
+fn compatibility_mode_downloads_plain_imgur_file_links_directly() {
+    // A fake backend executable proves the Python backend is not consulted.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .args(["--extractor-command", "/nonexistent/gallery-dl", "-g"])
+        .arg("https://i.imgur.com/abcdefg.jpg")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "https://i.imgur.com/abcdefg.jpg"
+    );
+}
+
+#[test]
+fn plain_reddit_image_links_download_directly_in_both_modes() {
+    for mode in ["compatibility", "native"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .args([
+                "--extractor-command",
+                "/nonexistent/gallery-dl",
+                "--extractor",
+                mode,
+                "-g",
+            ])
+            .arg("https://i.redd.it/abcdefg.jpg")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{mode}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "https://i.redd.it/abcdefg.jpg"
+        );
+    }
+}
+
+#[test]
+fn plain_booru_file_links_download_directly() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        .args([
+            "--extractor-command",
+            "/nonexistent/gallery-dl",
+            "--extractor",
+            "native",
+            "-g",
+        ])
+        .arg("https://safebooru.org/images/1/abc.png")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "https://safebooru.org/images/1/abc.png"
+    );
 }
