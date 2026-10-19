@@ -361,6 +361,7 @@ struct RawExtractor {
     artstation: Box<RawOptions>,
     pinterest: Box<RawOptions>,
     newgrounds: Box<RawOptions>,
+    furaffinity: Box<RawOptions>,
     vsco: Box<RawOptions>,
     direct: Box<RawOptions>,
 }
@@ -501,6 +502,7 @@ impl Config {
                 "artstation",
                 "pinterest",
                 "newgrounds",
+                "furaffinity",
                 "vsco",
                 "direct",
             ] {
@@ -636,6 +638,7 @@ impl Config {
             ("artstation", extractor.artstation),
             ("pinterest", extractor.pinterest),
             ("newgrounds", extractor.newgrounds),
+            ("furaffinity", extractor.furaffinity),
             ("vsco", extractor.vsco),
             ("direct", extractor.direct),
         ] {
@@ -694,6 +697,7 @@ impl Config {
                 | "artstation"
                 | "pinterest"
                 | "newgrounds"
+                | "furaffinity"
                 | "vsco"
                 | "direct"
         ) {

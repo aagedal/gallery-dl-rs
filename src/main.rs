@@ -418,6 +418,7 @@ async fn run(args: Args) -> Result<()> {
                     | "artstation"
                     | "pinterest"
                     | "newgrounds"
+                    | "furaffinity"
                     | "vsco"
             ) && let Some(file_key) = item.archive_key()
             {
@@ -604,6 +605,7 @@ struct Extractors {
     artstation: OnceCell<Result<gallery_dl_rs::artstation::ArtStation>>,
     pinterest: OnceCell<Result<gallery_dl_rs::pinterest::Pinterest>>,
     newgrounds: OnceCell<Result<gallery_dl_rs::newgrounds::Newgrounds>>,
+    furaffinity: OnceCell<Result<gallery_dl_rs::furaffinity::FurAffinity>>,
     vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
 }
 
@@ -893,6 +895,28 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
+                    native.events(&url)
+                }
+                Extractor::Native if category == "furaffinity" => {
+                    let native = extractors
+                        .furaffinity
+                        .get_or_init(|| async {
+                            gallery_dl_rs::furaffinity::FurAffinity::from_cookie_jar(
+                                extractors.cookie_jar(configured, "furaffinity.net").await?,
+                                backend.timeout,
+                            )
+                            .and_then(|native| {
+                                native
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
+                        })
+                        .await
+                        .as_ref()
+                        .map_err(|e| {
+                            error(format!("native Fur Affinity initialization failed: {e}"))
+                        })?;
                     native.events(&url)
                 }
                 Extractor::Native if category == "newgrounds" => {
@@ -1240,6 +1264,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "artstation",
         "pinterest",
         "newgrounds",
+        "furaffinity",
         "vsco",
         "direct",
     ] {

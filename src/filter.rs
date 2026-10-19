@@ -372,6 +372,7 @@ fn context_parts(
                 | "artstation"
                 | "pinterest"
                 | "newgrounds"
+                | "furaffinity"
                 | "vsco"
         ) || crate::booru::Site::from_category(category).is_some()
         {

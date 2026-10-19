@@ -19,6 +19,7 @@ mod facebook_video;
 pub mod file_metadata;
 pub mod filter;
 pub mod flickr;
+pub mod furaffinity;
 pub mod imagehosts;
 pub mod imgur;
 pub mod input;
