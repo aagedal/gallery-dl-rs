@@ -51,4 +51,14 @@ mod tests {
         );
         assert_eq!(render("true", None), "true");
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn paths_are_cmd_quoted() {
+        assert_eq!(
+            render("echo {}", Some(Path::new(r#"a b\say "hi".jpg"#))),
+            r#"echo "a b\say ""hi"".jpg""#
+        );
+        assert_eq!(render("true", None), "true");
+    }
 }
