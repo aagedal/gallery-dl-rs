@@ -816,10 +816,17 @@ exclude sort/target/dates and remain separate from ranking/artwork entries.
 Date selection scans unordered results; empty animation posts keep their range
 positions. Recorded upstream query vectors and HTTP fixtures cover traversal;
 live authenticated search remains unverified.
+Native illustration series support singular-user series URLs, scoped lazy
+pagination, first-response id/title/caption/total metadata, descending signed
+`num_series`, source filename prefixes and ordinary artwork archive identity.
+Recorded source pagination vectors cover empty first pages, immutable detail,
+mixed artists and numbering gaps; HTTP fixtures cover selection and recovery.
+Extended series-detail metadata and live authenticated verification remain
+unfinished.
 Remaining: ugoira original individual-frame mode and conversion,
 bookmark cursor/metadata options,
 sketch,
-pixivision, series, upstream metadata options
+pixivision, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and

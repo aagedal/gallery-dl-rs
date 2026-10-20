@@ -41,6 +41,9 @@ pub use ranking::{RankingMetadata, RankingOptions};
 #[path = "pixiv_search.rs"]
 pub mod search;
 pub use search::{SearchMetadata, SearchOptions};
+#[path = "pixiv_series.rs"]
+pub mod series;
+pub use series::SeriesMetadata;
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -115,6 +118,10 @@ pub enum Target {
     Novel(novel::Target),
     Ranking(RankingOptions),
     Search(SearchOptions),
+    Series {
+        owner: String,
+        id: String,
+    },
     Following {
         id: Option<String>,
         private: bool,
@@ -187,6 +194,15 @@ pub fn target(url: &Url) -> Result<Target> {
         || url.password().is_some()
         || !matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net"))
     {
+        return Err(unsupported());
+    }
+    if let ["user", owner, "series", id] = segments(url).as_slice() {
+        if valid_id(owner) && valid_id(id) {
+            return Ok(Target::Series {
+                owner: (*owner).to_owned(),
+                id: (*id).to_owned(),
+            });
+        }
         return Err(unsupported());
     }
     if url.path() == "/ranking.php" {
@@ -1097,6 +1113,7 @@ impl Pixiv {
             Target::Following { id, private } => return self.following_events(id, private),
             Target::Ranking(options) => return self.ranking_events(options),
             Target::Search(options) => return self.search_events(options),
+            Target::Series { id, .. } => return self.series_events(id),
             Target::Profile { id, kind } => {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/user/detail").expect("static");

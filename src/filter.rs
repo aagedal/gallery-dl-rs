@@ -403,6 +403,32 @@ fn context_parts(
                 ])),
             );
         }
+        if let Some(series) = &post.series {
+            metadata.insert(
+                "series".into(),
+                map(BTreeMap::from([
+                    ("id".into(), identifier(&series.id)),
+                    (
+                        "title".into(),
+                        series
+                            .title
+                            .as_ref()
+                            .map_or(Value::None, |s| text(s.clone())),
+                    ),
+                    (
+                        "caption".into(),
+                        series
+                            .caption
+                            .as_ref()
+                            .map_or(Value::None, |s| text(s.clone())),
+                    ),
+                    ("total".into(), Value::Int(series.total.into())),
+                ])),
+            );
+        }
+        if let Some(index) = post.num_series {
+            metadata.insert("num_series".into(), Value::Int(index.into()));
+        }
         if let Some(score) = post.score {
             metadata.insert("score".into(), Value::Int(score.into()));
         }

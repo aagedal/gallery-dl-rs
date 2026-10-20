@@ -19,3 +19,9 @@ requests were made.
 generator with synthetic API pages. Date-ascending, date-descending and popular
 sort cases capture offset-5,000 requests, UTC date-window changes and overlap
 suppression, including the skipped crossing row. No API requests were made.
+
+`series.json` records `PixivSeriesExtractor.works` with the real App API series
+pagination helper and synthetic responses. It covers an empty first page,
+immutable first-page detail, numbering before user/media filtering, mixed artists,
+and zero/negative numbering when the reported total differs from the page count.
+No API requests were made.

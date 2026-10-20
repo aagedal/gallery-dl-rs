@@ -647,6 +647,22 @@ search results without assuming newest-first order. Empty/failed animation
 posts retain their selection positions; metadata failures currently report
 errors where upstream warns. Live authenticated search remains unverified.
 
+Native Pixiv illustration series support `/user/OWNER/series/ID` (singular
+`user`). The API selects the series ID; the URL's owner does not filter artists.
+The first API response supplies normalized `series.id`, `series.title`,
+`series.caption` (raw text), and `series.total`, even if that page has no works.
+Later response details do not replace it. `num_series` counts down from the
+reported total before user/media selection, including zero and negative numbers
+if the reported count is inconsistent. Default filenames use
+`{num_series:>03}_{id}_pN.EXT`; custom templates can use the same public fields.
+Series files share ordinary artwork archive identity, so ordering and series
+membership do not create a new archive entry. Pagination pins the series ID,
+detects cycles and stops at 200 pages. Date selection scans series order without
+assuming publication-date order. Empty/failed animation entries retain post
+positions; native metadata failures remain errors where upstream warns.
+Additional series-detail fields and live authenticated verification remain
+unfinished.
+
 Native Pixiv novels use the separate `pixiv-novel` category and
 `extractor.pixiv-novel.refresh-token`. Supported URLs are `/novel/show.php?id=ID`,
 `/n/ID`, `/users/ID/novels`, `/novel/series/ID`, and

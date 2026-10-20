@@ -17,6 +17,8 @@ fn item(url: &str) -> Media {
     let mut media = extract::direct(&extract::http_url(url).unwrap()).unwrap();
     media.category = "instagram".into();
     media.metadata = Some(PostMetadata {
+        series: None,
+        num_series: None,
         search: None,
         search_archive: false,
         ranking: None,

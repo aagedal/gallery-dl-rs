@@ -474,6 +474,10 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series: Option<std::sync::Arc<crate::pixiv::SeriesMetadata>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_series: Option<i64>,
     /// Pixiv search context; only the search term scopes archive identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<std::sync::Arc<crate::pixiv::SearchMetadata>>,
@@ -1284,6 +1288,24 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
         }
     }
     let mut normalized = compatibility_metadata(metadata, category);
+    if category == "pixiv"
+        && let Some(post) = &normalized
+        && post.series.is_some()
+        && let Some(number) = post.num_series
+        && crate::pixiv::valid_id(&post.post_id)
+        && let Some(page) = metadata
+            .get("num")
+            .and_then(Value::as_u64)
+            .filter(|n| *n < 10000)
+        && let Some(extension) = metadata
+            .get("extension")
+            .and_then(Value::as_str)
+            .filter(|s| valid_extension(s))
+    {
+        // Backend messages carry the URL's filename, not the extractor's
+        // formatted default name. Rebuild the series default from public IDs.
+        filename = format!("{number:0>3}_{}_p{page}.{extension}", post.post_id);
+    }
     if category == "twitter"
         && let Some(kind) = metadata
             .get("subcategory")
@@ -1456,6 +1478,7 @@ fn compatibility_metadata(
                 if category == "pixiv-novel"
                     || data.contains_key("ranking")
                     || data.contains_key("search")
+                    || data.contains_key("num_series")
                 {
                     let caption = string("caption")
                         .map(|s| crate::mastodon::strip_html(&s))
@@ -1576,6 +1599,16 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        series: (category == "pixiv")
+            .then(|| {
+                data.get("series")
+                    .and_then(crate::pixiv::SeriesMetadata::parse_compat)
+                    .map(std::sync::Arc::new)
+            })
+            .flatten(),
+        num_series: (category == "pixiv")
+            .then(|| data.get("num_series").and_then(Value::as_i64))
+            .flatten(),
         search: (category == "pixiv")
             .then(|| {
                 data.get("search")
