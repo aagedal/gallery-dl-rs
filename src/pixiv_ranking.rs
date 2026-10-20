@@ -307,6 +307,7 @@ impl RankingMetadata {
 }
 
 struct State {
+    budget: super::PostBudget,
     options: RankingOptions,
     next: Option<String>,
     pages: usize,
@@ -373,6 +374,7 @@ impl Pixiv {
         }
         let next = Some(options.first(self).to_string());
         let state = State {
+            budget: super::PostBudget::new(self.max_posts),
             options,
             next,
             pages: 0,
@@ -388,6 +390,9 @@ impl Pixiv {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), state));
                 }
+                if state.budget.exhausted() {
+                    return None;
+                }
                 if let Some(work) = state.works.pop_front() {
                     skipped = skipped.wrapping_add(1);
                     if skipped == 0 {
@@ -402,6 +407,7 @@ impl Pixiv {
                     {
                         continue;
                     }
+                    state.budget.consume();
                     let Some(rank) = state.rank.checked_add(1) else {
                         state.done = true;
                         return Some((Err(error("Pixiv ranking counter overflow")), state));
@@ -977,5 +983,44 @@ mod tests {
                 .contains("PRIVATE")
         );
         assert_eq!(server.join().unwrap().len(), 2);
+    }
+    #[tokio::test]
+    async fn max_posts_counts_matching_content_before_missing_user_and_enrichment() {
+        for missing in [true, false] {
+            let mut selected = work(41, "illust", 2);
+            if missing {
+                selected["user"]["id"] = json!(0);
+            }
+            let (root, server) = serve(vec![
+                token("t"),
+                page(
+                    vec![work(40, "manga", 1), selected, work(42, "ugoira", 1)],
+                    Some(Url::parse("https://unexpected.invalid/page").unwrap()),
+                ),
+            ]);
+            let native = pixiv(root).with_max_posts(Some(1));
+            let events = native
+                .events(&url("&content=illust"))
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            let files: Vec<_> = events
+                .into_iter()
+                .filter_map(|event| {
+                    if let ExtractionEvent::Media(file) = event {
+                        Some(file)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(files.len(), if missing { 0 } else { 2 });
+            for file in files {
+                assert_eq!(file.metadata.unwrap().ranking.unwrap().rank, 1);
+            }
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
     }
 }

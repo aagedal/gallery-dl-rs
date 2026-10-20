@@ -951,14 +951,16 @@ async fn tumblr_selections_and_booru_credentials_forward_with_exact_types_and_sc
 
 #[cfg(unix)]
 #[tokio::test]
-async fn kemono_expansion_and_post_limits_forward_only_to_supported_categories() {
+async fn expansion_and_post_limits_forward_only_to_supported_categories() {
     let root = tempfile::tempdir().unwrap();
     let cfg = config(
         root.path(),
         serde_json::json!({"extractor": {
             "expand":true,"max-posts":10,
             "kemono":{"expand":false,"max-posts":2},
-            "coomer":{"max-posts":0}
+            "coomer":{"max-posts":0},
+            "pixiv":{"max-posts":3},
+            "pixiv-novel":{"max-posts":0}
         }}),
     );
     for (url, expected, absent) in [
@@ -971,6 +973,21 @@ async fn kemono_expansion_and_post_limits_forward_only_to_supported_categories()
             "https://coomer.st/onlyfans/user/alice?tag=cat",
             vec!["expand=true", "max-posts=0"],
             vec![],
+        ),
+        (
+            "https://www.pixiv.net/artworks/42",
+            vec!["max-posts=3"],
+            vec!["expand="],
+        ),
+        (
+            "https://www.pixivision.net/en/a/77",
+            vec!["max-posts=3"],
+            vec!["expand="],
+        ),
+        (
+            "https://www.pixiv.net/novel/show.php?id=42",
+            vec!["max-posts=0"],
+            vec!["expand="],
         ),
         (
             "https://x.com/alice/status/42",

@@ -64,6 +64,7 @@ impl SeriesMetadata {
 }
 
 struct State {
+    budget: super::PostBudget,
     id: String,
     next: Option<String>,
     pages: usize,
@@ -169,6 +170,7 @@ impl Pixiv {
         }
         let next = Some(self.series_first(&id).to_string());
         let state = State {
+            budget: super::PostBudget::new(self.max_posts),
             id,
             next,
             pages: 0,
@@ -185,10 +187,14 @@ impl Pixiv {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), state));
                 }
+                if state.budget.exhausted() {
+                    return None;
+                }
                 if state.done {
                     return None;
                 }
                 if let Some(work) = state.works.pop_front() {
+                    state.budget.consume();
                     skipped = skipped.wrapping_add(1);
                     if skipped == 0 {
                         tokio::task::yield_now().await;
@@ -701,6 +707,36 @@ mod tests {
                 .to_string()
                 .contains("PRIVATE")
         );
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+    #[tokio::test]
+    async fn max_posts_counts_raw_series_works_including_missing_users_and_empty_animation() {
+        let mut missing = work(40, "illust", 1);
+        missing["user"]["id"] = json!(0);
+        let (root, server) = serve(vec![
+            token("t"),
+            page(
+                vec![missing, work(41, "ugoira", 1), work(42, "illust", 1)],
+                detail(4),
+                Some(Url::parse("https://unexpected.invalid/page").unwrap()),
+            ),
+        ]);
+        let events = pixiv(root)
+            .with_ugoira(false)
+            .with_max_posts(Some(2))
+            .events(&url())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("expected empty post")
+        };
+        assert_eq!(post.count, Some(0));
+        assert_eq!(post.metadata.as_ref().unwrap().num_series, Some(3));
+        assert!(matches!(events[1], ExtractionEvent::EndPost));
         assert_eq!(server.join().unwrap().len(), 2);
     }
 }

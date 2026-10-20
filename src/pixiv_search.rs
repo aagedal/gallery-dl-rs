@@ -213,6 +213,7 @@ impl SearchOptions {
 }
 
 struct State {
+    budget: super::PostBudget,
     metadata: Arc<SearchMetadata>,
     request: SearchOptions,
     next: Option<String>,
@@ -355,6 +356,7 @@ impl Pixiv {
         let next = Some(options.first(self).to_string());
         let metadata = Arc::new(options.clone());
         let state = State {
+            budget: super::PostBudget::new(self.max_posts),
             metadata,
             request: options,
             next,
@@ -371,6 +373,9 @@ impl Pixiv {
             loop {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), state));
+                }
+                if state.budget.exhausted() {
+                    return None;
                 }
                 if let Some(work) = state.works.pop_front() {
                     skipped = skipped.wrapping_add(1);
@@ -389,6 +394,7 @@ impl Pixiv {
                         }
                         continue;
                     }
+                    state.budget.consume();
                     if !work
                         .get("user")
                         .and_then(|user| user.get("id"))
@@ -992,6 +998,28 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("PRIVATE")
+        );
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+    #[tokio::test]
+    async fn max_posts_counts_after_replay_suppression_and_stops_before_future_ugoira() {
+        let (root, server) = serve_with(|root| {
+            vec![token("t"),page(vec![work(41,"illust","2024-01-10T00:30:00+09:00")],Some(root.join("v1/search/illust?word=cat&search_target=exact_match_for_tags&sort=date_desc&offset=5000").unwrap())),page(vec![work(40,"illust","2024-01-10T01:00:00+09:00"),work(41,"illust","2024-01-10T00:30:00+09:00"),work(42,"illust","2024-01-09T23:59:00+09:00"),work(43,"ugoira",DATE)],Some(Url::parse("https://unexpected.invalid/page").unwrap()))]
+        });
+        let files = pixiv(root)
+            .with_max_posts(Some(2))
+            .stream(&url())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["41_p0.jpg", "42_p0.jpg"]
         );
         assert_eq!(server.join().unwrap().len(), 3);
     }

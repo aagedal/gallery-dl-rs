@@ -837,11 +837,17 @@ predicates and templates; article-scoped archives exclude title changes.
 HTTP fixtures cover authentication order, empty articles, selection, failures
 and animation positions. Live authenticated extraction and upstream default
 article directory layout remain unfinished.
+Native illustration and novel `max-posts` limits count source works per job,
+preserve the final work's files, and stop later enrichment and pagination.
+Queued profile views receive independent budgets; rankings filter content and
+searches suppress replayed rows before counting. Zero clears inherited limits,
+and compatibility mode forwards the root category setting upstream. Separate
+compatibility overrides for queued child categories remain incomplete.
 Remaining: ugoira original individual-frame mode and conversion,
 bookmark cursor/metadata options,
 sketch,
 upstream metadata options
-(`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
+(`metadata`, `tags`), and Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and
 folders via the OAuth2 API (client credentials, overridable `client-id`/

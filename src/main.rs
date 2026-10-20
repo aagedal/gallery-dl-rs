@@ -1124,6 +1124,7 @@ fn extract_input<'a>(
                                         covers: novel_options.covers.unwrap_or(false),
                                         full_series: novel_options.full_series.unwrap_or(false),
                                     })
+                                    .with_max_posts(novel_options.max_posts)
                                     .with_refresh_token(novel_options.refresh_token.as_deref())
                                     .with_retries(novel_options.retries.unwrap())
                                     .with_request_timeout(novel_options.timeout.unwrap())
@@ -1148,6 +1149,7 @@ fn extract_input<'a>(
                                             .with_novel_extractor(Arc::clone(novel))
                                             .with_include(options.include.clone())
                                             .with_ugoira(options.ugoira.unwrap_or(true))
+                                            .with_max_posts(options.max_posts)
                                             .with_refresh_token(options.refresh_token.as_deref())
                                             .with_retries(options.retries.unwrap())
                                             .with_request_timeout(options.timeout.unwrap())
@@ -1239,9 +1241,12 @@ fn extract_input<'a>(
                             expand: matches!(category, "twitter" | "kemono" | "coomer")
                                 .then_some(options.expand)
                                 .flatten(),
-                            max_posts: matches!(category, "kemono" | "coomer")
-                                .then_some(options.max_posts)
-                                .flatten(),
+                            max_posts: matches!(
+                                category,
+                                "kemono" | "coomer" | "pixiv" | "pixiv-novel"
+                            )
+                            .then_some(options.max_posts)
+                            .flatten(),
                             endpoint: matches!(category, "kemono" | "coomer")
                                 .then_some(options.endpoint)
                                 .flatten(),

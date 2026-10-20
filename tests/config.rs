@@ -2211,12 +2211,14 @@ fn booru_credentials_stay_in_their_category_and_are_private() {
 }
 
 #[test]
-fn kemono_post_limits_inherit_and_zero_explicitly_clears_limits() {
-    let config = parse(r#"{"extractor":{"max-posts":20,"expand":true,"kemono":{"max-posts":2,"expand":false},"coomer":{"max-posts":0}}}"#).unwrap();
+fn source_post_limits_inherit_and_zero_explicitly_clears_limits() {
+    let config = parse(r#"{"extractor":{"max-posts":20,"expand":true,"kemono":{"max-posts":2,"expand":false},"coomer":{"max-posts":0},"pixiv":{"max-posts":4},"pixiv-novel":{"max-posts":0}}}"#).unwrap();
     let kemono = config.resolve("kemono").unwrap();
     assert_eq!((kemono.max_posts, kemono.expand), (Some(2), Some(false)));
     let coomer = config.resolve("coomer").unwrap();
     assert_eq!((coomer.max_posts, coomer.expand), (Some(0), Some(true)));
+    assert_eq!(config.resolve("pixiv").unwrap().max_posts, Some(4));
+    assert_eq!(config.resolve("pixiv-novel").unwrap().max_posts, Some(0));
     let generic = config.resolve("instagram").unwrap();
     assert_eq!(generic.max_posts, Some(20));
     assert_eq!(
@@ -2239,7 +2241,7 @@ fn kemono_post_limits_inherit_and_zero_explicitly_clears_limits() {
 }
 
 #[test]
-fn kemono_post_limits_reject_invalid_types_privately_in_all_scopes() {
+fn source_post_limits_reject_invalid_types_privately_in_all_scopes() {
     use serde_json::json;
     for value in [
         json!(null),
@@ -2256,6 +2258,8 @@ fn kemono_post_limits_reject_invalid_types_privately_in_all_scopes() {
             json!({"extractor":{"max-posts":value}}),
             json!({"extractor":{"kemono":{"max-posts":value}}}),
             json!({"extractor":{"coomer":{"max-posts":value}}}),
+            json!({"extractor":{"pixiv":{"max-posts":value}}}),
+            json!({"extractor":{"pixiv-novel":{"max-posts":value}}}),
         ] {
             let failure = parse(&document.to_string()).unwrap_err().to_string();
             assert!(failure.contains("max-posts"), "{failure}");

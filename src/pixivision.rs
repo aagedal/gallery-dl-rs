@@ -210,6 +210,7 @@ impl Article {
     }
 }
 struct State {
+    budget: super::PostBudget,
     id: String,
     article: Option<Article>,
     metadata: Option<Arc<PixivisionMetadata>>,
@@ -284,6 +285,7 @@ impl Pixiv {
     }
     pub(super) fn pixivision_events(&self, id: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         let state = State {
+            budget: super::PostBudget::new(self.max_posts),
             id,
             article: None,
             metadata: None,
@@ -295,6 +297,9 @@ impl Pixiv {
             loop {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), state));
+                }
+                if state.budget.exhausted() {
+                    return None;
                 }
                 if state.done {
                     return None;
@@ -356,6 +361,7 @@ impl Pixiv {
                         state,
                     ));
                 }
+                state.budget.consume();
                 if !work
                     .get("user")
                     .and_then(|user| user.get("id"))
@@ -690,5 +696,27 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("user-agent: custom article agent\r\n")
         );
+    }
+    #[tokio::test]
+    async fn max_posts_counts_query_variants_but_not_adjacent_raw_duplicates_before_next_detail() {
+        let (root, server) = serve(vec![
+            html(&["42?x", "42?x", "42?y", "43"]),
+            token("t"),
+            detail(42, "illust"),
+            detail(42, "illust"),
+        ]);
+        let native = pixiv(root.clone())
+            .with_pixivision_root(root)
+            .with_max_posts(Some(2));
+        let files = native
+            .stream(&url())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|file| file.filename == "42_p0.jpg"));
+        assert_eq!(server.join().unwrap().len(), 4);
     }
 }

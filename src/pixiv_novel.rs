@@ -293,6 +293,7 @@ struct State {
     pages: usize,
     seen: BTreeSet<String>,
     works: VecDeque<Value>,
+    remaining: Option<usize>,
     active: Option<Novel>,
     stage: Stage,
     done: bool,
@@ -392,6 +393,7 @@ impl Pixiv {
             pages: 0,
             seen: BTreeSet::new(),
             works: VecDeque::new(),
+            remaining: self.max_posts.filter(|limit| *limit > 0),
             active: None,
             stage: Stage::Load,
             done: false,
@@ -400,6 +402,12 @@ impl Pixiv {
             loop {
                 match state.stage {
                     Stage::Load => {
+                        // Upstream applies islice to the source novels before
+                        // enrichment, parsing, text requests and post predicates.
+                        // Check only between posts so the final text/cover drains.
+                        if state.remaining == Some(0) {
+                            return None;
+                        }
                         if let Err(error) = self.initialize_novels(&mut state).await {
                             state.done = true;
                             return Some((Err(error), state));
@@ -408,6 +416,9 @@ impl Pixiv {
                             return None;
                         }
                         if let Some(data) = state.works.pop_front() {
+                            if let Some(remaining) = &mut state.remaining {
+                                *remaining -= 1;
+                            }
                             match Novel::parse(data) {
                                 Ok(novel) => {
                                     let post = novel.post(self.novel_options.covers);
@@ -1161,5 +1172,220 @@ mod tests {
             ["41_p0.txt", "43_p0.txt"]
         );
         assert_eq!(server.join().unwrap().len(), 5);
+    }
+    #[tokio::test]
+    async fn max_posts_caps_source_novels_across_pages_and_drains_the_final_cover() {
+        for (route, endpoint) in [
+            ("users/9/novels", "v1/user/novels?user_id=9"),
+            ("novel/series/7", "v1/novel/series?series_id=7"),
+            (
+                "users/9/bookmarks/novels/tag?rest=hide",
+                "v1/user/bookmarks/novel?user_id=9&restrict=private&tag=tag",
+            ),
+        ] {
+            let (root, server) = serve_with(|root| {
+                vec![
+                    token("t"),
+                    page(
+                        vec![novel(41, "one")],
+                        Some(root.join(&format!("{endpoint}&offset=30")).unwrap()),
+                    ),
+                    webview("one"),
+                    page(
+                        vec![novel(42, "two"), novel(43, "three")],
+                        Some(root.join(&format!("{endpoint}&offset=60")).unwrap()),
+                    ),
+                    webview("two"),
+                ]
+            });
+            let native = pixiv(root)
+                .with_max_posts(Some(2))
+                .with_novel_options(NovelOptions {
+                    covers: true,
+                    full_series: false,
+                });
+            let events = native
+                .events(&Url::parse(&format!("https://www.pixiv.net/{route}")).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(events.len(), 8, "{route}: {events:?}");
+            assert!(
+                matches!(&events[6], ExtractionEvent::Media(file) if file.filename == "42_p1.jpg")
+            );
+            assert!(matches!(events[7], ExtractionEvent::EndPost));
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 5, "{route}");
+            assert!(
+                !requests
+                    .iter()
+                    .any(|request| request.contains("offset=60") || request.contains("id=43&"))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn max_posts_counts_invalid_novels_and_text_failures_before_later_work() {
+        for invalid in [true, false] {
+            let mut work = novel(41, "one");
+            if invalid {
+                work["id"] = json!(0);
+            }
+            let mut replies = vec![token("t"), page(vec![work, novel(42, "two")], None)];
+            if !invalid {
+                replies.push(response("200 OK", b"invalid webview"));
+            }
+            let (root, server) = serve(replies);
+            let native = pixiv(root).with_max_posts(Some(1));
+            let events = native
+                .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(events.iter().filter(|event| event.is_err()).count(), 1);
+            assert_eq!(events.len(), if invalid { 1 } else { 3 });
+            if !invalid {
+                assert!(matches!(events[2], Ok(ExtractionEvent::EndPost)));
+            }
+            assert_eq!(server.join().unwrap().len(), if invalid { 2 } else { 3 });
+        }
+    }
+
+    #[tokio::test]
+    async fn max_posts_precedes_post_predicates_and_does_not_fetch_n_plus_one_text() {
+        let (root, server) = serve(vec![
+            token("t"),
+            page(vec![novel(41, "one"), novel(42, "two")], None),
+            webview("one"),
+        ]);
+        let native = pixiv(root).with_max_posts(Some(1));
+        let selection = PostSelection::new(Some(RangeSelection::parse("2").unwrap()), None);
+        let files = selection
+            .apply(
+                native.events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap()),
+                None,
+                None,
+                false,
+            )
+            .collect::<Vec<_>>()
+            .await;
+        assert!(files.is_empty());
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn max_posts_full_series_counts_chapters_instead_of_discovery_detail() {
+        let mut work = novel(42, "two");
+        work["series"] = json!({"id":7});
+        let (root, server) = serve(vec![
+            token("t"),
+            detail(work),
+            page(vec![novel(41, "one"), novel(42, "two")], None),
+            webview("first chapter"),
+        ]);
+        let native = pixiv(root)
+            .with_max_posts(Some(1))
+            .with_novel_options(NovelOptions {
+                covers: false,
+                full_series: true,
+            });
+        let files = native
+            .stream(&Url::parse("https://www.pixiv.net/n/42").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].filename, "41_p0.txt");
+        assert_eq!(server.join().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn zero_and_absent_max_posts_leave_novel_feeds_unlimited() {
+        for limit in [None, Some(0)] {
+            let mut missing_user = novel(41, "one");
+            missing_user["user"] = Value::Null;
+            let (root, server) = serve(vec![
+                token("t"),
+                page(vec![missing_user, novel(42, "two")], None),
+                webview("one"),
+                webview("two"),
+            ]);
+            let native = pixiv(root).with_max_posts(limit);
+            let files = native
+                .stream(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(files.len(), 2);
+            assert_eq!(server.join().unwrap().len(), 4);
+        }
+    }
+
+    #[tokio::test]
+    async fn max_posts_counts_missing_author_novels_as_source_work() {
+        let mut first = novel(41, "one");
+        first["user"] = Value::Null;
+        let (root, server) = serve(vec![
+            token("t"),
+            page(vec![first, novel(42, "two")], None),
+            webview("one"),
+        ]);
+        let native = pixiv(root).with_max_posts(Some(1));
+        let files = native
+            .stream(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].filename, "41_p0.txt");
+        assert!(files[0].metadata.as_ref().unwrap().username.is_none());
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn max_posts_restarts_for_dispatched_novel_views_and_repeated_jobs() {
+        let (root, server) = serve(vec![
+            token("t"),
+            page(vec![novel(41, "one"), novel(42, "two")], None),
+            webview("one"),
+            page(vec![novel(43, "three"), novel(44, "four")], None),
+            webview("three"),
+            page(vec![novel(45, "five"), novel(46, "six")], None),
+            webview("five"),
+        ]);
+        let native = pixiv(root).with_max_posts(Some(1)).with_include(Some(
+            crate::dispatch::Include::Views(vec!["novel-user".into(), "novel-bookmark".into()]),
+        ));
+        let files = JobSelection::default()
+            .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["41_p0.txt", "43_p0.txt"]
+        );
+        let files = native
+            .stream(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].filename, "45_p0.txt");
+        assert_eq!(server.join().unwrap().len(), 7);
     }
 }

@@ -597,6 +597,16 @@ width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
 is (illustration, page). Plain `i.pximg.net` links stay direct downloads and
 usually fail without the Referer.
 
+Native Pixiv illustrations and novels honor `max-posts` in their respective
+`pixiv` and `pixiv-novel` scopes; zero removes an inherited limit. The limit
+counts source works before post filters and media extraction, including skipped
+or failed works, and retains every page, text file or cover of the final work.
+Ranking content filtering and search overlap suppression happen before counting.
+Each queued profile view starts a fresh budget; following user queues themselves
+are not limited. Reaching the budget avoids later detail, animation, text and
+pagination requests. Compatibility mode forwards the selected root category's
+setting upstream; separate overrides for queued child categories remain incomplete.
+
 Native Pixiv following lists support `/users/ID/following` and illustration
 bookmark URLs with `type=user`, including legacy `/bookmark.php` URLs. `rest=hide`
 selects private following; ownerless legacy URLs resolve the authenticated user.

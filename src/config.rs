@@ -120,7 +120,7 @@ pub struct Options {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
-    /// Limit Kemono/Coomer source posts; zero clears an inherited limit.
+    /// Limit Kemono/Coomer or Pixiv source works; zero clears an inherited limit.
     pub max_posts: Option<usize>,
     /// Look up Kemono/Coomer creator profiles.
     pub metadata: Option<bool>,

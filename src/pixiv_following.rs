@@ -647,7 +647,7 @@ mod tests {
     async fn followed_profile_post_ranges_reset_and_stop_before_later_work_or_manga_view() {
         use crate::post_selection::PostSelection;
         let work = |id| {
-            json!({"id":id,"type":"illust","user":{"account":"original"},
+            json!({"id":id,"type":"illust","user":{"id":5,"account":"original"},
             "meta_single_page":{"original_image_url":format!("https://i.pximg.net/img-original/{id}_p0.jpg")}})
         };
         let (root, server) = serve(vec![

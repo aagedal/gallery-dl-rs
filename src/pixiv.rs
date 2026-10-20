@@ -739,6 +739,7 @@ pub struct Pixiv {
     api_root: Url,
     oauth_root: Url,
     pixivision_root: Url,
+    max_posts: Option<usize>,
     refresh_token: Option<String>,
     access_token: tokio::sync::Mutex<Option<String>>,
     authenticated_user: tokio::sync::Mutex<Option<String>>,
@@ -768,11 +769,39 @@ impl Feed {
     }
 }
 
+fn value_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64() != Some(0.),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
+    }
+}
+
+/// Source works count before common user/media/predicate processing.
+struct PostBudget(Option<usize>);
+impl PostBudget {
+    fn new(max_posts: Option<usize>) -> Self {
+        Self(max_posts.filter(|limit| *limit > 0))
+    }
+    fn exhausted(&self) -> bool {
+        self.0 == Some(0)
+    }
+    fn consume(&mut self) {
+        if let Some(remaining) = &mut self.0 {
+            *remaining = remaining.saturating_sub(1);
+        }
+    }
+}
+
 struct ListingState {
+    budget: PostBudget,
     kinds: VecDeque<Feed>,
     active: Option<Feed>,
     user: Option<String>,
-    next: Option<Url>,
+    next: Option<String>,
     pages: usize,
     pending: VecDeque<ExtractionEvent>,
     works: VecDeque<Value>,
@@ -786,6 +815,7 @@ impl Pixiv {
             api_root: Url::parse("https://app-api.pixiv.net/").expect("static URL"),
             oauth_root: Url::parse("https://oauth.secure.pixiv.net/").expect("static URL"),
             pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
+            max_posts: None,
             refresh_token: None,
             access_token: tokio::sync::Mutex::new(None),
             authenticated_user: tokio::sync::Mutex::new(None),
@@ -863,6 +893,12 @@ impl Pixiv {
     /// Override the public article origin for bounded local fixtures.
     pub fn with_pixivision_root(mut self, root: Url) -> Self {
         self.pixivision_root = root;
+        self
+    }
+
+    /// Limit source works per independent job; zero and None are unlimited.
+    pub fn with_max_posts(mut self, max_posts: Option<usize>) -> Self {
+        self.max_posts = max_posts.filter(|limit| *limit > 0);
         self
     }
 
@@ -1045,7 +1081,7 @@ impl Pixiv {
         }
         let user = state.user.as_deref().expect("resolved listing user");
         let endpoint = match state.next.take() {
-            Some(url) => url,
+            Some(raw) => self.next_url(&raw, state.active.as_ref().expect("active feed"), user)?,
             None => {
                 let Some(feed) = state.kinds.pop_front() else {
                     return Ok(());
@@ -1061,8 +1097,7 @@ impl Pixiv {
         if state.pages < MAX_PAGES
             && let Some(next) = page.next
         {
-            state.next =
-                Some(self.next_url(&next, state.active.as_ref().expect("active feed"), user)?);
+            state.next = Some(next);
         }
         state.works.extend(page.works);
         Ok(())
@@ -1197,6 +1232,7 @@ impl Pixiv {
             Target::Bookmarks { id, tag, private } => (id, vec![Feed::Bookmarks { tag, private }]),
         };
         let state = ListingState {
+            budget: PostBudget::new(self.max_posts),
             kinds: kinds.into(),
             active: None,
             user,
@@ -1207,11 +1243,27 @@ impl Pixiv {
         };
         stream::unfold(Some(state), move |state| async move {
             let mut state = state?;
+            let mut skipped = 0u8;
             loop {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), Some(state)));
                 }
+                if state.budget.exhausted() {
+                    return None;
+                }
                 if let Some(work) = state.works.pop_front() {
+                    state.budget.consume();
+                    skipped = skipped.wrapping_add(1);
+                    if skipped == 0 {
+                        tokio::task::yield_now().await;
+                    }
+                    if !work
+                        .get("user")
+                        .and_then(|user| user.get("id"))
+                        .is_some_and(value_truthy)
+                    {
+                        continue;
+                    }
                     match self.work(&work, true).await {
                         Ok(media) => state.pending.extend(self.finish(media)),
                         Err(e) => return Some((Err(e), Some(state))),
@@ -2045,8 +2097,9 @@ mod tests {
             .stream(&Url::parse("https://www.pixiv.net/users/9").unwrap())
             .collect()
             .await;
-        assert_eq!(results.len(), 3, "{results:?}");
-        let error = results[2].as_ref().unwrap_err().to_string();
+        assert_eq!(results.len(), 4, "{results:?}");
+        assert_eq!(results[2].as_ref().unwrap().filename, "3_p0.jpg");
+        let error = results[3].as_ref().unwrap_err().to_string();
         assert!(error.contains("unexpected next page") && !error.contains("evil"));
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
@@ -2470,9 +2523,10 @@ mod tests {
             )
             .collect::<Vec<_>>()
             .await;
-        assert_eq!(files.len(), 1);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].as_ref().unwrap().filename, "41_p0.jpg");
         assert_eq!(
-            files[0].as_ref().unwrap_err().to_string(),
+            files[1].as_ref().unwrap_err().to_string(),
             "Pixiv returned an unexpected next page"
         );
         assert_eq!(server.join().unwrap().len(), 2);
@@ -2542,9 +2596,10 @@ mod tests {
             .stream(&Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks").unwrap())
             .collect::<Vec<_>>()
             .await;
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].as_ref().unwrap().filename, "42_p0.jpg");
         assert_eq!(
-            result[0].as_ref().unwrap_err().to_string(),
+            result[1].as_ref().unwrap_err().to_string(),
             "Pixiv returned an unexpected next page"
         );
         assert_eq!(server.join().unwrap().len(), 2);
@@ -3066,5 +3121,123 @@ mod tests {
         assert!(error.contains("refresh-token"), "{error}");
         assert!(!error.contains("refresh-secret") && !error.contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+    #[tokio::test]
+    async fn max_posts_drains_all_files_and_spans_profile_types_with_fresh_child_budgets() {
+        for include in [
+            None,
+            Some(crate::dispatch::Include::Views(vec![
+                "artworks".into(),
+                "artworks".into(),
+            ])),
+        ] {
+            let children = if include.is_some() { 2 } else { 1 };
+            let mut replies = vec![token("t")];
+            for _ in 0..children {
+                replies.push(response("200 OK",json!({"illusts":[illust(41,3),animation(42)],"next_url":"https://unexpected.invalid/next"}).to_string().as_bytes()));
+            }
+            let (root, server) = serve(replies);
+            let native = pixiv(root).with_include(include).with_max_posts(Some(1));
+            let target = Url::parse("https://www.pixiv.net/users/5").unwrap();
+            let files = native
+                .stream(&target)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(files.len(), 3 * children);
+            assert!(
+                files
+                    .iter()
+                    .all(|file| file.metadata.as_ref().unwrap().post_id == "41")
+            );
+            assert_eq!(server.join().unwrap().len(), 1 + children);
+        }
+        for max in [None, Some(0)] {
+            let (root, server) = serve(vec![
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illusts":[illust(41,1),illust(42,1)],"next_url":null})
+                        .to_string()
+                        .as_bytes(),
+                ),
+            ]);
+            let files = pixiv(root)
+                .with_max_posts(max)
+                .stream(&Url::parse("https://www.pixiv.net/users/5/illustrations").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(files.len(), 2);
+            assert!(files.iter().all(Result::is_ok));
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
+    }
+    #[tokio::test]
+    async fn max_posts_spans_illustration_to_manga_boundary_and_precedes_post_predicates() {
+        let (root, server) = serve(vec![
+            token("t"),
+            response(
+                "200 OK",
+                json!({"illusts":[illust(40,1)],"next_url":null})
+                    .to_string()
+                    .as_bytes(),
+            ),
+            response(
+                "200 OK",
+                json!({"illusts":[illust(41,2),animation(42)],"next_url":null})
+                    .to_string()
+                    .as_bytes(),
+            ),
+        ]);
+        let files = pixiv(root)
+            .with_max_posts(Some(2))
+            .stream(&Url::parse("https://www.pixiv.net/users/5/artworks").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["40_p0.jpg", "41_p0.png", "41_p1.png"]
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].contains("type=illust"));
+        assert!(requests[2].contains("type=manga"));
+        for missing in [false, true] {
+            let mut first = illust(41, 1);
+            if missing {
+                first["user"]["id"] = json!(0);
+            }
+            let (root, server) = serve(vec![
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illusts":[first,animation(42)],"next_url":null})
+                        .to_string()
+                        .as_bytes(),
+                ),
+            ]);
+            let native = pixiv(root).with_max_posts(Some(1));
+            let target = Url::parse("https://www.pixiv.net/users/5/artworks").unwrap();
+            let files = crate::job_selection::JobSelection {
+                post_selection: Some(crate::post_selection::PostSelection::new(
+                    None,
+                    Some(crate::filter::FilterExpression::parse("False").unwrap()),
+                )),
+                ..Default::default()
+            }
+            .apply(native.events(&target))
+            .collect::<Vec<_>>()
+            .await;
+            assert!(files.is_empty());
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
     }
 }

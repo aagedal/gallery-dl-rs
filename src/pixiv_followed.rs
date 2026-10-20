@@ -51,6 +51,7 @@ impl FollowedUserMetadata {
 }
 
 struct State {
+    budget: super::PostBudget,
     user: Option<Arc<FollowedUserMetadata>>,
     next: Option<String>,
     pages: usize,
@@ -150,6 +151,7 @@ impl Pixiv {
             return stream::once(async { Err(super::missing_token()) }).boxed();
         }
         let state = State {
+            budget: super::PostBudget::new(self.max_posts),
             user: None,
             next: Some(self.followed_first().to_string()),
             pages: 0,
@@ -164,6 +166,9 @@ impl Pixiv {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), state));
                 }
+                if state.budget.exhausted() {
+                    return None;
+                }
                 if state.done {
                     return None;
                 }
@@ -177,6 +182,7 @@ impl Pixiv {
                     }
                 }
                 if let Some(work) = state.works.pop_front() {
+                    state.budget.consume();
                     skipped = skipped.wrapping_add(1);
                     if skipped == 0 {
                         tokio::task::yield_now().await;
@@ -778,5 +784,24 @@ mod tests {
         let results = pixiv(root).stream(&url()).collect::<Vec<_>>().await;
         assert!(results.is_empty(), "{results:?}");
         assert_eq!(server.join().unwrap().len(), super::super::MAX_PAGES + 1);
+    }
+    #[tokio::test]
+    async fn max_posts_counts_missing_user_before_common_processing_without_fetching_next_page() {
+        let mut missing = work(41, "illust", "missing");
+        missing["user"]["id"] = json!(0);
+        let (root, server) = serve(vec![
+            login("t", json!(17)),
+            page(
+                vec![missing, work(42, "ugoira", "artist")],
+                Some(Url::parse("https://unexpected.invalid/page").unwrap()),
+            ),
+        ]);
+        let events = pixiv(root)
+            .with_max_posts(Some(1))
+            .events(&url())
+            .collect::<Vec<_>>()
+            .await;
+        assert!(events.is_empty());
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 }
