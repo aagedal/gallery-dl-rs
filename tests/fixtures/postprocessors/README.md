@@ -26,6 +26,19 @@ the Directory message, as well as eager/lazy initialization, empty posts and
 no-result jobs. Object identities use stable labels and temporary paths are
 normalized. Source checksums and the complete replay script are embedded in
 `generator_source`: write that string to a temporary `.py` file and pass the
-output JSON path as its sole argument. Regeneration was byte-identical. These
-traces document pending emitter-specific context and path-lifetime parity;
-they are source evidence, not a claim that the native runtime matches every case.
+output JSON path as its sole argument. Regeneration was byte-identical. The native keyword replay reconstructs the original emitter inputs, applies the
+real native metadata hooks and ownership engine, and compares all 204 context
+snapshots plus final contexts. Path-state and object-identity records remain
+additional source evidence; the replay does not assert all native path/alias
+behavior.
+
+`pixiv_ownership.json` consumes six genuine Pixiv/Pixivision/Sketch/Novel `items()`
+generators one yield at a time and applies actual metadata modify/delete hooks
+between yields. It records shared roots, per-file overwrites, novel increments,
+and nested aliases. Source checksums and a complete deterministic replay script
+are embedded. Novel mutation-driven counters and cross-object nested aliases
+remain native work; the fixture preserves that evidence independently.
+
+`init.json` contains 16 actual `Job._init()` truthiness cases. `metadata_paths.json`
+contains 13 actual MetadataPP/PathFormat destination cases. Both embed source
+checksums and replay scripts.

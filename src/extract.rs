@@ -1390,6 +1390,7 @@ pub(crate) fn parse_post_message(message: &Value, category: &str) -> Result<crat
         metadata.index = 0;
     }
     Ok(crate::event::Post {
+        keywords: Default::default(),
         category: category.into(),
         metadata,
         count: data

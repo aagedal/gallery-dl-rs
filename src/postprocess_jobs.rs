@@ -1,7 +1,7 @@
 //! Ordered post/job hooks around independently concurrent file downloads.
 use crate::{
     Result, error,
-    event::{ChildControl, ExtractionEvent, Post},
+    event::{ChildControl, ExtractionEvent, KeywordPolicy, Post},
     extract::{Media, MediaJob},
     naming::{DirectoryTemplate, FilenameTemplate},
     postprocess::{Hook, HookPaths, Postprocessors},
@@ -9,7 +9,7 @@ use crate::{
 use futures_util::{StreamExt, stream::BoxStream};
 use serde_json::{Map, Value};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -39,6 +39,9 @@ struct LeaseState {
     pending: usize,
     next: u64,
     initial: Map<String, Value>,
+    original: Map<String, Value>,
+    policy: KeywordPolicy,
+    active: BTreeSet<u64>,
     last: Option<(u64, Map<String, Value>, Option<PathBuf>)>,
 }
 struct Shared {
@@ -58,6 +61,8 @@ impl std::fmt::Debug for ScopeLease {
     }
 }
 impl ScopeLease {
+    /// Snapshot of post-hook keywords, before any file hooks. Use `inherit` to
+    /// construct a file context with the producer's ownership semantics.
     pub fn keywords(&self) -> Map<String, Value> {
         self.shared
             .inner
@@ -65,6 +70,40 @@ impl ScopeLease {
             .unwrap_or_else(|e| e.into_inner())
             .initial
             .clone()
+    }
+    /// Shared dictionaries observe every preceding file's completed mutations.
+    /// Register notifications before checking the turn to avoid cancellation races.
+    pub async fn inherit(&self, context: &mut Map<String, Value>) {
+        loop {
+            let notified = self.shared.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let mut state = self.shared.inner.lock().unwrap_or_else(|e| e.into_inner());
+                let shared = matches!(state.policy, KeywordPolicy::Shared { .. });
+                if !shared || state.active.first() == Some(&self.ordinal) {
+                    let latest = if shared {
+                        state
+                            .last
+                            .as_ref()
+                            .map(|(_, context, _)| context)
+                            .unwrap_or(&state.initial)
+                    } else {
+                        &state.initial
+                    };
+                    inherit_keywords(&state.policy, &state.original, latest, context);
+                    if shared {
+                        // Remember fields introduced by this emission as well, so
+                        // deleting a file-only field survives into the next file.
+                        for key in context.keys() {
+                            state.original.entry(key.clone()).or_insert(Value::Null);
+                        }
+                    }
+                    return;
+                }
+            }
+            notified.await;
+        }
     }
     /// Preserve source file order even when concurrent downloads finish out of order.
     pub fn complete(&self, context: &Map<String, Value>) {
@@ -99,18 +138,30 @@ impl Drop for ScopeLease {
     fn drop(&mut self) {
         let mut state = self.shared.inner.lock().unwrap_or_else(|e| e.into_inner());
         state.pending -= 1;
-        if state.pending == 0 {
-            self.shared.notify.notify_waiters();
-        }
+        state.active.remove(&self.ordinal);
+        self.shared.notify.notify_waiters();
     }
 }
 impl Shared {
-    fn new(context: Map<String, Value>, failed: Arc<AtomicBool>) -> Arc<Self> {
+    fn new(
+        original: Map<String, Value>,
+        mut context: Map<String, Value>,
+        policy: KeywordPolicy,
+        failed: Arc<AtomicBool>,
+    ) -> Arc<Self> {
+        if let KeywordPolicy::CopiedAfterPost { removed_fields, .. } = &policy {
+            for key in removed_fields.iter() {
+                context.remove(key);
+            }
+        }
         Arc::new(Self {
             inner: Mutex::new(LeaseState {
                 pending: 0,
                 next: 0,
                 initial: context,
+                original,
+                policy,
+                active: BTreeSet::new(),
                 last: None,
             }),
             notify: Notify::new(),
@@ -132,6 +183,7 @@ impl Shared {
             .ok_or_else(|| error("too many postprocessor files"))?;
         state.pending = pending;
         state.next = next;
+        state.active.insert(next);
         Ok(ScopeLease {
             shared: self.clone(),
             ordinal: state.next,
@@ -154,6 +206,37 @@ impl Shared {
                 }
             }
             notified.await;
+        }
+    }
+}
+fn inherit_keywords(
+    policy: &KeywordPolicy,
+    original: &Map<String, Value>,
+    latest: &Map<String, Value>,
+    context: &mut Map<String, Value>,
+) {
+    let fields = match policy {
+        KeywordPolicy::Independent => return,
+        KeywordPolicy::Shared { file_fields, .. }
+        | KeywordPolicy::CopiedAfterPost { file_fields, .. } => file_fields,
+    };
+    let file = std::mem::replace(context, latest.clone());
+    let removed = if let KeywordPolicy::CopiedAfterPost { removed_fields, .. } = policy {
+        for key in removed_fields.iter() {
+            context.remove(key);
+        }
+        removed_fields.as_ref()
+    } else {
+        &[]
+    };
+    for (key, value) in file {
+        // The producer, rather than the postprocessor adapter, declares which
+        // existing fields are assigned anew for each emitted file.
+        if (!original.contains_key(&key) && !context.contains_key(&key))
+            || fields.contains(&key)
+            || removed.contains(&key)
+        {
+            context.insert(key, value);
         }
     }
 }
@@ -310,6 +393,7 @@ impl State<'_> {
         frame.runtime = Some(Runtime {
             configuration,
             media: fake(Post {
+                keywords: Default::default(),
                 category: category.into(),
                 metadata: None,
                 count: None,
@@ -320,7 +404,12 @@ impl State<'_> {
         });
         let runtime = frame.runtime.as_mut().unwrap();
         let result = runtime.hook(Hook::Init).await;
-        frame.post = Some(Shared::new(runtime.context.clone(), runtime.failed.clone()));
+        frame.post = Some(Shared::new(
+            Map::new(),
+            runtime.context.clone(),
+            KeywordPolicy::Independent,
+            runtime.failed.clone(),
+        ));
         result
     }
     async fn shutdown(&mut self) {
@@ -371,14 +460,27 @@ impl State<'_> {
                     .last_mut()
                     .ok_or_else(|| error("missing postprocessor job scope"))?;
                 frame.end_post().await?;
+                let policy = post.keywords.clone();
+                let count = post.count;
                 let media = fake(*post);
+                let mut original = public_context(&media);
+                if let Some(count) = count {
+                    original.insert("count".into(), count.into());
+                }
+                if let KeywordPolicy::Shared { post_fields, .. } = &policy {
+                    original.extend(
+                        post_fields
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone())),
+                    );
+                }
                 let mut initialized = false;
                 if frame.runtime.is_none()
                     && let Some(configuration) = self.configurations.get(&media.category)
                 {
                     let runtime = Runtime {
                         configuration: configuration.clone(),
-                        context: public_context(&media),
+                        context: original.clone(),
                         paths: HookPaths {
                             directory: post_directory(configuration, &media)?,
                             filename: None,
@@ -394,12 +496,17 @@ impl State<'_> {
                 }
                 if let Some(runtime) = &mut frame.runtime {
                     if !initialized {
-                        runtime.context = public_context(&media);
+                        runtime.context = original.clone();
                     }
                     runtime.paths.directory = post_directory(&runtime.configuration, &media)?;
                     runtime.media = media;
                     runtime.hook(Hook::Post).await?;
-                    frame.post = Some(Shared::new(runtime.context.clone(), runtime.failed.clone()));
+                    frame.post = Some(Shared::new(
+                        original,
+                        runtime.context.clone(),
+                        policy,
+                        runtime.failed.clone(),
+                    ));
                 }
             }
             ExtractionEvent::EndPost => {
@@ -572,6 +679,7 @@ mod tests {
     }
     fn post(category: &str) -> ExtractionEvent {
         ExtractionEvent::Post(Box::new(Post {
+            keywords: Default::default(),
             category: category.into(),
             metadata: media().metadata,
             count: Some(0),
@@ -889,5 +997,153 @@ mod tests {
             std::fs::read_to_string(root.path().join("trace.log")).unwrap(),
             "pixiv-novel:init|pixiv-novel:post-after|pixiv-novel:finalize-success|pixiv-novel:finalize|"
         );
+    }
+}
+
+#[cfg(test)]
+#[path = "postprocess_keywords_oracle.rs"]
+mod keywords_oracle;
+
+#[cfg(test)]
+mod keyword_order_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn shared_files_wait_for_prior_mutations_and_cancelled_leases_do_not_block() {
+        let original = json!({"caption":"original","num":0})
+            .as_object()
+            .unwrap()
+            .clone();
+        let mut initial = original.clone();
+        initial.remove("caption");
+        initial.insert("counter".into(), 0.into());
+        let shared = Shared::new(
+            original,
+            initial,
+            KeywordPolicy::shared(&["num"]),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let first = shared.lease().unwrap();
+        let second = shared.lease().unwrap();
+        let cancelled = shared.lease().unwrap();
+        let fourth = shared.lease().unwrap();
+        drop(cancelled);
+        let mut two = json!({"caption":"original","num":2,"filename":"same.jpg"})
+            .as_object()
+            .unwrap()
+            .clone();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                second.inherit(&mut two)
+            )
+            .await
+            .is_err()
+        );
+        let mut one = json!({"caption":"original","num":1,"filename":"same.jpg"})
+            .as_object()
+            .unwrap()
+            .clone();
+        first.inherit(&mut one).await;
+        assert!(!one.contains_key("caption"));
+        assert_eq!(one["num"], 1);
+        one.insert("counter".into(), 1.into());
+        one.remove("filename");
+        first.complete(&one);
+        drop(first);
+        second.inherit(&mut two).await;
+        assert_eq!(two["counter"], 1);
+        assert_eq!(two["num"], 2);
+        assert!(
+            !two.contains_key("filename"),
+            "a deleted file-only field must stay deleted unless the producer resets it"
+        );
+        second.complete(&two);
+        drop(second);
+        let mut four = json!({"caption":"original","num":4,"filename":"same.jpg"})
+            .as_object()
+            .unwrap()
+            .clone();
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            fourth.inherit(&mut four),
+        )
+        .await
+        .unwrap();
+        assert_eq!(four["counter"], 1);
+        drop(fourth);
+        assert_eq!(shared.inner.lock().unwrap().active.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn copied_post_precedence_and_removed_fields_leave_prepared_file_values_intact() {
+        let original = json!({"caption":"original","num":0,"source_id":1})
+            .as_object()
+            .unwrap()
+            .clone();
+        let latest = json!({"caption":"post","num":99,"source_id":2,"filename":"post-name"})
+            .as_object()
+            .unwrap()
+            .clone();
+        for file_wins in [false, true] {
+            let fields = if file_wins {
+                vec!["num", "filename"]
+            } else {
+                vec!["num"]
+            };
+            let policy =
+                KeywordPolicy::copied_after_post(&fields).without_post_fields(&["source_id"]);
+            let mut file =
+                json!({"caption":"original","num":1,"source_id":3,"filename":"prepared-name"})
+                    .as_object()
+                    .unwrap()
+                    .clone();
+            inherit_keywords(&policy, &original, &latest, &mut file);
+            let empty = Shared::new(
+                original.clone(),
+                latest.clone(),
+                policy,
+                Arc::new(AtomicBool::new(false)),
+            );
+            let (closed, _) = empty.finish().await;
+            assert!(
+                !closed.contains_key("source_id"),
+                "producer removals also apply when no files are emitted"
+            );
+            assert_eq!(file,json!({"caption":"post","num":1,"source_id":3,"filename":if file_wins {"prepared-name"} else {"post-name"}}).as_object().unwrap().clone());
+        }
+    }
+
+    #[tokio::test]
+    async fn independent_and_copied_files_do_not_wait_or_inherit_previous_file_changes() {
+        for policy in [
+            KeywordPolicy::Independent,
+            KeywordPolicy::copied_after_post(&["num"]),
+        ] {
+            let original = json!({"caption":"original","num":0})
+                .as_object()
+                .unwrap()
+                .clone();
+            let initial = json!({"counter":0,"num":0}).as_object().unwrap().clone();
+            let copied = matches!(policy, KeywordPolicy::CopiedAfterPost { .. });
+            let shared = Shared::new(original, initial, policy, Arc::new(AtomicBool::new(false)));
+            let first = shared.lease().unwrap();
+            let second = shared.lease().unwrap();
+            first.complete(json!({"counter":99}).as_object().unwrap());
+            let mut context = json!({"caption":"original","num":2})
+                .as_object()
+                .unwrap()
+                .clone();
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                second.inherit(&mut context),
+            )
+            .await
+            .unwrap();
+            assert_eq!(context.get("counter"), copied.then_some(&json!(0)));
+            assert_eq!(context.contains_key("caption"), !copied);
+            assert_eq!(context["num"], 2);
+        }
     }
 }

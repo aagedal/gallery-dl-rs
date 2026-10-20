@@ -12,7 +12,7 @@ use crate::{
     Result,
     dispatch::Include,
     error,
-    event::{ChildMetadata, ExtractionEvent, group},
+    event::{ChildMetadata, ExtractionEvent, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -1229,7 +1229,7 @@ impl Pixiv {
         for item in &mut media {
             self.network.apply_media(item);
         }
-        group(media, "pixiv")
+        group_with_keywords(media, "pixiv", artwork_keywords())
     }
 
     fn first_page(&self, user: &str, feed: &Feed) -> Url {
@@ -1521,6 +1521,7 @@ impl Pixiv {
                         }
                         events.extend([
                             Ok(ExtractionEvent::Post(Box::new(crate::event::Post {
+                                keywords: artwork_keywords(),
                                 category: "pixiv".into(),
                                 metadata: Some(metadata),
                                 count: Some(0),
@@ -1628,6 +1629,7 @@ impl Pixiv {
                         }
                         state.pending.extend([
                             ExtractionEvent::Post(Box::new(crate::event::Post {
+                                keywords: artwork_keywords(),
                                 category: "pixiv".into(),
                                 metadata: Some(metadata),
                                 count: Some(0),
@@ -1783,6 +1785,28 @@ impl From<crate::Error> for Failure {
     }
 }
 
+// PixivExtractor.items reuses the work dictionary for its Directory and files.
+// These are native aliases for fields reassigned while producing each file.
+fn artwork_keywords() -> KeywordPolicy {
+    KeywordPolicy::shared(&[
+        "num",
+        "index",
+        "media_id",
+        "filename",
+        "name",
+        "extension",
+        "url",
+        "_url",
+        "_filesize",
+        "ugoira_frame_index",
+        "_ugoira_frame_index",
+        "date_url",
+        "hash",
+        "suffix",
+        "_fallback",
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1805,6 +1829,42 @@ mod tests {
                 format!("https://i.pximg.net/img-original/img/2024/01/01/00/00/00/{id}_p0.jpg")}) }
                 else { json!({}) },
             "meta_pages": (0..if pages == 1 { 0 } else { pages }).map(page).collect::<Vec<_>>()})
+    }
+
+    #[test]
+    fn ordinary_artwork_events_declare_shared_work_keywords_and_file_assignments() {
+        let native = Pixiv::new(Duration::from_secs(5)).unwrap();
+        let events = native.finish(parse_illust(&illust(42, 2)).unwrap());
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("expected artwork post");
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("artwork work dictionaries must be shared");
+        };
+        assert_eq!(
+            file_fields.iter().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "num",
+                "index",
+                "media_id",
+                "filename",
+                "name",
+                "extension",
+                "url",
+                "_url",
+                "_filesize",
+                "ugoira_frame_index",
+                "_ugoira_frame_index",
+                "date_url",
+                "hash",
+                "suffix",
+                "_fallback",
+            ]
+        );
+        assert_eq!(post.count, Some(2));
+        assert!(matches!(events[1], ExtractionEvent::Media(_)));
+        assert!(matches!(events[2], ExtractionEvent::Media(_)));
+        assert!(matches!(events[3], ExtractionEvent::EndPost));
     }
 
     #[test]

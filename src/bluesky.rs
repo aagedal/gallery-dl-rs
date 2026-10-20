@@ -7,7 +7,7 @@ use crate::{
     Result,
     dispatch::{self, Include},
     error,
-    event::{ChildMetadata, ExtractionEvent, Post, child_job, group},
+    event::{ChildMetadata, ExtractionEvent, KeywordPolicy, Post, child_job, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -949,6 +949,7 @@ impl Bluesky {
                         // fields outside the native PostMetadata schema.
                         VecDeque::from([
                             ExtractionEvent::Post(Box::new(Post {
+                                keywords: Default::default(),
                                 category: "bluesky".into(),
                                 count: Some(0),
                                 metadata: Some(PostMetadata {
@@ -1126,6 +1127,30 @@ impl From<crate::Error> for Failure {
     }
 }
 
+// BlueskyExtractor.items reuses post and updates each prepared media map.
+// Include native file aliases without resetting unrelated post-level fields.
+fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
+    group_with_keywords(
+        media,
+        category,
+        KeywordPolicy::shared(&[
+            "num",
+            "index",
+            "media_id",
+            "filename",
+            "name",
+            "extension",
+            "url",
+            "_url",
+            "_filesize",
+            "description",
+            "width",
+            "height",
+            "file",
+        ]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1160,6 +1185,22 @@ mod tests {
         json!({"thread": {"$type": "app.bsky.feed.defs#threadViewPost", "post": post(rkey, embed)}})
             .to_string()
             .into_bytes()
+    }
+
+    #[test]
+    fn shared_keyword_policy_declares_source_file_assignments() {
+        let media=parse_thread(&thread("3kabc",json!({"$type":"app.bsky.embed.images","images":[image(CID1,"first"),image(CID2,"second")]})),DID,"3kabc").unwrap();
+        let events = group(media, "bluesky");
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("missing post");
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("expected shared Bluesky keywords");
+        };
+        for field in ["num", "index", "media_id", "description", "width", "height"] {
+            assert!(file_fields.iter().any(|f| f == field));
+        }
+        assert!(!file_fields.iter().any(|f| f == "caption"));
     }
 
     #[test]

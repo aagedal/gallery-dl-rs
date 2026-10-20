@@ -181,6 +181,7 @@ impl Novel {
         metadata.media_id.clear();
         metadata.index = 0;
         Post {
+            keywords: Default::default(),
             category: "pixiv-novel".into(),
             metadata: Some(metadata),
             count: (!embeds).then_some(if covers { 2 } else { 1 }),

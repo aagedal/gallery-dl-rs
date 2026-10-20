@@ -510,6 +510,7 @@ pub(super) fn events(
                 state.pending = if media.is_empty() {
                     VecDeque::from([
                         ExtractionEvent::Post(Box::new(Post {
+                            keywords: Default::default(),
                             category: category.into(),
                             metadata: Some(base),
                             count: Some(count),

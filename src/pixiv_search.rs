@@ -423,6 +423,7 @@ impl Pixiv {
                         metadata.search_archive = true;
                         state.pending = VecDeque::from([
                             ExtractionEvent::Post(Box::new(Post {
+                                keywords: Default::default(),
                                 category: "pixiv".into(),
                                 metadata: Some(metadata),
                                 count: Some(0),

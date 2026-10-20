@@ -9,7 +9,7 @@
 //! service name is kept in the `instance` metadata field and the archive key.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, Post, group},
+    event::{ExtractionEvent, KeywordPolicy, Post, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -1052,6 +1052,7 @@ impl Kemono {
         if media.is_empty() {
             VecDeque::from([
                 ExtractionEvent::Post(Box::new(Post {
+                    keywords: Default::default(),
                     category: category.into(),
                     metadata: Some(post_metadata(post, identity)),
                     count: Some(count),
@@ -1487,6 +1488,34 @@ impl From<crate::Error> for Failure {
     }
 }
 
+// KemonoExtractor.items reuses post and updates each prepared file map.
+// Include native file aliases without resetting unrelated post-level fields.
+fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
+    group_with_keywords(
+        media,
+        category,
+        KeywordPolicy::shared(&[
+            "num",
+            "index",
+            "media_id",
+            "filename",
+            "name",
+            "extension",
+            "url",
+            "_url",
+            "_filesize",
+            "path",
+            "hash",
+            "type",
+            "file_id",
+            "thumbnail",
+            "originalname",
+            "_http_validate",
+            "file",
+        ]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1508,6 +1537,35 @@ mod tests {
                 {"name": "cover.JPEG", "path": format!("/aa/11/{HASH_A}.jpeg")},
                 {"name": "bad", "path": "/../etc/passwd"},
                 {"name": "clip.mp4", "path": format!("/bb/22/{HASH_B}")}]})
+    }
+
+    #[test]
+    fn shared_keyword_policy_declares_source_file_assignments() {
+        let events = group(
+            parse_post(&post("7"), "kemono.cr", "patreon", "42"),
+            "kemono",
+        );
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("missing post");
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("expected shared Kemono keywords");
+        };
+        for field in [
+            "num",
+            "index",
+            "media_id",
+            "hash",
+            "path",
+            "type",
+            "file_id",
+            "thumbnail",
+        ] {
+            assert!(file_fields.iter().any(|f| f == field));
+        }
+        for field in ["post_id", "service", "user"] {
+            assert!(!file_fields.iter().any(|f| f == field));
+        }
     }
 
     #[test]

@@ -27,6 +27,7 @@ fn media(id: &str) -> Media {
 }
 fn post(id: &str) -> ExtractionEvent {
     ExtractionEvent::Post(Box::new(Post {
+        keywords: Default::default(),
         category: "pixiv".into(),
         metadata: media(id).metadata,
         count: None,

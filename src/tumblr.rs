@@ -10,7 +10,7 @@
 //! over HTTPS from `*.media.tumblr.com` (audio also from `a.tumblr.com`).
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::ExtractionEvent,
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -787,7 +787,11 @@ impl Tumblr {
             || page.total.is_some_and(|total| state.offset as u64 >= total)
             || state.pages >= MAX_PAGES;
         for media in page.posts {
-            state.pending.extend(group(media, "tumblr"));
+            state.pending.extend(crate::event::group_with_keywords(
+                media,
+                "tumblr",
+                crate::event::KeywordPolicy::copied_after_post(&["num", "index", "media_id"]),
+            ));
         }
         Ok(())
     }
@@ -831,8 +835,14 @@ impl Tumblr {
                         return Err(error("Tumblr post contains no supported media"));
                     }
                     Ok::<_, crate::Error>(
-                        stream::iter(group(media, "tumblr"))
-                            .then(move |event| async move { Ok(self.finish_event(event).await) }),
+                        stream::iter(crate::event::group_with_keywords(
+                            media,
+                            "tumblr",
+                            crate::event::KeywordPolicy::copied_after_post(&[
+                                "num", "index", "media_id",
+                            ]),
+                        ))
+                        .then(move |event| async move { Ok(self.finish_event(event).await) }),
                     )
                 })
                 .map(|result| match result {
@@ -1274,7 +1284,7 @@ mod tests {
         // No listener is started: finishing these files must not perform I/O.
         let native = tumblr(Url::parse("http://127.0.0.1:9/").unwrap());
         let mut count = 0;
-        for event in group(parse_post(&post(7), "alice"), "tumblr") {
+        for event in crate::event::group(parse_post(&post(7), "alice"), "tumblr") {
             native.finish_event(event).await;
             count += 1;
         }

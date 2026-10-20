@@ -34,23 +34,8 @@ pub(crate) async fn prepare(
     let prepared = pp.prepared_media(media);
     let mut keywords = postprocess::context(&prepared);
     if let Some(scope) = options.postprocessor_scope {
-        let base = scope.keywords();
-        for (key, value) in base {
-            if !matches!(
-                key.as_str(),
-                "filename"
-                    | "name"
-                    | "extension"
-                    | "url"
-                    | "_url"
-                    | "num"
-                    | "index"
-                    | "media_id"
-                    | "_filesize"
-            ) {
-                keywords.insert(key, value);
-            }
-        }
+        scope.inherit(&mut keywords).await;
+        scope.complete(&keywords);
     }
     let path = logical_path(root, &prepared, &keywords, options, template).or_else(|failure| {
         if pp
@@ -165,50 +150,58 @@ async fn run_hook(
             if !spec.events.contains(&hook) || !spec.matches_keywords(media, &prepared.keywords) {
                 continue;
             }
-            match &spec.options {
-                Processor::Ugoira(_) => {}
-                Processor::Metadata(config) => {
-                    config
-                        .clone()
-                        .with_filename_template(template.cloned())
-                        .run(
-                            &mut prepared.keywords,
-                            &prepared.media,
-                            &prepared.path,
-                            root,
-                        )
-                        .await?
-                }
-                Processor::Mtime(config) => {
-                    if config.is_file() {
-                        prepared.keywords.insert(
-                            "_mtime_meta".into(),
-                            config
-                                .getter(&prepared.keywords)
-                                .map_or(Value::Null, Value::from),
-                        );
-                    } else {
-                        config.apply(
-                            &mut prepared.keywords,
-                            prepared
-                                .path
-                                .parent()
-                                .ok_or_else(|| error("invalid postprocessor directory"))?,
-                        )?;
+            let result: Result<()> = async {
+                match &spec.options {
+                    Processor::Ugoira(_) => {}
+                    Processor::Metadata(config) => {
+                        config
+                            .clone()
+                            .with_filename_template(template.cloned())
+                            .run(
+                                &mut prepared.keywords,
+                                &prepared.media,
+                                &prepared.path,
+                                root,
+                            )
+                            .await?
+                    }
+                    Processor::Mtime(config) => {
+                        if config.is_file() {
+                            prepared.keywords.insert(
+                                "_mtime_meta".into(),
+                                config
+                                    .getter(&prepared.keywords)
+                                    .map_or(Value::Null, Value::from),
+                            );
+                        } else {
+                            config.apply(
+                                &mut prepared.keywords,
+                                prepared
+                                    .path
+                                    .parent()
+                                    .ok_or_else(|| error("invalid postprocessor directory"))?,
+                            )?;
+                        }
+                    }
+                    Processor::Hash(config) => {
+                        if config.run(&mut prepared.keywords, input).await? {
+                            prepared.path = logical_path(
+                                root,
+                                &prepared.media,
+                                &prepared.keywords,
+                                options,
+                                template,
+                            )?;
+                        }
                     }
                 }
-                Processor::Hash(config) => {
-                    if config.run(&mut prepared.keywords, input).await? {
-                        prepared.path = logical_path(
-                            root,
-                            &prepared.media,
-                            &prepared.keywords,
-                            options,
-                            template,
-                        )?;
-                    }
-                }
+                Ok(())
             }
+            .await;
+            if let Some(scope) = options.postprocessor_scope {
+                scope.complete(&prepared.keywords);
+            }
+            result?;
         }
         Ok(())
     })
@@ -318,6 +311,7 @@ pub(crate) async fn download(
     source.source = Some(input.to_owned());
     let size = std::fs::metadata(input)?.len();
     prepared.keywords.insert("_filesize".into(), size.into());
+    prepared.keywords.insert("_mtime_http".into(), Value::Null);
     if let Some(timestamp) = *captured_mtime
         .lock()
         .map_err(|_| error("HTTP metadata lock poisoned"))?
@@ -512,43 +506,51 @@ async fn run_single_file(
     prepared: &mut Prepared,
     options: DownloadOptions<'_>,
 ) -> Result<()> {
-    match &spec.options {
-        Processor::Metadata(config) => {
-            config
-                .clone()
-                .with_filename_template(template.cloned())
-                .run(
-                    &mut prepared.keywords,
-                    &prepared.media,
-                    &prepared.path,
-                    root,
-                )
-                .await?
-        }
-        Processor::Mtime(config) => {
-            if config.is_file() {
-                prepared.keywords.insert(
-                    "_mtime_meta".into(),
-                    config
-                        .getter(&prepared.keywords)
-                        .map_or(Value::Null, Value::from),
-                );
-            } else {
-                config.apply(
-                    &mut prepared.keywords,
-                    prepared
-                        .path
-                        .parent()
-                        .ok_or_else(|| error("invalid postprocessor directory"))?,
-                )?;
+    let result: Result<()> = async {
+        match &spec.options {
+            Processor::Metadata(config) => {
+                config
+                    .clone()
+                    .with_filename_template(template.cloned())
+                    .run(
+                        &mut prepared.keywords,
+                        &prepared.media,
+                        &prepared.path,
+                        root,
+                    )
+                    .await?
             }
-        }
-        Processor::Hash(config) => {
-            if config.run(&mut prepared.keywords, input).await? {
-                prepared.path = logical_path(root, media, &prepared.keywords, options, template)?;
+            Processor::Mtime(config) => {
+                if config.is_file() {
+                    prepared.keywords.insert(
+                        "_mtime_meta".into(),
+                        config
+                            .getter(&prepared.keywords)
+                            .map_or(Value::Null, Value::from),
+                    );
+                } else {
+                    config.apply(
+                        &mut prepared.keywords,
+                        prepared
+                            .path
+                            .parent()
+                            .ok_or_else(|| error("invalid postprocessor directory"))?,
+                    )?;
+                }
             }
+            Processor::Hash(config) => {
+                if config.run(&mut prepared.keywords, input).await? {
+                    prepared.path =
+                        logical_path(root, media, &prepared.keywords, options, template)?;
+                }
+            }
+            Processor::Ugoira(_) => {}
         }
-        Processor::Ugoira(_) => {}
+        Ok(())
     }
-    Ok(())
+    .await;
+    if let Some(scope) = options.postprocessor_scope {
+        scope.complete(&prepared.keywords);
+    }
+    result
 }

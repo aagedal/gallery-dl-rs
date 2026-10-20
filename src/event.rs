@@ -201,8 +201,62 @@ impl ChildScope {
     }
 }
 
+/// Ownership of public keyword dictionaries emitted around one post.
+/// Shared producers explicitly declare the fields they assign again per file.
+#[derive(Clone, Debug, Default)]
+pub enum KeywordPolicy {
+    #[default]
+    Independent,
+    CopiedAfterPost {
+        file_fields: Arc<[String]>,
+        removed_fields: Arc<[String]>,
+    },
+    Shared {
+        file_fields: Arc<[String]>,
+        post_fields: Arc<serde_json::Map<String, serde_json::Value>>,
+    },
+}
+impl KeywordPolicy {
+    pub fn copied_after_post(fields: &[&str]) -> Self {
+        Self::CopiedAfterPost {
+            removed_fields: Arc::new([]),
+            file_fields: fields.iter().map(|field| (*field).to_owned()).collect(),
+        }
+    }
+    /// Fields removed from the post before the producer copies it into a file.
+    pub fn without_post_fields(mut self, names: &[&str]) -> Self {
+        if let Self::CopiedAfterPost { removed_fields, .. } = &mut self {
+            *removed_fields = names.iter().map(|name| (*name).to_owned()).collect();
+        }
+        self
+    }
+    pub fn shared(fields: &[&str]) -> Self {
+        Self::Shared {
+            post_fields: Arc::new(serde_json::Map::new()),
+            file_fields: fields.iter().map(|field| (*field).to_owned()).collect(),
+        }
+    }
+    /// Preserve fields the producer already supplied before the Directory event.
+    pub fn with_post_fields(mut self, media: &Media, names: &[&str]) -> Self {
+        if let Self::Shared { post_fields, .. } = &mut self {
+            let context = crate::postprocess::context(media);
+            *post_fields = Arc::new(
+                names
+                    .iter()
+                    .filter_map(|name| {
+                        context
+                            .get(*name)
+                            .map(|value| ((*name).to_owned(), value.clone()))
+                    })
+                    .collect(),
+            );
+        }
+        self
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Post {
+    pub keywords: KeywordPolicy,
     pub category: String,
     pub metadata: Option<PostMetadata>,
     /// Declared file count; this is metadata, not a framing delimiter.
@@ -218,6 +272,7 @@ impl Post {
             metadata.index = 0;
         }
         Self {
+            keywords: KeywordPolicy::default(),
             category: category.into(),
             metadata,
             count: Some(media.len()),
@@ -331,10 +386,17 @@ pub fn child_job<'a>(
     .boxed()
 }
 pub fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
+    group_with_keywords(media, category, KeywordPolicy::default())
+}
+pub fn group_with_keywords(
+    media: Vec<Media>,
+    category: &str,
+    keywords: KeywordPolicy,
+) -> VecDeque<ExtractionEvent> {
     let mut events = VecDeque::with_capacity(media.len() + 2);
-    events.push_back(ExtractionEvent::Post(Box::new(Post::from_media(
-        &media, category,
-    ))));
+    let mut post = Post::from_media(&media, category);
+    post.keywords = keywords;
+    events.push_back(ExtractionEvent::Post(Box::new(post)));
     events.extend(
         media
             .into_iter()

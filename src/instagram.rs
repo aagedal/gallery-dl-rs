@@ -153,7 +153,13 @@ impl Instagram {
         if shortcode(url).is_ok() {
             let url = url.clone();
             return stream::once(async move { self.extract(&url).await })
-                .map_ok(|items| stream::iter(event::group(items, "instagram").into_iter().map(Ok)))
+                .map_ok(|items| {
+                    stream::iter(
+                        event::group_with_keywords(items, "instagram", instagram_keywords())
+                            .into_iter()
+                            .map(Ok),
+                    )
+                })
                 .try_flatten()
                 .boxed();
         }
@@ -301,7 +307,11 @@ impl Instagram {
             for item in &mut media {
                 self.network.apply_media(item);
             }
-            pending.extend(event::group(media, "instagram"));
+            pending.extend(event::group_with_keywords(
+                media,
+                "instagram",
+                instagram_keywords(),
+            ));
         }
         state.pending = pending;
         state.cursor = cursor;
@@ -1675,3 +1685,25 @@ mod story_tests;
 #[cfg(test)]
 #[path = "instagram_collections_tests.rs"]
 mod collection_tests;
+
+fn instagram_keywords() -> event::KeywordPolicy {
+    event::KeywordPolicy::copied_after_post(&[
+        "num",
+        "index",
+        "media_id",
+        "filename",
+        "name",
+        "extension",
+        "url",
+        "_url",
+        "file",
+        "width",
+        "height",
+        "duration",
+        "description",
+        "alt",
+        "audio_url",
+        "video_url",
+        "display_url",
+    ])
+}

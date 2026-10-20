@@ -161,12 +161,19 @@ impl FilterExpression {
         }
         Ok(true)
     }
-    /// Evaluate post metadata before any file-specific fields are available.
+    /// Evaluate the metadata available on the producer's Directory event.
     pub fn matches_post(&self, post: &crate::event::Post) -> Result<bool> {
         if self.expressions.is_empty() {
             return Ok(true);
         }
         let mut context = context_parts(&post.category, post.metadata.as_ref(), None);
+        if let crate::event::KeywordPolicy::Shared { post_fields, .. } = &post.keywords {
+            context.extend(
+                post_fields
+                    .iter()
+                    .map(|(key, value)| (key.clone(), json_value(value))),
+            );
+        }
         if let Some(count) = post.count {
             context.insert("count".into(), Value::Int(count as i128));
         }

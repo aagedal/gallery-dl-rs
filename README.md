@@ -1984,12 +1984,22 @@ retain the previous filename across empty posts; before the first file, the
 default sidecar basename is `metadata`. Hash filename rebuilding updates the path
 seen by subsequent job hooks without moving an already completed file.
 
+Native producers declare whether file keywords share the post dictionary, copy
+post keywords, or arrive independently. Ordinary Pixiv artwork, boorus, Flickr,
+Fur Affinity, ArtStation, Bluesky, Kemono/Coomer, Mastodon and Pinterest declare
+shared dictionaries. Shared files run in source order when generic processors
+are enabled, preserving post-hook deletions and earlier file-hook mutations;
+other file contexts can still run concurrently. Twitter/Tumblr copy post fields
+into prepared files; Instagram lets prepared file fields take precedence.
+ArtStation emits a post boundary per supported asset, retaining source asset
+positions and the project's declared asset count.
+
 The native formatter remains a bounded, non-executable subset of upstream's
 formatter. Processor archive databases, other text encodings/open modes,
 extractor-subcategory selectors, keyword-driven changes to native archive
-identities, emitter-specific keyword mutation inheritance and remaining temporary-path behavior,
-and additional
-processor types remain unfinished. These processors
+identities and pre-download selection, additional producer ownership policies, nested object aliases,
+counter normalization, mutation-driven counters and URLs, remaining temporary-path behavior, and
+additional processor types remain unfinished. These processors
 operate on metadata supported by the native extractor, which may omit fields
 available from upstream.
 

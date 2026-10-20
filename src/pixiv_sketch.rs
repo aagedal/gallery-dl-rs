@@ -527,6 +527,7 @@ impl Pixiv {
                             });
                             return Some((
                                 Ok(ExtractionEvent::Post(Box::new(Post {
+                                    keywords: Default::default(),
                                     category: "pixiv".into(),
                                     metadata: Some(metadata),
                                     count: Some(count),

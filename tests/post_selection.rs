@@ -196,6 +196,7 @@ async fn extraction_errors_preserve_positions_and_bad_framing_is_private() {
 #[tokio::test]
 async fn unbounded_empty_posts_yield_for_cancellation() {
     let input = stream::repeat(ExtractionEvent::Post(Box::new(Post {
+        keywords: Default::default(),
         category: "twitter".into(),
         metadata: None,
         count: Some(0),

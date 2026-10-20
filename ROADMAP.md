@@ -1077,11 +1077,21 @@ algorithm choices, timestamps and lifecycle traces. Job paths now distinguish th
 current directory from the retained filename and completed file path, including
 empty posts and ordered hash/metadata hooks. Scoped `init` supports eager jobs,
 including no-result roots and children, with source truthiness fixtures.
+Explicit producer policies now preserve shared root mutations/deletions for
+ordinary Pixiv artwork, boorus, Flickr, Fur Affinity, ArtStation, Bluesky,
+Kemono/Coomer, Mastodon and Pinterest. Shared file contexts wait for earlier
+leases, including cancelled/filtered files; independent and copied contexts
+retain concurrent execution. Twitter/Tumblr and Instagram declare their different
+copy precedence. ArtStation has per-asset boundaries and source asset positions
+and counts. The keyword engine replays all 204 snapshots in nine genuine source
+job traces; six additional consumed Pixiv emitter cases document overwrites,
+incrementing counters and nested aliases.
 Remaining: processor archive
 databases, additional encodings/open modes and formatter dialects, arbitrary
-native filename fields, keyword-driven archive identity changes, further
-cross-processor hook parity, emitter-specific shared/copied keyword mutation
-inheritance, remaining temporary-path behavior, and other processor types.
+native filename fields, keyword-driven archive identity and pre-download selection changes, further
+cross-processor hook parity, further producer policies and framing, nested alias
+identity, counter normalization and mutation-driven counters/URLs, remaining temporary-path behavior, and
+other processor types.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

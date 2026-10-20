@@ -17,6 +17,7 @@ use std::sync::{
 };
 fn post(id: &str) -> ExtractionEvent {
     ExtractionEvent::Post(Box::new(Post {
+        keywords: Default::default(),
         category: "direct".into(),
         metadata: Some(PostMetadata {
             post_id: id.into(),

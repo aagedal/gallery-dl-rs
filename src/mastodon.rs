@@ -8,7 +8,7 @@
 //! no API headers or cookies are attached to media requests.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, Post, group},
+    event::{ExtractionEvent, KeywordPolicy, Post, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -628,6 +628,7 @@ impl Mastodon {
         }
         VecDeque::from([
             ExtractionEvent::Post(Box::new(Post {
+                keywords: Default::default(),
                 category: instance_category(host).unwrap_or("mastodon").into(),
                 metadata: Some(post_metadata(status, host)),
                 count: Some(0),
@@ -923,6 +924,28 @@ impl From<crate::Error> for Failure {
     }
 }
 
+// MastodonExtractor.items reuses status, assigns media, and derives its name.
+// Include native file aliases without resetting unrelated post-level fields.
+fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
+    group_with_keywords(
+        media,
+        category,
+        KeywordPolicy::shared(&[
+            "num",
+            "index",
+            "media_id",
+            "filename",
+            "name",
+            "extension",
+            "url",
+            "_url",
+            "_filesize",
+            "media",
+            "file",
+        ]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -947,6 +970,29 @@ mod tests {
                 {"id": format!("{id}4"), "type": "gifv",
                  "url": "https://cdn.example/media/b.mp4",
                  "meta": {"original": {"width": 10, "height": 20, "duration": 1.5}}}]})
+    }
+
+    #[test]
+    fn shared_keyword_policy_declares_source_file_assignments() {
+        let media = parse_single(
+            status("100").to_string().as_bytes(),
+            "100",
+            "mastodon.social",
+        )
+        .unwrap();
+        let events = group(media, "mastodon.social");
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("missing post");
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("expected shared Mastodon keywords");
+        };
+        for field in ["num", "index", "media_id", "media", "filename", "extension"] {
+            assert!(file_fields.iter().any(|f| f == field));
+        }
+        for field in ["width", "height", "description", "caption"] {
+            assert!(!file_fields.iter().any(|f| f == field));
+        }
     }
 
     #[test]

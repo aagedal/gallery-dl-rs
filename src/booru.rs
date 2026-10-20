@@ -9,7 +9,7 @@
 //! CDN hosts.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -605,9 +605,13 @@ impl Booru {
         for post in raw {
             if let Some(mut media) = parse_post(self.site, post) {
                 self.network.apply_media(&mut media);
-                state
-                    .pending
-                    .extend(group(vec![media], self.site.category()));
+                let keywords = KeywordPolicy::shared(&["num", "index", "media_id"])
+                    .with_post_fields(&media, &["filename", "name", "extension"]);
+                state.pending.extend(group_with_keywords(
+                    vec![media],
+                    self.site.category(),
+                    keywords,
+                ));
             }
         }
     }
@@ -894,6 +898,7 @@ impl From<crate::Error> for Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::group;
     use serde_json::json;
     use std::{
         io::{Read, Write},
@@ -1112,6 +1117,13 @@ mod tests {
             .collect()
             .await;
         assert_eq!(events.len(), 3, "{events:?}");
+        let ExtractionEvent::Post(post) = events[0].as_ref().unwrap() else {
+            panic!("missing source post")
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("booru must reuse Directory keywords")
+        };
+        assert_eq!(file_fields.as_ref(), &["num", "index", "media_id"]);
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with("GET /posts/5.json "));
         assert!(

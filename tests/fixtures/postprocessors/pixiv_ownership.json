@@ -1,0 +1,1506 @@
+{
+  "version": "1.32.17",
+  "source": "Actual PixivExtractor/PixivSketchExtractor/PixivNovelExtractor.items consumed one yield at a time; actual MetadataPP modify/delete run at Directory and first Url. Stub work/profile APIs only, _extract_files/_extract_ugoira/nameext/date functions remain actual source. No HTTP/authentication. Stable identity labels plus real alias identity checks; private fallback generators are recorded without consuming them.",
+  "source_sha256": {
+    "pixiv.py": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+    "metadata.py": "db7481267bbdbca3ed95ace30dcb05f3cec5511a84f75f1769a0362ae0fb53a5"
+  },
+  "post_hooks": [
+    {
+      "name": "metadata",
+      "mode": "modify",
+      "fields": {
+        "num": "{id}",
+        "caption": "post-caption",
+        "user_alias": "{user}",
+        "user_alias[name]": "post-user",
+        "custom": "post-added",
+        "suffix": "POST"
+      }
+    },
+    {
+      "name": "metadata",
+      "mode": "delete",
+      "fields": [
+        "title",
+        "remove",
+        "user_alias[remove]"
+      ]
+    }
+  ],
+  "first_file_hooks": [
+    {
+      "name": "metadata",
+      "mode": "modify",
+      "fields": {
+        "num": "{id}",
+        "caption": "file-caption",
+        "file_only": "first-file",
+        "user_alias[name]": "file-user"
+      }
+    },
+    {
+      "name": "metadata",
+      "mode": "delete",
+      "fields": [
+        "custom"
+      ]
+    }
+  ],
+  "generator_source": "import copy,datetime,hashlib,json,logging,sys,types\nfrom pathlib import Path\nfrom types import SimpleNamespace\nfrom gallery_dl import version\nfrom gallery_dl.extractor import pixiv\nfrom gallery_dl.extractor.message import Message\nfrom gallery_dl.postprocessor.metadata import MetadataPP\nclass Job:\n def get_logger(self,n):return logging.getLogger(n)\n def register_hooks(self,*a):pass\nHOOKS=[{'name':'metadata','mode':'modify','fields':{'num':'{id}','caption':'post-caption','user_alias':'{user}','user_alias[name]':'post-user','custom':'post-added','suffix':'POST'}},{'name':'metadata','mode':'delete','fields':['title','remove','user_alias[remove]']}]\nFILE_HOOKS=[{'name':'metadata','mode':'modify','fields':{'num':'{id}','caption':'file-caption','file_only':'first-file','user_alias[name]':'file-user'}},{'name':'metadata','mode':'delete','fields':['custom']}]\ndef clean(v):\n if isinstance(v,datetime.datetime):return v.isoformat(sep=' ')\n if isinstance(v,dict):return {k:clean(x) for k,x in v.items()}\n if isinstance(v,(tuple,list)):return [clean(x) for x in v]\n if isinstance(v,types.GeneratorType):return {'$type':'generator-not-consumed'}\n if isinstance(v,type):return {'$class':v.__name__}\n return v\nURL='https://i.pximg.net/img-original/img/2024/01/02/03/04/05/'\ndef work(pages=2,kind='illust'):\n return {'id':42,'type':kind,'title':'Original title','caption':'Original caption','remove':'original','user':{'id':5,'account':'fixture','name':'Original artist','remove':'nested-original'},'tags':[],'create_date':'2024-01-02T03:04:05Z','x_restrict':0,'width':640,'height':480,'meta_single_page':{'original_image_url':URL+'42_ugoira0.jpg' if kind=='ugoira' else URL+'42_p0.jpg'},'meta_pages':[{'image_urls':{'original':URL+f'42_p{n}.jpg'}} for n in range(pages)] if pages>1 else [],'image_urls':{}}\ndef run(name,kind):\n e=object.__new__(pixiv.PixivSketchExtractor if kind=='sketch' else pixiv.PixivNovelExtractor if kind=='novel' else pixiv.PixivPixivisionExtractor if kind=='pixivision' else pixiv.PixivExtractor)\n e.config=lambda key,default=None:{'tags':'original','covers':True,'embeds':True}.get(key,default)\n e.log=logging.getLogger('ownership-oracle');e.max_posts=0;e.meta_user=e.meta_comments=e.meta_bookmark=e.meta_captions=False;e.load_ugoira=True;e.load_ugoira_original=False;e.sanity_workaround=False\n if kind=='sketch':\n  source={'id':42,'created_at':'2024-01-02T03:04:05Z','user':{'id':5,'name':'Original artist','remove':'nested-original'},'remove':'original','text':'Sketch text','media':[{'id':n,'photo':{'original':{'url':URL+f'{n}.jpg','width':n,'height':n+1}}} for n in [900,901]],'_links':{}}\n  e.groups=('fixture',);e.posts=lambda:iter([source])\n elif kind=='novel':\n  source={'id':42,'title':'Original novel','caption':'Original caption','remove':'original','user':{'id':5,'name':'Original artist','remove':'nested-original'},'tags':[],'create_date':'2024-01-02T03:04:05Z','x_restrict':0,'image_urls':{'large':'https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg'}}\n  e.groups=('42',);e.novels=lambda:iter([source]);e.api=SimpleNamespace(novel_webview=lambda id:{'text':'Text [uploadedimage:upload] [pixivimage:70]'})\n  body={'textEmbeddedImages':{'upload':{'urls':{'original':'https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/upload.png'},'width':24,'height':12,'extra_upload':{'value':'row'}}}}\n  e._request_ajax=lambda endpoint:body\n else:\n  source=work(1 if kind in ('single','zip') else 2,'ugoira' if kind=='zip' else 'illust');e.works=lambda:iter([source]);e.metadata=lambda:{'pixivision_id':'123','pixivision_title':'Fixture article'} if kind=='pixivision' else {}\n  e.api=SimpleNamespace(ugoira_metadata=lambda id:{'frames':[{'file':'000000.jpg','delay':50},{'file':'000001.jpg','delay':100}],'zip_urls':{'medium':'https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip'}})\n input=clean(copy.deepcopy(source));events=[];labels={};refs=[];first=True;error=None\n try:\n  for msg,url,data in e.items():\n   if id(data) not in labels:labels[id(data)]=f'object-{len(labels)+1}';refs.append(data)\n   event={'kind':{Message.Directory:'post',Message.Url:'file',Message.Queue:'child'}[msg],'url':url,'object':labels[id(data)],'before_hooks':clean(data)}\n   hooks=HOOKS if msg==Message.Directory else FILE_HOOKS if msg==Message.Url and first else []\n   for options in hooks:MetadataPP(Job(),copy.deepcopy(options)).run(SimpleNamespace(kwdict=data))\n   if msg==Message.Url:first=False\n   event['after_hooks']=clean(data);event['user_alias_is_user']=data.get('user_alias') is data.get('user');event['frames_alias_same_object']=data.get('frames') is data.get('_ugoira_frame_data') if 'frames' in data else None\n   events.append(event)\n except Exception as exc:error=type(exc).__name__\n return {'name':name,'producer':type(e).__name__,'source_items_owner':type(e).items.__qualname__,'input':input,'events':events,'error':error}\ncases=[run('ordinary_multi_page_shared_and_enumerate_reset','multi'),run('ordinary_single_suffix_hook_persists','single'),run('ugoira_zip_suffix_hook_persists','zip'),run('pixivision_inherits_shared_items','pixivision'),run('sketch_shared_photo_assignments','sketch'),run('novel_shared_increment_and_upload_child','novel')]\nassert all(c['error'] is None and len({e['object'] for e in c['events']})==1 for c in cases)\nassert [e['before_hooks']['num'] for e in cases[0]['events']]==[0,0,1]\nassert cases[1]['events'][1]['before_hooks']['suffix']=='POST'\nassert cases[2]['events'][1]['before_hooks']['suffix']=='POST'\nassert cases[2]['events'][1]['frames_alias_same_object'] is True\nassert cases[3]['source_items_owner']=='PixivExtractor.items'\nassert [e['before_hooks']['num'] for e in cases[5]['events']]==[0,42,43,44,45]\nassert cases[5]['events'][-1]['before_hooks']['extra_upload']=={'value':'row'}\nresult={'version':version.__version__,'source':'Actual PixivExtractor/PixivSketchExtractor/PixivNovelExtractor.items consumed one yield at a time; actual MetadataPP modify/delete run at Directory and first Url. Stub work/profile APIs only, _extract_files/_extract_ugoira/nameext/date functions remain actual source. No HTTP/authentication. Stable identity labels plus real alias identity checks; private fallback generators are recorded without consuming them.','source_sha256':{'pixiv.py':hashlib.sha256(Path(pixiv.__file__).read_bytes()).hexdigest(),'metadata.py':hashlib.sha256(Path(sys.modules[MetadataPP.__module__].__file__).read_bytes()).hexdigest()},'post_hooks':HOOKS,'first_file_hooks':FILE_HOOKS,'generator_source':Path(__file__).read_text(),'cases':cases}\nPath(sys.argv[1]).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\\n');print([(c['name'],len(c['events']),c['error'])for c in cases])\n",
+  "cases": [
+    {
+      "name": "ordinary_multi_page_shared_and_enumerate_reset",
+      "producer": "PixivExtractor",
+      "source_items_owner": "PixivExtractor.items",
+      "input": {
+        "id": 42,
+        "type": "illust",
+        "title": "Original title",
+        "caption": "Original caption",
+        "remove": "original",
+        "user": {
+          "id": 5,
+          "account": "fixture",
+          "name": "Original artist",
+          "remove": "nested-original"
+        },
+        "tags": [],
+        "create_date": "2024-01-02T03:04:05Z",
+        "x_restrict": 0,
+        "width": 640,
+        "height": 480,
+        "meta_single_page": {
+          "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [
+          {
+            "image_urls": {
+              "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+            }
+          },
+          {
+            "image_urls": {
+              "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg"
+            }
+          }
+        ],
+        "image_urls": {}
+      },
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "title": "Original title",
+            "caption": "Original caption",
+            "remove": "original",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "Original artist",
+              "remove": "nested-original"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p1",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p1",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "ordinary_single_suffix_hook_persists",
+      "producer": "PixivExtractor",
+      "source_items_owner": "PixivExtractor.items",
+      "input": {
+        "id": 42,
+        "type": "illust",
+        "title": "Original title",
+        "caption": "Original caption",
+        "remove": "original",
+        "user": {
+          "id": 5,
+          "account": "fixture",
+          "name": "Original artist",
+          "remove": "nested-original"
+        },
+        "tags": [],
+        "create_date": "2024-01-02T03:04:05Z",
+        "x_restrict": 0,
+        "width": 640,
+        "height": 480,
+        "meta_single_page": {
+          "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [],
+        "image_urls": {}
+      },
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "title": "Original title",
+            "caption": "Original caption",
+            "remove": "original",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "Original artist",
+              "remove": "nested-original"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "ugoira_zip_suffix_hook_persists",
+      "producer": "PixivExtractor",
+      "source_items_owner": "PixivExtractor.items",
+      "input": {
+        "id": 42,
+        "type": "ugoira",
+        "title": "Original title",
+        "caption": "Original caption",
+        "remove": "original",
+        "user": {
+          "id": 5,
+          "account": "fixture",
+          "name": "Original artist",
+          "remove": "nested-original"
+        },
+        "tags": [],
+        "create_date": "2024-01-02T03:04:05Z",
+        "x_restrict": 0,
+        "width": 640,
+        "height": 480,
+        "meta_single_page": {
+          "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg"
+        },
+        "meta_pages": [],
+        "image_urls": {}
+      },
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "ugoira",
+            "title": "Original title",
+            "caption": "Original caption",
+            "remove": "original",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "Original artist",
+              "remove": "nested-original"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "ugoira",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": true
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "ugoira",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added",
+            "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+            "filename": "42_ugoira1920x1080",
+            "extension": "zip",
+            "hash": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "ugoira",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 100
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+            "filename": "42_ugoira1920x1080",
+            "extension": "zip",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": true
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "pixivision_inherits_shared_items",
+      "producer": "PixivPixivisionExtractor",
+      "source_items_owner": "PixivExtractor.items",
+      "input": {
+        "id": 42,
+        "type": "illust",
+        "title": "Original title",
+        "caption": "Original caption",
+        "remove": "original",
+        "user": {
+          "id": 5,
+          "account": "fixture",
+          "name": "Original artist",
+          "remove": "nested-original"
+        },
+        "tags": [],
+        "create_date": "2024-01-02T03:04:05Z",
+        "x_restrict": 0,
+        "width": 640,
+        "height": 480,
+        "meta_single_page": {
+          "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [
+          {
+            "image_urls": {
+              "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+            }
+          },
+          {
+            "image_urls": {
+              "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg"
+            }
+          }
+        ],
+        "image_urls": {}
+      },
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "title": "Original title",
+            "caption": "Original caption",
+            "remove": "original",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "Original artist",
+              "remove": "nested-original"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "",
+            "pixivision_id": "123",
+            "pixivision_title": "Fixture article"
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "POST",
+            "pixivision_id": "123",
+            "pixivision_title": "Fixture article",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "pixivision_id": "123",
+            "pixivision_title": "Fixture article",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "post-user"
+            },
+            "custom": "post-added",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "pixivision_id": "123",
+            "pixivision_title": "Fixture article",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "pixivision_id": "123",
+            "pixivision_title": "Fixture article",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p1",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "after_hooks": {
+            "id": 42,
+            "type": "illust",
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "width": 640,
+            "height": 480,
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "pixivision_id": "123",
+            "pixivision_title": "Fixture article",
+            "user_alias": {
+              "id": 5,
+              "account": "fixture",
+              "name": "file-user"
+            },
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+            "_fallback": {
+              "$type": "generator-not-consumed"
+            },
+            "filename": "42_p1",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": "",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "sketch_shared_photo_assignments",
+      "producer": "PixivSketchExtractor",
+      "source_items_owner": "PixivSketchExtractor.items",
+      "input": {
+        "id": 42,
+        "created_at": "2024-01-02T03:04:05Z",
+        "user": {
+          "id": 5,
+          "name": "Original artist",
+          "remove": "nested-original"
+        },
+        "remove": "original",
+        "text": "Sketch text",
+        "media": [
+          {
+            "id": 900,
+            "photo": {
+              "original": {
+                "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/900.jpg",
+                "width": 900,
+                "height": 901
+              }
+            }
+          },
+          {
+            "id": 901,
+            "photo": {
+              "original": {
+                "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/901.jpg",
+                "width": 901,
+                "height": 902
+              }
+            }
+          }
+        ],
+        "_links": {}
+      },
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "object": "object-1",
+          "before_hooks": {
+            "created_at": "2024-01-02T03:04:05Z",
+            "user": {
+              "id": 5,
+              "name": "Original artist",
+              "remove": "nested-original"
+            },
+            "remove": "original",
+            "text": "Sketch text",
+            "post_id": 42,
+            "date": "2024-01-02 03:04:05"
+          },
+          "after_hooks": {
+            "created_at": "2024-01-02T03:04:05Z",
+            "user": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "text": "Sketch text",
+            "post_id": 42,
+            "date": "2024-01-02 03:04:05",
+            "num": null,
+            "caption": "post-caption",
+            "user_alias": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "custom": "post-added",
+            "suffix": "POST"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/900.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "created_at": "2024-01-02T03:04:05Z",
+            "user": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "text": "Sketch text",
+            "post_id": 42,
+            "date": "2024-01-02 03:04:05",
+            "num": null,
+            "caption": "post-caption",
+            "user_alias": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "custom": "post-added",
+            "suffix": "POST",
+            "_http_headers": {
+              "Referer": "https://sketch.pixiv.net/@fixture"
+            },
+            "id": 900,
+            "width": 900,
+            "height": 901,
+            "filename": "900",
+            "extension": "jpg"
+          },
+          "after_hooks": {
+            "created_at": "2024-01-02T03:04:05Z",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "text": "Sketch text",
+            "post_id": 42,
+            "date": "2024-01-02 03:04:05",
+            "num": 900,
+            "caption": "file-caption",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "suffix": "POST",
+            "_http_headers": {
+              "Referer": "https://sketch.pixiv.net/@fixture"
+            },
+            "id": 900,
+            "width": 900,
+            "height": 901,
+            "filename": "900",
+            "extension": "jpg",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/901.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "created_at": "2024-01-02T03:04:05Z",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "text": "Sketch text",
+            "post_id": 42,
+            "date": "2024-01-02 03:04:05",
+            "num": 900,
+            "caption": "file-caption",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "suffix": "POST",
+            "_http_headers": {
+              "Referer": "https://sketch.pixiv.net/@fixture"
+            },
+            "id": 901,
+            "width": 901,
+            "height": 902,
+            "filename": "901",
+            "extension": "jpg",
+            "file_only": "first-file"
+          },
+          "after_hooks": {
+            "created_at": "2024-01-02T03:04:05Z",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "text": "Sketch text",
+            "post_id": 42,
+            "date": "2024-01-02 03:04:05",
+            "num": 900,
+            "caption": "file-caption",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "suffix": "POST",
+            "_http_headers": {
+              "Referer": "https://sketch.pixiv.net/@fixture"
+            },
+            "id": 901,
+            "width": 901,
+            "height": 902,
+            "filename": "901",
+            "extension": "jpg",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "novel_shared_increment_and_upload_child",
+      "producer": "PixivNovelExtractor",
+      "source_items_owner": "PixivNovelExtractor.items",
+      "input": {
+        "id": 42,
+        "title": "Original novel",
+        "caption": "Original caption",
+        "remove": "original",
+        "user": {
+          "id": 5,
+          "name": "Original artist",
+          "remove": "nested-original"
+        },
+        "tags": [],
+        "create_date": "2024-01-02T03:04:05Z",
+        "x_restrict": 0,
+        "image_urls": {
+          "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+        }
+      },
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "title": "Original novel",
+            "caption": "Original caption",
+            "remove": "original",
+            "user": {
+              "id": 5,
+              "name": "Original artist",
+              "remove": "nested-original"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          },
+          "after_hooks": {
+            "id": 42,
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "custom": "post-added"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "text:Text [uploadedimage:upload] [pixivimage:70]",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "caption": "post-caption",
+            "user": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "name": "post-user"
+            },
+            "custom": "post-added",
+            "extension": "txt"
+          },
+          "after_hooks": {
+            "id": 42,
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 42,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "POST",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "extension": "txt",
+            "file_only": "first-file"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.jpg",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 43,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p43",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "extension": "jpg",
+            "file_only": "first-file",
+            "date_url": "2024-01-01 18:04:05",
+            "_fallback": [
+              "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.png"
+            ],
+            "filename": "42"
+          },
+          "after_hooks": {
+            "id": 42,
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 43,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p43",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "extension": "jpg",
+            "file_only": "first-file",
+            "date_url": "2024-01-01 18:04:05",
+            "_fallback": [
+              "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.png"
+            ],
+            "filename": "42"
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "file",
+          "url": "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/upload.png",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 44,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p44",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "extension": "png",
+            "file_only": "first-file",
+            "date_url": "2024-01-01 18:04:05",
+            "filename": "upload",
+            "width": 24,
+            "height": 12,
+            "extra_upload": {
+              "value": "row"
+            }
+          },
+          "after_hooks": {
+            "id": 42,
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 44,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p44",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "extension": "png",
+            "file_only": "first-file",
+            "date_url": "2024-01-01 18:04:05",
+            "filename": "upload",
+            "width": 24,
+            "height": 12,
+            "extra_upload": {
+              "value": "row"
+            }
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        },
+        {
+          "kind": "child",
+          "url": "https://www.pixiv.net/artworks/70",
+          "object": "object-1",
+          "before_hooks": {
+            "id": 42,
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 45,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p45",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "extension": "png",
+            "file_only": "first-file",
+            "date_url": null,
+            "filename": "upload",
+            "width": 24,
+            "height": 12,
+            "extra_upload": {
+              "value": "row"
+            },
+            "_extractor": {
+              "$class": "PixivWorkExtractor"
+            }
+          },
+          "after_hooks": {
+            "id": 42,
+            "caption": "file-caption",
+            "user": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "tags": [],
+            "create_date": "2024-01-02T03:04:05Z",
+            "x_restrict": 0,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 45,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p45",
+            "user_alias": {
+              "id": 5,
+              "name": "file-user"
+            },
+            "extension": "png",
+            "file_only": "first-file",
+            "date_url": null,
+            "filename": "upload",
+            "width": 24,
+            "height": 12,
+            "extra_upload": {
+              "value": "row"
+            },
+            "_extractor": {
+              "$class": "PixivWorkExtractor"
+            }
+          },
+          "user_alias_is_user": true,
+          "frames_alias_same_object": null
+        }
+      ],
+      "error": null
+    }
+  ]
+}

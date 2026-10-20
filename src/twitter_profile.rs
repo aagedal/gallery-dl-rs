@@ -1010,6 +1010,7 @@ pub(super) fn profile_view(
             .and_then(timestamp);
         return Ok(VecDeque::from([
             ExtractionEvent::Post(Box::new(event::Post {
+                keywords: Default::default(),
                 category: "twitter".into(),
                 metadata: Some(PostMetadata {
                     post_id: owner,
@@ -1327,6 +1328,8 @@ fn queue_unique(
         }
     }
     pending.push_back(ExtractionEvent::Post(Box::new(event::Post {
+        keywords: event::KeywordPolicy::copied_after_post(&["num", "index", "media_id"])
+            .without_post_fields(&["source_id", "source_user", "sensitive_flags"]),
         category: "twitter".into(),
         metadata: Some(post.metadata),
         count: Some(post.media.len()),

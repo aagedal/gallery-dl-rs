@@ -391,6 +391,7 @@ async fn malformed_boundaries_and_unclosed_child_scopes_fail_privately() {
             _ => vec![
                 ExtractionEvent::BeginChild(a.clone()),
                 ExtractionEvent::Post(Box::new(Post {
+                    keywords: Default::default(),
                     category: "direct".into(),
                     metadata: None,
                     count: None,
@@ -421,6 +422,7 @@ async fn errors_do_not_advance_positions_and_child_failure_does_not_poison_paren
     let bad = stream::iter([
         Ok(ExtractionEvent::BeginChild(s)),
         Ok(ExtractionEvent::Post(Box::new(Post {
+            keywords: Default::default(),
             category: "direct".into(),
             metadata: None,
             count: None,
@@ -495,12 +497,14 @@ async fn cancelling_outer_job_propagates_before_poll_and_unwinds_open_inner_post
     let opening = stream::iter(vec![
         Ok(ExtractionEvent::BeginChild(outer)),
         Ok(ExtractionEvent::Post(Box::new(Post {
+            keywords: Default::default(),
             category: "direct".into(),
             metadata: None,
             count: None,
         }))),
         Ok(ExtractionEvent::BeginChild(inner)),
         Ok(ExtractionEvent::Post(Box::new(Post {
+            keywords: Default::default(),
             category: "direct".into(),
             metadata: None,
             count: None,

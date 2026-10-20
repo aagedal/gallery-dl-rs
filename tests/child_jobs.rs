@@ -96,6 +96,7 @@ async fn natural_eof_and_recoverable_errors_keep_balanced_outer_scope() {
         stream::iter([
             Err(error("fixture recoverable error")),
             Ok(ExtractionEvent::Post(Box::new(Post {
+                keywords: Default::default(),
                 category: "fixture".into(),
                 metadata: None,
                 count: Some(0),
@@ -246,6 +247,7 @@ async fn malformed_source_boundaries_are_not_repaired_or_hidden() {
         ))))],
         vec![Ok(ExtractionEvent::EndChild(ChildControl::default()))],
         vec![Ok(ExtractionEvent::Post(Box::new(Post {
+            keywords: Default::default(),
             category: "fixture".into(),
             metadata: None,
             count: None,

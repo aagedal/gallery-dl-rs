@@ -456,6 +456,7 @@ impl Pixiv {
                         metadata.ranking_archive = true;
                         state.pending = VecDeque::from([
                             ExtractionEvent::Post(Box::new(crate::event::Post {
+                                keywords: Default::default(),
                                 category: "pixiv".into(),
                                 metadata: Some(metadata),
                                 count: Some(0),
