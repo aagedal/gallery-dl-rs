@@ -2463,21 +2463,19 @@ fn kemono_metadata_option_is_sparse_and_scoped_with_explicit_false_overlays() {
         parse("{}").unwrap().resolve("kemono").unwrap().metadata,
         None
     );
-    for value in [
-        serde_json::json!(null),
-        serde_json::json!(1),
-        serde_json::json!("PRIVATE_VALUE"),
-        serde_json::json!([]),
+    for (value, expected) in [
+        (serde_json::json!(null), false),
+        (serde_json::json!(1), true),
+        (serde_json::json!("PRIVATE_VALUE"), true),
+        (serde_json::json!([]), false),
     ] {
         for doc in [
             serde_json::json!({"metadata":value}),
             serde_json::json!({"extractor":{"kemono":{"metadata":value}}}),
         ] {
-            let error = parse(&doc.to_string()).unwrap_err().to_string();
-            assert!(
-                error.contains("metadata") && !error.contains("PRIVATE_VALUE"),
-                "{error}"
-            );
+            let resolved = parse(&doc.to_string()).unwrap().resolve("kemono").unwrap();
+            assert_eq!(resolved.metadata, Some(expected));
+            assert!(!format!("{resolved:?}").contains("PRIVATE_VALUE"));
         }
     }
 }
@@ -3129,17 +3127,87 @@ fn pixiv_enrichment_switches_are_scoped_and_explicit_null_clears_defaults() {
     assert_eq!(overridden.comments, Some(true));
     assert_eq!(overridden.metadata_bookmark, Some(true));
     assert_eq!(overridden.overlay(&Options::default()), overridden);
-    for document in [
-        r#"{"metadata":null}"#,
-        r#"{"extractor":{"metadata":"private-payload"}}"#,
+    for (document, expected) in [
+        (r#"{"metadata":null}"#, false),
+        (r#"{"extractor":{"metadata":"private-payload"}}"#, true),
     ] {
-        let message = parse(document).unwrap_err().to_string();
-        assert!(message.contains("metadata"));
-        assert!(!message.contains("private-payload"));
+        let resolved = parse(document).unwrap().resolve("pixiv").unwrap();
+        assert_eq!(resolved.metadata, Some(expected));
+        assert!(!format!("{resolved:?}").contains("private-payload"));
     }
     let cfg =
         parse(r#"{"extractor":{"pixiv":{"comments":true,"metadata-bookmark":true}}}"#).unwrap();
     assert_eq!(cfg.resolve("pixiv-novel").unwrap().comments, None);
     assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata_bookmark, None);
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn metadata_switch_matches_source_truthiness_across_pixiv_and_kemono_scopes() {
+    use serde_json::json;
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for category in ["pixiv", "pixiv-novel", "kemono", "coomer"] {
+            for document in [
+                json!({"metadata":value}),
+                json!({"extractor":{"metadata":value}}),
+                json!({"extractor":{category:{"metadata":value}}}),
+            ] {
+                let resolved = parse(&document.to_string())
+                    .unwrap()
+                    .resolve(category)
+                    .unwrap();
+                assert_eq!(resolved.metadata, Some(expected));
+                assert!(!format!("{resolved:?}").contains("private"));
+                assert!(!format!("{resolved:?}").contains("payload"));
+            }
+        }
+    }
+}
+
+#[test]
+fn metadata_switch_preserves_independent_pixiv_novel_scopes_and_explicit_null_clearing() {
+    let cfg = parse(r#"{"extractor":{"metadata":true,"pixiv":{"metadata":null},"pixiv-novel":{"metadata":"false"},"kemono":{"metadata":[]}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().metadata, Some(false));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, Some(true));
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(false));
+    assert_eq!(cfg.resolve("coomer").unwrap().metadata, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, None);
+    let cfg = parse(r#"{"metadata":null,"extractor":{"metadata":true,"pixiv":{"metadata":true},"pixiv-novel":{"metadata":true}}}"#).unwrap();
+    for category in ["pixiv", "pixiv-novel", "kemono"] {
+        let resolved = cfg.resolve(category).unwrap();
+        assert_eq!(resolved.metadata, Some(false));
+        assert_eq!(
+            resolved
+                .overlay(&Options {
+                    metadata: Some(true),
+                    ..Options::default()
+                })
+                .metadata,
+            Some(true)
+        );
+        assert_eq!(resolved.overlay(&Options::default()).metadata, Some(false));
+    }
+    for category in ["pixiv", "pixiv-novel", "kemono", "coomer"] {
+        assert_eq!(
+            parse("{}").unwrap().resolve(category).unwrap().metadata,
+            None
+        );
+    }
 }

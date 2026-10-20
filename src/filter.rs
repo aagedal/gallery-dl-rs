@@ -429,6 +429,11 @@ fn context_parts(
                 Value::List(tags.values().iter().map(json_value).collect()),
             );
         }
+        if let Some(detail) = &post.pixiv_user_detail {
+            for (key, value) in detail.fields() {
+                metadata.insert(key.clone(), json_value(value));
+            }
+        }
         if let Some(comments) = &post.comments {
             metadata.insert(
                 "comments".into(),

@@ -21,6 +21,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         sketch_archive: false,
         user_bookmark: None,
         bookmark_archive: false,
+        pixiv_user_detail: None,
         comments: None,
         tags_bookmark: None,
         ugoira_original: None,

@@ -815,6 +815,21 @@ fixtures cover owner snapshots, empty animations, cursor encoding and novel
 archive exclusions. Compatibility forwarding retains the cursor's JSON type;
 automatic resume hints and separate child-category compatibility overrides remain
 unfinished.
+Native illustration/novel `metadata` now loads complete artist user details
+before comments/bookmark enrichment, with source ordering, listing-owner preloads,
+empty animation posts and fatal pre-post failure handling. Basic artist objects
+are retained when disabled; avatar/background jobs reuse their required detail
+lookup. Ordered user/profile/publicity/workspace values and native API extras
+reach inspection, sidecars, predicates and templates without changing archives.
+Successful same-artist lookups share bounded cached snapshots, including owner
+and profile discovery; attached illustration/novel clients share matching API
+roots. Cache/snapshot limits and identity/canonical-key guards bound untrusted
+responses; failed or cancelled lookups are not cached. Metadata configuration
+now follows upstream JSON truthiness in Pixiv and Kemono/Coomer, preserving their
+different runtime defaults. Source vectors and HTTP tests cover ordering, cache
+reuse, option scope, selection, shared snapshots and cancellation. Live authenticated
+verification and complete arbitrary compatibility-field normalization remain
+unfinished.
 Native illustration `comments` and `metadata-bookmark` enrich selected works
 lazily after file discovery. Comment objects retain nested source fields and
 ordered pagination; enabled empty/error cases emit an empty list, discarding
@@ -899,9 +914,8 @@ account only after child selection. Anonymous first-photo output from the public
 cookies, default directory layout and source `filename` template semantics remain
 unfinished.
 Remaining: ugoira conversion,
-bookmark resume-cursor diagnostics and additional metadata enrichment,
-upstream metadata options
-(`metadata`), and Referer-routed plain `i.pximg.net` links.
+bookmark resume-cursor diagnostics, additional metadata fields and
+Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and
 folders via the OAuth2 API (client credentials, overridable `client-id`/

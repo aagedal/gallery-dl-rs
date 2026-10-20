@@ -1125,6 +1125,7 @@ fn extract_input<'a>(
                                         covers: novel_options.covers.unwrap_or(false),
                                         full_series: novel_options.full_series.unwrap_or(false),
                                     })
+                                    .with_metadata(novel_options.metadata.unwrap_or(false))
                                     .with_comments(novel_options.comments.unwrap_or(false))
                                     .with_metadata_bookmark(
                                         novel_options.metadata_bookmark.unwrap_or(false),
@@ -1156,6 +1157,7 @@ fn extract_input<'a>(
                                             .with_novel_extractor(Arc::clone(novel))
                                             .with_include(options.include.clone())
                                             .with_ugoira_mode(options.ugoira.unwrap_or_default())
+                                            .with_metadata(options.metadata.unwrap_or(false))
                                             .with_comments(options.comments.unwrap_or(false))
                                             .with_metadata_bookmark(
                                                 options.metadata_bookmark.unwrap_or(false),
@@ -1275,9 +1277,12 @@ fn extract_input<'a>(
                             order_posts: matches!(category, "kemono" | "coomer")
                                 .then_some(options.order_posts)
                                 .flatten(),
-                            metadata: matches!(category, "kemono" | "coomer")
-                                .then_some(options.metadata)
-                                .flatten(),
+                            metadata: matches!(
+                                category,
+                                "kemono" | "coomer" | "pixiv" | "pixiv-novel"
+                            )
+                            .then_some(options.metadata)
+                            .flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
                             text_tweets: (category == "twitter")
                                 .then_some(options.text_tweets)

@@ -1688,3 +1688,37 @@ async fn novel_and_illustration_enrichment_forward_independent_category_override
         }
     }
 }
+
+#[tokio::test]
+async fn pixiv_metadata_truthiness_forwards_independent_scopes_and_keeps_other_categories_sparse() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor":{"metadata":["enabled"],"pixiv-novel":{"metadata":null}}}),
+    );
+    for (url, expected) in [
+        ("https://www.pixiv.net/artworks/42", Some(true)),
+        ("https://www.pixivision.net/en/a/77", Some(true)),
+        ("https://www.pixiv.net/novel/show.php?id=42", Some(false)),
+        ("https://kemono.cr/posts", Some(true)),
+        ("https://instagram.com/p/abc/", None),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        match expected {
+            Some(value) => assert!(
+                log.contains(&format!("--option\nmetadata={value}\n")),
+                "{log}"
+            ),
+            None => assert!(!log.contains("metadata="), "{log}"),
+        }
+    }
+}

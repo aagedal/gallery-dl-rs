@@ -126,7 +126,7 @@ pub struct Options {
     pub search_stop: Option<u8>,
     /// Limit Kemono/Coomer or Pixiv source works; zero clears an inherited limit.
     pub max_posts: Option<usize>,
-    /// Look up Kemono/Coomer creator profiles.
+    /// Look up Kemono/Coomer creator profiles or Pixiv author metadata.
     pub metadata: Option<bool>,
     /// Include Pixiv illustration or novel comments.
     pub comments: Option<bool>,
@@ -1487,7 +1487,7 @@ impl RawOptions {
             Some(Value::String(value)) if value == "auto" => Some(3),
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
-        let metadata = boolean(self.metadata, "metadata")?;
+        let metadata = self.metadata.0.as_ref().map(value_truthy);
         let comments = self.comments.0.as_ref().map(value_truthy);
         let metadata_bookmark = self.metadata_bookmark.0.as_ref().map(value_truthy);
         let max_posts = match self.max_posts.0 {

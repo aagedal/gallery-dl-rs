@@ -220,6 +220,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
         sketch_archive: false,
         user_bookmark: None,
         bookmark_archive: false,
+        pixiv_user_detail: None,
         comments: None,
         tags_bookmark: None,
         ugoira_original: None,

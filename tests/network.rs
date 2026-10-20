@@ -272,6 +272,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
         sketch_archive: false,
         user_bookmark: None,
         bookmark_archive: false,
+        pixiv_user_detail: None,
         comments: None,
         tags_bookmark: None,
         ugoira_original: None,

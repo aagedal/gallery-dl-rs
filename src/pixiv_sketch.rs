@@ -389,13 +389,9 @@ impl Pixiv {
     }
     pub(super) fn sketch_user_events(&self, id: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         stream::once(async move {
-            let mut endpoint = self
-                .api_root
-                .join("v1/user/detail")
-                .expect("static endpoint");
-            endpoint.query_pairs_mut().append_pair("user_id", &id);
-            let body = super::json(&self.get(&endpoint).await?)?;
-            let user = body
+            let detail = self.user_detail(&id).await?;
+            let user = detail
+                .fields()
                 .get("user")
                 .ok_or_else(|| error("Pixiv response contains no Sketch account"))?;
             if super::id_of(user).as_deref() != Some(&id) {

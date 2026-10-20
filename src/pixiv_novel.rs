@@ -139,6 +139,10 @@ impl Novel {
         }
         .map(Arc::from);
         let metadata = PostMetadata {
+            pixiv_user_detail: data
+                .as_object()
+                .and_then(super::UserDetail::parse_compat)
+                .map(Arc::new),
             tags: data.get("tags").and_then(|tags| mode.transform(tags)),
             comments: data
                 .get("comments")
@@ -437,6 +441,15 @@ impl Pixiv {
                             if let Some(remaining) = &mut state.remaining {
                                 *remaining -= 1;
                             }
+                            let user_detail = match self.enrich_user_work(&mut data).await {
+                                Ok(detail) => detail,
+                                Err(error) => {
+                                    state.done = true;
+                                    state.works.clear();
+                                    state.next = None;
+                                    return Some((Err(error), state));
+                                }
+                            };
                             if let Err(error) = self.enrich_novel_work(&mut data).await {
                                 state.done = true;
                                 state.works.clear();
@@ -444,7 +457,10 @@ impl Pixiv {
                                 return Some((Err(error), state));
                             }
                             match Novel::parse(data, self.tags) {
-                                Ok(novel) => {
+                                Ok(mut novel) => {
+                                    if user_detail.is_some() {
+                                        novel.metadata.pixiv_user_detail = user_detail;
+                                    }
                                     let post = novel.post(self.novel_options.covers);
                                     state.active = Some(novel);
                                     state.stage = Stage::Text;
@@ -2037,5 +2053,325 @@ mod tests {
             assert!(requests[1].starts_with("GET /v1/user/novels?user_id=9 "));
             assert!(requests.iter().all(|request| !request.contains("/illust/")));
         }
+    }
+    fn novel_author_detail() -> Vec<u8> {
+        response("200 OK", br#"{"user":{"id":77,"account":"enriched.author","name":"Public author"},"profile":{"total_novels":2},"profile_publicity":{"region":"public"},"workspace":{"tool":"pen"},"future_public_root":{"nested":[1,true]}}"#)
+    }
+
+    #[tokio::test]
+    async fn novel_user_metadata_precedes_comments_is_cached_and_shared_across_posts_text_and_covers()
+     {
+        let (root, server) = serve(vec![
+            token("t"),
+            page(vec![enrichable_novel(41), enrichable_novel(42)], None),
+            novel_author_detail(),
+            novel_comments_reply(),
+            novel_bookmark_reply(),
+            webview("one"),
+            novel_comments_reply(),
+            novel_bookmark_reply(),
+            webview("two"),
+        ]);
+        let native = pixiv(root)
+            .with_metadata(true)
+            .with_comments(true)
+            .with_metadata_bookmark(true)
+            .with_novel_options(NovelOptions {
+                covers: true,
+                full_series: false,
+            });
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(events.len(), 8);
+        let ExtractionEvent::Post(first) = &events[0] else {
+            panic!("expected post")
+        };
+        let first = first
+            .metadata
+            .as_ref()
+            .unwrap()
+            .pixiv_user_detail
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            first.fields()["future_public_root"],
+            json!({"nested":[1,true]})
+        );
+        for event in &events {
+            let metadata = match event {
+                ExtractionEvent::Post(post) => post.metadata.as_ref().unwrap(),
+                ExtractionEvent::Media(file) => file.metadata.as_ref().unwrap(),
+                ExtractionEvent::EndPost => continue,
+                _ => panic!("unexpected child"),
+            };
+            assert!(Arc::ptr_eq(
+                first,
+                metadata.pixiv_user_detail.as_ref().unwrap()
+            ));
+            assert_eq!(metadata.username.as_deref(), Some("enriched.author"));
+            let public = serde_json::to_value(metadata).unwrap();
+            assert_eq!(public["user"]["id"], 77);
+            assert_eq!(public["profile"]["total_novels"], 2);
+            assert_eq!(public["future_public_root"], json!({"nested":[1,true]}));
+        }
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 9);
+        assert!(requests[2].starts_with("GET /v1/user/detail?user_id=77 "));
+        assert!(requests[3].starts_with("GET /v1/novel/comments?novel_id=41 "));
+        assert!(requests[4].starts_with("GET /v2/novel/bookmark/detail?novel_id=41 "));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.contains("/user/detail"))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_novel_user_metadata_retains_basic_author_without_lookup() {
+        let work = novel(41, "basic.author");
+        let basic = work["user"].clone();
+        let (root, server) = serve(vec![token("t"), detail(work), webview("one")]);
+        let native = pixiv(root).with_metadata(false);
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/n/41").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("expected post")
+        };
+        let metadata = post.metadata.as_ref().unwrap();
+        let detail = metadata.pixiv_user_detail.as_ref().unwrap();
+        assert_eq!(detail.fields().len(), 1);
+        assert_eq!(detail.fields()["user"], basic);
+        assert_eq!(metadata.username.as_deref(), Some("basic.author"));
+        let ExtractionEvent::Media(file) = &events[1] else {
+            panic!("expected text")
+        };
+        assert!(Arc::ptr_eq(
+            detail,
+            file.metadata
+                .as_ref()
+                .unwrap()
+                .pixiv_user_detail
+                .as_ref()
+                .unwrap()
+        ));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request.contains("/user/detail"))
+        );
+    }
+
+    #[tokio::test]
+    async fn novel_user_metadata_failure_aborts_all_routes_before_other_enrichment_or_posts() {
+        for (route, full_series) in [
+            ("users/9/novels", false),
+            ("novel/series/7", false),
+            ("users/9/bookmarks/novels", false),
+            ("n/41", false),
+            ("n/41", true),
+        ] {
+            let mut first = enrichable_novel(41);
+            if full_series {
+                first["series"] = json!({"id":7});
+            }
+            let mut replies = vec![token("t")];
+            if route == "n/41" {
+                replies.push(detail(first.clone()));
+            }
+            if route != "n/41" || full_series {
+                replies.push(page(vec![first, enrichable_novel(42)], None));
+            }
+            let expected_requests = replies.len() + 1;
+            replies.push(response("404 Not Found", b"PRIVATE_AUTHOR_ERROR"));
+            let (root, server) = serve(replies);
+            let native = pixiv(root)
+                .with_metadata(true)
+                .with_comments(true)
+                .with_metadata_bookmark(true)
+                .with_novel_options(NovelOptions {
+                    covers: true,
+                    full_series,
+                });
+            let events = native
+                .events(&Url::parse(&format!("https://www.pixiv.net/{route}")).unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(events.len(), 1, "{route} {full_series}");
+            assert!(
+                !events[0]
+                    .as_ref()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("PRIVATE_AUTHOR_ERROR")
+            );
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), expected_requests);
+            assert!(
+                requests
+                    .last()
+                    .unwrap()
+                    .starts_with("GET /v1/user/detail?user_id=77 ")
+            );
+            assert!(
+                !requests
+                    .iter()
+                    .any(|request| request.contains("/novel/comments")
+                        || request.contains("/novel/bookmark/detail")
+                        || request.contains("webview"))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn novel_user_metadata_respects_source_budget_predicates_and_drop_before_text() {
+        for select_second in [false, true] {
+            let mut second = novel(42, "other.author");
+            second["user"]["id"] = json!(88);
+            let mut replies = vec![
+                token("t"),
+                page(vec![novel(41, "first"), second], None),
+                novel_author_detail(),
+            ];
+            if select_second {
+                replies.push(webview("one"));
+            }
+            let (root, server) = serve(replies);
+            let native = pixiv(root).with_metadata(true).with_max_posts(Some(1));
+            let url = Url::parse("https://www.pixiv.net/users/9/novels").unwrap();
+            if select_second {
+                let files = PostSelection::new(Some(RangeSelection::parse("2").unwrap()), None)
+                    .apply(native.events(&url), None, None, false)
+                    .collect::<Vec<_>>()
+                    .await;
+                assert!(files.is_empty());
+            } else {
+                let mut events = native.events(&url);
+                assert!(matches!(
+                    events.next().await.unwrap().unwrap(),
+                    ExtractionEvent::Post(_)
+                ));
+                drop(events);
+            }
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 3 + usize::from(select_second));
+            assert!(
+                !requests
+                    .iter()
+                    .any(|request| request.contains("user_id=88"))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn novel_profile_dispatch_uses_its_separate_user_metadata_setting() {
+        let (root, server) = serve(vec![
+            token("novel-only"),
+            page(vec![novel(41, "author")], None),
+            novel_author_detail(),
+            webview("one"),
+        ]);
+        let novel_native = Arc::new(pixiv(root).with_metadata(true));
+        let native = Pixiv::new(std::time::Duration::from_secs(2))
+            .unwrap()
+            .with_metadata(false)
+            .with_include(Some(crate::dispatch::Include::Views(vec![
+                "novel-user".into(),
+            ])))
+            .with_novel_extractor(novel_native);
+        let files = JobSelection::default()
+            .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(
+            files[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .pixiv_user_detail
+                .as_ref()
+                .unwrap()
+                .fields()
+                .contains_key("profile")
+        );
+        assert_eq!(server.join().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn cancelling_novel_user_metadata_closes_http_before_comments_post_or_text() {
+        use std::time::Duration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let (started, waiting) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            for reply in [token("t"), detail(enrichable_novel(41))] {
+                let (mut connection, _) = listener.accept().await.unwrap();
+                let mut buffer = [0; 8192];
+                assert_ne!(connection.read(&mut buffer).await.unwrap(), 0);
+                connection.write_all(&reply).await.unwrap();
+            }
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 8192];
+            let count = connection.read(&mut buffer).await.unwrap();
+            assert!(
+                String::from_utf8_lossy(&buffer[..count])
+                    .starts_with("GET /v1/user/detail?user_id=77 ")
+            );
+            connection
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n{\"user\":{")
+                .await
+                .unwrap();
+            started.send(()).unwrap();
+            match tokio::time::timeout(Duration::from_secs(2), connection.read(&mut buffer))
+                .await
+                .unwrap()
+            {
+                Ok(0) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                other => panic!("novel author connection stayed active: {other:?}"),
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let extraction = tokio::spawn(async move {
+            pixiv(root)
+                .with_metadata(true)
+                .with_comments(true)
+                .with_metadata_bookmark(true)
+                .events(&Url::parse("https://www.pixiv.net/n/41").unwrap())
+                .collect::<Vec<_>>()
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        extraction.abort();
+        assert!(extraction.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
     }
 }

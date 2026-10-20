@@ -187,3 +187,34 @@ Malformed source responses record exception classes without prescribing
 native malformed-response policy. Post, text, and cover enrichment snapshots
 retain the same values. All identities, comments, text, dates, URLs, and
 metadata are synthetic; no HTTP, OAuth, sessions, or downloads ran.
+
+`user_detail.json` records 30 cases from the actual illustration and novel
+`items` implementations in gallery-dl 1.32.17, together with the actual
+`PixivArtworksExtractor.metadata`, `PixivFavoriteExtractor.metadata`,
+`PixivAppAPI.user_detail`/`_user_detail_impl`, and `Extractor.cache` helpers.
+The source path and SHA-256 match the values above and are repeated in the
+fixture. Synthetic work/file/comment/bookmark/webview providers and an API
+`_call` stub replace network operations. The source metadata option assignment
+is evaluated without session initialization. The process-global memory cache
+is cleared between cases inside the isolated generator process.
+
+Cases cover default and JSON truthy/falsy metadata modes, full user/profile/
+profile_publicity/workspace dictionaries and unknown top-level fields, account
+replacement, repeated or different artists, an empty file list, user-detail
+failures, artist preload before the artwork feed, and named bookmark owner
+lookups sharing the artist cache. Merge-dependent comment/bookmark gates and
+canonical field collisions record the source's unrestricted `work.update`
+behavior; native tests should distinguish deliberate canonical-field guards
+from ordinary public metadata preservation. Novel cases include covers,
+repeated artists, fatal detail failures, ignored `_ajax` comment gates, and
+text failure after an enriched post.
+
+A separate vector calls the real user-detail wrapper first with `fatal=False`
+and then `fatal=True`, recording one `_call` and the same cached response
+object. The source memory-cache key uses the user ID but omits the fatal flag,
+and the default expiry is zero. This records source behavior, including reuse
+of a synthetic nonfatal error response, without requiring unsafe error caching
+in native code. Metadata is deep-copied at each emitted boundary; dates use
+naive UTC ISO text and filename/archive formats are evaluated by the source.
+All identifiers, strings, dates, URLs, and metadata are synthetic. No HTTP,
+OAuth, sessions, or downloads ran.

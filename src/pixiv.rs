@@ -62,6 +62,9 @@ pub use cursor::BookmarkCursor;
 #[path = "pixiv_ugoira.rs"]
 pub mod ugoira;
 pub use ugoira::UgoiraMode;
+#[path = "pixiv_user_detail.rs"]
+pub mod user_detail;
+pub use user_detail::UserDetail;
 #[path = "pixiv_enrichment.rs"]
 mod enrichment;
 use enrichment::WorkFailure;
@@ -426,6 +429,10 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
     PostMetadata {
         post_id: id.to_owned(),
+        pixiv_user_detail: illust
+            .as_object()
+            .and_then(UserDetail::parse_compat)
+            .map(Arc::new),
         comments: illust
             .get("comments")
             .and_then(crate::extract::pixiv_comments),
@@ -655,6 +662,11 @@ pub fn parse_profile(bytes: &[u8], owner: &str, kind: ProfileKind) -> Result<Vec
             timestamp,
             index: 1,
             profile_asset: profile_asset_identity(label, owner, timestamp),
+            pixiv_user_detail: UserDetail::parse_compat(&serde_json::Map::from_iter([(
+                "user".to_owned(),
+                user.clone(),
+            )]))
+            .map(Arc::new),
             ..PostMetadata::default()
         }),
         headers: BTreeMap::from([("Referer".into(), REFERER.into())]),
@@ -773,6 +785,8 @@ pub struct Pixiv {
     max_posts: Option<usize>,
     tags: TagMode,
     cursor: Option<BookmarkCursor>,
+    metadata: bool,
+    user_detail_cache: Arc<tokio::sync::Mutex<user_detail::UserDetailCache>>,
     comments: bool,
     metadata_bookmark: bool,
     refresh_token: Option<String>,
@@ -835,6 +849,7 @@ impl PostBudget {
 struct ListingState {
     bookmarks: bool,
     bookmark_owner: Option<Arc<FollowedUserMetadata>>,
+    owner_loaded: bool,
     budget: PostBudget,
     kinds: VecDeque<Feed>,
     active: Option<Feed>,
@@ -857,6 +872,10 @@ impl Pixiv {
             max_posts: None,
             tags: TagMode::default(),
             cursor: None,
+            metadata: false,
+            user_detail_cache: Arc::new(tokio::sync::Mutex::new(
+                user_detail::UserDetailCache::default(),
+            )),
             comments: false,
             metadata_bookmark: false,
             refresh_token: None,
@@ -894,6 +913,9 @@ impl Pixiv {
 
     /// Apply independently configured pixiv-novel credentials/options to queued novel views.
     pub fn with_novel_extractor(mut self, native: Arc<Pixiv>) -> Self {
+        if self.api_root == native.api_root {
+            self.user_detail_cache = native.user_detail_cache.clone();
+        }
         self.novel_extractor = Some(native);
         self
     }
@@ -928,6 +950,11 @@ impl Pixiv {
 
     /// Override the App API origin; intended for local tests.
     pub fn with_api_root(mut self, root: Url) -> Self {
+        if self.api_root != root {
+            self.user_detail_cache = Arc::new(tokio::sync::Mutex::new(
+                user_detail::UserDetailCache::default(),
+            ));
+        }
         self.api_root = root;
         self
     }
@@ -957,6 +984,7 @@ impl Pixiv {
 
     fn illustration_metadata(&self, illust: &Value, id: &str) -> PostMetadata {
         let mut metadata = illustration_metadata(illust, id);
+        metadata.pixiv_user_detail = self.work_user_detail(illust);
         metadata.tags = illust
             .get("tags")
             .and_then(|tags| self.tags.transform(tags));
@@ -1112,6 +1140,11 @@ impl Pixiv {
             .work_files(illust, listing)
             .await
             .map_err(WorkFailure::Files)?;
+        let user_detail = self
+            .enrich_user_work(illust)
+            .await
+            .map_err(WorkFailure::Enrichment)?
+            .or_else(|| self.work_user_detail(illust));
         self.enrich_work(illust)
             .await
             .map_err(WorkFailure::Enrichment)?;
@@ -1124,8 +1157,14 @@ impl Pixiv {
         let tags_bookmark = illust
             .get("tags_bookmark")
             .and_then(crate::extract::pixiv_bookmark_tags);
+        let username = illust
+            .get("user")
+            .and_then(|user| string(user, "account"))
+            .map(Arc::<str>::from);
         for file in &mut media {
             if let Some(metadata) = &mut file.metadata {
+                metadata.pixiv_user_detail = user_detail.clone();
+                metadata.username = username.clone();
                 metadata.tags = tags.clone();
                 metadata.comments = comments.clone();
                 metadata.tags_bookmark = tags_bookmark.clone();
@@ -1190,12 +1229,8 @@ impl Pixiv {
 
     async fn bookmark_owner(&self, user: Option<&str>) -> Result<Arc<FollowedUserMetadata>> {
         if let Some(id) = user {
-            let mut endpoint = self
-                .api_root
-                .join("v1/user/detail")
-                .expect("static endpoint");
-            endpoint.query_pairs_mut().append_pair("user_id", id);
-            let body = json(&self.get(&endpoint).await?)?;
+            let detail = self.user_detail(id).await?;
+            let body = Value::Object(detail.fields().clone());
             let owner = body
                 .get("user")
                 .and_then(FollowedUserMetadata::parse_compat)
@@ -1236,6 +1271,10 @@ impl Pixiv {
             }
         }
         let user = state.user.as_deref().expect("resolved listing user");
+        if self.metadata && !state.bookmarks && !state.owner_loaded {
+            self.user_detail(user).await?;
+            state.owner_loaded = true;
+        }
         let endpoint = match state.next.take() {
             Some(raw) => self.next_url(&raw, state.active.as_ref().expect("active feed"), user)?,
             None => {
@@ -1365,9 +1404,17 @@ impl Pixiv {
             Target::Series { id, .. } => return self.series_events(id),
             Target::Profile { id, kind } => {
                 return stream::once(async move {
-                    let mut endpoint = self.api_root.join("v1/user/detail").expect("static");
-                    endpoint.query_pairs_mut().append_pair("user_id", &id);
-                    let media = parse_profile(&self.get(&endpoint).await?, &id, kind)?;
+                    let detail = self.user_detail(&id).await?;
+                    let bytes = serde_json::to_vec(detail.fields())
+                        .map_err(|_| error("Pixiv returned invalid user detail"))?;
+                    let mut media = parse_profile(&bytes, &id, kind)?;
+                    if self.metadata {
+                        for file in &mut media {
+                            if let Some(metadata) = &mut file.metadata {
+                                metadata.pixiv_user_detail = Some(detail.clone());
+                            }
+                        }
+                    }
                     let events = if media.is_empty() {
                         VecDeque::new()
                     } else {
@@ -1437,6 +1484,7 @@ impl Pixiv {
                 .iter()
                 .any(|feed| matches!(feed, Feed::Bookmarks { .. })),
             bookmark_owner: None,
+            owner_loaded: false,
             budget: PostBudget::new(self.max_posts),
             kinds: kinds.into(),
             active: None,
@@ -3166,15 +3214,12 @@ mod tests {
         let profile = response("200 OK", user_detail().to_string().as_bytes());
         let (root, server) = serve(vec![
             token("access-secret"),
-            profile.clone(),
-            profile.clone(),
+            profile,
             page(41),
             response("200 OK", br#"{"illusts":[],"next_url":null}"#),
-            profile.clone(),
             page(42),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
-            profile,
             response("200 OK", br#"{"data":{"items":[]},"_links":{}}"#),
         ]);
         let native = pixiv(root.clone())
@@ -3212,12 +3257,11 @@ mod tests {
         assert_eq!(results.len(), 4);
         assert!(results.iter().all(|value| !value.contains("secret")));
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 11);
+        assert_eq!(requests.len(), 8);
         assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
-        assert!(requests[2].starts_with("GET /v1/user/detail?user_id=9 "));
-        assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
+        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
         assert!(
-            requests[6].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public ")
+            requests[4].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public ")
         );
     }
 
@@ -3229,9 +3273,8 @@ mod tests {
         let (root, server) = serve(vec![
             token("t"),
             response("503 Service Unavailable", b""),
-            profile.clone(),
-            response("503 Service Unavailable", b""),
             profile,
+            response("503 Service Unavailable", b""),
         ]);
         let native = pixiv(root).with_include(Some(included(&[
             "novel-user",
@@ -3254,7 +3297,7 @@ mod tests {
             results[3].as_ref().unwrap().filename,
             "avatar_2023-12-31.jpg"
         );
-        assert_eq!(server.join().unwrap().len(), 5);
+        assert_eq!(server.join().unwrap().len(), 4);
     }
 
     #[tokio::test]
@@ -3315,7 +3358,6 @@ mod tests {
                     token("t"),
                     bookmark_owner_reply(9),
                     page(41, 100),
-                    bookmark_owner_reply(9),
                     page(43, 200),
                 ]
             });
@@ -3347,7 +3389,7 @@ mod tests {
                 items.last().unwrap().metadata.as_ref().unwrap().post_id,
                 "43"
             );
-            assert_eq!(server.join().unwrap().len(), 5);
+            assert_eq!(server.join().unwrap().len(), 4);
         }
     }
 

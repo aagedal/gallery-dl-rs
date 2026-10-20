@@ -616,6 +616,30 @@ rewritten. Sketch, profile-image and novel archive identities are unchanged.
 Plain `i.pximg.net` links stay direct downloads and
 usually fail without the Referer.
 
+Native Pixiv illustrations and novels support `metadata: true` to load artist
+user details before comments and bookmark-tag enrichment. Illustrations discover
+files first; novels fetch details before emitting the post. User listings preload
+the owner profile before the feed. Detail failures abort before the affected post
+and stop later works in that job. Avatar/background jobs reuse their required
+profile lookup and expose the complete detail when enabled. Without enrichment,
+ordinary works still retain their complete basic `user` object.
+
+Public metadata includes `user`, `profile`, `profile_publicity` and `workspace`
+objects with their original nested values and key order. Native API response
+extras are retained too; templates can access them through `{metadata[KEY]}`.
+Compatibility normalization retains the four standard detail roots. Snapshots
+are shared across post/file output and expose profile values to predicates,
+sidecars and templates without changing archives. Successful lookups are cached
+by artist ID, including profile discovery and bookmark-owner lookups; attached
+illustration/novel clients share the cache for the same API root. The cache keeps
+up to 256 entries and 32 MiB, with 32 MiB/one-million-node/depth-128 snapshot
+bounds. Failed requests are not cached, and cancellation publishes no incomplete
+response. Mismatched identities and collisions with native canonical/transport
+fields are rejected where upstream may overwrite work fields. `metadata` uses
+JSON truthiness, with explicit null disabling inherited settings; Pixiv defaults
+to disabled, separately from Kemono/Coomer's enabled default. Live authenticated
+user-detail extraction remains unverified.
+
 Native Pixiv illustrations also support `comments` and `metadata-bookmark`, both
 disabled by default and using upstream JSON truthiness (explicit null disables
 an inherited value). `comments` retains complete API comment objects in source
@@ -808,8 +832,8 @@ save exact UTF-8 as `ID_p0.txt`, preserving newlines and embedded-image markers.
 and belong under `extractor.pixiv-novel`. Text and covers share the novel ID
 but have separate archive entries, isolated from illustration IDs. Profile
 `include` novel children use the novel category's credentials, network and output
-settings. Embedded-image expansion and upstream's extended
-novel metadata options remain unfinished. Text/cover failures close the current
+settings. Embedded-image expansion and additional extended novel metadata
+fields remain unfinished. Text/cover failures close the current
 post and allow later novels to continue; native mode currently reports these as
 errors where upstream warns. Authenticated live novel extraction is unverified;
 local HTTP fixtures cover selection, pagination, text publication and recovery.
