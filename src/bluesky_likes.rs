@@ -1,6 +1,31 @@
 //! Public Bluesky liked-post record traversal and DID service discovery.
 use super::*;
 
+const MAX_SERVICES: usize = 1024;
+
+#[derive(Default)]
+pub(super) struct DiscoveryCache {
+    entries: BTreeMap<String, Arc<tokio::sync::OnceCell<Url>>>,
+    order: VecDeque<String>,
+}
+
+impl DiscoveryCache {
+    fn cell(&mut self, did: &str) -> Arc<tokio::sync::OnceCell<Url>> {
+        if let Some(cell) = self.entries.get(did) {
+            return cell.clone();
+        }
+        if self.entries.len() >= MAX_SERVICES
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.entries.remove(&oldest);
+        }
+        let cell = Arc::new(tokio::sync::OnceCell::new());
+        self.entries.insert(did.into(), cell.clone());
+        self.order.push_back(did.into());
+        cell
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LikesEndpoint {
     #[default]
@@ -104,6 +129,13 @@ impl Bluesky {
     pub(super) fn with_likes_test_roots(mut self, discovery: Url, fallback: Url) -> Self {
         self.discovery_root = Some(discovery);
         self.pds_fallback = fallback;
+        self.discovery_cache = std::sync::Mutex::new(DiscoveryCache::default());
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_blob_test_root(mut self, root: Option<Url>) -> Self {
+        self.blob_root_override = root;
         self
     }
 
@@ -127,6 +159,16 @@ impl Bluesky {
     }
 
     async fn personal_server(&self, did: &str) -> Url {
+        let cell = {
+            self.discovery_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .cell(did)
+        };
+        cell.get_or_init(|| self.discover_server(did)).await.clone()
+    }
+
+    async fn discover_server(&self, did: &str) -> Url {
         let document =
             tokio::time::timeout(self.timeout, self.request(&self.discovery_url(did))).await;
         if let Ok(Ok(document)) = document
@@ -135,6 +177,37 @@ impl Bluesky {
             return root;
         }
         self.pds_fallback.clone()
+    }
+
+    pub(super) async fn route_blob(&self, media: &mut Media) -> Result<()> {
+        let did = media
+            .url
+            .query_pairs()
+            .find(|(key, _)| key == "did")
+            .map(|(_, value)| value.into_owned())
+            .filter(|did| valid_did(did))
+            .ok_or_else(|| error("Bluesky media is missing a valid author DID"))?;
+        let cid = media
+            .metadata
+            .as_ref()
+            .map(|post| post.media_id.as_str())
+            .filter(|cid| valid_cid(cid))
+            .ok_or_else(|| error("Bluesky media has an invalid blob CID"))?;
+        #[cfg(test)]
+        let root = match &self.blob_root_override {
+            Some(root) => root.clone(),
+            None => self.personal_server(&did).await,
+        };
+        #[cfg(not(test))]
+        let root = self.personal_server(&did).await;
+        let mut url = root
+            .join("xrpc/com.atproto.sync.getBlob")
+            .map_err(|_| error("Bluesky DID service has an invalid base URL"))?;
+        url.query_pairs_mut()
+            .append_pair("did", &did)
+            .append_pair("cid", cid);
+        media.url = url;
+        Ok(())
     }
 
     async fn like_page(&self, state: &mut State) -> Result<()> {
@@ -264,6 +337,24 @@ impl Bluesky {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn discovery_cache_is_bounded_shares_pending_entries_and_evicts_oldest() {
+        let mut cache = DiscoveryCache::default();
+        let first = cache.cell("did:web:first.example");
+        assert!(Arc::ptr_eq(&first, &cache.cell("did:web:first.example")));
+        for index in 0..MAX_SERVICES {
+            cache.cell(&format!("did:web:owner{index}.example"));
+        }
+        assert_eq!(cache.entries.len(), MAX_SERVICES);
+        assert_eq!(cache.order.len(), MAX_SERVICES);
+        assert!(!cache.entries.contains_key("did:web:first.example"));
+        let latest = format!("did:web:owner{}.example", MAX_SERVICES - 1);
+        let cell = cache.cell(&latest);
+        assert!(Arc::ptr_eq(&cell, &cache.cell(&latest)));
+        assert!(!Arc::ptr_eq(&first, &cache.cell("did:web:first.example")));
+        assert_eq!(cache.entries.len(), MAX_SERVICES);
+    }
 
     #[test]
     fn discovery_requires_matching_did_and_safe_https_service_and_builds_expected_urls() {

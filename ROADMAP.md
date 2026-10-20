@@ -517,8 +517,26 @@ Valid own media now emit before quote validation, so a malformed quote cannot
 erase those files or poison later likes. On 2026-10-20 bounded public native
 likes inspection emitted one media job with no errors; an upstream resolved-JSON
 inspection selected the same original post, author DID and blob CID. Neither
-inspection downloaded media. Native login/restricted likes, PDS-specific blob
-routing and successful blob transfers remain unfinished.
+inspection downloaded media. Native login/restricted likes remain unfinished.
+
+**Implemented author-specific Bluesky blob routing:** asynchronous native post,
+feed, liked-post, quote and profile-image streams now use each media author's
+validated DID service endpoint for getBlob jobs, including service base paths.
+The shared bounded cache stores up to 1,024 successful/fallback roots with
+in-flight lookup sharing, releases locks before network work and allows canceled
+initialization to retry. Repository owner discovery shares this cache; unrelated
+liked/quoted authors retain their own PDS and DID/CID archive identity. Empty
+media and canceled later jobs start no blob discovery. Offline parse helpers
+retain the bsky.social fallback because they perform no network requests.
+Fixtures cover different author servers, profile assets, shared lookup reuse,
+fallbacks, cache bounds, cancellation and credential isolation. CLI proxy tests
+fail discovery locally to verify fallback without public traffic. On 2026-10-20
+native and upstream public avatar inspections produced equivalent getBlob URLs
+on the same non-default PDS. A separate bounded native download saved one
+256,555-byte JPEG in a fresh temporary directory with no partial artifacts;
+JPEG signatures, end marker and image metadata were verified, and the saved
+bytes' SHA-256 digest matched the blob CID's multihash.
+Authenticated/restricted blobs and broader PDS captures remain unverified.
 
 **Implemented native file metadata expressions:** repeated `--filter` and scoped
 `file-filter` / `image-filter` string/list settings select normalized public fields
@@ -836,7 +854,7 @@ identities, use hydrated data and fetch missing records lazily with cycle and
 depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
 requested; own pinned posts are retained. Ordered include, replies/video and
 profile-image and public likes views are described above. Not yet: searches,
-authentication, PDS-specific blob hosts (blobs always use `bsky.social`), thread `depth`,
+authentication, thread `depth`,
 metadata facets/user expansion, and newer multi-item media embeds.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook

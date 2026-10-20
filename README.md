@@ -246,9 +246,15 @@ posts retain their individual authors; the author-feed `reposts` restriction
 does not filter mixed-author feed/list results. All feed/list pagination is
 capped at 1,000 pages, follows opaque cursors (up to 1 KiB), and stops on
 repeated cursors; invalid or oversized cursors are explicit errors. Images and videos (also inside
-`recordWithMedia`) are downloaded as full-size blobs from
-`https://bsky.social/xrpc/com.atproto.sync.getBlob?did=DID&cid=CID`, built from
-validated identifiers only. `extractor.bluesky.reposts` defaults to false and
+`recordWithMedia`) are emitted as full-size blob jobs using the media author's
+discovered PDS and `/xrpc/com.atproto.sync.getBlob?did=DID&cid=CID`, built from
+validated identifiers only. The root follows the actual author for mixed feeds,
+liked posts and quotes; it also applies to avatars/banners. DID discovery caches
+up to 1,024 successes or fallback roots per extractor, sharing results with like
+repository reads. Failed discovery falls back to `https://bsky.social`.
+Offline synchronous parsing helpers retain that fallback root; native `events`
+and `stream` perform discovery. Blob host changes do not change DID/CID archive
+identity. `extractor.bluesky.reposts` defaults to false and
 selects the underlying author; own pinned posts retain their normal identity.
 `extractor.bluesky.videos` defaults to true; false omits video blobs.
 `extractor.bluesky.quoted` defaults to false; true follows quoted-post media
@@ -291,8 +297,9 @@ login is implemented; restricted endpoints/content still report access errors.
 Category-scoped `api-server` overrides the AppView base URL (HTTP(S), optional
 path, no credentials/query/fragment), appending `/xrpc/`; it does not redirect
 DID discovery or repository reads. An empty string, `false` or `null` restores
-the public AppView. Both settings forward to compatibility mode. Blob jobs still
-use `bsky.social`; full PDS-specific blob routing remains unfinished.
+the public AppView. Both settings forward to compatibility mode. Blob routing
+and repository reads use their authors' DID service roots independently of this
+override; no API credentials are copied to blob jobs.
 
 Experimental native Reddit extraction (`--extractor native`, category `reddit`)
 accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),
