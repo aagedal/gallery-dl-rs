@@ -823,8 +823,14 @@ bookmark-detail failures abort before the affected post. Both fields reach
 inspection, sidecars, predicates and templates without changing archives.
 Configuration honors JSON truthiness and explicit-null inheritance clearing.
 Fixed comment endpoint/scope, cycle/page/aggregate bounds and cancellation protect
-pagination. Native novel enrichment and live authenticated verification remain
-unfinished.
+pagination. Native novels support the same switches in an independent category,
+including profile queues. Novel comments use their own endpoint and ID scope,
+ignore `_ajax`, and propagate failures before the post or text/cover requests.
+Enrichment is shared by Post/text/cover output; later text failures keep the post
+and allow subsequent novels. Source oracle cases and HTTP tests cover category
+routing, ordering, failure boundaries and selection. Compatibility novel text and
+cover defaults now use source `{id}_p{N}.{extension}` filenames. Live authenticated
+enrichment verification remains unfinished.
 Native following lists queue selected users through normal profile `include`
 dispatch, with bounded preview fields for child filters, lazy scoped pagination,
 cycle detection and a 200-page cap. Modern and legacy URLs support public/private

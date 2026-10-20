@@ -1125,6 +1125,10 @@ fn extract_input<'a>(
                                         covers: novel_options.covers.unwrap_or(false),
                                         full_series: novel_options.full_series.unwrap_or(false),
                                     })
+                                    .with_comments(novel_options.comments.unwrap_or(false))
+                                    .with_metadata_bookmark(
+                                        novel_options.metadata_bookmark.unwrap_or(false),
+                                    )
                                     .with_max_posts(novel_options.max_posts)
                                     .with_tags(novel_options.tags.unwrap_or_default())
                                     .with_cursor(novel_options.cursor.clone())
@@ -1312,8 +1316,10 @@ fn extract_input<'a>(
                                 .then_some(options.order_revisions)
                                 .flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
-                            comments: (category == "pixiv").then_some(options.comments).flatten(),
-                            metadata_bookmark: (category == "pixiv")
+                            comments: matches!(category, "pixiv" | "pixiv-novel")
+                                .then_some(options.comments)
+                                .flatten(),
+                            metadata_bookmark: matches!(category, "pixiv" | "pixiv-novel")
                                 .then_some(options.metadata_bookmark)
                                 .flatten(),
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),

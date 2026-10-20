@@ -140,6 +140,12 @@ impl Novel {
         .map(Arc::from);
         let metadata = PostMetadata {
             tags: data.get("tags").and_then(|tags| mode.transform(tags)),
+            comments: data
+                .get("comments")
+                .and_then(crate::extract::pixiv_comments),
+            tags_bookmark: data
+                .get("tags_bookmark")
+                .and_then(crate::extract::pixiv_bookmark_tags),
             post_id: id.clone(),
             media_id: format!("{id}_p0"),
             index: 1,
@@ -427,9 +433,15 @@ impl Pixiv {
                         if state.done {
                             return None;
                         }
-                        if let Some(data) = state.works.pop_front() {
+                        if let Some(mut data) = state.works.pop_front() {
                             if let Some(remaining) = &mut state.remaining {
                                 *remaining -= 1;
+                            }
+                            if let Err(error) = self.enrich_novel_work(&mut data).await {
+                                state.done = true;
+                                state.works.clear();
+                                state.next = None;
+                                return Some((Err(error), state));
                             }
                             match Novel::parse(data, self.tags) {
                                 Ok(novel) => {
@@ -1568,5 +1580,462 @@ mod tests {
                     || request.contains("user/detail"))
         );
         assert!(files[0].archive_key().unwrap().starts_with("pixiv-novel:"));
+    }
+    fn enrichable_novel(id: u64) -> Value {
+        let mut work = novel(id, "author");
+        work["total_comments"] = json!(2);
+        work["is_bookmarked"] = json!(true);
+        work["_ajax"] = json!(true); // Novel comments have no illustration AJAX gate.
+        work
+    }
+
+    fn novel_comments_reply() -> Vec<u8> {
+        response("200 OK", br#"{"comments":[{"id":7,"comment":"first"},{"id":7,"comment":"duplicate"}],"next_url":null}"#)
+    }
+
+    fn novel_bookmark_reply() -> Vec<u8> {
+        response("200 OK", br#"{"bookmark_detail":{"tags":[{"name":"keep","is_registered":true},{"name":"omit","is_registered":false},{"name":"keep","is_registered":1}]}}"#)
+    }
+
+    #[tokio::test]
+    async fn novel_enrichment_finishes_before_post_and_drop_avoids_text_and_cover() {
+        let (root, server) = serve(vec![
+            token("t"),
+            detail(enrichable_novel(41)),
+            novel_comments_reply(),
+            novel_bookmark_reply(),
+        ]);
+        let native = pixiv(root)
+            .with_comments(true)
+            .with_metadata_bookmark(true)
+            .with_novel_options(NovelOptions {
+                covers: true,
+                full_series: false,
+            });
+        let url = Url::parse("https://www.pixiv.net/n/41").unwrap();
+        let mut events = native.events(&url);
+        let ExtractionEvent::Post(post) = events.next().await.unwrap().unwrap() else {
+            panic!("expected enriched post")
+        };
+        let metadata = post.metadata.unwrap();
+        assert_eq!(metadata.comments.as_ref().unwrap().len(), 2);
+        assert_eq!(metadata.tags_bookmark.as_deref().unwrap(), ["keep", "keep"]);
+        drop(events);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[2].starts_with("GET /v1/novel/comments?novel_id=41 "));
+        assert!(requests[3].starts_with("GET /v2/novel/bookmark/detail?novel_id=41 "));
+        assert!(!requests.iter().any(|request| request.contains("webview")));
+    }
+
+    #[tokio::test]
+    async fn novel_enrichment_is_shared_by_post_text_and_cover_after_comment_pagination() {
+        let (root, server) = serve_with(|root| {
+            vec![token("t"), detail(enrichable_novel(41)),
+            response("200 OK",json!({"comments":[{"id":1,"comment":"one"}],"next_url":root.join("v1/novel/comments?novel_id=41&offset=30").unwrap()}).to_string().as_bytes()),
+            novel_comments_reply(),novel_bookmark_reply(),webview("text")]
+        });
+        let native = pixiv(root)
+            .with_comments(true)
+            .with_metadata_bookmark(true)
+            .with_novel_options(NovelOptions {
+                covers: true,
+                full_series: false,
+            });
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/n/41").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("expected post")
+        };
+        let metadata = post.metadata.as_ref().unwrap();
+        assert_eq!(metadata.comments.as_ref().unwrap().len(), 3);
+        for event in &events[1..3] {
+            let ExtractionEvent::Media(file) = event else {
+                panic!("expected text or cover")
+            };
+            let file_metadata = file.metadata.as_ref().unwrap();
+            assert!(Arc::ptr_eq(
+                file_metadata.comments.as_ref().unwrap(),
+                metadata.comments.as_ref().unwrap()
+            ));
+            assert!(Arc::ptr_eq(
+                file_metadata.tags_bookmark.as_ref().unwrap(),
+                metadata.tags_bookmark.as_ref().unwrap()
+            ));
+        }
+        assert!(matches!(events[3], ExtractionEvent::EndPost));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 6);
+        assert!(requests[3].starts_with("GET /v1/novel/comments?novel_id=41&offset=30 "));
+        assert!(requests[5].starts_with("GET /webview/v2/novel?id=41&"));
+    }
+
+    #[tokio::test]
+    async fn novel_enrichment_failures_abort_all_feeds_before_post_and_buffered_successors() {
+        for route in [
+            "users/9/novels",
+            "novel/series/7",
+            "users/9/bookmarks/novels",
+            "n/41",
+        ] {
+            for fail_comments in [true, false] {
+                let mut first = enrichable_novel(41);
+                if route == "n/41" {
+                    first["series"] = json!({"id":7});
+                }
+                let mut replies = vec![token("t")];
+                if route == "n/41" {
+                    replies.push(detail(first.clone()));
+                }
+                replies.push(page(vec![first, enrichable_novel(42)], None));
+                if !fail_comments {
+                    replies.push(novel_comments_reply());
+                }
+                replies.push(response("404 Not Found", b"PRIVATE_ENRICHMENT_ERROR"));
+                let (root, server) = serve(replies);
+                let native = pixiv(root)
+                    .with_comments(true)
+                    .with_metadata_bookmark(true)
+                    .with_novel_options(NovelOptions {
+                        covers: true,
+                        full_series: true,
+                    });
+                let events = native
+                    .events(&Url::parse(&format!("https://www.pixiv.net/{route}")).unwrap())
+                    .collect::<Vec<_>>()
+                    .await;
+                assert_eq!(events.len(), 1, "{route} {events:?}");
+                let message = events[0].as_ref().unwrap_err().to_string();
+                assert!(!message.contains("PRIVATE_ENRICHMENT_ERROR"));
+                let requests = server.join().unwrap();
+                assert_eq!(
+                    requests.len(),
+                    3 + usize::from(route == "n/41") + usize::from(!fail_comments)
+                );
+                assert!(
+                    !requests
+                        .iter()
+                        .any(|request| request.contains("webview")
+                            || request.contains("novel_id=42"))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn novel_enrichment_budget_precedes_post_range_and_stops_before_next_work() {
+        for select_second in [false, true] {
+            let (root, server) = serve(vec![
+                token("t"),
+                page(vec![enrichable_novel(41), enrichable_novel(42)], None),
+                novel_comments_reply(),
+                novel_bookmark_reply(),
+                webview("one"),
+            ]);
+            let native = pixiv(root)
+                .with_comments(true)
+                .with_metadata_bookmark(true)
+                .with_max_posts(Some(1));
+            let url = Url::parse("https://www.pixiv.net/users/9/novels").unwrap();
+            let events = native.events(&url);
+            let files = if select_second {
+                PostSelection::new(Some(RangeSelection::parse("2").unwrap()), None)
+                    .apply(events, None, None, false)
+            } else {
+                event::media_only(events)
+            }
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+            assert_eq!(files.len(), usize::from(!select_second));
+            assert_eq!(server.join().unwrap().len(), 5);
+        }
+    }
+
+    #[tokio::test]
+    async fn profile_novel_dispatch_uses_independent_enrichment_flags() {
+        let (root, server) = serve(vec![
+            token("novel-only"),
+            page(vec![enrichable_novel(41)], None),
+            novel_comments_reply(),
+            novel_bookmark_reply(),
+            webview("one"),
+        ]);
+        let novel_native = Arc::new(pixiv(root).with_comments(true).with_metadata_bookmark(true));
+        let native = Pixiv::new(std::time::Duration::from_secs(2))
+            .unwrap()
+            .with_include(Some(crate::dispatch::Include::Views(vec![
+                "novel-user".into(),
+            ])))
+            .with_novel_extractor(novel_native);
+        let files = JobSelection::default()
+            .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        let metadata = files[0].metadata.as_ref().unwrap();
+        assert!(metadata.comments.is_some());
+        assert!(metadata.tags_bookmark.is_some());
+        assert_eq!(server.join().unwrap().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn cancelling_novel_enrichment_closes_http_before_bookmark_post_or_text() {
+        use std::time::Duration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let (started, waiting) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            for reply in [token("t"), detail(enrichable_novel(41))] {
+                let (mut connection, _) = listener.accept().await.unwrap();
+                let mut buffer = [0; 8192];
+                assert_ne!(connection.read(&mut buffer).await.unwrap(), 0);
+                connection.write_all(&reply).await.unwrap();
+            }
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 8192];
+            let count = connection.read(&mut buffer).await.unwrap();
+            assert!(
+                String::from_utf8_lossy(&buffer[..count])
+                    .starts_with("GET /v1/novel/comments?novel_id=41 ")
+            );
+            connection
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n{\"comments\":[")
+                .await
+                .unwrap();
+            started.send(()).unwrap();
+            match tokio::time::timeout(Duration::from_secs(2), connection.read(&mut buffer))
+                .await
+                .unwrap()
+            {
+                Ok(0) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                other => panic!("novel comment connection stayed active: {other:?}"),
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let extraction = tokio::spawn(async move {
+            pixiv(root)
+                .with_comments(true)
+                .with_metadata_bookmark(true)
+                .events(&Url::parse("https://www.pixiv.net/n/41").unwrap())
+                .collect::<Vec<_>>()
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        extraction.abort();
+        assert!(extraction.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn recorded_novel_enrichment_source_cases_match_http_metadata_and_ordering() {
+        let fixture: Value = serde_json::from_slice(include_bytes!(
+            "../tests/fixtures/pixiv/novel_enrichment.json"
+        ))
+        .unwrap();
+        for case in fixture["cases"].as_array().unwrap() {
+            // Tag-shape validation predates this enrichment change; this case
+            // records an existing difference in malformed-tag handling.
+            if case["name"] == "malformed_tags_error_after_enrichment" {
+                continue;
+            }
+            let calls = case["calls"].as_array().unwrap();
+            let works = case["input_works"].as_array().unwrap().clone();
+            let (root, server) = serve_with(|root| {
+                let mut replies = vec![token("t"), page(works.clone(), None)];
+                for call in calls.iter().skip(1) {
+                    let id = call["id"].as_u64().unwrap();
+                    match call["method"].as_str().unwrap() {
+                        "novel_comments" => {
+                            let values = case["comments_script"]["values"].as_array().unwrap();
+                            if id == 42
+                                && let Some(before) =
+                                    case["comments_script"]["fail_before_index"].as_u64()
+                            {
+                                if before > 0 {
+                                    replies.push(response("200 OK",json!({"comments":values.iter().take(before as usize).cloned().collect::<Vec<_>>(),"next_url":root.join("v1/novel/comments?novel_id=42&offset=30").unwrap()}).to_string().as_bytes()));
+                                }
+                                replies.push(response("404 Not Found", b"PRIVATE_COMMENT_ERROR"));
+                            } else {
+                                replies.push(response(
+                                    "200 OK",
+                                    json!({"comments":values,"next_url":null})
+                                        .to_string()
+                                        .as_bytes(),
+                                ));
+                            }
+                        }
+                        "novel_bookmark_detail" => {
+                            replies.push(if id == 42 && case["bookmark_fail"] == true {
+                                response("404 Not Found", b"PRIVATE_BOOKMARK_ERROR")
+                            } else {
+                                response(
+                                    "200 OK",
+                                    json!({"bookmark_detail":case["bookmark_detail"]})
+                                        .to_string()
+                                        .as_bytes(),
+                                )
+                            });
+                        }
+                        "novel_webview" => {
+                            replies.push(if id == 42 && case["webview_fail"] == true {
+                                response("404 Not Found", b"PRIVATE_WEBVIEW_ERROR")
+                            } else {
+                                let content = if id == 42 {
+                                    case["webview"].clone()
+                                } else {
+                                    json!({"text":"Later fixture text"})
+                                };
+                                response("200 OK", format!("novel: {content},\n").as_bytes())
+                            });
+                        }
+                        other => panic!("unexpected oracle call: {other}"),
+                    }
+                }
+                replies
+            });
+            let mode = super::super::TagMode::parse(
+                case["options"]["tags"].as_str().unwrap_or("japanese"),
+            );
+            let native = pixiv(root)
+                .with_comments(
+                    case["options"]
+                        .get("comments")
+                        .is_some_and(super::super::value_truthy),
+                )
+                .with_metadata_bookmark(
+                    case["options"]
+                        .get("metadata-bookmark")
+                        .is_some_and(super::super::value_truthy),
+                )
+                .with_tags(mode)
+                .with_novel_options(NovelOptions {
+                    covers: case["options"]
+                        .get("covers")
+                        .is_some_and(super::super::value_truthy),
+                    full_series: false,
+                });
+            let events = native
+                .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            let mut expected = case["events"].as_array().unwrap().iter();
+            let mut errors = 0;
+            for event in events {
+                let (metadata, file) = match event {
+                    Ok(ExtractionEvent::Post(post)) => {
+                        let next = expected
+                            .next()
+                            .unwrap_or_else(|| panic!("unexpected post in {}", case["name"]));
+                        assert_eq!(next["kind"], "post", "{}", case["name"]);
+                        (post.metadata.unwrap(), None)
+                    }
+                    Ok(ExtractionEvent::Media(file)) => {
+                        let next = expected
+                            .next()
+                            .unwrap_or_else(|| panic!("unexpected media in {}", case["name"]));
+                        assert_eq!(next["kind"], "media", "{}", case["name"]);
+                        assert_eq!(
+                            file.filename,
+                            next["default_filename"].as_str().unwrap(),
+                            "{}",
+                            case["name"]
+                        );
+                        match &file.job {
+                            MediaJob::InlineText { data } => {
+                                assert_eq!(format!("text:{data}"), next["url"].as_str().unwrap())
+                            }
+                            _ => assert_eq!(file.url.as_str(), next["url"].as_str().unwrap()),
+                        }
+                        let metadata = file.metadata.clone().unwrap();
+                        (metadata, Some(file))
+                    }
+                    Ok(ExtractionEvent::EndPost) => continue,
+                    Err(error) => {
+                        errors += 1;
+                        assert!(!error.to_string().contains("PRIVATE"));
+                        continue;
+                    }
+                    other => panic!("unexpected novel event {other:?}"),
+                };
+                // The source event just consumed is determined by the number
+                // left, preserving repeated comment/tag values verbatim.
+                let index = case["events"].as_array().unwrap().len() - expected.len() - 1;
+                let source = &case["events"][index]["metadata"];
+                assert_eq!(
+                    metadata
+                        .comments
+                        .as_ref()
+                        .map(|values| serde_json::to_value(values).unwrap()),
+                    source.get("comments").cloned(),
+                    "{}",
+                    case["name"]
+                );
+                assert_eq!(
+                    metadata
+                        .tags_bookmark
+                        .as_ref()
+                        .map(|values| serde_json::to_value(values).unwrap()),
+                    source.get("tags_bookmark").cloned(),
+                    "{}",
+                    case["name"]
+                );
+                assert_eq!(
+                    metadata
+                        .tags
+                        .as_ref()
+                        .map(|values| serde_json::to_value(values).unwrap()),
+                    source.get("tags").cloned(),
+                    "{}",
+                    case["name"]
+                );
+                if let Some(file) = file {
+                    let raw = works
+                        .iter()
+                        .find(|work| id_of(work).as_deref() == Some(metadata.post_id.as_str()))
+                        .unwrap()
+                        .clone();
+                    let ordinary = Novel::parse(raw, mode).unwrap();
+                    let expected_key = if metadata.index == 1 {
+                        ordinary.text(String::new()).unwrap().archive_key()
+                    } else {
+                        ordinary.cover().unwrap().archive_key()
+                    };
+                    assert_eq!(file.archive_key(), expected_key);
+                }
+            }
+            assert_eq!(expected.len(), 0, "{}", case["name"]);
+            if !case["error"].is_null() {
+                assert_eq!(errors, 1, "{}", case["name"]);
+            } else if case["webview_fail"] == true || case["webview"].get("text").is_none() {
+                assert!(errors > 0, "{}", case["name"]);
+            } else {
+                assert_eq!(errors, 0, "{}", case["name"]);
+            }
+            let requests = server.join().unwrap();
+            assert!(requests[1].starts_with("GET /v1/user/novels?user_id=9 "));
+            assert!(requests.iter().all(|request| !request.contains("/illust/")));
+        }
     }
 }

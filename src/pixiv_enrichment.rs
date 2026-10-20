@@ -1,4 +1,4 @@
-//! Optional illustration comments and registered bookmark-tag enrichment.
+//! Optional Pixiv illustration/novel comments and registered bookmark tags.
 use super::Pixiv;
 use crate::{Result, error};
 use serde_json::Value;
@@ -22,6 +22,38 @@ const MAX_COMMENTS: usize = 100_000;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
 const MAX_QUERY: usize = 64 * 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkKind {
+    Illustration,
+    Novel,
+}
+impl WorkKind {
+    fn id_key(self) -> &'static str {
+        match self {
+            Self::Illustration => "illust_id",
+            Self::Novel => "novel_id",
+        }
+    }
+    fn comments_endpoint(self) -> &'static str {
+        match self {
+            Self::Illustration => "v3/illust/comments",
+            Self::Novel => "v1/novel/comments",
+        }
+    }
+    fn bookmark_endpoint(self) -> &'static str {
+        match self {
+            Self::Illustration => "v2/illust/bookmark/detail",
+            Self::Novel => "v2/novel/bookmark/detail",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Illustration => "illustration",
+            Self::Novel => "novel",
+        }
+    }
+}
+
 impl Pixiv {
     pub fn with_comments(mut self, enabled: bool) -> Self {
         self.comments = enabled;
@@ -32,15 +64,15 @@ impl Pixiv {
         self
     }
 
-    fn comments_first(&self, id: &str) -> Url {
+    fn comments_first(&self, kind: WorkKind, id: &str) -> Url {
         let mut endpoint = self
             .api_root
-            .join("v3/illust/comments")
+            .join(kind.comments_endpoint())
             .expect("static comments endpoint");
-        endpoint.query_pairs_mut().append_pair("illust_id", id);
+        endpoint.query_pairs_mut().append_pair(kind.id_key(), id);
         endpoint
     }
-    fn comments_next(&self, id: &str, raw: &str) -> Result<Url> {
+    fn comments_next(&self, kind: WorkKind, id: &str, raw: &str) -> Result<Url> {
         let invalid = || error("Pixiv returned unexpected comment pagination");
         if raw.len() > MAX_QUERY {
             return Err(invalid());
@@ -60,17 +92,17 @@ impl Pixiv {
         }
         if !pairs
             .iter()
-            .any(|(key, value)| key == "illust_id" && value == id)
+            .any(|(key, value)| key == kind.id_key() && value == id)
         {
             return Err(invalid());
         }
-        let mut endpoint = self.comments_first(id);
+        let mut endpoint = self.comments_first(kind, id);
         endpoint.set_query(None);
         endpoint.query_pairs_mut().extend_pairs(pairs);
         Ok(endpoint)
     }
-    async fn illust_comments(&self, id: &str) -> Result<Vec<Value>> {
-        let mut endpoint = self.comments_first(id);
+    async fn work_comments(&self, kind: WorkKind, id: &str) -> Result<Vec<Value>> {
+        let mut endpoint = self.comments_first(kind, id);
         let mut seen = BTreeSet::new();
         let mut output = Vec::new();
         let mut bytes = 2usize;
@@ -116,6 +148,7 @@ impl Pixiv {
                 return Ok(output);
             }
             endpoint = self.comments_next(
+                kind,
                 id,
                 next.as_str()
                     .ok_or_else(|| error("Pixiv returned invalid comment pagination"))?,
@@ -123,13 +156,13 @@ impl Pixiv {
         }
         Err(error("Pixiv comments exceeded the page limit"))
     }
-    async fn bookmark_tags(&self, id: &str) -> Result<Vec<Value>> {
+    async fn bookmark_tags(&self, kind: WorkKind, id: &str) -> Result<Vec<Value>> {
         let invalid = || error("Pixiv returned invalid registered bookmark tags");
         let mut endpoint = self
             .api_root
-            .join("v2/illust/bookmark/detail")
+            .join(kind.bookmark_endpoint())
             .expect("static bookmark detail endpoint");
-        endpoint.query_pairs_mut().append_pair("illust_id", id);
+        endpoint.query_pairs_mut().append_pair(kind.id_key(), id);
         let mut body = super::json(&self.get(&endpoint).await?)?;
         let tags = body
             .get_mut("bookmark_detail")
@@ -160,28 +193,42 @@ impl Pixiv {
         Ok(output)
     }
     pub(super) async fn enrich_work(&self, work: &mut Value) -> Result<()> {
+        self.enrich_kind(work, WorkKind::Illustration).await
+    }
+    pub(super) async fn enrich_novel_work(&self, work: &mut Value) -> Result<()> {
+        self.enrich_kind(work, WorkKind::Novel).await
+    }
+    async fn enrich_kind(&self, work: &mut Value, kind: WorkKind) -> Result<()> {
         if !self.comments && !self.metadata_bookmark {
             return Ok(());
         }
-        let id = super::id_of(work)
-            .ok_or_else(|| error("Pixiv enrichment requires a valid illustration ID"))?;
+        let id = super::id_of(work).ok_or_else(|| {
+            error(format!(
+                "Pixiv enrichment requires a valid {} ID",
+                kind.label()
+            ))
+        })?;
         if self.comments {
             let comments = if work.get("total_comments").is_some_and(super::value_truthy)
-                && !work.get("_ajax").is_some_and(super::value_truthy)
+                && (kind == WorkKind::Novel || !work.get("_ajax").is_some_and(super::value_truthy))
             {
-                self.illust_comments(&id).await.unwrap_or_default()
+                let comments = self.work_comments(kind, &id).await;
+                if kind == WorkKind::Novel {
+                    comments?
+                } else {
+                    comments.unwrap_or_default()
+                }
             } else {
                 Vec::new()
             };
             work["comments"] = Value::Array(comments);
         }
         if self.metadata_bookmark
-            && super::value_truthy(
-                work.get("is_bookmarked")
-                    .ok_or_else(|| error("Pixiv illustration contains no bookmark state"))?,
-            )
+            && super::value_truthy(work.get("is_bookmarked").ok_or_else(|| {
+                error(format!("Pixiv {} contains no bookmark state", kind.label()))
+            })?)
         {
-            work["tags_bookmark"] = Value::Array(self.bookmark_tags(&id).await?);
+            work["tags_bookmark"] = Value::Array(self.bookmark_tags(kind, &id).await?);
         }
         Ok(())
     }
@@ -771,5 +818,188 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+    #[tokio::test]
+    async fn novel_helper_uses_novel_endpoints_and_ignores_ajax_comment_gate() {
+        let first =
+            json!({"id":1,"comment":"raw <text>","user":{"id":9},"extra":{"full":[true,null]}});
+        let second = json!({"id":2,"comment":"second"});
+        let (root, server) = serve(vec![
+            token("ACCESS_SECRET"),
+            comments(
+                vec![first.clone()],
+                json!(
+                    "https://unrequested.invalid/v3/illust/comments?novel_id=42&novel_id=99&offset=30"
+                ),
+            ),
+            comments(vec![second.clone()], Value::Null),
+            bookmark(),
+        ]);
+        let native = pixiv(root).with_comments(true).with_metadata_bookmark(true);
+        let mut data = work(42);
+        data["_ajax"] = json!(true);
+        native.enrich_novel_work(&mut data).await.unwrap();
+        assert_eq!(data["comments"], json!([first, second]));
+        assert_eq!(data["tags_bookmark"], json!(["same", "same", " 猫 "]));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[1].starts_with("GET /v1/novel/comments?novel_id=42 "));
+        assert!(requests[2].starts_with("GET /v1/novel/comments?novel_id=42&offset=30 "));
+        assert!(requests[3].starts_with("GET /v2/novel/bookmark/detail?novel_id=42 "));
+        assert!(requests[1..].iter().all(|request| {
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer access_secret")
+        }));
+        assert!(
+            requests
+                .iter()
+                .all(|request| !request.contains("unrequested.invalid")
+                    && !request.contains("illust_id="))
+        );
+    }
+
+    #[tokio::test]
+    async fn novel_comment_failures_propagate_before_bookmark_and_do_not_publish_partial_comments()
+    {
+        for (partial, failure, needle) in [
+            (false, response("404 Not Found", b"PRIVATE"), "not found"),
+            (true, response("404 Not Found", b"PRIVATE"), "not found"),
+            (
+                true,
+                reply(&json!({"comments":[{"id":2}]})),
+                "pagination state",
+            ),
+            (
+                true,
+                comments(
+                    vec![json!({"id":2})],
+                    json!("?novel_id=99&novel_id=42&offset=60"),
+                ),
+                "pagination",
+            ),
+            (
+                true,
+                comments(vec![json!({"id":2})], json!("?illust_id=42&offset=60")),
+                "pagination",
+            ),
+            (
+                true,
+                comments(vec![json!({"id":2})], json!("?novel_id=42")),
+                "repeated a page",
+            ),
+        ] {
+            let mut replies = vec![token("t")];
+            if partial {
+                replies.push(comments(
+                    vec![json!({"id":1})],
+                    json!("novel_id=42&offset=30"),
+                ));
+            }
+            replies.push(failure);
+            let (root, server) = serve(replies);
+            let mut data = work(42);
+            let error = pixiv(root)
+                .with_comments(true)
+                .with_metadata_bookmark(true)
+                .enrich_novel_work(&mut data)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(needle), "{error}");
+            assert!(!error.contains("PRIVATE"));
+            assert!(data.get("comments").is_none());
+            assert!(data.get("tags_bookmark").is_none());
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 2 + usize::from(partial));
+            assert!(
+                requests
+                    .iter()
+                    .all(|request| !request.contains("bookmark/detail"))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn novel_disabled_and_falsy_comment_gates_do_not_authenticate() {
+        for total in [
+            Value::Null,
+            json!(false),
+            json!(0),
+            json!(""),
+            json!([]),
+            json!({}),
+        ] {
+            let (root, server) = serve(vec![]);
+            let native = pixiv(root)
+                .with_refresh_token(None)
+                .with_comments(true)
+                .with_metadata_bookmark(true);
+            let mut data = work(42);
+            data["total_comments"] = total;
+            data["is_bookmarked"] = json!(false);
+            data["_ajax"] = json!(true);
+            native.enrich_novel_work(&mut data).await.unwrap();
+            assert_eq!(data["comments"], json!([]));
+            assert!(data.get("tags_bookmark").is_none());
+            assert!(server.join().unwrap().is_empty());
+        }
+        let (root, server) = serve(vec![]);
+        let native = pixiv(root).with_refresh_token(None);
+        let mut data = work(42);
+        native.enrich_novel_work(&mut data).await.unwrap();
+        assert!(data.get("comments").is_none());
+        assert!(data.get("tags_bookmark").is_none());
+        assert!(server.join().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn novel_comments_inherit_count_and_page_bounds_as_fatal_errors() {
+        let (root, server) = serve(vec![
+            token("t"),
+            comments(
+                vec![Value::Null; MAX_COMMENTS],
+                json!("?novel_id=42&offset=30"),
+            ),
+            comments(vec![Value::Null], Value::Null),
+        ]);
+        let mut data = work(42);
+        let error = pixiv(root)
+            .with_comments(true)
+            .with_metadata_bookmark(true)
+            .enrich_novel_work(&mut data)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("count limit"));
+        assert!(data.get("comments").is_none());
+        assert!(data.get("tags_bookmark").is_none());
+        assert_eq!(server.join().unwrap().len(), 3);
+        let (root, server) = serve_with(|_| {
+            let mut replies = vec![token("t")];
+            for index in 0..super::super::MAX_PAGES {
+                replies.push(comments(
+                    vec![],
+                    json!(format!("?novel_id=42&offset={}", index + 1)),
+                ));
+            }
+            replies
+        });
+        let mut data = work(42);
+        let error = pixiv(root)
+            .with_comments(true)
+            .enrich_novel_work(&mut data)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("page limit"));
+        assert!(data.get("comments").is_none());
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1 + super::super::MAX_PAGES);
+        assert!(
+            requests[1..]
+                .iter()
+                .all(|request| request.starts_with("GET /v1/novel/comments?novel_id=42"))
+        );
     }
 }

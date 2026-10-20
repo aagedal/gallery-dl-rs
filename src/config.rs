@@ -128,9 +128,9 @@ pub struct Options {
     pub max_posts: Option<usize>,
     /// Look up Kemono/Coomer creator profiles.
     pub metadata: Option<bool>,
-    /// Include Pixiv illustration comments.
+    /// Include Pixiv illustration or novel comments.
     pub comments: Option<bool>,
-    /// Include Pixiv illustration bookmark metadata.
+    /// Include Pixiv illustration or novel bookmark metadata.
     pub metadata_bookmark: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,

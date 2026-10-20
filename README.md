@@ -628,9 +628,17 @@ the affected post. Both fields are shared by post/file inspection, sidecars,
 predicates and filename templates, and do not affect archive identity.
 Enrichment runs after file discovery and stays lazy across works and selection
 limits. Comment pagination uses a fixed API endpoint and illustration scope,
-with cycle, page and aggregate-size bounds. These settings currently apply to
-illustration jobs, including Pixivision; native novel comment/bookmark enrichment
-remains unfinished. Live authenticated enrichment remains unverified.
+with cycle, page and aggregate-size bounds. Illustration jobs include Pixivision.
+Novels support the same settings independently under `pixiv-novel`, including
+queued profile novel views. Novel enrichment runs before the post and text/cover
+requests; comment or bookmark-detail failures abort the novel job before emitting
+that post. Unlike illustrations, `_ajax` does not suppress novel comments.
+Successful enrichment is shared by the post, text and optional cover; a later
+text-fetch failure retains the post and permits later novels. Both comment
+endpoints use fixed work-ID scopes and the same pagination bounds. Compatibility
+mode forwards each category's resolved switches. Compatibility novel default
+filenames also use upstream's `{id}_p{N}.{extension}` for text and covers. Live
+authenticated enrichment remains unverified.
 
 Native Pixiv illustrations and novels honor `max-posts` in their respective
 `pixiv` and `pixiv-novel` scopes; zero removes an inherited limit. The limit

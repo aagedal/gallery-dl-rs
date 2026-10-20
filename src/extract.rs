@@ -597,7 +597,7 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
-    /// Optional complete Pixiv illustration comment objects, in API order.
+    /// Optional complete Pixiv illustration or novel comment objects, in API order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comments: Option<std::sync::Arc<[Value]>>,
     /// Registered bookmark tag names, retaining source order and duplicates.
@@ -1467,6 +1467,20 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
         }
     }
     let mut normalized = compatibility_metadata(metadata, category);
+    if category == "pixiv-novel"
+        && let Some(post) = &normalized
+        && crate::pixiv::valid_id(&post.post_id)
+        && let Some(page) = metadata
+            .get("num")
+            .and_then(Value::as_u64)
+            .filter(|page| *page < 10_000)
+        && let Some(extension) = metadata
+            .get("extension")
+            .and_then(Value::as_str)
+            .filter(|extension| valid_extension(extension))
+    {
+        filename = format!("{}_p{page}.{extension}", post.post_id);
+    }
     if category == "pixiv"
         && metadata
             .get("_ugoira_original")
@@ -1869,10 +1883,10 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
-        comments: (category == "pixiv")
+        comments: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("comments").and_then(pixiv_comments))
             .flatten(),
-        tags_bookmark: (category == "pixiv")
+        tags_bookmark: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
             .flatten(),
         ugoira_original: (category == "pixiv")
