@@ -312,16 +312,39 @@ async fn run(args: Args) -> Result<()> {
     let failed = Cell::new(0);
     // Inputs stopped by -A/--abort; their remaining media are neither
     // extracted nor downloaded.
-    let aborted = std::cell::RefCell::new(HashSet::<usize>::new());
+    let aborted = std::sync::Mutex::new(HashSet::<usize>::new());
+    let terminated = std::sync::atomic::AtomicBool::new(false);
     let mut seen = HashSet::new();
     // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
+    let job_configurations = std::sync::Arc::new(if args.dump_json || args.get_urls {
+        BTreeMap::new()
+    } else {
+        settings
+            .iter()
+            .filter_map(|(category, settings)| {
+                settings.postprocessors.as_ref().map(|processors| {
+                    (
+                        (*category).to_owned(),
+                        gallery_dl_rs::postprocess::jobs::JobConfiguration {
+                            processors: processors.clone(),
+                            root: settings.options.base_directory.clone().unwrap(),
+                            filename: settings.filename.clone(),
+                            directory: settings.directory.clone(),
+                        },
+                    )
+                })
+            })
+            .collect()
+    });
     let media = inputs
         .stream()
+        .take_while(|_| std::future::ready(!terminated.load(std::sync::atomic::Ordering::Acquire)))
         .enumerate()
         .flat_map(|(index, source)| {
             let failed = &failed;
             let aborted = &aborted;
+            let terminated = &terminated;
             let input = match source {
                 Ok(source) => {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
@@ -378,15 +401,25 @@ async fn run(args: Args) -> Result<()> {
                             after: settings.options.date_after,
                             unordered: unordered_dates,
                         }
-                        .apply(input),
-                        None => event::media_only(input),
+                        .apply_events(input),
+                        None => input,
                     }
                 }
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
-            input
-                .take_while(move |_| std::future::ready(!aborted.borrow().contains(&index)))
-                .filter_map(move |result| {
+            let input = input
+                .take_while(move |_| {
+                    std::future::ready(
+                        !terminated.load(std::sync::atomic::Ordering::Acquire)
+                            && !aborted
+                                .lock()
+                                .expect("abort state lock poisoned")
+                                .contains(&index),
+                    )
+                })
+                .boxed();
+            gallery_dl_rs::postprocess::jobs::apply(input, job_configurations.clone()).filter_map(
+                move |result| {
                     std::future::ready(match result {
                         Ok(item) => Some((index, item)),
                         Err(e) => {
@@ -395,15 +428,17 @@ async fn run(args: Args) -> Result<()> {
                             None
                         }
                     })
-                })
+                },
+            )
         })
-        .map(|(index, mut item)| {
-            settings[item.category.as_str()]
+        .map(|(index, mut job)| {
+            settings[job.media.category.as_str()]
                 .network
-                .apply_media(&mut item);
-            (index, item)
+                .apply_media(&mut job.media);
+            (index, job)
         })
-        .filter(|(_, item)| {
+        .filter(|(_, job)| {
+            let item = &job.media;
             if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
                 return std::future::ready(true);
             }
@@ -453,11 +488,11 @@ async fn run(args: Args) -> Result<()> {
         });
     tokio::pin!(media);
     if args.dump_json {
-        let media: Vec<_> = media.map(|(_, item)| item).collect().await;
+        let media: Vec<_> = media.map(|(_, job)| job.media).collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
     } else if args.get_urls {
         while let Some((_, item)) = media.next().await {
-            println!("{}", item.url);
+            println!("{}", item.media.url);
         }
     } else {
         let client = download::client(Duration::from_secs(60))?
@@ -467,8 +502,10 @@ async fn run(args: Args) -> Result<()> {
             .with_sleep(args.sleep)
             .with_rate_limit(args.limit_rate);
         let aborted = &aborted;
+        let terminated = &terminated;
         let results = media
-            .map(|(index, item)| {
+            .map(|(index, job)| {
+                let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
                 let settings = &settings[item.category.as_str()];
                 let client = client
                     .clone()
@@ -483,7 +520,8 @@ async fn run(args: Args) -> Result<()> {
                     .map(|path| (&archives[path], path));
                 let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
-                    postprocessors: settings.postprocessors.as_ref(),
+                    postprocessor_scope: None,
+                    postprocessors: settings.postprocessors.as_deref(),
                     retries: settings.options.retries.unwrap(),
                     limits: settings.limits,
                     write_metadata: args.write_metadata,
@@ -491,10 +529,19 @@ async fn run(args: Args) -> Result<()> {
                 };
                 async move {
                     // Downloads queued before an abort are dropped unstarted.
-                    if aborted.borrow().contains(&index) {
+                    if terminated.load(std::sync::atomic::Ordering::Acquire)
+                        || aborted
+                            .lock()
+                            .expect("abort state lock poisoned")
+                            .contains(&index)
+                    {
                         return (index, None);
                     }
                     let result: Result<ArchiveOutcome> = async {
+                        let options = DownloadOptions {
+                            postprocessor_scope: scope.as_ref(),
+                            ..options
+                        };
                         let client = cell
                             .get_or_init(|| async { client.with_network(&settings.network) })
                             .await
@@ -535,6 +582,11 @@ async fn run(args: Args) -> Result<()> {
                         }
                     }
                     .await;
+                    if result.is_err()
+                        && let Some(scope) = &scope
+                    {
+                        scope.fail();
+                    }
                     (index, Some(result))
                 }
             })
@@ -559,7 +611,11 @@ async fn run(args: Args) -> Result<()> {
                 skipped = 0;
                 *input = 0;
             }
-            if args.abort.is_some_and(|limit| *input >= limit) && aborted.borrow_mut().insert(index)
+            if args.abort.is_some_and(|limit| *input >= limit)
+                && aborted
+                    .lock()
+                    .expect("abort state lock poisoned")
+                    .insert(index)
             {
                 eprintln!(
                     "stopping input {} after {input} consecutive skipped files",
@@ -588,10 +644,11 @@ async fn run(args: Args) -> Result<()> {
                     failed.set(failed.get() + 1);
                 }
             }
-            if args.terminate.is_some_and(|limit| skipped >= limit) {
-                // Dropping the stream cancels pending extraction and downloads.
+            if args.terminate.is_some_and(|limit| skipped >= limit)
+                && !terminated.swap(true, std::sync::atomic::Ordering::AcqRel)
+            {
+                // Stop new work while draining active files and finalization hooks.
                 eprintln!("stopping after {skipped} consecutive skipped files");
-                break;
             }
         }
     }
@@ -1518,7 +1575,7 @@ struct Settings {
     child_range: Option<RangeSelection>,
     child_filter: Option<FilterExpression>,
     network: NetworkOptions,
-    postprocessors: Option<gallery_dl_rs::postprocess::Postprocessors>,
+    postprocessors: Option<std::sync::Arc<gallery_dl_rs::postprocess::Postprocessors>>,
     download_client: OnceCell<Result<download::DownloadClient>>,
     limits: SizeLimits,
 }
@@ -1756,9 +1813,9 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .postprocessors
             .as_ref()
             .map(|config| {
-                config
-                    .specifications()
-                    .map(gallery_dl_rs::postprocess::Postprocessors::new)
+                config.specifications().map(|specs| {
+                    std::sync::Arc::new(gallery_dl_rs::postprocess::Postprocessors::new(specs))
+                })
             })
             .transpose()?;
         settings.insert(

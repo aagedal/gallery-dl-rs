@@ -146,6 +146,21 @@ impl FilterExpression {
         }
         Ok(true)
     }
+    pub(crate) fn matches_keywords(
+        &self,
+        keywords: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<bool> {
+        let context = keywords
+            .iter()
+            .map(|(key, value)| (key.clone(), json_value(value)))
+            .collect();
+        for expression in self.expressions.iter() {
+            if !eval::truthy(&eval::evaluate(expression, &context)?) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     /// Evaluate post metadata before any file-specific fields are available.
     pub fn matches_post(&self, post: &crate::event::Post) -> Result<bool> {
         if self.expressions.is_empty() {
@@ -292,7 +307,7 @@ fn map(values: BTreeMap<String, Value>) -> Value {
     Value::Map(Arc::new(values.into()))
 }
 // Structured public metadata is validated before reaching this context.
-fn json_value(value: &serde_json::Value) -> Value {
+pub(crate) fn json_value(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Null => Value::None,
         serde_json::Value::Bool(value) => Value::Bool(*value),

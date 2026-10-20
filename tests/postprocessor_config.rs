@@ -23,7 +23,7 @@ fn specs(config: &Config, category: &str) -> Vec<Specification> {
 fn extensions(specifications: &[Specification]) -> Vec<&str> {
     specifications
         .iter()
-        .map(|spec| spec.options.extension())
+        .map(|spec| spec.options.ugoira().unwrap().extension())
         .collect()
 }
 #[test]
@@ -55,11 +55,11 @@ fn named_definitions_type_aliases_and_mode_event_suffixes_resolve() {
     );
     let entries = specs(&configuration, "pixiv");
     assert_eq!(extensions(&entries), ["mkv", "mp4", "zip", "webm"]);
-    assert!(entries[0].options.keep_files());
-    assert!(entries[1].options.keep_files());
-    assert_eq!(entries[2].options.mode(), Mode::Archive);
-    assert_eq!(entries[2].options.metadata_name(), None);
-    assert_eq!(entries[3].options.mode(), Mode::Image2);
+    assert!(entries[0].options.ugoira().unwrap().keep_files());
+    assert!(entries[1].options.ugoira().unwrap().keep_files());
+    assert_eq!(entries[2].options.ugoira().unwrap().mode(), Mode::Archive);
+    assert_eq!(entries[2].options.ugoira().unwrap().metadata_name(), None);
+    assert_eq!(entries[3].options.ugoira().unwrap().mode(), Mode::Image2);
 }
 #[test]
 fn root_common_options_override_scoped_options_and_per_entry_values() {
@@ -68,7 +68,11 @@ fn root_common_options_override_scoped_options_and_per_entry_values() {
     );
     let entries = specs(&configuration, "pixiv");
     assert_eq!(extensions(&entries), ["avi", "avi", "avi"]);
-    assert!(entries.iter().all(|entry| entry.options.keep_files()));
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.options.ugoira().unwrap().keep_files())
+    );
 }
 #[test]
 fn common_options_replace_instead_of_merging_and_explicit_falsy_values_clear() {
@@ -77,7 +81,7 @@ fn common_options_replace_instead_of_merging_and_explicit_falsy_values_clear() {
     );
     let entries = specs(&scoped, "pixiv");
     assert_eq!(extensions(&entries), ["mp4"]);
-    assert!(!entries[0].options.keep_files());
+    assert!(!entries[0].options.ugoira().unwrap().keep_files());
     for clear in [Value::Null, json!({}), json!(false), json!("")] {
         let scoped = config(
             json!({"extractor":{"postprocessor-options":{"extension":"mkv"},"postprocessors":[{"name":"ugoira","extension":"gif"}],"pixiv":{"postprocessor-options":clear}}}),
@@ -96,8 +100,11 @@ fn definitions_remain_available_when_only_scoped_entries_or_common_options_are_p
     );
     let entries = specs(&configuration, "pixiv");
     assert_eq!(extensions(&entries), ["mkv"]);
-    assert_eq!(entries[0].options.metadata_name(), Some("frames.json"));
-    assert!(!entries[0].options.repeat_last_frame());
+    assert_eq!(
+        entries[0].options.ugoira().unwrap().metadata_name(),
+        Some("frames.json")
+    );
+    assert!(!entries[0].options.ugoira().unwrap().repeat_last_frame());
     assert!(specs(&configuration, "direct").is_empty());
 }
 #[test]
@@ -249,4 +256,43 @@ fn category_selector_bounds_qualifier_errors_and_unsupported_exec_are_private() 
     };
     assert!(!error.to_string().contains(PRIVATE));
     assert!(error.to_string().contains("supported: ugoira"));
+}
+
+#[test]
+fn ugoira_retains_fixed_hooks_without_interpreting_generic_event_options() {
+    for event in [json!({"ignored":true}), json!(42), json!(["unknown"])] {
+        let spec = gallery_dl_rs::postprocess::Specification::parse(
+            &json!({"name":"ugoira","mode":"archive","event":event}),
+            std::path::Path::new("."),
+        )
+        .unwrap();
+        assert!(spec.events.is_empty());
+    }
+}
+
+#[test]
+fn standard_fixed_hash_names_are_usable_by_native_filename_templates() {
+    for name in [
+        "md5",
+        "sha1",
+        "sha224",
+        "sha256",
+        "sha384",
+        "sha512",
+        "sha512_224",
+        "sha512_256",
+        "sha3_224",
+        "sha3_256",
+        "sha3_384",
+        "sha3_512",
+        "blake2b",
+        "blake2s",
+    ] {
+        gallery_dl_rs::naming::FilenameTemplate::parse(&format!("{{{name}}}.{{extension}}"))
+            .unwrap();
+        gallery_dl_rs::postprocess::hash::HashOptions::parse(
+            json!({"hashes":name,"filename":true}).as_object().unwrap(),
+        )
+        .unwrap();
+    }
 }

@@ -8,6 +8,7 @@ use crate::{
     selection::RangeSelection,
 };
 use futures_util::{StreamExt, stream::BoxStream};
+use std::collections::VecDeque;
 
 const MAX_FRAMES: usize = 128;
 
@@ -35,11 +36,14 @@ struct Frame {
     last_for_parent: bool,
     stopped: bool,
     failed: bool,
+    shown_post: bool,
+    shown_child: bool,
 }
 struct State<'a> {
     input: Option<BoxStream<'a, Result<ExtractionEvent>>>,
     selection: JobSelection,
     frames: Vec<Frame>,
+    pending: VecDeque<ExtractionEvent>,
 }
 impl State<'_> {
     fn sync_cancelled(&mut self) {
@@ -68,11 +72,21 @@ impl State<'_> {
         }
     }
     fn fail(&mut self, message: &str) -> crate::Error {
-        for frame in &self.frames {
+        for frame in self.frames.iter().rev() {
             if let Some(control) = &frame.control {
                 control.cancel();
             }
+            if frame.shown_post {
+                self.pending.push_back(ExtractionEvent::EndPost);
+            }
+            if frame.shown_child
+                && let Some(control) = &frame.control
+            {
+                self.pending
+                    .push_back(ExtractionEvent::EndChild(control.clone()));
+            }
         }
+        self.frames = vec![Frame::default()];
         self.input = None;
         error(message)
     }
@@ -119,6 +133,14 @@ impl JobSelection {
         &self,
         input: BoxStream<'a, Result<ExtractionEvent>>,
     ) -> BoxStream<'a, Result<Media>> {
+        crate::event::media_only(self.apply_events(input))
+    }
+    /// Retain selected job boundaries for consumers that run postprocessor hooks.
+    /// Finite file cuts close visible posts without polling their unused tails.
+    pub fn apply_events<'a>(
+        &self,
+        input: BoxStream<'a, Result<ExtractionEvent>>,
+    ) -> BoxStream<'a, Result<ExtractionEvent>> {
         let empty = self
             .file_range
             .as_ref()
@@ -138,12 +160,24 @@ impl JobSelection {
             input,
             selection: self.clone(),
             frames: vec![Frame::default()],
+            pending: VecDeque::new(),
         };
         futures_util::stream::unfold(state, |mut state| async move {
             let mut skipped = 0u8;
             loop {
+                if let Some(event) = state.pending.pop_front() {
+                    return Some((Ok(event), state));
+                }
                 state.sync_cancelled();
-                let next = state.input.as_mut()?.next().await;
+                if state.input.is_none() {
+                    if state.frames[0].shown_post {
+                        state.frames[0].shown_post = false;
+                        state.frames[0].in_post = false;
+                        return Some((Ok(ExtractionEvent::EndPost), state));
+                    }
+                    return None;
+                }
+                let next = state.input.as_mut().expect("active input").next().await;
                 let Some(event) = next else {
                     if state.frames.len() != 1 {
                         let error = state.fail("child events ended before the child completed");
@@ -153,6 +187,12 @@ impl JobSelection {
                     if frame.in_post && !frame.failed {
                         let error = state.fail("post events ended before the post completed");
                         return Some((Err(error), state));
+                    }
+                    if state.frames[0].shown_post {
+                        state.frames[0].shown_post = false;
+                        state.frames[0].in_post = false;
+                        state.input = None;
+                        return Some((Ok(ExtractionEvent::EndPost), state));
                     }
                     return None;
                 };
@@ -208,11 +248,15 @@ impl JobSelection {
                             scope.control.cancel();
                         }
                         state.frames.push(Frame {
-                            control: Some(scope.control),
+                            control: Some(scope.control.clone()),
+                            shown_child: selected,
                             stopped: !selected,
                             last_for_parent,
                             ..Frame::default()
                         });
+                        if selected {
+                            return Some((Ok(ExtractionEvent::BeginChild(scope)), state));
+                        }
                     }
                     Ok(ExtractionEvent::EndChild(control)) => {
                         let frame = state.frames.last().expect("current job");
@@ -230,6 +274,13 @@ impl JobSelection {
                         let frame = state.frames.pop().expect("completed child");
                         if frame.last_for_parent {
                             state.stop();
+                        }
+                        if frame.shown_child {
+                            if frame.shown_post {
+                                state.pending.push_back(ExtractionEvent::EndChild(control));
+                                return Some((Ok(ExtractionEvent::EndPost), state));
+                            }
+                            return Some((Ok(ExtractionEvent::EndChild(control)), state));
                         }
                     }
                     Ok(ExtractionEvent::Post(post)) => {
@@ -279,6 +330,11 @@ impl JobSelection {
                                 frame.active = true;
                             }
                         }
+                        let frame = state.frames.last_mut().expect("current job");
+                        if frame.active && !frame.stopped {
+                            frame.shown_post = true;
+                            return Some((Ok(ExtractionEvent::Post(post)), state));
+                        }
                     }
                     Ok(ExtractionEvent::EndPost) => {
                         let frame = state.frames.last_mut().expect("current job");
@@ -287,8 +343,12 @@ impl JobSelection {
                             return Some((Err(error), state));
                         }
                         frame.in_post = false;
+                        let shown = std::mem::take(&mut frame.shown_post);
                         if frame.last_post && !frame.stopped {
                             state.stop();
+                        }
+                        if shown {
+                            return Some((Ok(ExtractionEvent::EndPost), state));
                         }
                     }
                     Ok(ExtractionEvent::Media(media)) => {
@@ -339,7 +399,7 @@ impl JobSelection {
                                     state.stop();
                                 }
                                 if selected {
-                                    return Some((Ok(*media), state));
+                                    return Some((Ok(ExtractionEvent::Media(media)), state));
                                 }
                             }
                         }

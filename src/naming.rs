@@ -2,7 +2,7 @@
 use crate::{Result, error, extract::Media};
 use std::{collections::BTreeMap, path::PathBuf};
 #[path = "naming_format.rs"]
-mod format;
+pub(crate) mod format;
 use format::{Field, Value};
 
 const MAX_BYTES: usize = 240;
@@ -11,6 +11,20 @@ const MAX_TEMPLATE: usize = 8192;
 /// Names a template may reference. Signed transport URLs are deliberately
 /// unavailable so credentials cannot leak into paths.
 const FIELDS: &[&str] = &[
+    "md5",
+    "sha1",
+    "sha224",
+    "sha256",
+    "sha384",
+    "sha512",
+    "sha512_224",
+    "sha512_256",
+    "sha3_224",
+    "sha3_256",
+    "sha3_384",
+    "sha3_512",
+    "blake2b",
+    "blake2s",
     "filename",
     "name",
     "extension",
@@ -223,11 +237,34 @@ impl FilenameTemplate {
     pub fn render_optional(&self, media: &Media) -> Result<Option<String>> {
         let mut context = None;
         match self.select(media)? {
-            Some(parts) => Self::render_parts(parts, media, &mut context).map(Some),
+            Some(parts) => Self::render_parts(parts, media, &mut context, false).map(Some),
             None => Ok(None),
         }
     }
 
+    pub(crate) fn render_keywords(
+        &self,
+        media: &Media,
+        keywords: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Option<String>> {
+        let mut context = Some(
+            keywords
+                .iter()
+                .map(|(key, value)| (key.clone(), crate::filter::json_value(value)))
+                .collect(),
+        );
+        let mut selected = self.parts.as_deref();
+        for (filter, parts) in &self.conditions {
+            if filter.matches_keywords(keywords)? {
+                selected = Some(parts);
+                break;
+            }
+        }
+        match selected {
+            Some(parts) => Self::render_parts(parts, media, &mut context, true).map(Some),
+            None => Ok(None),
+        }
+    }
     fn select(&self, media: &Media) -> Result<Option<&[Part]>> {
         for (filter, parts) in &self.conditions {
             if filter.matches(media)? {
@@ -245,13 +282,14 @@ impl FilenameTemplate {
         let parts = self
             .select(media)?
             .ok_or_else(|| error("no filename template condition matched"))?;
-        Self::render_parts(parts, media, context)
+        Self::render_parts(parts, media, context, false)
     }
 
     fn render_parts(
         parts: &[Part],
         media: &Media,
         context: &mut Option<BTreeMap<String, crate::filter::Value>>,
+        keywords: bool,
     ) -> Result<String> {
         let mut output = String::new();
         for part in parts {
@@ -259,7 +297,23 @@ impl FilenameTemplate {
                 Part::Literal(value) => output.push_str(value),
                 Part::Field(field) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
-                    let value = field.render(|name| lookup(media, context, name))?;
+                    let value = field.render(|name| {
+                        if keywords {
+                            context.get(name).map(|value| {
+                                if matches!(name, "date" | "date_updated")
+                                    && let crate::filter::Value::String(value) = value
+                                    && let Ok(date) =
+                                        crate::postprocess::template::parse_date(value)
+                                {
+                                    Value::Date(date)
+                                } else {
+                                    convert(value, name)
+                                }
+                            })
+                        } else {
+                            lookup(media, context, name)
+                        }
+                    })?;
                     let Some(value) = value else {
                         let name = field.names().next().unwrap_or("literal");
                         if media.metadata.is_none()

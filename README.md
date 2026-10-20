@@ -625,8 +625,9 @@ resume checkpoints when resuming is enabled. Failed conversion reports an error,
 files and does not add a success archive entry; this deliberately differs from
 upstream paths that can archive failed conversions. Original-frame conversion
 requires the complete frame set and a newly downloaded final frame; selecting
-only part of an animation retains those frames. Other postprocessor types remain
-unimplemented. `post_id`/`id` is the illustration
+only part of an animation retains those frames. Native metadata, mtime and hash
+processors are described below; other postprocessor types remain unfinished.
+`post_id`/`id` is the illustration
 ID, `media_id` `ID_pN`, `username` the account, caption the title plus HTML-stripped
 caption, with `create_date` timestamp and page-0 App API width/height (AJAX recovery
 retains dimensions on every page). Default filenames
@@ -1893,8 +1894,10 @@ timeouts outside the monotonic clock's range or precision are rejected.
 
 Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, null settings
 (except the optional browser-array placeholders described above),
-unsupported types, hooks, environment expansion, and other conditional values fail
-explicitly. Filenames use the native template subset described below; archive
+unsupported types, executable hooks, and unsupported conditional values fail
+explicitly. Native processor events are described below. Processor directory
+options support home/environment expansion without shell execution; the other
+native configuration paths remain literal. Filenames use the native template subset described below; archive
 files use the Rust archive format.
 
 Like upstream, `filename` may be an object mapping filter expressions to
@@ -1910,8 +1913,75 @@ Without `--native-config`, the first existing file among `$GALLERY_DL_RS_CONFIG`
 `~/.gallery-dl-rs.conf` is loaded (`%APPDATA%\gallery-dl-rs\config.json` and
 `%USERPROFILE%\gallery-dl-rs.conf` on Windows). `--native-config-ignore` skips
 discovery. Upstream gallery-dl configuration files are never read natively. Full gallery-dl
-configuration compatibility and postprocessor types beyond `ugoira` remain
+configuration compatibility and additional postprocessor types remain
 unimplemented.
+
+## Native postprocessors
+
+Native configuration accepts `ugoira`, `metadata`, `mtime` and `hash` processors.
+Lists accumulate from category settings through extractor defaults to root
+settings. Root `postprocessor-options` takes precedence over narrower common
+options; named definitions live in the root `postprocessor` object. The `name`
+shorthands `metadata/tags` and `metadata/json@skip` select a mode and event.
+
+For example, this computes a digest before publishing each file and writes a
+sidecar containing that digest:
+
+```json
+{
+  "extractor": {
+    "filename": "{sha256}.{extension}",
+    "postprocessors": [
+      {"name": "hash", "hashes": "sha256", "filename": true},
+      {"name": "metadata", "mode": "json", "include": ["id", "sha256", "date"]}
+    ]
+  }
+}
+```
+
+`hash` defaults to MD5 and SHA1. It also supports SHA224/256/384/512,
+SHA512/224 and /256, SHA3 and BLAKE2. `hashes` accepts a comma-separated string
+(`"sha256:digest"` stores the result under `digest`), an object mapping keyword
+names to algorithms, or pairs of names and algorithms. `chunk-size` controls
+bounded reads. `filename: true` rebuilds the configured filename after hashing;
+standard digest names are available in native filename templates. Hashes can be
+used by subsequent processor filters and metadata templates.
+
+`metadata` supports JSON (default), JSONL append records, tags, custom content,
+printing, and sequential `modify`/`delete` keyword operations. JSON defaults to
+four-space indentation and supports `include`, `exclude`, `private`, `ascii`,
+`sort`, `indent` and `separators`. Tags use one tag per line. `content-format`
+(or `format`) accepts a template or a list of lines for custom content. Sidecars
+support `base-directory`, `directory`, `filename`, `extension`,
+`extension-format`, `metadata-path`, `skip`, `empty`, `mtime`, `newline`, and
+text overwrite/append/exclusive open modes. UTF-8 and ASCII encodings are
+supported. Ordinary sidecars are atomic; append records are serialized across
+concurrent downloads. Metadata processors export the native keyword context,
+including the media URL; `--write-metadata` retains its separate versioned schema.
+
+`mtime` uses `key: "date"` by default, or a `value` template. File mode updates
+the completed file's modification time. `target: "directory"` (also `dir`)
+updates its containing directory after the post completes. Missing or zero values
+retain the normal timestamp. Metadata sidecars with `mtime: true` use preceding
+mtime processor values or the HTTP Last-Modified timestamp.
+
+Processors default to the `file` event, except directory mtime, which defaults
+to `post-after`. Explicit events may be a comma-separated string or list:
+`init`, `prepare`, `prepare-after`, `file`, `after`, `skip`, `error`, `post`,
+`post-after`, `child`, `child-after`, `finalize-success`, `finalize-error`, and
+`finalize`. Post boundaries wait for concurrent files before running their closing
+hooks. Selected empty posts retain their hooks; rejected posts and children do
+not run them. Abort and terminate drain finalization hooks. URL/JSON inspection
+runs no postprocessors. Ugoira retains its fixed source hooks.
+
+The native formatter remains a bounded, non-executable subset of upstream's
+formatter. Processor archive databases, other text encodings/open modes,
+extractor-subcategory selectors, keyword-driven changes to native archive
+identities, emitter-specific keyword mutation inheritance and job path lifetimes,
+and additional
+processor types remain unfinished. These processors
+operate on metadata supported by the native extractor, which may omit fields
+available from upstream.
 
 ## Current behavior
 

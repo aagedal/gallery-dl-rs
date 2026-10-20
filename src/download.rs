@@ -1,3 +1,5 @@
+#[path = "download_postprocess.rs"]
+pub(crate) mod processing;
 use crate::{
     Result, error,
     extract::{Media, MediaJob},
@@ -30,6 +32,7 @@ pub struct DownloadClient {
     network: NetworkOptions,
     mtime_http: bool,
     mtime_field: Option<String>,
+    response_mtime: Option<std::sync::Arc<std::sync::Mutex<Option<SystemTime>>>>,
     sleep: Option<crate::sleep::SleepRange>,
     /// Maximum body bytes per second for each download.
     rate: Option<u64>,
@@ -113,6 +116,17 @@ fn set_mtime(file: &std::fs::File, time: Option<SystemTime>) -> std::io::Result<
 }
 
 impl DownloadClient {
+    fn capture_http_mtime(&self, headers: &HeaderMap) {
+        if let Some(capture) = &self.response_mtime
+            && let Ok(mut timestamp) = capture.lock()
+        {
+            *timestamp = headers
+                .get(reqwest::header::LAST_MODIFIED)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| httpdate::parse_http_date(value).ok());
+        }
+    }
+
     /// Apply transport overrides while retaining shared per-origin cooldowns.
     pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
         if self.network.proxy() != network.proxy()
@@ -215,6 +229,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         network: NetworkOptions::default(),
         mtime_http: true,
         mtime_field: None,
+        response_mtime: None,
         sleep: None,
         rate: None,
     })
@@ -302,6 +317,7 @@ impl Outcome {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DownloadOptions<'a> {
     pub retries: u8,
+    pub postprocessor_scope: Option<&'a crate::postprocess::jobs::ScopeLease>,
     pub postprocessors: Option<&'a crate::postprocess::Postprocessors>,
     /// Override category folders with per-media directory components.
     pub directory: Option<&'a DirectoryTemplate>,
@@ -347,6 +363,10 @@ pub async fn download_with_template(
 ) -> Result<Outcome> {
     let effective_media = client.effective_media(media);
     let media = effective_media.as_ref();
+    if options.postprocessors.is_some_and(|pp| pp.has_generic()) {
+        let prepared = processing::prepare(client, root, media, options, template).await?;
+        return processing::download(client, root, media, options, template, prepared).await;
+    }
     let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
     let output_media = prepared.as_ref().unwrap_or(media);
     let original_frames = media
@@ -431,8 +451,7 @@ pub(crate) async fn complete_original(
         };
         let mut last = None;
         for spec in options.postprocessors.unwrap().selected(&collection.media) {
-            let converted =
-                crate::postprocess::with_extension(&collection.media, spec.options.extension());
+            let converted = crate::postprocess::with_extension(&collection.media, spec.extension());
             let path = destination_with_templates(root, &converted, template, options.directory)?;
             crate::postprocess::convert(
                 spec,
@@ -451,7 +470,7 @@ pub(crate) async fn complete_original(
             .unwrap()
             .selected(&collection.media)
             .iter()
-            .any(|spec| !spec.options.keep_files())
+            .any(|spec| !spec.keep_files())
             && let crate::postprocess::FrameInput::Files(frames) = &collection.input
         {
             for (frame, before) in frames.iter().zip(fingerprints) {
@@ -511,7 +530,13 @@ impl Drop for UgoiraSource {
             && let Some(parent) = self.recovery.parent()
             && let Ok(file) = tempfile::Builder::new()
                 .prefix(".gallery-dl-ugoira-source-")
-                .suffix(".zip")
+                .suffix(&format!(
+                    ".{}",
+                    self.recovery
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .unwrap_or("bin")
+                ))
                 .tempfile_in(parent)
         {
             let path = file.into_temp_path();
@@ -528,7 +553,7 @@ async fn download_ugoira(
     prepared: &Media,
     options: DownloadOptions<'_>,
     template: Option<&FilenameTemplate>,
-    selected: &[&crate::postprocess::Specification],
+    selected: &[&crate::postprocess::UgoiraOptions],
 ) -> Result<Outcome> {
     let path = destination_with_templates(root, prepared, template, options.directory)?;
     if crate::postprocess::regular_file(&path)? {
@@ -575,12 +600,12 @@ async fn download_ugoira(
     };
     let mut published = std::collections::HashSet::new();
     for spec in selected {
-        let converted = crate::postprocess::with_extension(prepared, spec.options.extension());
+        let converted = crate::postprocess::with_extension(prepared, spec.extension());
         let output = destination_with_templates(root, &converted, template, options.directory)?;
         crate::postprocess::convert(spec, &input, &converted, &output, client.wait_limit).await?;
         published.insert(output);
     }
-    if selected.iter().all(|spec| spec.options.keep_files()) && !published.contains(&path) {
+    if selected.iter().all(|spec| spec.keep_files()) && !published.contains(&path) {
         match std::fs::hard_link(input_path, &path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -1014,6 +1039,7 @@ async fn attempt_download(
         return Err(terminal("unexpected Content-Range in full media response"));
     }
     let expected = response.content_length();
+    client.capture_http_mtime(response.headers());
     let modified = mtime.select(response.headers());
     validate_media(&response)?;
     if let Some(rejection) = expected.and_then(|size| limits.check(size)) {
@@ -1435,6 +1461,7 @@ async fn attempt_resume(
                 (offset, Some(end - offset + 1), Some(total))
             }
         };
+        client.capture_http_mtime(response.headers());
         let modified = mtime.select(response.headers());
         let mut stream = response.bytes_stream();
         let mut received = 0u64;

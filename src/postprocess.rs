@@ -34,9 +34,76 @@ impl FrameInput {
     }
 }
 
+#[path = "postprocess_hash.rs"]
+pub mod hash;
+#[path = "postprocess_jobs.rs"]
+pub mod jobs;
+#[path = "postprocess_metadata.rs"]
+pub mod metadata;
+#[path = "postprocess_mtime.rs"]
+pub mod mtime;
+#[path = "postprocess_template.rs"]
+pub mod template;
+
+#[derive(Clone, Debug)]
+pub enum Processor {
+    Ugoira(UgoiraOptions),
+    Metadata(metadata::MetadataOptions),
+    Mtime(mtime::MtimeOptions),
+    Hash(hash::HashOptions),
+}
+impl Processor {
+    pub fn ugoira(&self) -> Option<&UgoiraOptions> {
+        if let Self::Ugoira(options) = self {
+            Some(options)
+        } else {
+            None
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hook {
+    Init,
+    Prepare,
+    PrepareAfter,
+    File,
+    After,
+    Skip,
+    Error,
+    Post,
+    PostAfter,
+    Child,
+    ChildAfter,
+    Finalize,
+    FinalizeSuccess,
+    FinalizeError,
+}
+impl Hook {
+    fn parse(value: &str) -> Result<Self> {
+        Ok(match value {
+            "init" => Self::Init,
+            "prepare" => Self::Prepare,
+            "prepare-after" => Self::PrepareAfter,
+            "file" => Self::File,
+            "after" => Self::After,
+            "skip" => Self::Skip,
+            "error" => Self::Error,
+            "post" => Self::Post,
+            "post-after" => Self::PostAfter,
+            "child" => Self::Child,
+            "child-after" => Self::ChildAfter,
+            "finalize" => Self::Finalize,
+            "finalize-success" => Self::FinalizeSuccess,
+            "finalize-error" => Self::FinalizeError,
+            _ => return Err(error("unsupported native postprocessor event")),
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct Specification {
-    pub options: UgoiraOptions,
+    pub options: Processor,
+    pub events: Arc<[Hook]>,
     pub filter: Option<crate::filter::FilterExpression>,
     pub whitelist: Option<Vec<String>>,
     pub blacklist: Option<Vec<String>>,
@@ -62,13 +129,15 @@ impl Specification {
         let (name, event) = name
             .rsplit_once('@')
             .map_or((name.as_str(), None), |(name, event)| (name, Some(event)));
-        let _ = event; // Ugoira registers fixed hooks; event suffixes do not change them.
+        if !options.contains_key("event")
+            && let Some(event) = event
+        {
+            options.insert("event".into(), event.into());
+        }
         let (name, mode) = name
             .rsplit_once('/')
             .map_or((name, None), |(name, mode)| (name, Some(mode)));
-        if name != "ugoira" {
-            return Err(error("unsupported native postprocessor; supported: ugoira"));
-        }
+
         if !options.contains_key("mode")
             && let Some(mode) = mode
         {
@@ -108,20 +177,64 @@ impl Specification {
             }
             Ok(Some(values.into_iter().map(str::to_owned).collect()))
         };
+        let processor = match name {
+            "ugoira" => Processor::Ugoira(UgoiraOptions::parse(&options, base)?),
+            "metadata" => Processor::Metadata(metadata::MetadataOptions::parse(&options, base)?),
+            "mtime" => Processor::Mtime(mtime::MtimeOptions::parse(&options)?),
+            "hash" => Processor::Hash(hash::HashOptions::parse(&options)?),
+            _ => {
+                return Err(error(
+                    "unsupported native postprocessor; supported: ugoira, metadata, mtime, hash",
+                ));
+            }
+        };
+        let defaults = match &processor {
+            Processor::Mtime(options) => options
+                .default_events()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            _ => vec!["file".to_owned()],
+        };
+        let events = if matches!(processor, Processor::Ugoira(_)) {
+            Vec::new()
+        } else {
+            let events = match options.get("event") {
+                None | Some(Value::Null) => defaults,
+                Some(Value::String(value)) => value.split(',').map(str::to_owned).collect(),
+                Some(Value::Array(values)) if values.len() <= 32 => values
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_owned)
+                            .ok_or_else(|| error("invalid postprocessor event"))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                _ => return Err(error("invalid postprocessor event")),
+            };
+            if events.len() > 32 {
+                return Err(error("too many postprocessor events"));
+            }
+            events
+                .iter()
+                .map(|value| Hook::parse(value))
+                .collect::<Result<Vec<_>>>()?
+        };
         Ok(Self {
-            options: UgoiraOptions::parse(&options, base)?,
+            options: processor,
+            events: events.into(),
             filter,
             whitelist: list("whitelist")?,
             blacklist: list("blacklist")?,
         })
     }
-    pub fn applies(&self, media: &Media) -> bool {
+    fn matches_category(&self, media: &Media) -> bool {
         let matches = |name: &str| {
             name == media.category
                 || name.strip_suffix(":*") == Some(media.category.as_str())
                 || name.strip_suffix(':') == Some(media.category.as_str())
         };
-        let category = self.whitelist.as_ref().map_or_else(
+        self.whitelist.as_ref().map_or_else(
             || {
                 !self
                     .blacklist
@@ -129,13 +242,23 @@ impl Specification {
                     .is_some_and(|v| v.iter().any(|name| matches(name)))
             },
             |v| v.is_empty() || v.iter().any(|name| matches(name)),
-        );
-        category
+        )
+    }
+    pub(crate) fn matches_keywords(&self, media: &Media, keywords: &Map<String, Value>) -> bool {
+        self.matches_category(media)
+            && self
+                .filter
+                .as_ref()
+                .is_none_or(|filter| filter.matches_keywords(keywords).unwrap_or(false))
+    }
+    pub fn applies(&self, media: &Media) -> bool {
+        self.matches_category(media)
             && self
                 .filter
                 .as_ref()
                 .is_none_or(|filter| filter.matches(media).unwrap_or(false))
-            && media.metadata.as_ref().is_some_and(|m| m.frames.is_some())
+            && (self.options.ugoira().is_none()
+                || media.metadata.as_ref().is_some_and(|m| m.frames.is_some()))
     }
 }
 pub(crate) fn truthy(value: &Value) -> bool {
@@ -289,7 +412,7 @@ pub mod frames;
 
 #[derive(Debug)]
 pub struct Postprocessors {
-    specifications: Vec<Specification>,
+    pub(crate) specifications: Vec<Specification>,
     pub(crate) frames: frames::FrameCollector,
 }
 impl Postprocessors {
@@ -299,13 +422,18 @@ impl Postprocessors {
             frames: Default::default(),
         }
     }
-    pub fn selected<'a>(&'a self, media: &Media) -> Vec<&'a Specification> {
+    pub(crate) fn has_generic(&self) -> bool {
+        self.specifications
+            .iter()
+            .any(|spec| !matches!(spec.options, Processor::Ugoira(_)))
+    }
+    pub fn selected<'a>(&'a self, media: &Media) -> Vec<&'a UgoiraOptions> {
         self.plan(media).1
     }
     pub fn prepared_media(&self, media: &Media) -> Media {
         self.plan(media).0
     }
-    fn plan<'a>(&'a self, media: &Media) -> (Media, Vec<&'a Specification>) {
+    fn plan<'a>(&'a self, media: &Media) -> (Media, Vec<&'a UgoiraOptions>) {
         let mut prepared = media.clone();
         let zip = media
             .metadata
@@ -313,10 +441,12 @@ impl Postprocessors {
             .is_some_and(|m| m.ugoira_frame_index.is_none());
         let mut selected = Vec::new();
         for spec in &self.specifications {
-            if spec.applies(&prepared) {
-                selected.push(spec);
-                if zip && !spec.options.keep_files() {
-                    prepared = with_extension(&prepared, spec.options.extension());
+            if let Some(options) = spec.options.ugoira()
+                && spec.applies(&prepared)
+            {
+                selected.push(options);
+                if zip && !options.keep_files() {
+                    prepared = with_extension(&prepared, options.extension());
                 }
             }
         }
@@ -344,13 +474,13 @@ pub(crate) fn regular_file(path: &Path) -> Result<bool> {
 /// Conversion takes place on the destination filesystem and only complete files
 /// become visible. Encoder output and arguments are never included in errors.
 pub(crate) async fn convert(
-    spec: &Specification,
+    options: &UgoiraOptions,
     input: &FrameInput,
     media: &Media,
     path: &Path,
     timeout: std::time::Duration,
 ) -> Result<()> {
-    if regular_file(path)? && spec.options.skip() {
+    if regular_file(path)? && options.skip() {
         return Ok(());
     }
     let parent = path
@@ -360,13 +490,13 @@ pub(crate) async fn convert(
     let temporary = tempfile::TempDir::new_in(parent)?;
     let output = temporary
         .path()
-        .join(format!("converted.{}", spec.options.extension()));
-    spec.options.convert(input, &output, media, timeout).await?;
+        .join(format!("converted.{}", options.extension()));
+    options.convert(input, &output, media, timeout).await?;
     if !regular_file(&output)? {
         return Err(error("postprocessor produced no output"));
     }
     std::fs::File::open(&output)?.sync_all()?;
-    if spec.options.skip() {
+    if options.skip() {
         match std::fs::hard_link(&output, path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -379,4 +509,86 @@ pub(crate) async fn convert(
         std::fs::rename(&output, path)?;
     }
     Ok(())
+}
+
+/// Keyword values exposed by native extractors. Transport headers, handoffs and
+/// cookie stores are deliberately absent, just as they are in expression contexts.
+pub fn context(media: &Media) -> Map<String, Value> {
+    fn json(value: &crate::filter::Value) -> Value {
+        use crate::filter::Value as V;
+        match value {
+            V::None => Value::Null,
+            V::Bool(v) => (*v).into(),
+            V::Int(v) => serde_json::Number::from_i128(*v).map_or(Value::Null, Value::Number),
+            V::Float(v) => serde_json::Number::from_f64(*v).map_or(Value::Null, Value::Number),
+            V::String(v) => v.as_ref().into(),
+            V::List(v) | V::Tuple(v) => Value::Array(v.iter().map(json).collect()),
+            V::Map(v) => Value::Object(v.iter().map(|(k, v)| (k.clone(), json(v))).collect()),
+        }
+    }
+    let mut context: Map<String, Value> = crate::filter::context(media)
+        .into_iter()
+        .map(|(k, v)| (k, json(&v)))
+        .collect();
+    if let Some(timestamp) = media.metadata.as_ref().and_then(|m| m.timestamp) {
+        context.entry("date").or_insert(timestamp.into());
+    }
+    for key in ["date", "date_updated", "date_url"] {
+        if let Some(timestamp) = context.get(key).and_then(Value::as_i64)
+            && let Ok(date) = time::OffsetDateTime::from_unix_timestamp(timestamp)
+        {
+            context.insert(
+                key.into(),
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                    date.year(),
+                    date.month() as u8,
+                    date.day(),
+                    date.hour(),
+                    date.minute(),
+                    date.second()
+                )
+                .into(),
+            );
+        }
+    }
+    context
+}
+impl Postprocessors {
+    pub async fn run_hook(
+        &self,
+        hook: Hook,
+        context: &mut Map<String, Value>,
+        media: &Media,
+        path: &Path,
+        root: &Path,
+    ) -> Result<bool> {
+        let mut rebuild = false;
+        for spec in &self.specifications {
+            if !spec.events.contains(&hook)
+                || !spec.matches_category(media)
+                || spec
+                    .filter
+                    .as_ref()
+                    .is_some_and(|filter| !filter.matches_keywords(context).unwrap_or(false))
+            {
+                continue;
+            }
+            match &spec.options {
+                Processor::Ugoira(_) => {}
+                Processor::Metadata(options) => options.run(context, media, path, root).await?,
+                Processor::Mtime(options) => options.apply(
+                    context,
+                    if options.is_file() {
+                        path
+                    } else {
+                        path.parent()
+                            .ok_or_else(|| error("invalid postprocessor directory"))?
+                    },
+                )?,
+                Processor::Hash(options) => rebuild |= options.run(context, path).await?,
+            }
+        }
+        Ok(rebuild)
+    }
 }

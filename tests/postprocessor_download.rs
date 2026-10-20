@@ -11,7 +11,7 @@ use std::{
     fs,
     io::{Cursor, Read, Write},
     net::TcpListener,
-    path::Path,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -35,6 +35,9 @@ fn source_zip() -> Vec<u8> {
 }
 
 fn serve(body: Vec<u8>) -> (String, thread::JoinHandle<()>) {
+    serve_with_header(body, "")
+}
+fn serve_with_header(body: Vec<u8>, header: &'static str) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -65,7 +68,7 @@ fn serve(body: Vec<u8>) -> (String, thread::JoinHandle<()>) {
             request.extend_from_slice(&buffer[..count]);
         }
         assert!(request.starts_with(b"GET /ugoira.zip "));
-        write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+        write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\nContent-Length: {}\r\n{header}Connection: close\r\n\r\n", body.len()).unwrap();
         socket.write_all(&body).unwrap();
     });
     (format!("http://{address}/ugoira.zip"), handle)
@@ -625,4 +628,297 @@ async fn chained_extension_filters_publish_each_selected_output_and_return_exist
     assert_eq!(outcome, Outcome::Downloaded(final_path.clone()));
     verify_animation(&final_path);
     verify_animation(&path(root.path(), &with_extension(&media, "cbz")));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mixed_concat_hashes_raw_zip_and_publishes_hash_named_conversion_and_metadata() {
+    use gallery_dl_rs::naming::FilenameTemplate;
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let encoder = root.path().join("successful encoder");
+    fs::write(
+        &encoder,
+        b"#!/bin/sh\nfor value do output=\"$value\"; done\nprintf ENCODED_FIXTURE > \"$output\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&encoder, fs::Permissions::from_mode(0o700)).unwrap();
+    let source = source_zip();
+    let digest = format!("{:x}", Sha256::digest(&source));
+    let (url, server) = serve(source);
+    let media = media(&url);
+    let specifications = [
+        json!({"name":"ugoira","mode":"concat","extension":"webm","ffmpeg-location":encoder}),
+        json!({"name":"hash","hashes":"sha256","filename":true}),
+        json!({"name":"metadata","include":["sha256","extension"]}),
+    ];
+    let processors = Postprocessors::new(
+        specifications
+            .iter()
+            .map(|value| Specification::parse(value, root.path()).unwrap())
+            .collect(),
+    );
+    let filename = FilenameTemplate::parse("{sha256}.{extension}").unwrap();
+    let result = download::download_with_template(
+        &client(),
+        root.path(),
+        &media,
+        DownloadOptions {
+            postprocessors: Some(&processors),
+            ..Default::default()
+        },
+        Some(&filename),
+    )
+    .await
+    .unwrap();
+    server.join().unwrap();
+    let output = root.path().join("pixiv").join(format!("{digest}.webm"));
+    assert_eq!(result, Outcome::Downloaded(output.clone()));
+    assert_eq!(fs::read(&output).unwrap(), b"ENCODED_FIXTURE");
+    let sidecar: serde_json::Value = serde_json::from_slice(
+        &fs::read(output.with_file_name(format!("{digest}.webm.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(sidecar, json!({"sha256":digest,"extension":"webm"}));
+}
+
+#[tokio::test]
+async fn mixed_archive_then_hash_reads_zip_after_animation_metadata_was_appended() {
+    use gallery_dl_rs::naming::FilenameTemplate;
+    use sha2::{Digest, Sha256};
+    let root = tempfile::tempdir().unwrap();
+    let source = source_zip();
+    let original_digest = format!("{:x}", Sha256::digest(&source));
+    let (url, server) = serve(source);
+    let media = media(&url);
+    let specifications = [
+        json!({"name":"ugoira","mode":"archive","extension":"zip","mtime":false}),
+        json!({"name":"hash","hashes":"sha256","filename":true}),
+        json!({"name":"metadata","include":["sha256","extension"]}),
+    ];
+    let processors = Postprocessors::new(
+        specifications
+            .iter()
+            .map(|value| Specification::parse(value, root.path()).unwrap())
+            .collect(),
+    );
+    let filename = FilenameTemplate::parse("{sha256}.{extension}").unwrap();
+    let result = download::download_with_template(
+        &client(),
+        root.path(),
+        &media,
+        DownloadOptions {
+            postprocessors: Some(&processors),
+            ..Default::default()
+        },
+        Some(&filename),
+    )
+    .await
+    .unwrap();
+    server.join().unwrap();
+    let Outcome::Downloaded(output) = result else {
+        panic!("expected converted ZIP")
+    };
+    verify_animation(&output);
+    let processed_digest = format!("{:x}", Sha256::digest(fs::read(&output).unwrap()));
+    assert_ne!(processed_digest, original_digest);
+    assert_eq!(
+        output.file_name().unwrap().to_str().unwrap(),
+        format!("{processed_digest}.zip")
+    );
+    let sidecar: serde_json::Value = serde_json::from_slice(
+        &fs::read(output.with_file_name(format!("{processed_digest}.zip.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        sidecar,
+        json!({"sha256":processed_digest,"extension":"zip"})
+    );
+}
+
+#[tokio::test]
+async fn mixed_archive_keep_files_same_extension_publishes_processed_zip() {
+    let root = tempfile::tempdir().unwrap();
+    let source = source_zip();
+    let (url, server) = serve(source.clone());
+    let media = media(&url);
+    let specifications = [
+        json!({"name":"ugoira","mode":"archive","extension":"zip","keep-files":true}),
+        json!({"name":"metadata","include":["extension"]}),
+    ];
+    let processors = Postprocessors::new(
+        specifications
+            .iter()
+            .map(|value| Specification::parse(value, root.path()).unwrap())
+            .collect(),
+    );
+    let result = download::download_with_options(
+        &client(),
+        root.path(),
+        &media,
+        DownloadOptions {
+            postprocessors: Some(&processors),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    server.join().unwrap();
+    let output = path(root.path(), &media);
+    assert_eq!(result, Outcome::Downloaded(output.clone()));
+    verify_animation(&output);
+    assert_ne!(fs::read(&output).unwrap(), source);
+    let sidecar: serde_json::Value = serde_json::from_slice(
+        &fs::read(output.with_file_name(format!(
+            "{}.json",
+            output.file_name().unwrap().to_str().unwrap()
+        )))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(sidecar, json!({"extension":"zip"}));
+}
+
+#[tokio::test]
+async fn generic_metadata_keeps_final_first_original_conversion_working_with_late_existing_frame() {
+    for archived in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let specifications = [
+            json!({"name":"ugoira","mode":"archive","extension":"cbz"}),
+            json!({"name":"metadata","include":["extension","media_id"]}),
+        ];
+        let processors = Postprocessors::new(
+            specifications
+                .iter()
+                .map(|value| Specification::parse(value, root.path()).unwrap())
+                .collect(),
+        );
+        let archive = Archive::open(root.path().join("archive.sqlite3"))
+            .await
+            .unwrap();
+        let (url, server) = serve(b"second frame".to_vec());
+        let last = original(&url, 1);
+        archive
+            .download(
+                &client(),
+                root.path(),
+                &last,
+                DownloadOptions {
+                    postprocessors: Some(&processors),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        server.join().unwrap();
+        let first = original("http://127.0.0.1:1/never-request.jpg", 0);
+        fs::write(path(root.path(), &first), b"first frame").unwrap();
+        if archived {
+            archive.record(&first.archive_key().unwrap()).await.unwrap();
+        }
+        let result = archive
+            .download(
+                &client(),
+                root.path(),
+                &first,
+                DownloadOptions {
+                    postprocessors: Some(&processors),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let ArchiveOutcome::Completed(Outcome::Downloaded(output)) = result else {
+            panic!("late existing frame must complete conversion: {result:?}")
+        };
+        verify_animation(&output);
+        assert!(!path(root.path(), &first).exists());
+        assert!(!path(root.path(), &last).exists());
+    }
+}
+
+#[tokio::test]
+async fn metadata_sidecar_mtime_uses_http_header_even_when_media_http_mtime_is_disabled() {
+    for enabled in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let (url, server) = serve_with_header(
+            source_zip(),
+            "Last-Modified: Sun, 06 Nov 1994 08:49:37 GMT\r\n",
+        );
+        let media = media(&url);
+        let processors = processors(
+            root.path(),
+            json!({"name":"metadata","include":["post_id"],"mtime":true}),
+        );
+        let result = download::download_with_options(
+            &client().with_http_mtime(enabled),
+            root.path(),
+            &media,
+            DownloadOptions {
+                postprocessors: Some(&processors),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        server.join().unwrap();
+        let path = result.saved_path().unwrap();
+        let sidecar = PathBuf::from(format!("{}.json", path.display()));
+        let seconds = fs::metadata(sidecar)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(seconds, 784_111_777);
+        if !enabled {
+            assert_ne!(
+                fs::metadata(path)
+                    .unwrap()
+                    .modified()
+                    .unwrap()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                seconds
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn hash_filename_rebuilding_preserves_typed_date_formats() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, server) = serve(source_zip());
+    let media = media(&url);
+    let processors = processors(
+        root.path(),
+        json!({"name":"hash","hashes":"sha256","filename":true}),
+    );
+    let filename =
+        gallery_dl_rs::naming::FilenameTemplate::parse("{date:%Y}_{sha256}.{extension}").unwrap();
+    let result = download::download_with_template(
+        &client(),
+        root.path(),
+        &media,
+        DownloadOptions {
+            postprocessors: Some(&processors),
+            ..Default::default()
+        },
+        Some(&filename),
+    )
+    .await
+    .unwrap();
+    server.join().unwrap();
+    let path = result.saved_path().unwrap();
+    assert!(
+        path.file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("2024_")
+    );
+    assert!(path.is_file());
 }

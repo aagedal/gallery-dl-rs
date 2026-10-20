@@ -105,8 +105,18 @@ impl Archive {
                 &download::destination_with_templates(root, media, template, options.directory)?,
             )?;
         }
+        let mut generic = if options.postprocessors.is_some_and(|pp| pp.has_generic()) {
+            Some(download::processing::prepare(client, root, media, options, template).await?)
+        } else {
+            None
+        };
         let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
-        let identity = prepared.as_ref().unwrap_or(media).archive_key();
+        let identity = generic
+            .as_ref()
+            .map(|job| &job.media)
+            .or(prepared.as_ref())
+            .unwrap_or(media)
+            .archive_key();
         // Serialize the same stable identity within this instance, without
         // suppressing a refreshed URL if a previous request failed. Weak entries
         // retain no per-item state once pending downloads have finished.
@@ -117,6 +127,13 @@ impl Archive {
         if let Some(identity) = &identity
             && self.contains(identity).await?
         {
+            if let Some(generic) = &mut generic
+                && let Some(outcome) =
+                    download::processing::skip(client, root, media, options, template, generic)
+                        .await?
+            {
+                return Ok(ArchiveOutcome::Completed(outcome));
+            }
             // An earlier archived frame can become ready after a newly downloaded
             // final frame when downloads run concurrently. Finish collection without
             // making another HTTP request or changing the archived frame's identity.
@@ -146,8 +163,11 @@ impl Archive {
             }
             return Ok(ArchiveOutcome::AlreadyArchived);
         }
-        let outcome =
-            download::download_with_template(client, root, media, options, template).await?;
+        let outcome = if let Some(generic) = generic {
+            download::processing::download(client, root, media, options, template, generic).await?
+        } else {
+            download::download_with_template(client, root, media, options, template).await?
+        };
         if let Some(identity) = &identity
             && let Some(path) = outcome.saved_path()
         {

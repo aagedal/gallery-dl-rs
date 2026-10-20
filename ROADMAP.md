@@ -1062,8 +1062,22 @@ retries, and per-request deadlines. The overall extraction deadline remains
 separate. Inspection opens no configured archives and creates no output paths.
 Tests cover schema, scope/CLI precedence, relative paths, credentials selection,
 fractional timeouts, retry counts, and separate compatibility configuration.
-Full configuration compatibility, discovery, conditional templates, and
-postprocessors remain.
+Full configuration compatibility and additional postprocessors remain.
+
+**Implemented generic postprocessor step:** native metadata, hash and mtime
+processors share scoped lists, definitions, filters and lifecycle hooks. Metadata
+supports JSON/JSONL, tags, custom/print and keyword modify/delete modes, bounded
+content templates, custom sidecar paths and serialized append records. Hashes
+include MD5, SHA1/SHA2/SHA3 and BLAKE2, with digest-based filename rebuilding before
+atomic publication. Mtime supports metadata/template values and file/directory
+targets. Selection preserves post/child boundaries so empty selected posts,
+concurrent downloads, abort/terminate, errors and finalization retain their hooks;
+inspection has no processor side effects. Source fixtures cover rendering,
+algorithm choices, timestamps and lifecycle traces. Remaining: processor archive
+databases, additional encodings/open modes and formatter dialects, arbitrary
+native filename fields, keyword-driven archive identity changes, further
+cross-processor hook parity, emitter-specific shared/copied keyword mutation
+inheritance, source job path lifetimes, and other processor types.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

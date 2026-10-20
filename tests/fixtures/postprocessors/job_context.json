@@ -1,0 +1,6206 @@
+{
+  "version": "1.32.17",
+  "source": "Actual DownloadJob.run/dispatch/initialize/handle_directory/handle_url/handle_finalize + MetadataPP modify/delete + PathFormat reference assignments. Synthetic Extractor yields dictionaries and fake download writes synthetic bytes; no network or external command. No source edits. Default lazy initialization, eager init and three emitter identity patterns are isolated in separate config.clear() cases.",
+  "source_sha256": {
+    "job.py": "b1d630adb73404342d236f7af807041186f0a38a436cff6979749d411a5d9a75",
+    "path.py": "7ff87004d4fbab80ccd0e525882c0bb010ddaced357aa6bee1657f28ca6b7fb6",
+    "postprocessor/metadata.py": "db7481267bbdbca3ed95ace30dcb05f3cec5511a84f75f1769a0362ae0fb53a5"
+  },
+  "generator_source": "import copy,hashlib,json,logging,re,tempfile,sys\nfrom pathlib import Path\nfrom types import SimpleNamespace\nfrom unittest.mock import patch\nfrom gallery_dl import config,job,version\nfrom gallery_dl.extractor.common import Extractor,Message\nfrom gallery_dl.postprocessor.metadata import MetadataPP\nBASE=Path(job.__file__).parent\nclass Synthetic(Extractor):\n category='fixture';subcategory='context';directory_fmt=('{id}',);filename_fmt='{id}_{num}.{extension}';archive_fmt='{id}_{num}'\n def initialize(self):pass\n def cookies_store(self):pass\n def items(self):return self.messages()\n\ndef generate(name,kind='shared',empty_tail=False,eager=False,empty_only=False,no_results=False):\n config.clear();records=[];refs=[];labels={}\n def snap(context):\n  ident=id(context)\n  if ident not in labels:labels[ident]=f'context-{len(labels)+1}';refs.append(context)\n  return {'object':labels[ident],'keywords':copy.deepcopy(context)}\n opts=[\n  {'name':'metadata','mode':'modify','event':'init','fields':{'initialized':'{id}','init_only':'from-init'}},\n  {'name':'metadata','mode':'modify','event':'post','fields':{'caption':'post-{id}','post_only':'from-post','nested[post]':'{id}'}},\n  {'name':'metadata','mode':'delete','event':'post','fields':['remove','nested[remove]']},\n  {'name':'metadata','mode':'modify','event':'file','fields':{'last_file':'{num}','file_only':'file-{num}'}},\n  {'name':'metadata','mode':'delete','event':'file','fields':['caption']},\n  {'name':'metadata','mode':'modify','event':'after','fields':{'after_seen':'{last_file}'}},\n  {'name':'metadata','mode':'modify','event':'post-after','fields':{'post_after_seen':'{last_file}'}},\n  {'name':'metadata','mode':'modify','event':'finalize','fields':{'final_seen':'{last_file}'}},\n ]\n with tempfile.TemporaryDirectory() as tmp:\n  config.set(('extractor','fixture'),'base-directory',tmp)\n  for key in ('metadata-path','metadata-extractor','metadata-url'):config.set(('extractor','fixture'),key,False if key!='metadata-url' else None)\n  config.set(('extractor','fixture'),'postprocessors',opts)\n  if eager:config.set(('extractor','fixture'),'init',True)\n  extr=Synthetic(re.match('.*','https://fixture.invalid/context'))\n  def messages():\n   if no_results:return\n   post={'id':1,'num':0,'caption':'original','remove':'original','nested':{'remove':'nested-original'}}\n   prepared=[dict(copy.deepcopy(post),num=n,filename=f'file-{n}',extension='txt') for n in range(2)]\n   records.append(dict(event='emit-directory',**snap(post)))\n   yield Message.Directory,'',post\n   records.append(dict(event='resume-after-directory',**snap(post)))\n   if not empty_only:\n    for n in range(2):\n     if kind=='shared':data=post;data.update(num=n,filename=f'file-{n}',extension='txt')\n     elif kind=='precomputed':data=prepared[n]\n     else:data=copy.deepcopy(post);data.update(num=n,filename=f'file-{n}',extension='txt')\n     records.append(dict(event='emit-file',**snap(data)))\n     yield Message.Url,f'text:file-{n}',data\n     records.append(dict(event='resume-after-file',**snap(data)))\n   if empty_tail:\n    empty={'id':2,'num':0,'caption':'second','remove':'second','nested':{'remove':'second-nested'}}\n    records.append(dict(event='emit-directory',**snap(empty)))\n    yield Message.Directory,'',empty\n    records.append(dict(event='resume-after-directory',**snap(empty)))\n  extr.messages=messages\n  real_register=job.DownloadJob.register_hooks\n  def path_state(path):\n   return {'filename':path.filename,'extension':path.extension,'directory':path.directory,'path':path.path,'realpath':path.realpath}\n  def register(self,hooks,options=None):\n   wrapped={}\n   for event,callback in hooks.items():\n    def hook(path,event=event,callback=callback,mode=(options or {}).get('mode')):\n     records.append(dict(event='hook-before',hook=event,mode=mode,path_state=path_state(path),**snap(path.kwdict)))\n     callback(path)\n     records.append(dict(event='hook-after',hook=event,mode=mode,path_state=path_state(path),**snap(path.kwdict)))\n    wrapped[event]=hook\n   return real_register(self,wrapped,options)\n  with patch.object(job.DownloadJob,'register_hooks',register):\n   actual=job.DownloadJob(extr)\n   actual.out=SimpleNamespace(success=lambda p:None,skip=lambda p:None)\n   def download(url):\n    path=actual.pathfmt;path.build_path();Path(path.realdirectory).mkdir(parents=True,exist_ok=True);Path(path.temppath).write_text('synthetic');return True\n   actual.download=download\n   status=actual.run()\n  result={'name':name,'emitter':kind,'empty_tail':empty_tail,'eager_init':eager,'empty_only':empty_only,'no_results':no_results,'status':status,'records':records,'final_path_context':dict(**snap(actual.pathfmt.kwdict),path_state=path_state(actual.pathfmt)) if actual.pathfmt else None,'hook_options':opts,'config_options':{'base-directory':'$WORK','metadata-path':False,'metadata-extractor':False,'metadata-url':None,'init':True if eager else None},'extractor_directory_format':['{id}'],'extractor_filename_format':'{id}_{num}.{extension}'}\n  # Never retain temporary host paths if source adds one in a future version.\n  return json.loads(json.dumps(result).replace(tmp,'$WORK'))\ncases=[generate('shared_dictionary'),generate('precomputed_file_dictionaries','precomputed'),generate('copies_after_directory','after-directory'),generate('shared_then_empty_post',empty_tail=True),generate('precomputed_then_empty_post','precomputed',True),generate('eager_init_shared',eager=True),generate('only_empty_post',empty_only=True),generate('no_results_lazy',no_results=True),generate('no_results_eager',no_results=True,eager=True)]\nresult={'version':version.__version__,'source':'Actual DownloadJob.run/dispatch/initialize/handle_directory/handle_url/handle_finalize + MetadataPP modify/delete + PathFormat reference assignments. Synthetic Extractor yields dictionaries and fake download writes synthetic bytes; no network or external command. No source edits. Default lazy initialization, eager init and three emitter identity patterns are isolated in separate config.clear() cases.','source_sha256':{p:hashlib.sha256((BASE/p).read_bytes()).hexdigest() for p in ['job.py','path.py','postprocessor/metadata.py']},'generator_source':Path(__file__).read_text(),'options':'Per-case hook mutations are visible in hook-after snapshots: init adds initialized/init_only; post adds caption/post_only/nested[post] then deletes remove/nested[remove]; file adds last_file/file_only then deletes caption; after/post-after/finalize add their observed last_file.','cases':cases}\nout=Path(sys.argv[1]);out.parent.mkdir(exist_ok=True);out.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\\n');print([(c['name'],c['status'],len(c['records']))for c in cases])\n",
+  "options": "Per-case hook mutations are visible in hook-after snapshots: init adds initialized/init_only; post adds caption/post_only/nested[post] then deletes remove/nested[remove]; file adds last_file/file_only then deletes caption; after/post-after/finalize add their observed last_file.",
+  "cases": [
+    {
+      "name": "shared_dictionary",
+      "emitter": "shared",
+      "empty_tail": false,
+      "eager_init": false,
+      "empty_only": false,
+      "no_results": false,
+      "status": 0,
+      "records": [
+        {
+          "event": "emit-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1,
+            "final_seen": 1
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-1",
+        "keywords": {
+          "id": 1,
+          "num": 1,
+          "nested": {
+            "post": 1
+          },
+          "category": "fixture",
+          "subcategory": "context",
+          "initialized": 1,
+          "init_only": "from-init",
+          "post_only": "from-post",
+          "filename": "file-1",
+          "extension": "txt",
+          "last_file": 1,
+          "file_only": "file-1",
+          "after_seen": 1,
+          "post_after_seen": 1,
+          "final_seen": 1
+        },
+        "path_state": {
+          "filename": "1_1.txt",
+          "extension": "txt",
+          "directory": "$WORK/1/",
+          "path": "$WORK/1/1_1.txt",
+          "realpath": "$WORK/1/1_1.txt"
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": null
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "precomputed_file_dictionaries",
+      "emitter": "precomputed",
+      "empty_tail": false,
+      "eager_init": false,
+      "empty_only": false,
+      "no_results": false,
+      "status": 0,
+      "records": [
+        {
+          "event": "emit-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1,
+            "final_seen": 1
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-3",
+        "keywords": {
+          "id": 1,
+          "num": 1,
+          "remove": "original",
+          "nested": {
+            "remove": "nested-original"
+          },
+          "filename": "file-1",
+          "extension": "txt",
+          "category": "fixture",
+          "subcategory": "context",
+          "last_file": 1,
+          "file_only": "file-1",
+          "after_seen": 1,
+          "post_after_seen": 1,
+          "final_seen": 1
+        },
+        "path_state": {
+          "filename": "1_1.txt",
+          "extension": "txt",
+          "directory": "$WORK/1/",
+          "path": "$WORK/1/1_1.txt",
+          "realpath": "$WORK/1/1_1.txt"
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": null
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "copies_after_directory",
+      "emitter": "after-directory",
+      "empty_tail": false,
+      "eager_init": false,
+      "empty_only": false,
+      "no_results": false,
+      "status": 0,
+      "records": [
+        {
+          "event": "emit-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1,
+            "final_seen": 1
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-3",
+        "keywords": {
+          "id": 1,
+          "num": 1,
+          "nested": {
+            "post": 1
+          },
+          "category": "fixture",
+          "subcategory": "context",
+          "initialized": 1,
+          "init_only": "from-init",
+          "post_only": "from-post",
+          "filename": "file-1",
+          "extension": "txt",
+          "last_file": 1,
+          "file_only": "file-1",
+          "after_seen": 1,
+          "post_after_seen": 1,
+          "final_seen": 1
+        },
+        "path_state": {
+          "filename": "1_1.txt",
+          "extension": "txt",
+          "directory": "$WORK/1/",
+          "path": "$WORK/1/1_1.txt",
+          "realpath": "$WORK/1/1_1.txt"
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": null
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "shared_then_empty_post",
+      "emitter": "shared",
+      "empty_tail": true,
+      "eager_init": false,
+      "empty_only": false,
+      "no_results": false,
+      "status": 0,
+      "records": [
+        {
+          "event": "emit-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "emit-directory",
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "second",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "second",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested",
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested",
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "post_after_seen": null,
+            "final_seen": null
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-2",
+        "keywords": {
+          "id": 2,
+          "num": 0,
+          "caption": "post-2",
+          "nested": {
+            "post": 2
+          },
+          "category": "fixture",
+          "subcategory": "context",
+          "post_only": "from-post",
+          "post_after_seen": null,
+          "final_seen": null
+        },
+        "path_state": {
+          "filename": "1_1.txt",
+          "extension": "txt",
+          "directory": "$WORK/2/",
+          "path": "$WORK/1/1_1.txt",
+          "realpath": "$WORK/1/1_1.txt"
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": null
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "precomputed_then_empty_post",
+      "emitter": "precomputed",
+      "empty_tail": true,
+      "eager_init": false,
+      "empty_only": false,
+      "no_results": false,
+      "status": 0,
+      "records": [
+        {
+          "event": "emit-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-0",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "emit-directory",
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "second",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-3",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "filename": "file-1",
+            "extension": "txt",
+            "category": "fixture",
+            "subcategory": "context",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "second",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested",
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "remove": "second",
+            "nested": {
+              "remove": "second-nested",
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/2/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-4",
+          "keywords": {
+            "id": 2,
+            "num": 0,
+            "caption": "post-2",
+            "nested": {
+              "post": 2
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "post_after_seen": null,
+            "final_seen": null
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-4",
+        "keywords": {
+          "id": 2,
+          "num": 0,
+          "caption": "post-2",
+          "nested": {
+            "post": 2
+          },
+          "category": "fixture",
+          "subcategory": "context",
+          "post_only": "from-post",
+          "post_after_seen": null,
+          "final_seen": null
+        },
+        "path_state": {
+          "filename": "1_1.txt",
+          "extension": "txt",
+          "directory": "$WORK/2/",
+          "path": "$WORK/1/1_1.txt",
+          "realpath": "$WORK/1/1_1.txt"
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": null
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "eager_init_shared",
+      "emitter": "shared",
+      "empty_tail": false,
+      "eager_init": true,
+      "empty_only": false,
+      "no_results": false,
+      "status": 0,
+      "records": [
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {}
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "emit-directory",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_0.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_0.txt",
+            "realpath": "$WORK/1/1_0.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-0",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "emit-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 0,
+            "file_only": "file-0",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "file",
+          "mode": "delete",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 0
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "resume-after-file",
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "1_1.txt",
+            "extension": "txt",
+            "directory": "$WORK/1/",
+            "path": "$WORK/1/1_1.txt",
+            "realpath": "$WORK/1/1_1.txt"
+          },
+          "object": "context-2",
+          "keywords": {
+            "id": 1,
+            "num": 1,
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "post_only": "from-post",
+            "filename": "file-1",
+            "extension": "txt",
+            "last_file": 1,
+            "file_only": "file-1",
+            "after_seen": 1,
+            "post_after_seen": 1,
+            "final_seen": 1
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-2",
+        "keywords": {
+          "id": 1,
+          "num": 1,
+          "nested": {
+            "post": 1
+          },
+          "category": "fixture",
+          "subcategory": "context",
+          "post_only": "from-post",
+          "filename": "file-1",
+          "extension": "txt",
+          "last_file": 1,
+          "file_only": "file-1",
+          "after_seen": 1,
+          "post_after_seen": 1,
+          "final_seen": 1
+        },
+        "path_state": {
+          "filename": "1_1.txt",
+          "extension": "txt",
+          "directory": "$WORK/1/",
+          "path": "$WORK/1/1_1.txt",
+          "realpath": "$WORK/1/1_1.txt"
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": true
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "only_empty_post",
+      "emitter": "shared",
+      "empty_tail": false,
+      "eager_init": false,
+      "empty_only": true,
+      "no_results": false,
+      "status": 0,
+      "records": [
+        {
+          "event": "emit-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            }
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "original",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original"
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "remove": "original",
+            "nested": {
+              "remove": "nested-original",
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post",
+          "mode": "delete",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "resume-after-directory",
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "$WORK/1/",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "id": 1,
+            "num": 0,
+            "caption": "post-1",
+            "nested": {
+              "post": 1
+            },
+            "category": "fixture",
+            "subcategory": "context",
+            "initialized": 1,
+            "init_only": "from-init",
+            "post_only": "from-post",
+            "post_after_seen": null,
+            "final_seen": null
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-1",
+        "keywords": {
+          "id": 1,
+          "num": 0,
+          "caption": "post-1",
+          "nested": {
+            "post": 1
+          },
+          "category": "fixture",
+          "subcategory": "context",
+          "initialized": 1,
+          "init_only": "from-init",
+          "post_only": "from-post",
+          "post_after_seen": null,
+          "final_seen": null
+        },
+        "path_state": {
+          "filename": "",
+          "extension": "",
+          "directory": "$WORK/1/",
+          "path": "",
+          "realpath": ""
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": null
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "no_results_lazy",
+      "emitter": "shared",
+      "empty_tail": false,
+      "eager_init": false,
+      "empty_only": false,
+      "no_results": true,
+      "status": 0,
+      "records": [],
+      "final_path_context": null,
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          }
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          }
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ]
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          }
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ]
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          }
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          }
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          }
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": null
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    },
+    {
+      "name": "no_results_eager",
+      "emitter": "shared",
+      "empty_tail": false,
+      "eager_init": true,
+      "empty_only": false,
+      "no_results": true,
+      "status": 0,
+      "records": [
+        {
+          "event": "hook-before",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {}
+        },
+        {
+          "event": "hook-after",
+          "hook": "init",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init"
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "post-after",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-before",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init",
+            "post_after_seen": null
+          }
+        },
+        {
+          "event": "hook-after",
+          "hook": "finalize",
+          "mode": "modify",
+          "path_state": {
+            "filename": "",
+            "extension": "",
+            "directory": "",
+            "path": "",
+            "realpath": ""
+          },
+          "object": "context-1",
+          "keywords": {
+            "initialized": null,
+            "init_only": "from-init",
+            "post_after_seen": null,
+            "final_seen": null
+          }
+        }
+      ],
+      "final_path_context": {
+        "object": "context-1",
+        "keywords": {
+          "initialized": null,
+          "init_only": "from-init",
+          "post_after_seen": null,
+          "final_seen": null
+        },
+        "path_state": {
+          "filename": "",
+          "extension": "",
+          "directory": "",
+          "path": "",
+          "realpath": ""
+        }
+      },
+      "hook_options": [
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "init",
+          "fields": {
+            "initialized": "{id}",
+            "init_only": "from-init"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post",
+          "fields": {
+            "caption": "post-{id}",
+            "post_only": "from-post",
+            "nested[post]": "{id}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "post",
+          "fields": [
+            "remove",
+            "nested[remove]"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "file",
+          "fields": {
+            "last_file": "{num}",
+            "file_only": "file-{num}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "delete",
+          "event": "file",
+          "fields": [
+            "caption"
+          ],
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "after",
+          "fields": {
+            "after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "post-after",
+          "fields": {
+            "post_after_seen": "{last_file}"
+          },
+          "__init__": null
+        },
+        {
+          "name": "metadata",
+          "mode": "modify",
+          "event": "finalize",
+          "fields": {
+            "final_seen": "{last_file}"
+          },
+          "__init__": null
+        }
+      ],
+      "config_options": {
+        "base-directory": "$WORK",
+        "metadata-path": false,
+        "metadata-extractor": false,
+        "metadata-url": null,
+        "init": true
+      },
+      "extractor_directory_format": [
+        "{id}"
+      ],
+      "extractor_filename_format": "{id}_{num}.{extension}"
+    }
+  ]
+}

@@ -13,7 +13,7 @@ const MAX_TEXT: usize = 65536;
 const MAX_WIDTH: usize = 240;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum Value {
+pub(crate) enum Value {
     None,
     Bool(bool),
     Int(i128),
@@ -48,7 +48,7 @@ impl Value {
     }
 }
 
-pub(super) fn timestamp(seconds: i128) -> Value {
+pub(crate) fn timestamp(seconds: i128) -> Value {
     i64::try_from(seconds)
         .ok()
         .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
@@ -137,7 +137,7 @@ enum Op {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Field {
+pub(crate) struct Field {
     alternatives: Vec<Source>,
     conversion: Option<char>,
     ops: Vec<Op>,
@@ -148,7 +148,7 @@ const CONVERSIONS: &str = "lucCtsSrjdDTifgUHW";
 
 impl Field {
     /// Parse the text between braces. `known` validates top-level names.
-    pub(super) fn parse(text: &str, known: impl Fn(&str) -> bool) -> Result<Self> {
+    pub(crate) fn parse(text: &str, known: impl Fn(&str) -> bool) -> Result<Self> {
         let (head, conversion, spec) = split_field(text)?;
         let mut alternatives = Vec::new();
         for alternative in split_outside(head, '|') {
@@ -172,15 +172,23 @@ impl Field {
         })
     }
 
-    pub(super) fn names(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
         self.alternatives.iter().filter_map(|source| match source {
             Source::Path { name, .. } => Some(name.as_str()),
             Source::Literal(_) => None,
         })
     }
 
-    /// Render the field. `Ok(None)` reports a missing or empty required value.
-    pub(super) fn render(&self, lookup: impl Fn(&str) -> Option<Value>) -> Result<Option<String>> {
+    /// Preserve the source value for a single unformatted replacement field.
+    pub(crate) fn render_value(&self, lookup: impl Fn(&str) -> Option<Value>) -> Result<Value> {
+        if self.conversion.is_none() && self.ops.is_empty() && self.spec.is_empty() {
+            Ok(self.select(lookup))
+        } else {
+            self.render(lookup)
+                .map(|value| value.map_or(Value::None, Value::Str))
+        }
+    }
+    fn select(&self, lookup: impl Fn(&str) -> Option<Value>) -> Value {
         let mut selected = Value::None;
         for source in &self.alternatives {
             let value = match source {
@@ -199,6 +207,11 @@ impl Field {
                 break;
             }
         }
+        selected
+    }
+    /// Render the field. `Ok(None)` reports a missing or empty required value.
+    pub(crate) fn render(&self, lookup: impl Fn(&str) -> Option<Value>) -> Result<Option<String>> {
+        let mut selected = self.select(lookup);
         if let Some(conversion) = self.conversion {
             selected = convert(selected, conversion)?;
         }
