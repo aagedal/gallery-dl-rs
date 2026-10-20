@@ -4986,6 +4986,8 @@ fn event_shape(events: &[crate::event::ExtractionEvent]) -> Vec<(char, String, u
                 ('M', metadata.post_id.clone(), metadata.index)
             }
             ExtractionEvent::EndPost => ('E', String::new(), 0),
+            ExtractionEvent::BeginChild(_) => ('B', String::new(), 0),
+            ExtractionEvent::EndChild(_) => ('C', String::new(), 0),
         })
         .collect()
 }

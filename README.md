@@ -465,8 +465,8 @@ upstream's reversed source ordering. Child identities validate only when consume
 and media retain the same metadata/archive identity as direct post/creator URLs.
 Child requests are lazy, failures report an error and leave later children
 available, and cancellation drops the active child. `max-posts` applies per
-creator or Discord channel. Rust post/file ranges still count across the input;
-upstream's independent child counters and child filters remain unimplemented.
+creator or Discord channel. Native child jobs reset post/file/child counters;
+`--child-range` and `--child-filter` select creators and channels before requests.
 
 Kemono/Coomer API requests now accept scoped Netscape or imported Firefox
 cookies, recomputed for each request URL and rotated from responses. Cookies
@@ -1156,7 +1156,9 @@ without echoing contents or paths. Inline `-KEY=VALUE` / `-G` options, configure
 
 ## Media selection
 
-`--range '2-5,8,10:20:3'` selects media positions separately for each input URL.
+`--range '2-5,8,10:20:3'` selects media positions separately for each extractor
+job. Native Kemono/Coomer collections and Discord servers reset counters for
+each child creator, post or channel; other inputs begin with one root job.
 Positions start at one. Hyphen endpoints are inclusive (`2-5` selects 2 through
 5); slices exclude their stop (`10:20:3` selects 10, 13, 16, 19). Comma groups
 form a union and output retains extraction order. Omitted endpoints default to
@@ -1183,8 +1185,8 @@ optimizations; native extractors still parse a whole response page or post.
 Compatibility positions count the resolved media stream for an entire input,
 including flattened child extractors; counters do not yet reset at nested child
 boundaries. The separate compatibility configuration can apply its own selection
-before Rust receives media. Child ranges and child expression filters remain
-unimplemented.
+before Rust receives media. Rust forwards child ranges and child filters to
+the compatibility process, which applies them to its queued jobs.
 
 ## Post selection
 
@@ -1199,7 +1201,8 @@ gallery-dl-rs --post-filter "count >= 2" --post-range '1-3' URL
 Scoped `post-range` accepts the same string/list syntax and limits as
 `file-range`; scoped `post-filter` accepts the same string/list expressions and
 limits as `file-filter`. Empty strings/lists clear inherited settings. Explicit
-CLI values replace configured values. Counters start at one for each input URL.
+CLI values replace configured values. Counters start at one for each root job
+and reset for native child jobs with explicit boundaries.
 
 With post selection enabled, dates apply to post timestamps, followed by post
 filters, post ranges, file filters, file ranges, global deduplication, and archive
@@ -1228,13 +1231,57 @@ Empty ranges start no extraction. Finite native post ranges stop at the selected
 post's end, without requesting later posts. Compatibility output has no explicit
 end marker: Rust must read the next directory event or validated EOF to finish a
 post, which can require upstream work for the next post. Compatibility counters
-cover flattened child extractors for the whole input; nested child boundaries
-and child predicates remain unimplemented.
+cover flattened child extractors for the whole input because resolved JSON
+output does not identify its child boundaries.
 
 Library callers can consume `ExtractionEvent::Post`, `Media`, and `EndPost`
-through native `events` methods or `Backend::events_with_options`. Existing
-media-only stream methods remain available; `event::media_only` adapts event
-streams without inferring boundaries from file identities.
+through native `events` methods or `Backend::events_with_options`. Native child
+jobs additionally emit `BeginChild(ChildScope)` and matching `EndChild` events.
+`JobSelection` applies the combined predicates and counters; legacy
+`PostSelection::apply` also honors native child boundaries. Existing media-only
+stream methods remain available; `event::media_only` ignores framing events.
+
+## Child selection
+
+`--child-range '1-3'` selects child jobs within each parent; repeat
+`--child-filter EXPR` to require all expressions. Native configuration accepts
+`child-range` strings/lists and `child-filter` string/list expressions with the
+same scopes and limits as post selection. Explicit CLI values override config;
+empty strings/lists clear inherited selections. A mathematical empty child range
+skips all children while leaving root posts available. Empty file/post ranges
+still start no extraction.
+
+Child filters run before child counters and ranges. Rejected children do not
+occupy positions and start no child requests. After the last selected child,
+only its parent job stops; later siblings of that parent remain available.
+File/post limits similarly cancel the current native child before later pages,
+then continue sibling children. Nested counters reset independently, including
+favorites that select Discord servers whose channels are further child jobs.
+Error events add no extra positions; a selected child still occupies its
+position if extraction fails. Later siblings remain available unless a range
+has finished their parent.
+The cumulative input extraction budget is shared across every child.
+
+Collection child expressions expose bounded public queue fields such as `id`,
+`name`, `service`, `user`, `indexed`, `updated`, `favorited`, `faved_seq`, plus
+`category` and the parent `subcategory`. Values retain their raw scalar types;
+creator IDs in observed catalogs are strings. Discord channel children expose
+upstream's `server` and `channel` objects with public scalar fields, for example:
+
+```sh
+gallery-dl-rs --extractor native --child-filter "service == 'patreon'" --child-range '1-3' 'https://kemono.cr/artists'
+gallery-dl-rs --extractor native --child-filter "channel['type'] == 0" --child-range '1-2' 'https://kemono.cr/discord/server/SERVER_ID'
+```
+
+Fields also appear under `child` and `metadata` map aliases. Arbitrary transport
+URLs, headers, cookies, and private fields are omitted; semantic names and topics
+retain their text. Strings are limited to 64 KiB, numeric representations to
+128 bytes, and nested objects to the known server/channel shape. Missing keys
+and evaluation errors reject the child. Invalid selected identities fail before
+any request; invalid unselected identities can be skipped. Direct Discord channel
+URLs are root jobs, so child predicates do not filter their own messages.
+Additional extractor queue boundaries, subcategory-specific child settings,
+full queue metadata and authenticated verification remain unfinished.
 
 ## Metadata file filters
 
@@ -1393,7 +1440,7 @@ is a strict subset. Compatibility config is loaded only when explicitly selected
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
-`file-filter`, `image-filter`, `post-range`, `post-filter`,
+`file-filter`, `image-filter`, `post-range`, `post-filter`, `child-range`, `child-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,

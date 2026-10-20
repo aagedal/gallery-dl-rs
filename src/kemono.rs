@@ -1100,7 +1100,9 @@ impl Kemono {
                         media.filename = format!("{stem}_r{id}.{ext}");
                     }
                 }
-                ExtractionEvent::EndPost => {}
+                ExtractionEvent::EndPost
+                | ExtractionEvent::BeginChild(_)
+                | ExtractionEvent::EndChild(_) => {}
             }
         }
         events

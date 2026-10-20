@@ -2553,3 +2553,64 @@ fn kemono_favorites_are_sparse_scoped_and_validated_privately() {
         }
     }
 }
+
+#[test]
+fn child_selection_is_scoped_sparse_and_explicitly_clearable() {
+    let cfg=parse(r#"{"extractor":{"child-range":["2","4"],"child-filter":["service == 'patreon'"],"kemono":{"child-range":"1","child-filter":[]}}}"#).unwrap();
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert_eq!(kemono.child_range.as_deref(), Some("1"));
+    assert_eq!(kemono.child_filter, Some(vec![]));
+    let coomer = cfg.resolve("coomer").unwrap();
+    assert_eq!(coomer.child_range.as_deref(), Some("2,4"));
+    assert_eq!(
+        coomer.child_filter,
+        Some(vec!["service == 'patreon'".into()])
+    );
+    let overlaid = coomer.overlay(&Options {
+        child_range: Some("3".into()),
+        child_filter: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(overlaid.child_range.as_deref(), Some("3"));
+    assert_eq!(overlaid.child_filter, Some(vec![]));
+    let empty = parse("{}").unwrap().resolve("kemono").unwrap();
+    assert!(empty.child_range.is_none() && empty.child_filter.is_none());
+    assert_eq!(
+        parse(r#"{"child-range":"5","extractor":{"kemono":{"child-range":"1"}}}"#)
+            .unwrap()
+            .resolve("kemono")
+            .unwrap()
+            .child_range
+            .as_deref(),
+        Some("5")
+    );
+    for (field, values) in [
+        (
+            "child-range",
+            vec![
+                serde_json::json!(null),
+                serde_json::json!(true),
+                serde_json::json!({}),
+                serde_json::json!("PRIVATE_VALUE"),
+            ],
+        ),
+        (
+            "child-filter",
+            vec![
+                serde_json::json!(null),
+                serde_json::json!(true),
+                serde_json::json!([1]),
+                serde_json::json!({"private":"PRIVATE_VALUE"}),
+            ],
+        ),
+    ] {
+        for value in values {
+            let doc = serde_json::json!({"extractor":{"kemono":{field:value}}});
+            let error = parse(&doc.to_string()).unwrap_err().to_string();
+            assert!(
+                error.contains(field) && !error.contains("PRIVATE_VALUE"),
+                "{error}"
+            );
+        }
+    }
+}

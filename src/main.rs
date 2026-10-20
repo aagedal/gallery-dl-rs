@@ -18,6 +18,7 @@ use gallery_dl_rs::{
     filter::FilterExpression,
     input::Inputs,
     instagram::Instagram,
+    job_selection::JobSelection,
     naming::{DirectoryTemplate, FilenameTemplate},
     network::NetworkOptions,
     post_selection::PostSelection,
@@ -58,18 +59,24 @@ struct Args {
     /// Maximum simultaneous downloads
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=32))]
     jobs: u8,
-    /// Select one-based file positions per input (e.g. 5, 8-20, or 1:24:3)
+    /// Select one-based file positions per extractor job (e.g. 5, 8-20, or 1:24:3)
     #[arg(long = "range", allow_hyphen_values = true)]
     file_range: Option<String>,
     /// Select files with a metadata expression; repeat to require all expressions
     #[arg(long = "filter", value_name = "EXPR", allow_hyphen_values = true)]
     file_filter: Vec<String>,
-    /// Select one-based post positions per input
+    /// Select one-based post positions per extractor job
     #[arg(long = "post-range", allow_hyphen_values = true)]
     post_range: Option<String>,
     /// Select posts before file filtering; repeat to require all expressions
     #[arg(long = "post-filter", value_name = "EXPR", allow_hyphen_values = true)]
     post_filter: Vec<String>,
+    /// Select one-based child extractor positions within each parent job
+    #[arg(long = "child-range", allow_hyphen_values = true)]
+    child_range: Option<String>,
+    /// Select child extractors before requests; repeat to require all expressions
+    #[arg(long = "child-filter", value_name = "EXPR", allow_hyphen_values = true)]
+    child_filter: Vec<String>,
     /// Emit metadata for native X posts without media
     #[arg(long, conflicts_with = "no_text_tweets")]
     text_tweets: bool,
@@ -352,37 +359,17 @@ async fn run(args: Args) -> Result<()> {
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
-                        Some(settings) => {
-                            let input = if let Some(selection) = &settings.post_selection {
-                                selection.apply(
-                                    input,
-                                    settings.options.date_before,
-                                    settings.options.date_after,
-                                    unordered_dates,
-                                )
-                            } else {
-                                let input = event::media_only(input);
-                                if settings.options.date_before.is_some()
-                                    || settings.options.date_after.is_some()
-                                {
-                                    if unordered_dates {
-                                        settings.dates.apply_unordered(input)
-                                    } else {
-                                        settings.dates.apply(input)
-                                    }
-                                } else {
-                                    input
-                                }
-                            };
-                            let input = match &settings.filter {
-                                Some(filter) => filter.apply(input),
-                                None => input,
-                            };
-                            match &settings.selection {
-                                Some(selection) => selection.apply(input),
-                                None => input,
-                            }
+                        Some(settings) => JobSelection {
+                            post_selection: settings.post_selection.clone(),
+                            file_range: settings.selection.clone(),
+                            file_filter: settings.filter.clone(),
+                            child_range: settings.child_range.clone(),
+                            child_filter: settings.child_filter.clone(),
+                            before: settings.options.date_before,
+                            after: settings.options.date_after,
+                            unordered: unordered_dates,
                         }
+                        .apply(input),
                         None => event::media_only(input),
                     }
                 }
@@ -1188,6 +1175,8 @@ fn extract_input<'a>(
                     backend.events_with_options(
                         &url,
                         BackendOptions {
+                            child_range: options.child_range.clone(),
+                            child_filter: options.child_filter.clone(),
                             browser: configured.browser_spec.clone(),
                             proxy: configured.network.proxy().map(str::to_owned),
                             user_agent: configured.network.user_agent().map(str::to_owned),
@@ -1324,7 +1313,9 @@ fn extract_input<'a>(
                         match &mut event {
                             ExtractionEvent::Media(media) => media.category = category.into(),
                             ExtractionEvent::Post(post) => post.category = category.into(),
-                            ExtractionEvent::EndPost => {}
+                            ExtractionEvent::EndPost
+                            | ExtractionEvent::BeginChild(_)
+                            | ExtractionEvent::EndChild(_) => {}
                         }
                         event
                     })
@@ -1349,7 +1340,8 @@ struct Settings {
     selection: Option<RangeSelection>,
     filter: Option<FilterExpression>,
     post_selection: Option<PostSelection>,
-    dates: DateFilter,
+    child_range: Option<RangeSelection>,
+    child_filter: Option<FilterExpression>,
     network: NetworkOptions,
     download_client: OnceCell<Result<download::DownloadClient>>,
     limits: SizeLimits,
@@ -1382,6 +1374,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         file_filter: (!args.file_filter.is_empty()).then(|| args.file_filter.clone()),
         post_range: args.post_range.clone(),
         post_filter: (!args.post_filter.is_empty()).then(|| args.post_filter.clone()),
+        child_range: args.child_range.clone(),
+        child_filter: (!args.child_filter.is_empty()).then(|| args.child_filter.clone()),
         date_before: args.date_before,
         date_after: args.date_after,
         directory: if args.exact_directory.is_some() {
@@ -1555,7 +1549,19 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .then(|| PostSelection::new(post_range, post_filter));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
-        let dates = DateFilter::new(options.date_before, options.date_after)?;
+        DateFilter::new(options.date_before, options.date_after)?;
+        let child_range = options
+            .child_range
+            .as_deref()
+            .map(RangeSelection::parse)
+            .transpose()
+            .map_err(|_| error("invalid child range"))?;
+        let child_filter = options
+            .child_filter
+            .as_deref()
+            .filter(|clauses| !clauses.is_empty())
+            .map(FilterExpression::parse_all)
+            .transpose()?;
         settings.insert(
             category,
             Settings {
@@ -1567,7 +1573,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 selection,
                 filter,
                 post_selection,
-                dates,
+                child_range,
+                child_filter,
                 network,
                 download_client: OnceCell::new(),
                 limits,

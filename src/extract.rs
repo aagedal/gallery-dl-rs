@@ -594,6 +594,8 @@ pub fn direct(url: &Url) -> Option<Media> {
 /// Runtime overrides passed as individual arguments to the compatibility process.
 #[derive(Clone, Default)]
 pub struct BackendOptions {
+    pub child_range: Option<String>,
+    pub child_filter: Option<Vec<String>>,
     pub browser: Option<String>,
     pub proxy: Option<String>,
     pub user_agent: Option<String>,
@@ -751,6 +753,20 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("text-tweets={text_tweets}"));
+        }
+        if let Some(range) = &options.child_range {
+            command
+                .arg("--option")
+                .arg(format!("child-range={}", serde_json::json!(range)));
+        }
+        if let Some(clauses) = &options.child_filter {
+            // An empty clause list explicitly clears inherited backend filters.
+            let value = if clauses.is_empty() {
+                serde_json::json!("")
+            } else {
+                serde_json::json!(clauses)
+            };
+            command.arg("--option").arg(format!("child-filter={value}"));
         }
         if let Some(size) = &options.size {
             command

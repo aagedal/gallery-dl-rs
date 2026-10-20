@@ -1,6 +1,9 @@
 //! Bounded, cooperatively cancellable creator and favorite discovery.
 use super::{Kemono, MAX_RESPONSE, valid_discord_id, valid_id, valid_service};
-use crate::{Result, error, event::ExtractionEvent};
+use crate::{
+    Result, error,
+    event::{ChildControl, ChildMetadata, ChildScope, ExtractionEvent},
+};
 use futures_util::{
     StreamExt,
     stream::{self, BoxStream},
@@ -389,8 +392,43 @@ fn child(row: &Value, query: &Query) -> Child {
         }
     }
 }
+#[derive(Debug)]
+struct Queued {
+    child: Child,
+    metadata: serde_json::Map<String, Value>,
+}
+impl Queued {
+    fn url(self, host: &str) -> Result<Url> {
+        self.child.url(host)
+    }
+}
+fn child_metadata(row: &Value) -> serde_json::Map<String, Value> {
+    let mut metadata = serde_json::Map::new();
+    for key in [
+        "id",
+        "user",
+        "service",
+        "name",
+        "indexed",
+        "updated",
+        "favorited",
+        "faved_seq",
+    ] {
+        let Some(value) = row.get(key) else { continue };
+        let bounded = match value {
+            Value::String(text) => text.len() <= MAX_TEXT && !text.contains('\0'),
+            Value::Number(number) => number.to_string().len() <= 128,
+            Value::Bool(_) | Value::Null => true,
+            _ => false,
+        };
+        if bounded {
+            metadata.insert(key.into(), value.clone());
+        }
+    }
+    metadata
+}
 struct Prepared {
-    children: Vec<Option<Child>>,
+    children: Vec<Option<Queued>>,
     keys: Vec<Key>,
     class: Option<u8>,
 }
@@ -416,7 +454,10 @@ impl Prepared {
                 return Ok(());
             }
         }
-        let child = child(&row, query);
+        let child = Queued {
+            child: child(&row, query),
+            metadata: child_metadata(&row),
+        };
         let key = key(row.get(&query.sort).ok_or_else(invalid)?)?;
         let class = match key {
             Key::None => None,
@@ -485,7 +526,7 @@ fn parse_reader<R: std::io::Read>(
     reader: R,
     query: &Query,
     cancel: &AtomicBool,
-) -> Result<Vec<Child>> {
+) -> Result<Vec<Queued>> {
     checkpoint(cancel)?;
     let reader = std::io::BufReader::with_capacity(
         16 * 1024,
@@ -512,7 +553,7 @@ fn parse_reader<R: std::io::Read>(
     }
     Ok(sorted)
 }
-fn parse(bytes: &[u8], query: &Query, cancel: &AtomicBool) -> Result<Vec<Child>> {
+fn parse(bytes: &[u8], query: &Query, cancel: &AtomicBool) -> Result<Vec<Queued>> {
     if bytes.len() > MAX_RESPONSE {
         return Err(error("Kemono collection exceeds 32 MiB"));
     }
@@ -524,7 +565,7 @@ impl Drop for CancelOnDrop {
         self.0.store(true, AtomicOrder::Relaxed);
     }
 }
-async fn parse_background(bytes: Vec<u8>, query: Query) -> Result<Vec<Child>> {
+async fn parse_background(bytes: Vec<u8>, query: Query) -> Result<Vec<Queued>> {
     let cancel = Arc::new(AtomicBool::new(false));
     let guard = CancelOnDrop(cancel.clone());
     let result = tokio::task::spawn_blocking(move || parse(&bytes, &query, &cancel))
@@ -536,9 +577,12 @@ async fn parse_background(bytes: Vec<u8>, query: Query) -> Result<Vec<Child>> {
 struct State<'a> {
     host: String,
     query: Query,
-    children: std::collections::VecDeque<Child>,
+    children: std::collections::VecDeque<Queued>,
     initialized: bool,
     current: Option<BoxStream<'a, Result<ExtractionEvent>>>,
+    candidate: Option<Queued>,
+    control: Option<ChildControl>,
+    descendants: Vec<ChildControl>,
 }
 pub(super) fn events<'a>(
     extractor: &'a Kemono,
@@ -555,50 +599,97 @@ pub(super) fn events<'a>(
         children: Default::default(),
         initialized: false,
         current: None,
+        candidate: None,
+        control: None,
+        descendants: Vec::new(),
     };
     stream::unfold(Some(state), move |state| async move {
         let mut state = state?;
-        loop {
-            if let Some(child) = &mut state.current {
-                if let Some(event) = child.next().await {
-                    return Some((event, Some(state)));
-                }
-                state.current = None;
+        if state
+            .control
+            .as_ref()
+            .is_some_and(ChildControl::is_cancelled)
+        {
+            state.current = None;
+            state.candidate = None;
+            for control in &state.descendants {
+                control.cancel();
             }
-            if !state.initialized {
-                let favorites = if state.query.favorites == Favorites::Artist {
-                    "artist"
-                } else {
-                    "post"
-                };
-                let result = async {
-                    let bytes = if state.query.kind == Kind::Artists {
-                        extractor.call(&state.host, "api/v1/creators", &[]).await?
-                    } else {
-                        extractor
-                            .call(
-                                &state.host,
-                                "api/v1/account/favorites",
-                                &[("type", favorites)],
-                            )
-                            .await?
-                    };
-                    parse_background(bytes, state.query.clone()).await
-                }
-                .await;
-                state.children = match result {
-                    Ok(children) => children.into(),
-                    Err(error) => return Some((Err(error), None)),
-                };
-                state.initialized = true;
+            if let Some(control) = state.descendants.pop() {
+                return Some((Ok(ExtractionEvent::EndChild(control)), Some(state)));
             }
-            let child = state.children.pop_front()?;
-            let url = match child.url(&state.host) {
-                Ok(url) => url,
-                Err(error) => return Some((Err(error), Some(state))),
-            };
-            state.current = Some(extractor.events(&url));
         }
+        if let Some(child) = state.candidate.take() {
+            match child.url(&state.host) {
+                Ok(url) => state.current = Some(extractor.events(&url)),
+                Err(error) => return Some((Err(error), Some(state))),
+            }
+        }
+        if let Some(child) = &mut state.current {
+            if let Some(event) = child.next().await {
+                match &event {
+                    Ok(ExtractionEvent::BeginChild(scope)) => {
+                        state.descendants.push(scope.control.clone())
+                    }
+                    Ok(ExtractionEvent::EndChild(control))
+                        if state
+                            .descendants
+                            .last()
+                            .is_some_and(|child| child.same_scope(control)) =>
+                    {
+                        state.descendants.pop();
+                    }
+                    _ => {}
+                }
+                return Some((event, Some(state)));
+            }
+            state.current = None;
+        }
+        if let Some(control) = state.control.take() {
+            return Some((Ok(ExtractionEvent::EndChild(control)), Some(state)));
+        }
+        if !state.initialized {
+            let favorites = if state.query.favorites == Favorites::Artist {
+                "artist"
+            } else {
+                "post"
+            };
+            let result = async {
+                let bytes = if state.query.kind == Kind::Artists {
+                    extractor.call(&state.host, "api/v1/creators", &[]).await?
+                } else {
+                    extractor
+                        .call(
+                            &state.host,
+                            "api/v1/account/favorites",
+                            &[("type", favorites)],
+                        )
+                        .await?
+                };
+                parse_background(bytes, state.query.clone()).await
+            }
+            .await;
+            state.children = match result {
+                Ok(children) => children.into(),
+                Err(error) => return Some((Err(error), None)),
+            };
+            state.initialized = true;
+        }
+        let child = state.children.pop_front()?;
+        let category = super::category(&state.host).expect("validated host");
+        let subcategory = if state.query.kind == Kind::Artists {
+            "artists"
+        } else {
+            "favorite"
+        };
+        let scope = ChildScope::new(ChildMetadata::from_raw(
+            category,
+            subcategory,
+            &child.metadata,
+        ));
+        state.control = Some(scope.control.clone());
+        state.candidate = Some(child);
+        Some((Ok(ExtractionEvent::BeginChild(scope)), Some(state)))
     })
     .boxed()
 }
@@ -615,10 +706,10 @@ mod tests {
         thread,
         time::Duration,
     };
-    fn child_ids(children: &[Child]) -> Vec<&str> {
+    fn child_ids(children: &[Queued]) -> Vec<&str> {
         children
             .iter()
-            .map(|child| match child {
+            .map(|child| match &child.child {
                 Child::User { user, .. } => user.as_str(),
                 Child::Post { post, .. } => post.as_str(),
                 Child::Discord { server } => server.as_str(),
@@ -626,7 +717,7 @@ mod tests {
             })
             .collect()
     }
-    fn parse_url(bytes: &[u8], url: &str, default: Favorites) -> Result<Vec<Child>> {
+    fn parse_url(bytes: &[u8], url: &str, default: Favorites) -> Result<Vec<Queued>> {
         let url = Url::parse(url).unwrap();
         let query = query(&url, kind(&url).unwrap(), default)?;
         parse(bytes, &query, &AtomicBool::new(false))
@@ -881,6 +972,27 @@ mod tests {
             .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
             .unwrap()
     }
+    fn assert_child_frames(events: &[Result<ExtractionEvent>], expected: usize, depth: usize) {
+        let mut stack: Vec<ChildControl> = Vec::new();
+        let mut began = 0;
+        let mut maximum = 0;
+        for event in events.iter().filter_map(|event| event.as_ref().ok()) {
+            match event {
+                ExtractionEvent::BeginChild(scope) => {
+                    began += 1;
+                    stack.push(scope.control.clone());
+                    maximum = maximum.max(stack.len());
+                }
+                ExtractionEvent::EndChild(control) => {
+                    assert!(stack.pop().unwrap().same_scope(control))
+                }
+                _ => {}
+            }
+        }
+        assert!(stack.is_empty());
+        assert_eq!(began, expected);
+        assert_eq!(maximum, depth);
+    }
     fn post(id: &str, user: &str) -> Value {
         json!({"id":id,"service":"patreon","user":user,"title":"title","file":{},"attachments":[]})
     }
@@ -897,7 +1009,8 @@ mod tests {
             .events(&Url::parse("https://kemono.cr/artists?service=PATREON").unwrap())
             .collect()
             .await;
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 8);
+        assert_child_frames(&events, 2, 1);
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 3);
         assert!(requests[0].starts_with("GET /api/v1/creators "));
@@ -918,7 +1031,8 @@ mod tests {
             .events(&Url::parse("https://kemono.cr/account/favorites?type=post").unwrap())
             .collect()
             .await;
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 8);
+        assert_child_frames(&events, 2, 1);
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /api/v1/account/favorites?type=post "));
         assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/post/8 "));
@@ -942,7 +1056,8 @@ mod tests {
             .events(&Url::parse("https://kemono.cr/favorites?type=artist").unwrap())
             .collect()
             .await;
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 10);
+        assert_child_frames(&events, 3, 2);
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 4);
         assert!(requests[0].starts_with("GET /api/v1/account/favorites?type=artist "));
@@ -999,17 +1114,18 @@ mod tests {
             .events(&Url::parse("https://kemono.cr/artists").unwrap())
             .collect()
             .await;
-        assert_eq!(events.len(), 4);
-        assert!(events[0].is_err());
+        assert_eq!(events.len(), 10);
+        assert_child_frames(&events, 3, 1);
         assert!(events[1].is_err());
+        assert!(events[4].is_err());
         assert!(
-            !events[1]
+            !events[4]
                 .as_ref()
                 .unwrap_err()
                 .to_string()
                 .contains("private")
         );
-        assert!(matches!(events[2], Ok(ExtractionEvent::Post(_))));
+        assert!(matches!(events[7], Ok(ExtractionEvent::Post(_))));
         assert_eq!(server.join().unwrap().len(), 3);
         let (root, server) = serve(vec![
             response("200 OK", rows.to_string().as_bytes()),
@@ -1020,10 +1136,129 @@ mod tests {
         let mut events = client.events(&input);
         assert!(matches!(
             events.next().await.unwrap().unwrap(),
+            ExtractionEvent::BeginChild(_)
+        ));
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
             ExtractionEvent::Post(_)
         ));
         drop(events);
         assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn child_cancellation_skips_invalid_identity_and_pending_pages_before_next_sibling() {
+        let rows = json!([
+            {"id":"private/invalid","service":"patreon","favorited":3,"name":"https://private.example/token","url":"https://private.example/token","cookie":"private"},
+            {"id":"42","service":"patreon","favorited":2,"name":"First"},
+            {"id":"43","service":"patreon","favorited":1,"name":"Second"}
+        ]);
+        let page: Vec<_> = (1..=50).map(|id| post(&id.to_string(), "42")).collect();
+        let (root, server) = serve(vec![
+            response("200 OK", rows.to_string().as_bytes()),
+            response("200 OK", json!(page).to_string().as_bytes()),
+            response("200 OK", json!([post("99", "43")]).to_string().as_bytes()),
+        ]);
+        let client = extractor(root);
+        let input = Url::parse("https://kemono.cr/artists").unwrap();
+        let mut events = client.events(&input);
+        let ExtractionEvent::BeginChild(skipped) = events.next().await.unwrap().unwrap() else {
+            panic!("missing invalid child scope")
+        };
+        assert_eq!(skipped.metadata.category(), "kemono");
+        assert_eq!(skipped.metadata.subcategory(), "artists");
+        assert_eq!(skipped.metadata.fields()["id"], "private/invalid");
+        assert_eq!(
+            skipped.metadata.fields()["name"],
+            "https://private.example/token"
+        );
+        assert!(!skipped.metadata.fields().contains_key("url"));
+        assert!(!skipped.metadata.fields().contains_key("cookie"));
+        skipped.control.cancel();
+        let ExtractionEvent::EndChild(end) = events.next().await.unwrap().unwrap() else {
+            panic!("missing skipped child end")
+        };
+        assert!(end.same_scope(&skipped.control));
+        let ExtractionEvent::BeginChild(first) = events.next().await.unwrap().unwrap() else {
+            panic!("missing first child scope")
+        };
+        assert_eq!(first.metadata.fields()["id"], "42");
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::Post(_)
+        ));
+        first.control.cancel();
+        let ExtractionEvent::EndChild(end) = events.next().await.unwrap().unwrap() else {
+            panic!("pending post not discarded")
+        };
+        assert!(end.same_scope(&first.control));
+        let rest: Vec<_> = events.collect().await;
+        assert_eq!(rest.len(), 4);
+        assert_child_frames(&rest, 1, 1);
+        let ExtractionEvent::Post(post) = rest[1].as_ref().unwrap() else {
+            panic!("missing sibling post")
+        };
+        assert_eq!(post.metadata.as_ref().unwrap().post_id, "99");
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].contains("/patreon/user/42/posts?o=0"));
+        assert!(requests[2].contains("/patreon/user/43/posts?o=0"));
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request.contains("o=50") || request.contains("private"))
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_outer_discord_favorite_unwinds_active_channel_before_next_artist() {
+        let rows = json!([{"id":"100","service":"discord","updated":2},{"id":"42","service":"patreon","updated":1}]);
+        let server_body = json!({"id":"100","name":"Server","channels":[{"id":"200","server_id":"100","post_count":151},{"id":"201","server_id":"100","post_count":1}]});
+        let messages: Vec<_> = (1..=150).map(|id| json!({"id":id.to_string(),"server":"100","channel":"200","content":"text","attachments":[]})).collect();
+        let (root, server) = serve(vec![
+            response("200 OK", rows.to_string().as_bytes()),
+            response("200 OK", server_body.to_string().as_bytes()),
+            response("200 OK", json!(messages).to_string().as_bytes()),
+            response("200 OK", json!([post("99", "42")]).to_string().as_bytes()),
+        ]);
+        let client = extractor(root);
+        let input = Url::parse("https://kemono.cr/favorites").unwrap();
+        let mut events = client.events(&input);
+        let ExtractionEvent::BeginChild(outer) = events.next().await.unwrap().unwrap() else {
+            panic!("missing favorite child")
+        };
+        let ExtractionEvent::BeginChild(inner) = events.next().await.unwrap().unwrap() else {
+            panic!("missing Discord channel child")
+        };
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::Post(_)
+        ));
+        outer.control.cancel();
+        let ExtractionEvent::EndChild(inner_end) = events.next().await.unwrap().unwrap() else {
+            panic!("missing inner child end")
+        };
+        assert!(inner_end.same_scope(&inner.control));
+        assert!(inner_end.is_cancelled());
+        let ExtractionEvent::EndChild(outer_end) = events.next().await.unwrap().unwrap() else {
+            panic!("missing outer child end")
+        };
+        assert!(outer_end.same_scope(&outer.control));
+        let rest: Vec<_> = events.collect().await;
+        assert_eq!(rest.len(), 4);
+        assert_child_frames(&rest, 1, 1);
+        let ExtractionEvent::Post(post) = rest[1].as_ref().unwrap() else {
+            panic!("missing next artist")
+        };
+        assert_eq!(post.metadata.as_ref().unwrap().post_id, "99");
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[3].contains("/patreon/user/42/posts?o=0"));
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request.contains("o=150") || request.contains("/channel/201"))
+        );
     }
 
     #[tokio::test]
@@ -1055,6 +1290,10 @@ mod tests {
             async move {
                 let input = Url::parse("https://kemono.cr/artists").unwrap();
                 let mut events = client.events(&input);
+                assert!(matches!(
+                    events.next().await.unwrap().unwrap(),
+                    ExtractionEvent::BeginChild(_)
+                ));
                 events.next().await
             }
         });

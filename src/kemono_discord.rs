@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     Result, error,
-    event::{ExtractionEvent, Post, group},
+    event::{ChildControl, ChildMetadata, ChildScope, ExtractionEvent, Post, group},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
 };
@@ -74,6 +74,38 @@ fn invalid() -> crate::Error {
 struct Channel {
     metadata: DiscordMetadata,
     post_count: Option<usize>,
+    queue_server: Arc<Value>,
+    queue_channel: Value,
+    owner: Option<String>,
+}
+impl Channel {
+    fn valid_for(&self, server: &str) -> bool {
+        valid_discord_id(&self.metadata.channel_id) && self.owner.as_deref() == Some(server)
+    }
+}
+fn raw_channel_id(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) if value.len() <= 128 => Some(value.clone()),
+        Value::Number(value) => value.as_u64().map(|value| value.to_string()),
+        _ => None,
+    }
+}
+fn queue_fields(value: &Value, fields: &[&str]) -> Value {
+    Value::Object(
+        fields
+            .iter()
+            .filter_map(|key| {
+                let value = value.get(*key)?;
+                let valid = match value {
+                    Value::String(text) => text.len() <= MAX_TEXT && !text.contains('\0'),
+                    Value::Number(number) => number.to_string().len() <= 128,
+                    Value::Bool(_) | Value::Null => true,
+                    _ => false,
+                };
+                valid.then(|| ((*key).into(), value.clone()))
+            })
+            .collect(),
+    )
 }
 fn server_channels(bytes: &[u8], server: &str) -> Result<VecDeque<Channel>> {
     if bytes.len() > MAX_RESPONSE || !valid_discord_id(server) {
@@ -90,22 +122,42 @@ fn server_channels(bytes: &[u8], server: &str) -> Result<VecDeque<Channel>> {
     if channels.len() > MAX_CHANNELS {
         return Err(error("Kemono Discord channel count exceeds limit"));
     }
-    let mut seen = HashSet::new();
+    let mut positions = HashMap::new();
     let mut result = VecDeque::new();
     let server_name = text(&body, "name");
+    let queue_server = Arc::new(queue_fields(&body, &["id", "name", "indexed", "updated"]));
     for channel in channels {
-        let channel_id = channel.get("id").and_then(id).ok_or_else(invalid)?;
-        if channel.get("server_id").and_then(id).as_deref() != Some(server)
-            || !seen.insert(channel_id.clone())
-        {
-            return Err(invalid());
-        }
+        let channel_id = channel
+            .get("id")
+            .and_then(raw_channel_id)
+            .unwrap_or_default();
+        let owner = channel.get("server_id").and_then(raw_channel_id);
         let post_count = channel
             .get("post_count")
             .and_then(Value::as_u64)
             .and_then(|count| usize::try_from(count).ok())
             .filter(|count| count.checked_add(PAGE_SIZE * MAX_PAGES).is_some());
-        result.push_back(Channel {
+        let queue_channel = queue_fields(
+            channel,
+            &[
+                "id",
+                "server_id",
+                "name",
+                "parent_channel_id",
+                "topic",
+                "is_nsfw",
+                "type",
+                "post_count",
+                "position",
+                "theme_color",
+                "icon_emoji",
+            ],
+        );
+        let canonical = valid_discord_id(&channel_id).then(|| channel_id.clone());
+        let descriptor = Channel {
+            queue_server: queue_server.clone(),
+            queue_channel,
+            owner,
             metadata: DiscordMetadata {
                 server_id: server.into(),
                 channel_id,
@@ -117,7 +169,17 @@ fn server_channels(bytes: &[u8], server: &str) -> Result<VecDeque<Channel>> {
                 parent_id: channel.get("parent_channel_id").and_then(id),
             },
             post_count,
-        });
+        };
+        // Upstream stores channels in an insertion-ordered mapping: a later
+        // duplicate replaces its value without moving the original position.
+        if let Some(id) = canonical {
+            if let Some(position) = positions.get(&id) {
+                result[*position] = descriptor;
+                continue;
+            }
+            positions.insert(id, result.len());
+        }
+        result.push_back(descriptor);
     }
     Ok(result)
 }
@@ -361,6 +423,7 @@ struct State {
     raw: VecDeque<Value>,
     pending: VecDeque<ExtractionEvent>,
     emitted: usize,
+    control: Option<ChildControl>,
 }
 
 fn channel_error(
@@ -393,10 +456,26 @@ pub(super) fn events(
         raw: VecDeque::new(),
         pending: VecDeque::new(),
         emitted: 0,
+        control: None,
     };
     stream::unfold(Some(state), move |state| async move {
         let mut state = state?;
         loop {
+            if state
+                .control
+                .as_ref()
+                .is_some_and(ChildControl::is_cancelled)
+            {
+                state.pending.clear();
+                state.raw.clear();
+                state.current = None;
+                state.emitted = 0;
+            }
+            if state.current.is_none()
+                && let Some(control) = state.control.take()
+            {
+                return Some((Ok(ExtractionEvent::EndChild(control)), Some(state)));
+            }
             if let Some(event) = state.pending.pop_front() {
                 return Some((Ok(event), Some(state)));
             }
@@ -409,6 +488,7 @@ pub(super) fn events(
                 state.raw.clear();
                 state.current = None;
                 state.emitted = 0;
+                continue;
             }
             if let Some(post) = state.raw.pop_front() {
                 state.emitted += 1;
@@ -448,6 +528,7 @@ pub(super) fn events(
             if state.current.as_ref().is_some_and(|channel| channel.done) {
                 state.current = None;
                 state.emitted = 0;
+                continue;
             }
             if state.current.is_none() {
                 if !state.initialized {
@@ -478,15 +559,31 @@ pub(super) fn events(
                 }
                 let channel = state.channels.pop_front()?;
                 let offset = if extractor.post_order == super::PostOrder::Reverse {
-                    let Some(count) = channel.post_count else {
-                        return channel_error(
-                            state,
-                            error("Kemono Discord reverse order requires a valid post count"),
-                        );
-                    };
-                    count / PAGE_SIZE * PAGE_SIZE
+                    channel.post_count.unwrap_or(0) / PAGE_SIZE * PAGE_SIZE
                 } else {
                     0
+                };
+                let scope = if state.requested.is_none() {
+                    let mut fields = serde_json::to_value(&channel.metadata)
+                        .expect("serializable Discord metadata")
+                        .as_object()
+                        .unwrap()
+                        .clone();
+                    if let Some(id) = channel.queue_channel.get("id") {
+                        fields.insert("id".into(), id.clone());
+                    }
+                    fields.insert("server".into(), channel.queue_server.as_ref().clone());
+                    fields.insert("channel".into(), channel.queue_channel.clone());
+                    if let Some(count) = channel.post_count {
+                        fields.insert("post_count".into(), Value::from(count));
+                    }
+                    Some(ChildScope::new(ChildMetadata::from_raw(
+                        category(&state.host).expect("validated host"),
+                        "discord-server",
+                        &fields,
+                    )))
+                } else {
+                    None
                 };
                 state.current = Some(ChannelState {
                     channel,
@@ -495,8 +592,23 @@ pub(super) fn events(
                     done: false,
                     seen: HashSet::new(),
                 });
+                if let Some(scope) = scope {
+                    state.control = Some(scope.control.clone());
+                    return Some((Ok(ExtractionEvent::BeginChild(scope)), Some(state)));
+                }
             }
             let channel = state.current.as_mut().expect("active Discord channel");
+            if !channel.channel.valid_for(&state.server) {
+                return channel_error(state, invalid());
+            }
+            if extractor.post_order == super::PostOrder::Reverse
+                && channel.channel.post_count.is_none()
+            {
+                return channel_error(
+                    state,
+                    error("Kemono Discord reverse order requires a valid post count"),
+                );
+            }
             let offset = channel.offset.to_string();
             let path = format!(
                 "api/v1/discord/channel/{}",
@@ -689,6 +801,60 @@ mod tests {
     }
 
     #[test]
+    fn queued_channels_share_bounded_server_metadata_without_cloning_per_channel() {
+        let mut body = server_payload(&[("200", 1), ("201", 2), ("202", 3)]);
+        body["name"] = json!("Shared server name".repeat(128));
+        body["indexed"] = json!("2024-01-01");
+        body["updated"] = json!(123);
+        let channels = server_channels(body.to_string().as_bytes(), "100").unwrap();
+        assert_eq!(channels.len(), 3);
+        for channel in &channels {
+            assert!(Arc::ptr_eq(
+                &channels[0].queue_server,
+                &channel.queue_server
+            ));
+            assert!(Arc::ptr_eq(
+                channels[0].metadata.server.as_ref().unwrap(),
+                channel.metadata.server.as_ref().unwrap()
+            ));
+            assert_eq!(channel.queue_server["name"], body["name"]);
+            assert_eq!(channel.queue_server["indexed"], "2024-01-01");
+            assert!(channel.queue_server.get("channels").is_none());
+        }
+        assert_eq!(channels[0].queue_channel["id"], "200");
+        assert_eq!(channels[1].queue_channel["id"], "201");
+        assert_eq!(channels[2].queue_channel["post_count"], 3);
+    }
+
+    #[test]
+    fn channel_descriptors_defer_invalid_identity_and_replace_duplicate_ids_in_first_slot() {
+        let mut payload = server_payload(&[("200", 1), ("201", 2), ("200", 3), ("202", 4)]);
+        payload["channels"][0]["name"] = json!("old");
+        payload["channels"][2]["name"] = json!("last");
+        payload["channels"][3]["server_id"] = json!("private/invalid");
+        payload["channels"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":"private/invalid","server_id":"100"}));
+        payload["channels"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":{"private":"value"},"server_id":"100"}));
+        let channels = server_channels(payload.to_string().as_bytes(), "100").unwrap();
+        assert_eq!(channels.len(), 5);
+        assert_eq!(channels[0].metadata.channel_id, "200");
+        assert_eq!(channels[0].metadata.channel.as_deref(), Some("last"));
+        assert_eq!(channels[0].post_count, Some(3));
+        assert_eq!(channels[1].metadata.channel_id, "201");
+        assert!(channels[0].valid_for("100"));
+        assert!(channels[1].valid_for("100"));
+        assert!(!channels[2].valid_for("100"));
+        assert!(!channels[3].valid_for("100"));
+        assert!(!channels[4].valid_for("100"));
+        assert!(channels[4].queue_channel.get("id").is_none());
+    }
+
+    #[test]
     fn capture_server_and_messages_keep_bound_server_channel_identity() {
         let bytes = include_bytes!("../tests/fixtures/kemono/discord-server.json");
         let channels = server_channels(bytes, "100").unwrap();
@@ -720,13 +886,9 @@ mod tests {
         assert_eq!(total, 2);
         let mut wrong: Value = serde_json::from_slice(bytes).unwrap();
         wrong["channels"][0]["server_id"] = json!("private-other");
-        assert!(
-            !server_channels(wrong.to_string().as_bytes(), "100")
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("private")
-        );
+        let wrong = server_channels(wrong.to_string().as_bytes(), "100").unwrap();
+        assert!(!wrong[0].valid_for("100"));
+        assert!(wrong[1].valid_for("100"));
         assert!(server_channels(bytes, "101").is_err());
         let mut post = message(400, "200");
         post["channel"] = json!("private-other");
@@ -856,6 +1018,10 @@ mod tests {
             .collect()
             .await;
         assert_eq!(ids(&events), ["400", "401"]);
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            Ok(ExtractionEvent::BeginChild(_) | ExtractionEvent::EndChild(_))
+        )));
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[0].starts_with("GET /api/v1/discord/server/100 "));
@@ -995,10 +1161,264 @@ mod tests {
         let mut events = client.events(&input);
         assert!(matches!(
             events.next().await.unwrap().unwrap(),
+            ExtractionEvent::BeginChild(_)
+        ));
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
             ExtractionEvent::Post(_)
         ));
         drop(events);
         assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn whole_server_cancelled_channels_skip_fetches_and_pending_media_then_resume_siblings() {
+        let full: Vec<_> = (1..=150).map(|id| message(id, "201")).collect();
+        let mut payload = server_payload(&[("200", 1), ("201", 151), ("202", 1)]);
+        payload["indexed"] = json!(123);
+        payload["updated"] = json!("2026-10-21");
+        payload["url"] = json!("https://private.example/token");
+        payload["channels"][0]["cookie"] = json!("private");
+        payload["channels"][0]["position"] = json!("03");
+        payload["channels"][0]["theme_color"] = json!(42);
+        payload["channels"][0]["icon_emoji"] = json!("猫");
+        let (root, server) = serve(vec![
+            response("200 OK", payload.to_string().as_bytes()),
+            response("200 OK", json!(full).to_string().as_bytes()),
+            response(
+                "200 OK",
+                json!([message(500, "202")]).to_string().as_bytes(),
+            ),
+        ]);
+        let client = extractor(root);
+        let input = Url::parse("https://kemono.cr/discord/server/100").unwrap();
+        let mut events = client.events(&input);
+        let ExtractionEvent::BeginChild(skipped) = events.next().await.unwrap().unwrap() else {
+            panic!("missing first channel")
+        };
+        assert_eq!(skipped.metadata.category(), "kemono");
+        assert_eq!(skipped.metadata.subcategory(), "discord-server");
+        assert_eq!(skipped.metadata.fields()["id"], "200");
+        assert_eq!(skipped.metadata.fields()["server_id"], "100");
+        assert_eq!(skipped.metadata.fields()["channel_id"], "200");
+        assert_eq!(skipped.metadata.fields()["server"]["id"], "100");
+        assert_eq!(skipped.metadata.fields()["server"]["name"], "Server");
+        assert_eq!(skipped.metadata.fields()["channel"]["id"], "200");
+        assert_eq!(
+            skipped.metadata.fields()["channel"]["topic"],
+            "line1\nline2"
+        );
+        assert_eq!(skipped.metadata.fields()["channel"]["post_count"], 1);
+        assert!(
+            skipped.metadata.fields()["server"]
+                .get("channels")
+                .is_none()
+        );
+        assert_eq!(skipped.metadata.fields()["server"]["indexed"], 123);
+        assert_eq!(skipped.metadata.fields()["server"]["updated"], "2026-10-21");
+        assert_eq!(skipped.metadata.fields()["channel"]["position"], "03");
+        assert_eq!(skipped.metadata.fields()["channel"]["theme_color"], 42);
+        assert_eq!(skipped.metadata.fields()["channel"]["icon_emoji"], "猫");
+        assert!(skipped.metadata.fields()["server"].get("url").is_none());
+        assert!(skipped.metadata.fields()["channel"].get("cookie").is_none());
+        skipped.control.cancel();
+        let ExtractionEvent::EndChild(end) = events.next().await.unwrap().unwrap() else {
+            panic!("missing skipped end")
+        };
+        assert!(end.same_scope(&skipped.control));
+        let ExtractionEvent::BeginChild(first) = events.next().await.unwrap().unwrap() else {
+            panic!("missing second channel")
+        };
+        assert_eq!(first.metadata.fields()["id"], "201");
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::Post(_)
+        ));
+        first.control.cancel();
+        let ExtractionEvent::EndChild(end) = events.next().await.unwrap().unwrap() else {
+            panic!("pending post survived cancellation")
+        };
+        assert!(end.same_scope(&first.control));
+        let rest: Vec<_> = events.collect().await;
+        assert_eq!(rest.len(), 5);
+        let ExtractionEvent::BeginChild(last) = rest[0].as_ref().unwrap() else {
+            panic!("missing last channel")
+        };
+        let ExtractionEvent::EndChild(end) = rest[4].as_ref().unwrap() else {
+            panic!("missing last end")
+        };
+        assert!(end.same_scope(&last.control));
+        assert_eq!(ids(&rest), ["500"]);
+        assert!(matches!(rest[2], Ok(ExtractionEvent::Media(_))));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].contains("/channel/201?o=0"));
+        assert!(requests[2].contains("/channel/202?o=0"));
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request.contains("o=150") || request.contains("/channel/200"))
+        );
+    }
+
+    #[tokio::test]
+    async fn channel_filters_skip_bad_identity_before_validation_and_http() {
+        use crate::{filter::FilterExpression, job_selection::JobSelection};
+        for bad in [
+            json!({"id":"private/unsafe","server_id":"100","name":"bad"}),
+            json!({"id":"200","server_id":"private/owner","name":"bad"}),
+        ] {
+            let mut payload = server_payload(&[("201", 1)]);
+            payload["channels"].as_array_mut().unwrap().insert(0, bad);
+            let (root, server) = serve(vec![
+                response("200 OK", payload.to_string().as_bytes()),
+                response(
+                    "200 OK",
+                    json!([message(500, "201")]).to_string().as_bytes(),
+                ),
+            ]);
+            let client = extractor(root);
+            let input = Url::parse("https://kemono.cr/discord/server/100").unwrap();
+            let selected: Vec<_> = JobSelection {
+                child_filter: Some(FilterExpression::parse("channel['id'] == '201'").unwrap()),
+                ..JobSelection::default()
+            }
+            .apply(client.events(&input))
+            .collect()
+            .await;
+            assert_eq!(selected.len(), 1);
+            assert_eq!(
+                selected[0]
+                    .as_ref()
+                    .unwrap()
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .post_id,
+                "500"
+            );
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert!(requests[1].contains("/channel/201?o=0"));
+            assert!(!requests.iter().any(|request| request.contains("private")));
+        }
+    }
+
+    #[tokio::test]
+    async fn first_channel_range_stops_before_later_invalid_identity() {
+        use crate::{job_selection::JobSelection, selection::RangeSelection};
+        let mut payload = server_payload(&[("200", 1)]);
+        payload["channels"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":"private/unsafe","server_id":"100"}));
+        let (root, server) = serve(vec![
+            response("200 OK", payload.to_string().as_bytes()),
+            response(
+                "200 OK",
+                json!([message(400, "200")]).to_string().as_bytes(),
+            ),
+        ]);
+        let client = extractor(root);
+        let input = Url::parse("https://kemono.cr/discord/server/100").unwrap();
+        let selected: Vec<_> = JobSelection {
+            child_range: Some(RangeSelection::parse("1").unwrap()),
+            ..JobSelection::default()
+        }
+        .apply(client.events(&input))
+        .collect()
+        .await;
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            selected[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "400"
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].contains("/channel/200?o=0"));
+    }
+
+    #[tokio::test]
+    async fn selected_bad_channel_is_private_resumable_and_explicit_channel_ignores_unrelated_bad_rows()
+     {
+        let mut payload = server_payload(&[("200", 1), ("201", 1)]);
+        payload["channels"][0]["server_id"] = json!("private/owner");
+        let (root, server) = serve(vec![
+            response("200 OK", payload.to_string().as_bytes()),
+            response(
+                "200 OK",
+                json!([message(500, "201")]).to_string().as_bytes(),
+            ),
+        ]);
+        let events: Vec<_> = extractor(root)
+            .events(&Url::parse("https://kemono.cr/discord/server/100").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 8);
+        let ExtractionEvent::BeginChild(first) = events[0].as_ref().unwrap() else {
+            panic!("missing invalid child scope")
+        };
+        assert_eq!(
+            first.metadata.fields()["channel"]["server_id"],
+            "private/owner"
+        );
+        assert_eq!(
+            events[1].as_ref().unwrap_err().to_string(),
+            "Kemono returned invalid Discord identity or metadata"
+        );
+        let ExtractionEvent::EndChild(end) = events[2].as_ref().unwrap() else {
+            panic!("missing invalid child end")
+        };
+        assert!(first.control.same_scope(end));
+        assert_eq!(
+            ids(&events
+                .iter()
+                .skip(3)
+                .map(|event| Ok(event.as_ref().unwrap().clone()))
+                .collect::<Vec<_>>()),
+            ["500"]
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].contains("/channel/201?o=0"));
+        for requested in ["200", "201"] {
+            let mut replies = vec![response("200 OK", payload.to_string().as_bytes())];
+            if requested == "201" {
+                replies.push(response(
+                    "200 OK",
+                    json!([message(500, "201")]).to_string().as_bytes(),
+                ));
+            }
+            let (root, server) = serve(replies);
+            let events: Vec<_> = extractor(root)
+                .events(
+                    &Url::parse(&format!("https://kemono.cr/discord/server/100/{requested}"))
+                        .unwrap(),
+                )
+                .collect()
+                .await;
+            assert!(!events.iter().any(|event| matches!(
+                event,
+                Ok(ExtractionEvent::BeginChild(_) | ExtractionEvent::EndChild(_))
+            )));
+            if requested == "200" {
+                assert_eq!(events.len(), 1);
+                assert_eq!(
+                    events[0].as_ref().unwrap_err().to_string(),
+                    "Kemono returned invalid Discord identity or metadata"
+                );
+                assert_eq!(server.join().unwrap().len(), 1);
+            } else {
+                assert_eq!(ids(&events), ["500"]);
+                assert_eq!(server.join().unwrap().len(), 2);
+            }
+        }
     }
 
     #[tokio::test]
@@ -1085,9 +1505,23 @@ mod tests {
                 .events(&Url::parse("https://kemono.cr/discord/server/100").unwrap())
                 .collect()
                 .await;
-            assert_eq!(events.len(), 4, "{events:?}");
-            assert!(events[0].is_err());
-            let ExtractionEvent::Post(post) = events[1].as_ref().unwrap() else {
+            assert_eq!(events.len(), 8, "{events:?}");
+            let ExtractionEvent::BeginChild(first) = events[0].as_ref().unwrap() else {
+                panic!("missing first child")
+            };
+            assert!(events[1].is_err());
+            let ExtractionEvent::EndChild(first_end) = events[2].as_ref().unwrap() else {
+                panic!("missing failed child end")
+            };
+            assert!(first.control.same_scope(first_end));
+            let ExtractionEvent::BeginChild(second) = events[3].as_ref().unwrap() else {
+                panic!("missing second child")
+            };
+            let ExtractionEvent::EndChild(second_end) = events[7].as_ref().unwrap() else {
+                panic!("missing successful child end")
+            };
+            assert!(second.control.same_scope(second_end));
+            let ExtractionEvent::Post(post) = events[4].as_ref().unwrap() else {
                 panic!("expected later channel post")
             };
             assert_eq!(post.metadata.as_ref().unwrap().post_id, "500");

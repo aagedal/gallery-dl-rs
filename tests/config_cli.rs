@@ -1246,3 +1246,60 @@ async fn kemono_favorites_setting_forwards_only_to_supported_categories() {
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn child_selection_forwards_to_backend_and_cli_overrides_scoped_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor":{"child-range":"2","child-filter":["service == 'patreon'"],"coomer":{"child-filter":[]}}}),
+    );
+    for (url, cli, expected) in [
+        (
+            "https://kemono.cr/artists",
+            false,
+            vec![
+                "child-range=\"2\"",
+                "child-filter=[\"service == 'patreon'\"]",
+            ],
+        ),
+        (
+            "https://coomer.st/favorites",
+            false,
+            vec!["child-range=\"2\"", "child-filter=\"\""],
+        ),
+        (
+            "https://kemono.cr/artists",
+            true,
+            vec![
+                "child-range=\"1\"",
+                "child-filter=[\"id == '42'\",\"name != None\"]",
+            ],
+        ),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log);
+        if cli {
+            command.args([
+                "--child-range",
+                "1",
+                "--child-filter",
+                "id == '42'",
+                "--child-filter",
+                "name != None",
+            ]);
+        }
+        command.args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        for expected in expected {
+            assert!(log.contains(&format!("--option\n{expected}\n")), "{log}");
+        }
+    }
+}

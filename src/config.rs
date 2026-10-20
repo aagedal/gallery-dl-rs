@@ -41,6 +41,9 @@ pub struct Options {
     pub post_range: Option<String>,
     /// AND-combined post metadata filters.
     pub post_filter: Option<Vec<String>>,
+    /// One-based child job ranges and metadata predicates.
+    pub child_range: Option<String>,
+    pub child_filter: Option<Vec<String>>,
     pub date_before: Option<i64>,
     pub date_after: Option<i64>,
     /// Whether to include reposts, optionally under the original author.
@@ -211,6 +214,14 @@ impl Options {
                 .post_filter
                 .clone()
                 .or_else(|| self.post_filter.clone()),
+            child_range: overrides
+                .child_range
+                .clone()
+                .or_else(|| self.child_range.clone()),
+            child_filter: overrides
+                .child_filter
+                .clone()
+                .or_else(|| self.child_filter.clone()),
             date_before: overrides.date_before.or(self.date_before),
             date_after: overrides.date_after.or(self.date_after),
             retweets: overrides.retweets.or(self.retweets),
@@ -347,6 +358,8 @@ struct RawRoot {
     image_filter: Field,
     post_range: Field,
     post_filter: Field,
+    child_range: Field,
+    child_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -411,6 +424,8 @@ struct RawExtractor {
     image_filter: Field,
     post_range: Field,
     post_filter: Field,
+    child_range: Field,
+    child_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -507,6 +522,8 @@ struct RawOptions {
     image_filter: Field,
     post_range: Field,
     post_filter: Field,
+    child_range: Field,
+    child_filter: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -678,6 +695,8 @@ impl Config {
             image_filter: root.image_filter,
             post_range: root.post_range,
             post_filter: root.post_filter,
+            child_range: root.child_range,
+            child_filter: root.child_filter,
             date_before: root.date_before,
             date_after: root.date_after,
             retweets: root.retweets,
@@ -748,6 +767,8 @@ impl Config {
             image_filter: extractor.image_filter,
             post_range: extractor.post_range,
             post_filter: extractor.post_filter,
+            child_range: extractor.child_range,
+            child_filter: extractor.child_filter,
             date_before: extractor.date_before,
             date_after: extractor.date_after,
             retweets: extractor.retweets,
@@ -994,6 +1015,8 @@ impl RawOptions {
         };
         let post_filter = filter_clauses(self.post_filter, "post-filter")?;
         let post_range = range_spec(self.post_range, "post-range")?;
+        let child_range = range_spec(self.child_range, "child-range")?;
+        let child_filter = filter_clauses(self.child_filter, "child-filter")?;
         let retweets = match self.retweets.0 {
             None => None,
             Some(Value::Bool(false)) => Some(crate::twitter::RetweetMode::Skip),
@@ -1528,6 +1551,8 @@ impl RawOptions {
             file_filter,
             post_range,
             post_filter,
+            child_range,
+            child_filter,
             date_before: date(self.date_before)?,
             date_after: date(self.date_after)?,
             retweets,

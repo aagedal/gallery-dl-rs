@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use gallery_dl_rs::{
+    job_selection::JobSelection,
     kemono::{self, Favorites, Kemono},
     network::NetworkOptions,
     post_selection::PostSelection,
@@ -16,13 +17,28 @@ use url::Url;
 
 fn serve(replies: Vec<(u16, Value)>) -> (Url, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
     let root = format!("http://{}/", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let task = thread::spawn(move || {
         let mut requests = Vec::new();
         for (status, body) in replies {
-            let (mut socket, _) = listener.accept().unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "missing expected collection request"
+                        );
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            };
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();
@@ -52,12 +68,20 @@ fn extractor(root: Url) -> Kemono {
 fn first_post() -> PostSelection {
     PostSelection::new(Some(RangeSelection::parse("1").unwrap()), None)
 }
+fn first_child_post() -> JobSelection {
+    JobSelection {
+        post_selection: Some(first_post()),
+        child_range: Some(RangeSelection::parse("1").unwrap()),
+        unordered: true,
+        ..Default::default()
+    }
+}
 fn post(id: &str) -> Value {
     json!({"id":id,"user":"42","service":"patreon","title":"Actual post","file":{"name":"cover.jpg","path":"/aa/bb/aabb.jpg"},"attachments":[]})
 }
 
 #[tokio::test]
-async fn favorite_artist_post_range_counts_empty_posts_and_stops_later_children() {
+async fn child_range_stops_after_fileless_first_artist_without_later_requests() {
     let (root, server) = serve(vec![
         (
             200,
@@ -70,8 +94,8 @@ async fn favorite_artist_post_range_counts_empty_posts_and_stops_later_children(
     ]);
     let extractor = extractor(root);
     let url = "https://kemono.cr/account/favorites".parse().unwrap();
-    let selected: Vec<_> = first_post()
-        .apply(extractor.events(&url), None, None, true)
+    let selected: Vec<_> = first_child_post()
+        .apply(extractor.events(&url))
         .collect()
         .await;
     assert!(selected.is_empty());
@@ -92,8 +116,8 @@ async fn favorite_post_children_keep_direct_archive_identity_and_ignore_queue_di
     ]);
     let extractor = extractor(root).with_favorites(Favorites::Post);
     let url = "https://kemono.cr/favorites".parse().unwrap();
-    let selected: Vec<_> = first_post()
-        .apply(extractor.events(&url), None, None, true)
+    let selected: Vec<_> = first_child_post()
+        .apply(extractor.events(&url))
         .collect()
         .await;
     assert_eq!(selected.len(), 1);
@@ -151,4 +175,172 @@ async fn collection_child_error_keeps_later_child_available_through_post_selecti
         "7"
     );
     assert_eq!(server.join().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn post_ranges_reset_per_creator_and_cancel_each_job_before_later_pages() {
+    let mut first_page = vec![json!({"id":"7","file":{},"attachments":[]})];
+    first_page.extend((8..57).map(|id| post(&id.to_string())));
+    let mut second = post("70");
+    second["user"] = json!("43");
+    let (root, server) = serve(vec![
+        (
+            200,
+            json!([{"id":"42","service":"patreon","updated":2},{"id":"43","service":"patreon","updated":1}]),
+        ),
+        (200, json!(first_page)),
+        (200, json!([second])),
+    ]);
+    let client = extractor(root);
+    let url = "https://kemono.cr/favorites".parse().unwrap();
+    let selected: Vec<_> = first_post()
+        .apply(client.events(&url), None, None, true)
+        .collect()
+        .await;
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        selected[0]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .post_id,
+        "70"
+    );
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].contains("/patreon/user/42/posts?o=0"));
+    assert!(requests[2].contains("/patreon/user/43/posts?o=0"));
+}
+
+#[tokio::test]
+async fn file_filter_precedes_each_child_file_counter_and_finite_range_cancels_mid_post() {
+    let source = |id: &str, user: &str| json!({"id":id,"user":user,"service":"patreon","file":{},"attachments":[{"name":"one.jpg","path":"/aa/bb/aabb1.jpg"},{"name":"two.jpg","path":"/aa/bb/aabb2.jpg"},{"name":"three.jpg","path":"/aa/bb/aabb3.jpg"}]});
+    let (root, server) = serve(vec![
+        (
+            200,
+            json!([{"id":"42","service":"patreon","updated":2},{"id":"43","service":"patreon","updated":1}]),
+        ),
+        (200, json!([source("7", "42")])),
+        (200, json!([source("8", "43")])),
+    ]);
+    let client = extractor(root);
+    let url = "https://kemono.cr/favorites".parse().unwrap();
+    let selection = JobSelection {
+        file_range: Some(RangeSelection::parse("2").unwrap()),
+        file_filter: Some(gallery_dl_rs::filter::FilterExpression::parse("index != 2").unwrap()),
+        ..Default::default()
+    };
+    let selected: Vec<_> = selection.apply(client.events(&url)).collect().await;
+    assert_eq!(selected.len(), 2);
+    let metadata = selected
+        .iter()
+        .map(|item| item.as_ref().unwrap().metadata.as_ref().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        metadata
+            .iter()
+            .map(|post| post.post_id.as_str())
+            .collect::<Vec<_>>(),
+        ["7", "8"]
+    );
+    assert!(metadata.iter().all(|post| post.index == 3));
+    assert_eq!(server.join().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn child_filter_runs_before_child_range_and_invalid_identity_lookup() {
+    let mut selected_post = post("7");
+    selected_post["service"] = json!("fanbox");
+    let (root, server) = serve(vec![
+        (
+            200,
+            json!([{"id":"../private","service":"patreon","name":"Skip","updated":3},{"id":"42","service":"fanbox","name":"Selected","updated":2},{"id":"43","service":"patreon","name":"Later","updated":1}]),
+        ),
+        (200, json!([selected_post])),
+    ]);
+    let client = extractor(root);
+    let url = "https://kemono.cr/favorites".parse().unwrap();
+    let selection = JobSelection {
+        child_range: Some(RangeSelection::parse("1").unwrap()),
+        child_filter: Some(
+            gallery_dl_rs::filter::FilterExpression::parse(
+                "name == 'Selected' and service == 'fanbox'",
+            )
+            .unwrap(),
+        ),
+        ..Default::default()
+    };
+    let selected: Vec<_> = selection.apply(client.events(&url)).collect().await;
+    assert_eq!(selected.len(), 1);
+    assert!(selected[0].is_ok());
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].contains("/fanbox/user/42/posts?o=0"));
+}
+
+#[tokio::test]
+async fn discord_child_filter_uses_actual_nested_channel_objects_before_requests() {
+    let server: Value =
+        serde_json::from_slice(include_bytes!("fixtures/kemono/discord-server.json")).unwrap();
+    let message = json!({"id":"401","server":"100","channel":"201","content":"Image","attachments":[{"name":"cover.jpg","path":"/aa/bb/aabb.jpg"}]});
+    let (root, server_task) = serve(vec![(200, server), (200, json!([message]))]);
+    let client = extractor(root);
+    let url = "https://kemono.cr/discord/server/100".parse().unwrap();
+    let selection=JobSelection{child_range:Some(RangeSelection::parse("1").unwrap()),child_filter:Some(gallery_dl_rs::filter::FilterExpression::parse("channel['type'] == 0 and channel['id'] == '201' and server['name'] == 'Fixture Server'").unwrap()),..Default::default()};
+    let selected: Vec<_> = selection.apply(client.events(&url)).collect().await;
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        selected[0]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .discord
+            .as_ref()
+            .unwrap()
+            .channel_id,
+        "201"
+    );
+    let requests = server_task.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].contains("/discord/channel/201?o=0"));
+}
+
+#[tokio::test]
+async fn nested_favorite_discord_child_ranges_stop_each_parent_after_selected_child() {
+    let server: Value =
+        serde_json::from_slice(include_bytes!("fixtures/kemono/discord-server.json")).unwrap();
+    let messages: Value =
+        serde_json::from_slice(include_bytes!("fixtures/kemono/discord-channel.json")).unwrap();
+    let (root, server_task) = serve(vec![
+        (
+            200,
+            json!([{"id":"100","service":"discord","updated":2},{"id":"42","service":"patreon","updated":1}]),
+        ),
+        (200, server),
+        (200, messages),
+    ]);
+    let client = extractor(root);
+    let url = "https://kemono.cr/favorites".parse().unwrap();
+    let selected: Vec<_> = first_child_post()
+        .apply(client.events(&url))
+        .collect()
+        .await;
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        selected[0]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .post_id,
+        "400"
+    );
+    let requests = server_task.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[2].contains("/discord/channel/200?o=0"));
 }

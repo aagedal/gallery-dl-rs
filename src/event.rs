@@ -4,7 +4,179 @@ use crate::{
     extract::{Media, PostMetadata},
 };
 use futures_util::{StreamExt, stream::BoxStream};
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+
+/// Cooperative cancellation shared by one parent/child extraction scope.
+/// This handle contains no URL, credentials, or producer-owned metadata.
+#[derive(Clone, Default)]
+pub struct ChildControl(Arc<AtomicBool>);
+
+impl ChildControl {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    pub fn same_scope(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for ChildControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ChildControl { scope: [redacted] }")
+    }
+}
+
+/// Bounded public child-selection metadata, never the raw queue payload.
+/// IDs intentionally retain their original scalar representation: a filter
+/// may reject an invalid identity before the producer validates or uses it.
+#[derive(Clone)]
+pub struct ChildMetadata {
+    category: String,
+    subcategory: String,
+    fields: serde_json::Map<String, serde_json::Value>,
+}
+
+impl ChildMetadata {
+    pub fn from_raw(
+        category: &str,
+        subcategory: &str,
+        data: &serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
+        fn label(value: &str) -> String {
+            if value.len() <= 64
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+            {
+                value.to_owned()
+            } else {
+                String::new()
+            }
+        }
+        fn scalar(value: &serde_json::Value) -> Option<serde_json::Value> {
+            match value {
+                serde_json::Value::String(text) => {
+                    // Public names/topics and invalid IDs must retain their
+                    // exact meaning for filters, including URLs and newlines.
+                    (text.len() <= 64 * 1024 && !text.contains('\0')).then(|| value.clone())
+                }
+                serde_json::Value::Number(number) => {
+                    (number.as_str().len() <= 128).then(|| value.clone())
+                }
+                serde_json::Value::Bool(_) | serde_json::Value::Null => Some(value.clone()),
+                serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
+            }
+        }
+        let mut fields = serde_json::Map::new();
+        for key in [
+            "id",
+            "name",
+            "service",
+            "user",
+            "indexed",
+            "updated",
+            "favorited",
+            "faved_seq",
+            "server_id",
+            "channel_id",
+            "server",
+            "channel",
+            "channel_topic",
+            "channel_nsfw",
+            "channel_type",
+            "parent_id",
+            "post_count",
+        ] {
+            let Some(value) = data.get(key) else { continue };
+            let value = if matches!(key, "server" | "channel") {
+                if let Some(object) = value.as_object() {
+                    // Only the public one-level queue shape is retained. Do
+                    // not descend into arbitrary API response objects.
+                    let keys: &[&str] = if key == "server" {
+                        &["id", "name", "indexed", "updated"]
+                    } else {
+                        &[
+                            "id",
+                            "server_id",
+                            "name",
+                            "parent_channel_id",
+                            "topic",
+                            "is_nsfw",
+                            "type",
+                            "post_count",
+                            "position",
+                            "theme_color",
+                            "icon_emoji",
+                        ]
+                    };
+                    let public: serde_json::Map<_, _> = keys
+                        .iter()
+                        .filter_map(|key| {
+                            scalar(object.get(*key)?).map(|value| ((*key).to_owned(), value))
+                        })
+                        .collect();
+                    (!public.is_empty()).then_some(serde_json::Value::Object(public))
+                } else {
+                    scalar(value)
+                }
+            } else {
+                scalar(value)
+            };
+            if let Some(value) = value {
+                fields.insert(key.into(), value);
+            }
+        }
+        Self {
+            category: label(category),
+            subcategory: label(subcategory),
+            fields,
+        }
+    }
+
+    pub fn category(&self) -> &str {
+        &self.category
+    }
+
+    pub fn subcategory(&self) -> &str {
+        &self.subcategory
+    }
+
+    pub fn fields(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.fields
+    }
+}
+
+impl std::fmt::Debug for ChildMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ChildMetadata { fields: [redacted] }")
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ChildScope {
+    pub control: ChildControl,
+    pub metadata: ChildMetadata,
+}
+
+impl ChildScope {
+    pub fn new(metadata: ChildMetadata) -> Self {
+        Self {
+            control: ChildControl::default(),
+            metadata,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Post {
@@ -30,6 +202,8 @@ impl Post {
 }
 #[derive(Clone, Debug)]
 pub enum ExtractionEvent {
+    BeginChild(ChildScope),
+    EndChild(ChildControl),
     Post(Box<Post>),
     Media(Box<Media>),
     EndPost,

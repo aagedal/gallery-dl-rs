@@ -24,6 +24,7 @@ pub mod imagehosts;
 pub mod imgur;
 pub mod input;
 pub mod instagram;
+pub mod job_selection;
 pub mod kemono;
 pub mod mastodon;
 mod messages;

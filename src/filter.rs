@@ -162,6 +162,54 @@ impl FilterExpression {
         }
         Ok(true)
     }
+    /// Evaluate the allowlisted public metadata of a queued child before
+    /// opening that child's extractor or validating its identity.
+    pub fn matches_child(&self, child: &crate::event::ChildMetadata) -> Result<bool> {
+        if self.expressions.is_empty() {
+            return Ok(true);
+        }
+        let mut context = BTreeMap::from([
+            ("category".into(), text(child.category())),
+            ("subcategory".into(), text(child.subcategory())),
+        ]);
+        fn child_value(value: &serde_json::Value, allow_map: bool) -> Option<Value> {
+            Some(match value {
+                serde_json::Value::Null => Value::None,
+                serde_json::Value::Bool(value) => Value::Bool(*value),
+                serde_json::Value::String(value) => text(value.as_str()),
+                serde_json::Value::Number(value) => {
+                    if let Some(value) = value.as_i128() {
+                        Value::Int(value)
+                    } else {
+                        Value::Float(value.as_f64()?)
+                    }
+                }
+                // ChildMetadata has already allowlisted the public server and
+                // channel keys. Recursion remains bounded to that one level.
+                serde_json::Value::Object(values) if allow_map => map(values
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        child_value(value, false).map(|value| (key.clone(), value))
+                    })
+                    .collect()),
+                _ => return None,
+            })
+        }
+        for (key, value) in child.fields() {
+            if let Some(value) = child_value(value, true) {
+                context.insert(key.clone(), value);
+            }
+        }
+        let metadata = map(context.clone());
+        context.insert("child".into(), metadata.clone());
+        context.insert("metadata".into(), metadata);
+        for expression in self.expressions.iter() {
+            if !eval::truthy(&eval::evaluate(expression, &context)?) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     /// Like upstream's default expression mode, missing keys and evaluation
     /// errors reject the current file. Extraction errors still pass through.
     pub fn apply<'a>(&self, input: BoxStream<'a, Result<Media>>) -> BoxStream<'a, Result<Media>> {

@@ -422,13 +422,14 @@ variants, profile album listings, and upstream jump heuristics remain.
 **Implemented file selection:** `--range` and scoped native `file-range` strings
 or lists select one-based media positions using comma unions, inclusive hyphen
 ranges, and exclusive-stop signed slices. Membership and final indices use
-bounded arithmetic rather than expanding ranges. Selection runs per input before
+bounded arithmetic rather than expanding ranges. Selection runs per extractor job before
 global deduplication and archive checks, applies to inspection and downloading,
 and drops upstream immediately at the last matching index. Empty selections do
 not start extraction or open archives. Cooperative skips preserve cancellation.
 Parser, CLI, process-lifecycle, native-pagination, sidecar, and archive tests cover
-selection behavior. Site-specific offset skipping, counters at flattened child
-boundaries, child ranges, and child metadata filters remain.
+selection behavior. Native Kemono/Coomer child jobs now reset counters;
+site-specific offset skipping, additional native queue boundaries and flattened
+compatibility child counters remain.
 
 **Implemented explicit post selection:** native extractors and the compatibility
 decoder expose post/media/end events, while media-only library APIs remain
@@ -444,9 +445,26 @@ X text-only tweets create posts only with `text-tweets`. Empty ranges start no e
 native ranges drop at the selected end. Compatibility must read the next
 directory or validated EOF, potentially doing upstream work for the next post.
 Parser, runtime, CLI, cancellation, selected-only archive/sidecar, configuration,
-and error-ordering tests cover these paths. Nested child counters, queue events,
-child selection, complete upstream metadata, and live authenticated verification
-remain.
+and error-ordering tests cover these paths. Child scopes and selection are
+described below; complete upstream metadata, broader extractor queue boundaries
+and live authenticated verification remain.
+
+**Implemented native child jobs and selection:** explicit BeginChild/EndChild
+boundaries with shared cancellation controls now wrap Kemono/Coomer collection
+creators/posts/servers and Discord server channels. One selection engine resets
+post/file/child counters per job, applies child/file predicates before their
+ranges, preserves existing post date/filter ordering, and restores parent state
+after nested children. Finite ranges cancel only the current job and avoid later
+pages while keeping its parent's later children available. Child metadata retains
+bounded public scalar fields and actual one-level Discord server/channel maps;
+unselected invalid identities need no requests. Child range/filter config and
+CLI options forward to compatibility mode, whose own queue selection applies;
+resolved compatibility media still lack child boundary markers for Rust counters.
+Tests cover nested state restoration, framing failures, depth/identity guards,
+manual cancellation, empty posts, source indices, selected-only requests,
+metadata privacy, shared server metadata and actual nested HTTP traversal.
+Additional native queue producers, per-child/subcategory settings, parent metadata
+propagation and authenticated verification remain unfinished.
 
 **Implemented native file metadata expressions:** repeated `--filter` and scoped
 `file-filter` / `image-filter` string/list settings select normalized public fields
@@ -626,7 +644,7 @@ native Kemono artist inspection emitted two original media jobs; a separate
 Coomer artist inspection emitted one. Both retained creator identities and
 reported no errors; no media was downloaded.
 Authenticated favorites traversal and downloads remain unverified; login,
-independent nested child counters/filters and fuller queue metadata remain open.
+per-child settings and fuller queue metadata remain open.
 
 **Implemented Kemono/Coomer file selection:** ordered `files`, per-kind
 `duplicates`, and `original` settings now match upstream category order and
