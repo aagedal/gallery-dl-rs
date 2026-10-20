@@ -799,10 +799,6 @@ async fn date_selection_preserves_later_newer_bluesky_posts_and_unordered_pixiv_
     let root = tempfile::tempdir().unwrap();
     let cfg = config(root.path(), serde_json::json!({}));
     let executable = root.path().join("bluesky-backend");
-    std::fs::write(&executable, br#"#!/bin/sh
-printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","author":{"handle":"alice.test"}}],[3,"https://bsky.social/xrpc/com.atproto.sync.getBlob?did=did:plc:abcdefghijklmnopqrstuvwx&cid=bafykreia",{"filename":"bafykreia","extension":"png","id":42,"post_id":"old","num":0,"date":"2020-01-01T00:00:00Z","author":{"handle":"alice.test"}}],[2,"",{"id":43,"post_id":"new","date":"2025-01-01T00:00:00Z","author":{"handle":"alice.test"}}],[3,"https://bsky.social/xrpc/com.atproto.sync.getBlob?did=did:plc:abcdefghijklmnopqrstuvwx&cid=bafykreib",{"filename":"bafykreib","extension":"png","id":43,"post_id":"new","num":0,"date":"2025-01-01T00:00:00Z","author":{"handle":"alice.test"}}]]'
-"#).unwrap();
-    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     for (url, post_id, media_id) in [
         ("https://bsky.app/profile/alice.test", "new", "bafykreib"),
         (
@@ -827,6 +823,7 @@ printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","au
         ),
         ("https://www.pixiv.net/user/9/series/7", "43", "43_p0"),
         ("https://www.pixivision.net/en/a/77", "43", "43_p0"),
+        ("https://sketch.pixiv.net/@alice", "new", "43"),
         (
             "https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide",
             "43",
@@ -838,7 +835,36 @@ printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","au
             "43_p0",
         ),
     ] {
+        let mut rows = Vec::new();
+        for (id, label, date, cid) in [
+            (42, "old", "2020-01-01T00:00:00Z", "bafykreia"),
+            (43, "new", "2025-01-01T00:00:00Z", "bafykreib"),
+        ] {
+            let mut data = serde_json::json!({"id":id,"num":0,"date":date});
+            if url.contains("bsky.app") {
+                data["post_id"] = label.into();
+                data["author"] = serde_json::json!({"handle":"alice.test"});
+            } else if url.contains("sketch.pixiv.net") {
+                data["post_id"] = label.into();
+                data["user"] = serde_json::json!({"id":17,"unique_name":"alice"});
+                data["created_at"] = date.into();
+                data.as_object_mut().unwrap().remove("num");
+            }
+            rows.push(serde_json::json!([2, "", data.clone()]));
+            data["filename"] = cid.into();
+            data["extension"] = "png".into();
+            rows.push(serde_json::json!([3,format!("https://bsky.social/xrpc/com.atproto.sync.getBlob?did=did:plc:abcdefghijklmnopqrstuvwx&cid={cid}"),data]));
+        }
+        std::fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' '{}'\n",
+                serde_json::to_string(&rows).unwrap()
+            ),
+        )
+        .unwrap();
         for extra in [vec![], vec!["--post-range", "1"]] {
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
             let mut command = binary(root.path(), &cfg);
             command
                 .arg("--extractor-command")

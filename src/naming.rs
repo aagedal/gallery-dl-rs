@@ -57,6 +57,11 @@ const FIELDS: &[&str] = &[
     "metadata",
     "frames",
     "tags",
+    "sketch",
+    "user",
+    "text",
+    "created_at",
+    "subcategory",
     "profile_asset",
     "ranking",
     "search",
@@ -442,6 +447,30 @@ fn lookup(
         },
         "community_id" => Value::Str(metadata?.community.as_ref()?.id.clone()),
         "community_name" => Value::Str(metadata?.community.as_ref()?.name.as_deref()?.into()),
-        name => convert(context.get(name)?, name),
+        name => {
+            let value = context.get(name)?;
+            if metadata.is_some_and(|metadata| metadata.sketch.is_some()) {
+                // Only the canonical post date is a datetime. Sketch's other
+                // public dictionaries retain their original JSON field types.
+                if name == "metadata" {
+                    if let crate::filter::Value::Map(values) = value {
+                        Value::Map(
+                            values
+                                .iter()
+                                .map(|(key, value)| {
+                                    (key.clone(), convert_value(value, key, key == "date"))
+                                })
+                                .collect(),
+                        )
+                    } else {
+                        convert_value(value, name, false)
+                    }
+                } else {
+                    convert_value(value, name, name == "date")
+                }
+            } else {
+                convert(value, name)
+            }
+        }
     })
 }

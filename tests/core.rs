@@ -46,6 +46,8 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
         .insert("_fallback".into(), "FALLBACK_SECRET".into());
     item.metadata = Some(gallery_dl_rs::extract::PostMetadata {
         tags: None,
+        sketch: None,
+        sketch_archive: false,
         pixivision: None,
         pixivision_archive: false,
         user_follow: None,

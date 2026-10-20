@@ -562,7 +562,7 @@ legacy inline `_1280` rewriting remains enabled. Plain media links stay direct d
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
 category, never echoed); without it selected Pixiv jobs fail before any network access,
-except for the public Pixivision article request described below.
+except for public Pixiv Sketch feeds and the Pixivision article request described below.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
@@ -718,6 +718,27 @@ position and reports a native error where upstream warns. Date selection scans
 later artworks without assuming publication order. Live authenticated article
 extraction remains unverified; upstream's default article directory layout
 remains unfinished.
+
+Native Pixiv Sketch supports `sketch.pixiv.net/@USERNAME` without OAuth. It
+loads public wall pages lazily and emits each post before parsing its original
+photos, including empty posts. Images retain the wall Referer and source
+dimensions; source media URLs can use any HTTP(S) host. Default filenames are
+`POST_ID PHOTO_ID.EXT`. Sketch archives use the actual post owner's ID and photo
+ID, separately from ordinary Pixiv works; moving a photo between posts or
+renaming its owner does not change archive identity. Inspection, sidecars,
+filters and templates retain bounded public post fields under `sketch`, with
+flat aliases such as `user`, `text` and `created_at`. On files, `id` is the
+photo ID; `post_id` remains the containing post. A failed photo closes its post
+and stops the wall. Date selection scans later entries without assuming order.
+Pagination stays on the selected wall, detects cycles and stops at 200 pages.
+Sketch ignores Pixiv-specific `max-posts`, `tags` and `ugoira` settings, matching
+upstream's separate extractor. Global post/file filters and ranges still apply.
+An included profile Sketch view resolves the Pixiv account only after its child
+job is accepted. Anonymous first-photo extraction was verified against upstream
+on the public `@pxv_sketch` wall. Live pagination and authenticated profile-to-wall
+discovery remain unverified; configured cookies and the default Sketch directory
+layout remain unfinished. Generic native
+`filename` template semantics still use the logical output filename.
 
 Native Pixiv novels use the separate `pixiv-novel` category and
 `extractor.pixiv-novel.refresh-token`. Supported URLs are `/novel/show.php?id=ID`,
@@ -1513,7 +1534,7 @@ child positions; downstream deduplication/archive selection still applies.
 X accepts `replies` as an alias for `with-replies`. Pixiv's illustration bookmarks
 are `favorite`; `bookmark` and `user` select novels, also available as
 `novel-bookmark` and `novel-user`. Native Pixiv novel views are supported;
-Sketch reports an error inside its selected scope and leaves later children available.
+Sketch views resolve the artist's account through the App API, then load its public wall.
 `"all"` includes those entries; child ranges/filters can reject them without
 requests. Include settings forward to compatibility mode as typed options.
 Explicit view URLs ignore `include`. Post/file ranges reset for each selected

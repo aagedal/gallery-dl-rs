@@ -60,3 +60,23 @@ absent, whereas `mode: null` with `mode_set: true` supplies explicit null. The
 behavior without prescribing the native parser's malformed-response policy.
 All expected illustration and novel results agree. Every identity and string is
 synthetic; no captured user data or credentials are included.
+
+`sketch.json` records the actual `PixivSketchExtractor.items` and `posts`
+generators from gallery-dl 1.32.17, using the installed source path and SHA-256
+recorded for `tags.json` above. Only `request_json` was replaced: it records the
+requested URL and explicit headers and returns deep-copied synthetic API pages.
+Each emitted post/media dictionary was deep-copied before further source mutation;
+datetimes are represented as naive UTC ISO strings with an equivalent Unix
+`timestamp` alongside. Expected filenames and archive strings use the actual
+extractor's format strings with each emitted media dictionary.
+
+The cases cover two-page public traversal, exact API headers and media Referer,
+multiple photos, an empty post, mixed owner contexts, opaque string/integer IDs,
+repeated media IDs across posts, timezone normalization, ignored input query
+options, and lowercased URL extensions without converting `jpeg` to `jpg`.
+Supplying Pixiv `max-posts`, `tags`, and `ugoira` options does not change this
+separate extractor's results. A malformed second photo records the source
+`KeyError` after the first media and confirms later posts/pages remain unfetched;
+this documents source failure timing, not the native stream's balanced-end policy.
+All domains, identities, text, dates, and media data are synthetic. No extractor
+initialization, authentication, session creation, or network requests ran.

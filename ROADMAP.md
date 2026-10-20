@@ -486,8 +486,8 @@ entries. Native mode currently omits unknown include names without upstream's
 warning. All X profile views have native paths; Bluesky adds replies/video,
 avatar/banner blobs and normalized fileless info; Pixiv adds original
 avatar/background images and extension fallbacks. Native Pixiv novels now use
-their own category client for user/bookmark child views; Sketch still produces
-a scoped unsupported error without suppressing later selected children. Profile info retains only the
+their own category client for user/bookmark child views; Sketch resolves the
+artist account lazily after child selection and loads its public wall. Profile info retains only the
 normalized public subset; full metadata-only JSON dumping remains unfinished.
 X/Pixiv typed profile image identity isolates owner/kind/version archives from
 ordinary posts and agrees with compatibility rows. Inspection, filters and
@@ -850,9 +850,18 @@ original dictionary order survives rendering. Thirty vectors recorded from
 both upstream generators cover mode fallback, duplicates, empty/Unicode values
 and original extra fields. Bounded malformed tag arrays are omitted where
 upstream can abort; tag options need no additional API calls.
+Native Sketch walls support public pagination without OAuth, lazy original
+photos, empty posts and independent owner/photo archives. Public post metadata
+is retained for inspection, predicates and templates; source API headers,
+filenames, identity, ignored Pixiv-only options and malformed-photo cutoffs are
+covered by recorded upstream vectors. Profile include views discover the wall
+account only after child selection. Anonymous first-photo output from the public
+`@pxv_sketch` wall matched upstream IDs, owner, dimensions, filename and URL on
+2026-10-20. Live pagination/profile discovery remains unverified. Configured
+cookies, default directory layout and source `filename` template semantics remain
+unfinished.
 Remaining: ugoira original individual-frame mode and conversion,
 bookmark cursor/metadata options,
-sketch,
 upstream metadata options
 (`metadata`), and Referer-routed plain `i.pximg.net` links.
 

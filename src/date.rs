@@ -237,6 +237,8 @@ mod tests {
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
                 tags: None,
+                sketch: None,
+                sketch_archive: false,
                 pixivision: None,
                 pixivision_archive: false,
                 user_follow: None,

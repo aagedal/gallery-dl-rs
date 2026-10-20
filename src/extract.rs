@@ -320,7 +320,37 @@ impl Media {
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
-                if post.pixivision_archive || post.pixivision.is_some() {
+                if post.sketch_archive || post.sketch.is_some() {
+                    let sketch = post.sketch.as_ref()?;
+                    if !sketch.valid()
+                        || sketch
+                            .fields()
+                            .get("post_id")
+                            .and_then(crate::pixiv::sketch::id_from_value)
+                            .as_deref()
+                            != Some(post.post_id.as_str())
+                        || post.pixivision_archive
+                        || post.pixivision.is_some()
+                        || post.followed_archive
+                        || post.user_follow.is_some()
+                        || post.search_archive
+                        || post.search.is_some()
+                        || post.ranking_archive
+                        || post.ranking.is_some()
+                        || post.profile_asset.is_some()
+                        || post.series.is_some()
+                        || post.num_series.is_some()
+                        || !crate::pixiv::sketch::valid_id(&post.post_id)
+                        || !crate::pixiv::sketch::valid_id(&post.media_id)
+                    {
+                        return None;
+                    }
+                    (
+                        "pixiv",
+                        serde_json::json!(["sketch", sketch.owner_id()?, post.media_id])
+                            .to_string(),
+                    )
+                } else if post.pixivision_archive || post.pixivision.is_some() {
                     let article = post.pixivision.as_ref()?;
                     if !article.valid()
                         || post.followed_archive
@@ -510,6 +540,11 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<std::sync::Arc<crate::pixiv::SketchMetadata>>,
+    /// Retain declared Sketch scope when its owner metadata is invalid.
+    #[serde(skip_serializing)]
+    pub sketch_archive: bool,
     /// Pixiv tag names or original App API tag objects, in source order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<crate::pixiv::Tags>,
@@ -1345,6 +1380,22 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
     let mut normalized = compatibility_metadata(metadata, category);
     if category == "pixiv"
         && let Some(post) = &normalized
+        && post.sketch.is_some()
+        && crate::pixiv::sketch::valid_id(&post.post_id)
+        && crate::pixiv::sketch::valid_id(&post.media_id)
+        && let Some(extension) = metadata
+            .get("extension")
+            .and_then(Value::as_str)
+            .filter(|extension| valid_extension(extension))
+    {
+        filename = format!(
+            "{} {}.{extension}",
+            crate::download::safe_component(&post.post_id),
+            crate::download::safe_component(&post.media_id)
+        );
+    }
+    if category == "pixiv"
+        && let Some(post) = &normalized
         && post.series.is_some()
         && let Some(number) = post.num_series
         && crate::pixiv::valid_id(&post.post_id)
@@ -1450,7 +1501,24 @@ fn compatibility_metadata(
     } else {
         index
     };
+    let sketch_archive = category == "pixiv"
+        && (data.contains_key("post_id")
+            || data.get("subcategory").and_then(Value::as_str) == Some("sketch"));
     let (post_id, media_id, shortcode, username, caption) = match category {
+        "pixiv" if sketch_archive => (
+            data.get("post_id")
+                .and_then(crate::pixiv::sketch::id_from_value)
+                .unwrap_or_default(),
+            data.get("id")
+                .and_then(crate::pixiv::sketch::id_from_value)
+                .unwrap_or_default(),
+            String::new(),
+            data.get("user")
+                .and_then(|user| user.get("unique_name"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            string("text"),
+        ),
         "instagram" => (
             id("post_id"),
             id("media_id"),
@@ -1656,6 +1724,10 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        sketch: sketch_archive
+            .then(|| crate::pixiv::SketchMetadata::parse_compat(data).map(std::sync::Arc::new))
+            .flatten(),
+        sketch_archive,
         tags: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("tags").and_then(crate::pixiv::Tags::parse_compat))
             .flatten(),

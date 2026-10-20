@@ -53,6 +53,9 @@ pub use pixivision::PixivisionMetadata;
 #[path = "pixiv_tags.rs"]
 pub mod tags;
 pub use tags::{TagMode, Tags};
+#[path = "pixiv_sketch.rs"]
+pub mod sketch;
+pub use sketch::SketchMetadata;
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -126,6 +129,7 @@ impl ProfileKind {
 pub enum Target {
     Followed,
     Pixivision(String),
+    Sketch(String),
     Novel(novel::Target),
     Ranking(RankingOptions),
     Search(SearchOptions),
@@ -199,6 +203,9 @@ pub fn target(url: &Url) -> Result<Target> {
             "unsupported Pixiv URL; expected https://www.pixiv.net/artworks/ID or https://www.pixiv.net/users/ID[/illustrations|/manga|/bookmarks/artworks]",
         )
     };
+    if url.host_str() == Some("sketch.pixiv.net") {
+        return sketch::target(url).map(Target::Sketch);
+    }
     if matches!(
         url.host_str(),
         Some("pixivision.net" | "www.pixivision.net")
@@ -745,6 +752,7 @@ pub struct Pixiv {
     api_root: Url,
     oauth_root: Url,
     pixivision_root: Url,
+    sketch_root: Url,
     max_posts: Option<usize>,
     tags: TagMode,
     refresh_token: Option<String>,
@@ -821,6 +829,7 @@ impl Pixiv {
             network: NetworkOptions::default(),
             api_root: Url::parse("https://app-api.pixiv.net/").expect("static URL"),
             oauth_root: Url::parse("https://oauth.secure.pixiv.net/").expect("static URL"),
+            sketch_root: Url::parse("https://sketch.pixiv.net/").expect("static URL"),
             pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
             max_posts: None,
             tags: TagMode::default(),
@@ -921,6 +930,12 @@ impl Pixiv {
             .get("tags")
             .and_then(|tags| self.tags.transform(tags));
         metadata
+    }
+
+    /// Override the public Sketch origin for bounded local fixtures.
+    pub fn with_sketch_root(mut self, root: Url) -> Self {
+        self.sketch_root = root;
+        self
     }
 
     fn app_headers(&self, request: RequestBuilder) -> RequestBuilder {
@@ -1179,19 +1194,37 @@ impl Pixiv {
 
     fn view_events(&self, id: String, view: &str) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match view {
-            "artworks" => Target::User { id, kinds: vec![Kind::Illust, Kind::Manga] },
-            "favorite" => Target::Bookmarks { id: Some(id), tag: None, private: false },
-            "avatar" => Target::Profile { id, kind: ProfileKind::Avatar },
-            "background" => Target::Profile { id, kind: ProfileKind::Background },
+            "artworks" => Target::User {
+                id,
+                kinds: vec![Kind::Illust, Kind::Manga],
+            },
+            "favorite" => Target::Bookmarks {
+                id: Some(id),
+                tag: None,
+                private: false,
+            },
+            "avatar" => Target::Profile {
+                id,
+                kind: ProfileKind::Avatar,
+            },
+            "background" => Target::Profile {
+                id,
+                kind: ProfileKind::Background,
+            },
             "bookmark" | "user" => {
-                let target = if view == "bookmark" { novel::Target::Bookmarks { user: id, tag: None, private: false } }
-                    else { novel::Target::User(id) };
+                let target = if view == "bookmark" {
+                    novel::Target::Bookmarks {
+                        user: id,
+                        tag: None,
+                        private: false,
+                    }
+                } else {
+                    novel::Target::User(id)
+                };
                 let native = self.novel_extractor.as_deref().unwrap_or(self);
                 return native.novel_events(target);
             }
-            "sketch" => return stream::once(async {
-                Err(error("native Pixiv Sketch extraction is not supported; use --extractor compatibility"))
-            }).boxed(),
+            "sketch" => return self.sketch_user_events(id),
             _ => return stream::empty().boxed(),
         };
         self.target_events(target)
@@ -1204,10 +1237,14 @@ impl Pixiv {
         if let Target::Pixivision(id) = target {
             return self.pixivision_events(id);
         }
+        if let Target::Sketch(username) = target {
+            return self.sketch_events(username);
+        }
         if self.refresh_token.is_none() {
             return stream::once(async { Err(missing_token()) }).boxed();
         }
         let (user, kinds) = match target {
+            Target::Sketch(username) => return self.sketch_events(username),
             Target::Novel(target) => return self.novel_events(target),
             Target::Followed => return self.followed_events(),
             Target::Pixivision(id) => return self.pixivision_events(id),
@@ -2914,14 +2951,18 @@ mod tests {
         let (root, server) = serve(vec![
             token("access-secret"),
             profile.clone(),
-            profile,
+            profile.clone(),
             page(41),
             response("200 OK", br#"{"illusts":[],"next_url":null}"#),
             page(42),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
+            profile,
+            response("200 OK", br#"{"data":{"items":[]},"_links":{}}"#),
         ]);
-        let native = pixiv(root).with_include(Some(Include::All));
+        let native = pixiv(root.clone())
+            .with_sketch_root(root)
+            .with_include(Some(Include::All));
         let events = native
             .events(&Url::parse("https://www.pixiv.net/users/9").unwrap())
             .collect::<Vec<_>>()
@@ -2951,10 +2992,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(&results[..4], ["avatar", "background", "41", "42"]);
-        assert!(results[4].contains("Sketch"));
+        assert_eq!(results.len(), 4);
         assert!(results.iter().all(|value| !value.contains("secret")));
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 8);
+        assert_eq!(requests.len(), 10);
         assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
         assert!(requests[2].starts_with("GET /v1/user/detail?user_id=9 "));
         assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));

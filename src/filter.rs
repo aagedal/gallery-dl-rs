@@ -287,8 +287,8 @@ fn text(value: impl Into<Arc<str>>) -> Value {
 fn map(values: BTreeMap<String, Value>) -> Value {
     Value::Map(Arc::new(values.into()))
 }
-// Tags are validated for size and nesting before reaching the expression context.
-fn tag_value(value: &serde_json::Value) -> Value {
+// Structured public metadata is validated before reaching this context.
+fn json_value(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Null => Value::None,
         serde_json::Value::Bool(value) => Value::Bool(*value),
@@ -298,11 +298,11 @@ fn tag_value(value: &serde_json::Value) -> Value {
             .map(Value::Int)
             .or_else(|| value.as_f64().filter(|n| n.is_finite()).map(Value::Float))
             .unwrap_or(Value::None),
-        serde_json::Value::Array(values) => Value::List(values.iter().map(tag_value).collect()),
+        serde_json::Value::Array(values) => Value::List(values.iter().map(json_value).collect()),
         serde_json::Value::Object(values) => {
             let mut result = OrderedMap::default();
             for (key, value) in values {
-                result.insert(key.clone(), tag_value(value));
+                result.insert(key.clone(), json_value(value));
             }
             Value::Map(Arc::new(result))
         }
@@ -389,10 +389,44 @@ fn context_parts(
         if let Some(rating) = &post.rating {
             metadata.insert("rating".into(), text(rating.clone()));
         }
+        if let Some(sketch) = &post.sketch {
+            let mut fields = OrderedMap::default();
+            for (key, value) in sketch.fields() {
+                let value = json_value(value);
+                fields.insert(key.clone(), value.clone());
+                if !matches!(
+                    key.as_str(),
+                    "category"
+                        | "subcategory"
+                        | "post_id"
+                        | "media_id"
+                        | "index"
+                        | "username"
+                        | "caption"
+                        | "timestamp"
+                        | "filename"
+                        | "name"
+                        | "extension"
+                        | "url"
+                        | "_url"
+                        | "id"
+                        | "date"
+                ) {
+                    metadata.insert(key.clone(), value);
+                }
+            }
+            metadata.insert("sketch".into(), Value::Map(Arc::new(fields)));
+            metadata.insert("subcategory".into(), text("sketch"));
+            metadata.insert(
+                "date".into(),
+                post.timestamp
+                    .map_or(Value::None, |value| Value::Int(value.into())),
+            );
+        }
         if let Some(tags) = &post.tags {
             metadata.insert(
                 "tags".into(),
-                Value::List(tags.values().iter().map(tag_value).collect()),
+                Value::List(tags.values().iter().map(json_value).collect()),
             );
         }
         if let Some(ranking) = &post.ranking {
@@ -876,6 +910,16 @@ fn context_parts(
             );
             metadata.insert("article".into(), map(fields.clone()));
             values.insert("article".into(), map(fields));
+        }
+        if post.sketch_archive || post.sketch.is_some() {
+            if media.is_some() {
+                let id = identifier(&post.media_id);
+                values.insert("id".into(), id.clone());
+                metadata.insert("id".into(), id);
+            } else {
+                values.remove("id");
+                metadata.remove("id");
+            }
         }
         values.insert("metadata".into(), map(metadata));
     }
