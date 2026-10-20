@@ -1638,11 +1638,17 @@ mod tests {
                 .await
                 .unwrap();
             started.send(()).unwrap();
-            let count = tokio::time::timeout(Duration::from_secs(2), connection.read(&mut request))
-                .await
-                .expect("cancelled metadata connection remained open")
-                .unwrap();
-            assert_eq!(count, 0);
+            let closed =
+                tokio::time::timeout(Duration::from_secs(2), connection.read(&mut request))
+                    .await
+                    .expect("cancelled metadata connection remained open");
+            match closed {
+                Ok(0) => {}
+                // Cancelling before the incomplete response has been consumed
+                // may close TCP with a reset instead of an orderly EOF.
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                other => panic!("expected cancelled metadata connection to close: {other:?}"),
+            }
         });
         let extraction = tokio::spawn(async move {
             pixiv(root)
