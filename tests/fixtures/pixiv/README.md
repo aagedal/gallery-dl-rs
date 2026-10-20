@@ -38,3 +38,25 @@ OAuth owner, mixed artists, `restrict=all`, ignored URL query options and owner
 metadata that stays fixed after the API user object is replaced. Private-looking
 owner fields are synthetic sentinels used to verify native metadata allowlisting.
 No API requests were made.
+
+`tags.json` records the actual `PixivExtractor.items` and
+`PixivNovelExtractor.items` generators from installed gallery-dl 1.32.17 at
+`/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py`.
+That source file's SHA-256 is
+`add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f`.
+The oracle directly called both generators on synthetic one-work extractors:
+`works`/`novels` returned the supplied tag array, illustration `_extract_files`
+returned one fixed synthetic image, and novel `novel_webview` returned fixed text.
+Optional metadata, comments, bookmark metadata, covers, and embeds were disabled.
+Every post/media tag value was deep-copied at its emission boundary to avoid the
+upstream generator's shared mutable metadata. No requests or authentication ran.
+
+Its 30 cases cover absent/default and exact/unknown tag settings, nonstring option
+fallback, Japanese duplicate retention, translated fallback and stable deduplication,
+Unicode/whitespace/empty names, empty arrays, and complete original dictionaries
+with nested fields and insertion order. `mode_set: false` means the option was
+absent, whereas `mode: null` with `mode_set: true` supplies explicit null. The
+`malformed` cases record missing-key exception classes only; they document source
+behavior without prescribing the native parser's malformed-response policy.
+All expected illustration and novel results agree. Every identity and string is
+synthetic; no captured user data or credentials are included.

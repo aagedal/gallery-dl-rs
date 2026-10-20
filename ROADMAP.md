@@ -843,11 +843,18 @@ Queued profile views receive independent budgets; rankings filter content and
 searches suppress replayed rows before counting. Zero clears inherited limits,
 and compatibility mode forwards the root category setting upstream. Separate
 compatibility overrides for queued child categories remain incomplete.
+Native illustration and novel tags support Japanese names, translated names
+with stable fallback/deduplication, and complete original tag objects. Metadata
+is shared across post/file output and available in predicates and templates;
+original dictionary order survives rendering. Thirty vectors recorded from
+both upstream generators cover mode fallback, duplicates, empty/Unicode values
+and original extra fields. Bounded malformed tag arrays are omitted where
+upstream can abort; tag options need no additional API calls.
 Remaining: ugoira original individual-frame mode and conversion,
 bookmark cursor/metadata options,
 sketch,
 upstream metadata options
-(`metadata`, `tags`), and Referer-routed plain `i.pximg.net` links.
+(`metadata`), and Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and
 folders via the OAuth2 API (client credentials, overridable `client-id`/

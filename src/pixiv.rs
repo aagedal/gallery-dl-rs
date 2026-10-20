@@ -50,6 +50,9 @@ pub use followed::FollowedUserMetadata;
 #[path = "pixivision.rs"]
 pub mod pixivision;
 pub use pixivision::PixivisionMetadata;
+#[path = "pixiv_tags.rs"]
+pub mod tags;
+pub use tags::{TagMode, Tags};
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -407,6 +410,9 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
     PostMetadata {
         post_id: id.to_owned(),
+        tags: illust
+            .get("tags")
+            .and_then(|tags| TagMode::Japanese.transform(tags)),
         username,
         caption,
         timestamp,
@@ -740,6 +746,7 @@ pub struct Pixiv {
     oauth_root: Url,
     pixivision_root: Url,
     max_posts: Option<usize>,
+    tags: TagMode,
     refresh_token: Option<String>,
     access_token: tokio::sync::Mutex<Option<String>>,
     authenticated_user: tokio::sync::Mutex<Option<String>>,
@@ -816,6 +823,7 @@ impl Pixiv {
             oauth_root: Url::parse("https://oauth.secure.pixiv.net/").expect("static URL"),
             pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
             max_posts: None,
+            tags: TagMode::default(),
             refresh_token: None,
             access_token: tokio::sync::Mutex::new(None),
             authenticated_user: tokio::sync::Mutex::new(None),
@@ -900,6 +908,19 @@ impl Pixiv {
     pub fn with_max_posts(mut self, max_posts: Option<usize>) -> Self {
         self.max_posts = max_posts.filter(|limit| *limit > 0);
         self
+    }
+
+    pub fn with_tags(mut self, tags: TagMode) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    fn illustration_metadata(&self, illust: &Value, id: &str) -> PostMetadata {
+        let mut metadata = illustration_metadata(illust, id);
+        metadata.tags = illust
+            .get("tags")
+            .and_then(|tags| self.tags.transform(tags));
+        metadata
     }
 
     fn app_headers(&self, request: RequestBuilder) -> RequestBuilder {
@@ -1004,7 +1025,7 @@ impl Pixiv {
     }
 
     async fn work(&self, illust: &Value, listing: bool) -> Result<Vec<Media>> {
-        match parse_illust(illust) {
+        let mut media = match parse_illust(illust) {
             Ok(media) => Ok(media),
             Err(Skip::Ugoira) if !self.ugoira => Ok(Vec::new()),
             Err(Skip::Ugoira) => {
@@ -1018,7 +1039,16 @@ impl Pixiv {
             }
             Err(Skip::NoMedia) if listing => Ok(Vec::new()),
             Err(Skip::NoMedia) => Err(error("Pixiv illustration contains no supported media")),
+        }?;
+        let tags = illust
+            .get("tags")
+            .and_then(|tags| self.tags.transform(tags));
+        for file in &mut media {
+            if let Some(metadata) = &mut file.metadata {
+                metadata.tags = tags.clone();
+            }
         }
+        Ok(media)
     }
 
     fn finish(&self, mut media: Vec<Media>) -> VecDeque<ExtractionEvent> {

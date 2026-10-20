@@ -210,7 +210,7 @@ impl Pixiv {
                                 state,
                             ));
                         };
-                        let mut metadata = super::illustration_metadata(&work, &id);
+                        let mut metadata = self.illustration_metadata(&work, &id);
                         metadata.user_follow = Some(user);
                         metadata.followed_archive = true;
                         state.pending = VecDeque::from([

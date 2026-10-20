@@ -86,6 +86,8 @@ pub struct Options {
     pub reposts: Option<bool>,
     /// Include Pixiv ugoira frame ZIPs.
     pub ugoira: Option<bool>,
+    /// Pixiv tag names: Japanese strings, original objects or translated strings.
+    pub tags: Option<crate::pixiv::TagMode>,
     /// Explicit Mastodon bearer token, confined to API requests. Empty disables.
     pub access_token: Option<String>,
     /// Include Mastodon statuses without selected media.
@@ -272,6 +274,7 @@ impl Options {
             user_id: overrides.user_id.clone().or_else(|| self.user_id.clone()),
             reposts: overrides.reposts.or(self.reposts),
             ugoira: overrides.ugoira.or(self.ugoira),
+            tags: overrides.tags.or(self.tags),
             access_token: overrides
                 .access_token
                 .clone()
@@ -399,6 +402,7 @@ struct RawRoot {
     favorites: Field,
     reposts: Field,
     ugoira: Field,
+    tags: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -466,6 +470,7 @@ struct RawExtractor {
     favorites: Field,
     reposts: Field,
     ugoira: Field,
+    tags: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -566,6 +571,7 @@ struct RawOptions {
     favorites: Field,
     reposts: Field,
     ugoira: Field,
+    tags: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -744,6 +750,7 @@ impl Config {
             favorites: root.favorites,
             reposts: root.reposts,
             ugoira: root.ugoira,
+            tags: root.tags,
             text_posts: root.text_posts,
             unavailable: root.unavailable,
             text_tweets: root.text_tweets,
@@ -820,6 +827,7 @@ impl Config {
             favorites: extractor.favorites,
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
+            tags: extractor.tags,
             text_posts: extractor.text_posts,
             unavailable: extractor.unavailable,
             text_tweets: extractor.text_tweets,
@@ -1249,6 +1257,12 @@ impl RawOptions {
         };
         let reposts = boolean(self.reposts, "reposts")?;
         let ugoira = boolean(self.ugoira, "ugoira")?;
+        // Upstream has special behavior for exactly two strings; every other
+        // present value uses Japanese names and overrides inherited settings.
+        let tags = self
+            .tags
+            .0
+            .map(|value| crate::pixiv::TagMode::parse(value.as_str().unwrap_or("")));
         let access_token = match self.access_token.0 {
             None => None,
             Some(Value::Bool(false)) => Some(String::new()),
@@ -1684,6 +1698,7 @@ impl RawOptions {
             user_id,
             reposts,
             ugoira,
+            tags,
             access_token,
             text_posts,
             unavailable,

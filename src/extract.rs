@@ -510,6 +510,9 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Pixiv tag names or original App API tag objects, in source order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<crate::pixiv::Tags>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pixivision: Option<std::sync::Arc<crate::pixiv::PixivisionMetadata>>,
     #[serde(skip_serializing)]
@@ -757,6 +760,7 @@ pub struct BackendOptions {
     pub api_key: Option<String>,
     pub reposts: Option<bool>,
     pub ugoira: Option<bool>,
+    pub tags: Option<crate::pixiv::TagMode>,
     pub covers: Option<bool>,
     pub full_series: Option<bool>,
     pub access_token: Option<String>,
@@ -1178,6 +1182,11 @@ impl Backend {
         }
         if let Some(limit) = options.max_posts {
             command.arg("--option").arg(format!("max-posts={limit}"));
+        }
+        if let Some(mode) = options.tags {
+            command
+                .arg("--option")
+                .arg(format!("tags=\"{}\"", mode.as_str()));
         }
         if let Some(limit) = options.search_limit {
             command.arg("--option").arg(format!("search-limit={limit}"));
@@ -1647,6 +1656,9 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        tags: matches!(category, "pixiv" | "pixiv-novel")
+            .then(|| data.get("tags").and_then(crate::pixiv::Tags::parse_compat))
+            .flatten(),
         pixivision: (category == "pixiv")
             .then(|| crate::pixiv::PixivisionMetadata::parse_flat(data).map(std::sync::Arc::new))
             .flatten(),

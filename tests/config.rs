@@ -2772,3 +2772,98 @@ fn bluesky_likes_endpoint_and_api_server_are_scoped_sparse_and_private() {
         assert!(parse(&document.to_string()).is_err());
     }
 }
+
+#[test]
+fn pixiv_tag_modes_are_sparse_inherited_and_independent_between_categories() {
+    use gallery_dl_rs::pixiv::TagMode;
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().tags, None);
+    assert_eq!(
+        parse("{}").unwrap().resolve("pixiv-novel").unwrap().tags,
+        None
+    );
+    let cfg = parse(r#"{"extractor":{"tags":"translated","pixiv":{"tags":"original"},"pixiv-novel":{"tags":"japanese"}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().tags, Some(TagMode::Original));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().tags,
+        Some(TagMode::Japanese)
+    );
+    assert_eq!(
+        cfg.resolve("direct").unwrap().tags,
+        Some(TagMode::Translated)
+    );
+    let cfg = parse(r#"{"extractor":{"tags":"translated","pixiv":{"tags":"original"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().tags,
+        Some(TagMode::Translated)
+    );
+    let cfg = parse(r#"{"tags":"original","extractor":{"tags":"japanese","pixiv":{"tags":"translated"},"pixiv-novel":{"tags":"translated"}}}"#).unwrap();
+    for category in ["pixiv", "pixiv-novel"] {
+        let options = cfg.resolve(category).unwrap();
+        assert_eq!(options.tags, Some(TagMode::Original));
+        assert_eq!(
+            options
+                .overlay(&Options {
+                    tags: Some(TagMode::Japanese),
+                    ..Options::default()
+                })
+                .tags,
+            Some(TagMode::Japanese)
+        );
+        assert_eq!(
+            options.overlay(&Options::default()).tags,
+            Some(TagMode::Original)
+        );
+    }
+}
+
+#[test]
+fn pixiv_tag_modes_use_upstream_fallback_for_every_other_present_value() {
+    use gallery_dl_rs::pixiv::TagMode;
+    use serde_json::json;
+    for value in [
+        json!("japanese"),
+        json!("unknown-private-value"),
+        json!("ORIGINAL"),
+        json!("Translated"),
+        json!(" original"),
+        json!(""),
+        json!(null),
+        json!(true),
+        json!(false),
+        json!(0),
+        json!(1.5),
+        json!([]),
+        json!(["private-payload"]),
+        json!({"private":"payload"}),
+    ] {
+        for category in ["pixiv", "pixiv-novel"] {
+            let cfg = parse(
+                &json!({"extractor":{"tags":"translated", category: {"tags":value}}}).to_string(),
+            )
+            .unwrap();
+            let resolved = cfg.resolve(category).unwrap();
+            assert_eq!(resolved.tags, Some(TagMode::Japanese));
+            let debug = format!("{resolved:?}");
+            assert!(!debug.contains("private"));
+            assert!(!debug.contains("payload"));
+        }
+        for document in [json!({"tags":value}), json!({"extractor":{"tags":value}})] {
+            let cfg = parse(&document.to_string()).unwrap();
+            assert_eq!(cfg.resolve("pixiv").unwrap().tags, Some(TagMode::Japanese));
+            assert_eq!(
+                cfg.resolve("pixiv-novel").unwrap().tags,
+                Some(TagMode::Japanese)
+            );
+        }
+    }
+    let cfg = parse(r#"{"extractor":{"pixiv":{"tags":"translated","ugoira":false,"max-posts":3},"pixiv-novel":{"tags":"original","covers":true}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.tags, Some(TagMode::Translated));
+    assert_eq!(pixiv.ugoira, Some(false));
+    assert_eq!(pixiv.max_posts, Some(3));
+    let novels = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(novels.tags, Some(TagMode::Original));
+    assert_eq!(novels.covers, Some(true));
+    assert_eq!(novels.ugoira, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}

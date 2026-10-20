@@ -956,11 +956,11 @@ async fn expansion_and_post_limits_forward_only_to_supported_categories() {
     let cfg = config(
         root.path(),
         serde_json::json!({"extractor": {
-            "expand":true,"max-posts":10,
+            "expand":true,"max-posts":10,"tags":"translated",
             "kemono":{"expand":false,"max-posts":2},
             "coomer":{"max-posts":0},
-            "pixiv":{"max-posts":3},
-            "pixiv-novel":{"max-posts":0}
+            "pixiv":{"max-posts":3,"tags":"original"},
+            "pixiv-novel":{"max-posts":0,"tags":false}
         }}),
     );
     for (url, expected, absent) in [
@@ -976,28 +976,28 @@ async fn expansion_and_post_limits_forward_only_to_supported_categories() {
         ),
         (
             "https://www.pixiv.net/artworks/42",
-            vec!["max-posts=3"],
+            vec!["max-posts=3", "tags=\"original\""],
             vec!["expand="],
         ),
         (
             "https://www.pixivision.net/en/a/77",
-            vec!["max-posts=3"],
+            vec!["max-posts=3", "tags=\"original\""],
             vec!["expand="],
         ),
         (
             "https://www.pixiv.net/novel/show.php?id=42",
-            vec!["max-posts=0"],
+            vec!["max-posts=0", "tags=\"japanese\""],
             vec!["expand="],
         ),
         (
             "https://x.com/alice/status/42",
             vec!["expand=true"],
-            vec!["max-posts="],
+            vec!["max-posts=", "tags="],
         ),
         (
             "https://instagram.com/p/abc/",
             vec![],
-            vec!["expand=", "max-posts="],
+            vec!["expand=", "max-posts=", "tags="],
         ),
     ] {
         let log = root.path().join("backend.log");

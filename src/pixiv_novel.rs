@@ -126,7 +126,7 @@ struct Novel {
 }
 
 impl Novel {
-    fn parse(data: Value) -> Result<Self> {
+    fn parse(data: Value, mode: super::TagMode) -> Result<Self> {
         let id = id_of(&data).ok_or_else(|| error("Pixiv returned an invalid novel ID"))?;
         let title = string(&data, "title");
         let caption = string(&data, "caption")
@@ -139,6 +139,7 @@ impl Novel {
         }
         .map(Arc::from);
         let metadata = PostMetadata {
+            tags: data.get("tags").and_then(|tags| mode.transform(tags)),
             post_id: id.clone(),
             media_id: format!("{id}_p0"),
             index: 1,
@@ -419,7 +420,7 @@ impl Pixiv {
                             if let Some(remaining) = &mut state.remaining {
                                 *remaining -= 1;
                             }
-                            match Novel::parse(data) {
+                            match Novel::parse(data, self.tags) {
                                 Ok(novel) => {
                                     let post = novel.post(self.novel_options.covers);
                                     state.active = Some(novel);
@@ -822,7 +823,7 @@ mod tests {
             );
             assert_eq!(
                 files[0].archive_key(),
-                Novel::parse(novel(41, "first"))
+                Novel::parse(novel(41, "first"), super::super::TagMode::Japanese)
                     .unwrap()
                     .text("same".into())
                     .unwrap()
@@ -1387,5 +1388,46 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].filename, "45_p0.txt");
         assert_eq!(server.join().unwrap().len(), 7);
+    }
+    #[tokio::test]
+    async fn configured_novel_tags_are_shared_by_post_text_and_optional_cover() {
+        for mode in [
+            super::super::TagMode::Japanese,
+            super::super::TagMode::Translated,
+            super::super::TagMode::Original,
+        ] {
+            let mut data = novel(42, "author");
+            data["tags"] = json!([{"name":"猫","translated_name":"cat","extra":[1,true]},{"name":"猫","translated_name":"cat"}]);
+            let expected = mode.transform(&data["tags"]).unwrap();
+            let (root, server) = serve(vec![token("t"), detail(data), webview("novel text")]);
+            let native = pixiv(root)
+                .with_tags(mode)
+                .with_novel_options(NovelOptions {
+                    covers: true,
+                    full_series: false,
+                });
+            let events = native
+                .events(&Url::parse("https://www.pixiv.net/n/42").unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            let mut media = 0;
+            for event in events {
+                match event {
+                    ExtractionEvent::Post(post) => {
+                        assert_eq!(post.metadata.unwrap().tags, Some(expected.clone()))
+                    }
+                    ExtractionEvent::Media(file) => {
+                        media += 1;
+                        assert_eq!(file.metadata.unwrap().tags, Some(expected.clone()));
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(media, 2);
+            assert_eq!(server.join().unwrap().len(), 3);
+        }
     }
 }

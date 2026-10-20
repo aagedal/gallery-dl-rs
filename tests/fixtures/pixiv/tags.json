@@ -1,0 +1,2547 @@
+{
+  "source": "gallery_dl.extractor.pixiv.PixivExtractor.items + PixivNovelExtractor.items",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py",
+  "source_sha256": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+  "generator": "Direct calls to actual items generators; synthetic one-work works/novels, _extract_files and novel_webview stubs; no network/authentication; snapshots copied at each emitted post/media boundary.",
+  "cases": [
+    {
+      "name": "duplicates_mode_\"japanese\"",
+      "mode_set": true,
+      "mode": "japanese",
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_\"translated\"",
+      "mode_set": true,
+      "mode": "translated",
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "cat",
+            "猫",
+            "dog"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "cat",
+                "猫",
+                "dog"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "cat",
+                "猫",
+                "dog"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "cat",
+            "猫",
+            "dog"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "cat",
+                "猫",
+                "dog"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "cat",
+                "猫",
+                "dog"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_\"original\"",
+      "mode_set": true,
+      "mode": "original",
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            },
+            {
+              "name": "猫",
+              "translated_name": ""
+            },
+            {
+              "name": "別",
+              "translated_name": "cat"
+            },
+            {
+              "name": "cat",
+              "translated_name": null
+            },
+            {
+              "name": "犬",
+              "translated_name": "dog"
+            },
+            {
+              "name": "犬",
+              "translated_name": "dog"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "猫",
+                  "translated_name": ""
+                },
+                {
+                  "name": "別",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "cat",
+                  "translated_name": null
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "猫",
+                  "translated_name": ""
+                },
+                {
+                  "name": "別",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "cat",
+                  "translated_name": null
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                }
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            },
+            {
+              "name": "猫",
+              "translated_name": ""
+            },
+            {
+              "name": "別",
+              "translated_name": "cat"
+            },
+            {
+              "name": "cat",
+              "translated_name": null
+            },
+            {
+              "name": "犬",
+              "translated_name": "dog"
+            },
+            {
+              "name": "犬",
+              "translated_name": "dog"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "猫",
+                  "translated_name": ""
+                },
+                {
+                  "name": "別",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "cat",
+                  "translated_name": null
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "猫",
+                  "translated_name": ""
+                },
+                {
+                  "name": "別",
+                  "translated_name": "cat"
+                },
+                {
+                  "name": "cat",
+                  "translated_name": null
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog"
+                }
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_\"unknown\"",
+      "mode_set": true,
+      "mode": "unknown",
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_\"Translated\"",
+      "mode_set": true,
+      "mode": "Translated",
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_null",
+      "mode_set": true,
+      "mode": null,
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_false",
+      "mode_set": true,
+      "mode": false,
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_true",
+      "mode_set": true,
+      "mode": true,
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_0",
+      "mode_set": true,
+      "mode": 0,
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_[]",
+      "mode_set": true,
+      "mode": [],
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "duplicates_mode_{}",
+      "mode_set": true,
+      "mode": {},
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "default_absent",
+      "mode_set": false,
+      "mode": null,
+      "input_tags": [
+        {
+          "name": "猫",
+          "translated_name": "cat"
+        },
+        {
+          "name": "猫",
+          "translated_name": ""
+        },
+        {
+          "name": "別",
+          "translated_name": "cat"
+        },
+        {
+          "name": "cat",
+          "translated_name": null
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "猫",
+            "別",
+            "cat",
+            "犬",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "猫",
+                "別",
+                "cat",
+                "犬",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "unicode_whitespace_empty_japanese",
+      "mode_set": true,
+      "mode": "japanese",
+      "input_tags": [
+        {
+          "name": "",
+          "translated_name": ""
+        },
+        {
+          "name": " 猫\t",
+          "translated_name": null
+        },
+        {
+          "name": "空\n白",
+          "translated_name": " space "
+        },
+        {
+          "name": "é猫",
+          "translated_name": "é猫"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "",
+            " 猫\t",
+            "空\n白",
+            "é猫"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "",
+                " 猫\t",
+                "空\n白",
+                "é猫"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "",
+                " 猫\t",
+                "空\n白",
+                "é猫"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "",
+            " 猫\t",
+            "空\n白",
+            "é猫"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "",
+                " 猫\t",
+                "空\n白",
+                "é猫"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "",
+                " 猫\t",
+                "空\n白",
+                "é猫"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "empty_array_japanese",
+      "mode_set": true,
+      "mode": "japanese",
+      "input_tags": [],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [],
+          "messages": [
+            {
+              "message": "post",
+              "tags": []
+            },
+            {
+              "message": "media",
+              "tags": []
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [],
+          "messages": [
+            {
+              "message": "post",
+              "tags": []
+            },
+            {
+              "message": "media",
+              "tags": []
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "full_original_fields_japanese",
+      "mode_set": true,
+      "mode": "japanese",
+      "input_tags": [
+        {
+          "translated_name": null,
+          "name": "猫",
+          "unknown": {
+            "z": 1,
+            "a": [
+              true,
+              null,
+              {
+                "b": "two",
+                "a": "one"
+              }
+            ]
+          },
+          "empty": ""
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog",
+          "added_by": {
+            "id": 7,
+            "name": "Fixture User"
+          }
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "犬"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "犬"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "犬"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "unicode_whitespace_empty_translated",
+      "mode_set": true,
+      "mode": "translated",
+      "input_tags": [
+        {
+          "name": "",
+          "translated_name": ""
+        },
+        {
+          "name": " 猫\t",
+          "translated_name": null
+        },
+        {
+          "name": "空\n白",
+          "translated_name": " space "
+        },
+        {
+          "name": "é猫",
+          "translated_name": "é猫"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "",
+            " 猫\t",
+            " space ",
+            "é猫"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "",
+                " 猫\t",
+                " space ",
+                "é猫"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "",
+                " 猫\t",
+                " space ",
+                "é猫"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "",
+            " 猫\t",
+            " space ",
+            "é猫"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "",
+                " 猫\t",
+                " space ",
+                "é猫"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "",
+                " 猫\t",
+                " space ",
+                "é猫"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "empty_array_translated",
+      "mode_set": true,
+      "mode": "translated",
+      "input_tags": [],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [],
+          "messages": [
+            {
+              "message": "post",
+              "tags": []
+            },
+            {
+              "message": "media",
+              "tags": []
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [],
+          "messages": [
+            {
+              "message": "post",
+              "tags": []
+            },
+            {
+              "message": "media",
+              "tags": []
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "full_original_fields_translated",
+      "mode_set": true,
+      "mode": "translated",
+      "input_tags": [
+        {
+          "translated_name": null,
+          "name": "猫",
+          "unknown": {
+            "z": 1,
+            "a": [
+              true,
+              null,
+              {
+                "b": "two",
+                "a": "one"
+              }
+            ]
+          },
+          "empty": ""
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog",
+          "added_by": {
+            "id": 7,
+            "name": "Fixture User"
+          }
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫",
+            "dog"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "dog"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "dog"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫",
+            "dog"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫",
+                "dog"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫",
+                "dog"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "unicode_whitespace_empty_original",
+      "mode_set": true,
+      "mode": "original",
+      "input_tags": [
+        {
+          "name": "",
+          "translated_name": ""
+        },
+        {
+          "name": " 猫\t",
+          "translated_name": null
+        },
+        {
+          "name": "空\n白",
+          "translated_name": " space "
+        },
+        {
+          "name": "é猫",
+          "translated_name": "é猫"
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            {
+              "name": "",
+              "translated_name": ""
+            },
+            {
+              "name": " 猫\t",
+              "translated_name": null
+            },
+            {
+              "name": "空\n白",
+              "translated_name": " space "
+            },
+            {
+              "name": "é猫",
+              "translated_name": "é猫"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "name": "",
+                  "translated_name": ""
+                },
+                {
+                  "name": " 猫\t",
+                  "translated_name": null
+                },
+                {
+                  "name": "空\n白",
+                  "translated_name": " space "
+                },
+                {
+                  "name": "é猫",
+                  "translated_name": "é猫"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "name": "",
+                  "translated_name": ""
+                },
+                {
+                  "name": " 猫\t",
+                  "translated_name": null
+                },
+                {
+                  "name": "空\n白",
+                  "translated_name": " space "
+                },
+                {
+                  "name": "é猫",
+                  "translated_name": "é猫"
+                }
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            {
+              "name": "",
+              "translated_name": ""
+            },
+            {
+              "name": " 猫\t",
+              "translated_name": null
+            },
+            {
+              "name": "空\n白",
+              "translated_name": " space "
+            },
+            {
+              "name": "é猫",
+              "translated_name": "é猫"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "name": "",
+                  "translated_name": ""
+                },
+                {
+                  "name": " 猫\t",
+                  "translated_name": null
+                },
+                {
+                  "name": "空\n白",
+                  "translated_name": " space "
+                },
+                {
+                  "name": "é猫",
+                  "translated_name": "é猫"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "name": "",
+                  "translated_name": ""
+                },
+                {
+                  "name": " 猫\t",
+                  "translated_name": null
+                },
+                {
+                  "name": "空\n白",
+                  "translated_name": " space "
+                },
+                {
+                  "name": "é猫",
+                  "translated_name": "é猫"
+                }
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "empty_array_original",
+      "mode_set": true,
+      "mode": "original",
+      "input_tags": [],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [],
+          "messages": [
+            {
+              "message": "post",
+              "tags": []
+            },
+            {
+              "message": "media",
+              "tags": []
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [],
+          "messages": [
+            {
+              "message": "post",
+              "tags": []
+            },
+            {
+              "message": "media",
+              "tags": []
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "full_original_fields_original",
+      "mode_set": true,
+      "mode": "original",
+      "input_tags": [
+        {
+          "translated_name": null,
+          "name": "猫",
+          "unknown": {
+            "z": 1,
+            "a": [
+              true,
+              null,
+              {
+                "b": "two",
+                "a": "one"
+              }
+            ]
+          },
+          "empty": ""
+        },
+        {
+          "name": "犬",
+          "translated_name": "dog",
+          "added_by": {
+            "id": 7,
+            "name": "Fixture User"
+          }
+        }
+      ],
+      "malformed": false,
+      "expected": {
+        "illustration": {
+          "tags": [
+            {
+              "translated_name": null,
+              "name": "猫",
+              "unknown": {
+                "z": 1,
+                "a": [
+                  true,
+                  null,
+                  {
+                    "b": "two",
+                    "a": "one"
+                  }
+                ]
+              },
+              "empty": ""
+            },
+            {
+              "name": "犬",
+              "translated_name": "dog",
+              "added_by": {
+                "id": 7,
+                "name": "Fixture User"
+              }
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "translated_name": null,
+                  "name": "猫",
+                  "unknown": {
+                    "z": 1,
+                    "a": [
+                      true,
+                      null,
+                      {
+                        "b": "two",
+                        "a": "one"
+                      }
+                    ]
+                  },
+                  "empty": ""
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog",
+                  "added_by": {
+                    "id": 7,
+                    "name": "Fixture User"
+                  }
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "translated_name": null,
+                  "name": "猫",
+                  "unknown": {
+                    "z": 1,
+                    "a": [
+                      true,
+                      null,
+                      {
+                        "b": "two",
+                        "a": "one"
+                      }
+                    ]
+                  },
+                  "empty": ""
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog",
+                  "added_by": {
+                    "id": 7,
+                    "name": "Fixture User"
+                  }
+                }
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            {
+              "translated_name": null,
+              "name": "猫",
+              "unknown": {
+                "z": 1,
+                "a": [
+                  true,
+                  null,
+                  {
+                    "b": "two",
+                    "a": "one"
+                  }
+                ]
+              },
+              "empty": ""
+            },
+            {
+              "name": "犬",
+              "translated_name": "dog",
+              "added_by": {
+                "id": 7,
+                "name": "Fixture User"
+              }
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "translated_name": null,
+                  "name": "猫",
+                  "unknown": {
+                    "z": 1,
+                    "a": [
+                      true,
+                      null,
+                      {
+                        "b": "two",
+                        "a": "one"
+                      }
+                    ]
+                  },
+                  "empty": ""
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog",
+                  "added_by": {
+                    "id": 7,
+                    "name": "Fixture User"
+                  }
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "translated_name": null,
+                  "name": "猫",
+                  "unknown": {
+                    "z": 1,
+                    "a": [
+                      true,
+                      null,
+                      {
+                        "b": "two",
+                        "a": "one"
+                      }
+                    ]
+                  },
+                  "empty": ""
+                },
+                {
+                  "name": "犬",
+                  "translated_name": "dog",
+                  "added_by": {
+                    "id": 7,
+                    "name": "Fixture User"
+                  }
+                }
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "missing_translation_japanese",
+      "mode_set": true,
+      "mode": "japanese",
+      "input_tags": [
+        {
+          "name": "猫"
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "猫"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "猫"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "猫"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "猫"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "missing_translation_translated",
+      "mode_set": true,
+      "mode": "translated",
+      "input_tags": [
+        {
+          "name": "猫"
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        },
+        "novel": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        }
+      }
+    },
+    {
+      "name": "missing_translation_original",
+      "mode_set": true,
+      "mode": "original",
+      "input_tags": [
+        {
+          "name": "猫"
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": [
+            {
+              "name": "猫"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "name": "猫"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "name": "猫"
+                }
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            {
+              "name": "猫"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "name": "猫"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "name": "猫"
+                }
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "missing_name_truthy_translation_japanese",
+      "mode_set": true,
+      "mode": "japanese",
+      "input_tags": [
+        {
+          "translated_name": "cat"
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        },
+        "novel": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        }
+      }
+    },
+    {
+      "name": "missing_name_truthy_translation_translated",
+      "mode_set": true,
+      "mode": "translated",
+      "input_tags": [
+        {
+          "translated_name": "cat"
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": [
+            "cat"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "cat"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "cat"
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            "cat"
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                "cat"
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                "cat"
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "missing_name_truthy_translation_original",
+      "mode_set": true,
+      "mode": "original",
+      "input_tags": [
+        {
+          "translated_name": "cat"
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": [
+            {
+              "translated_name": "cat"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "translated_name": "cat"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "translated_name": "cat"
+                }
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            {
+              "translated_name": "cat"
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "translated_name": "cat"
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "translated_name": "cat"
+                }
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "missing_name_falsy_translation_japanese",
+      "mode_set": true,
+      "mode": "japanese",
+      "input_tags": [
+        {
+          "translated_name": null
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        },
+        "novel": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        }
+      }
+    },
+    {
+      "name": "missing_name_falsy_translation_translated",
+      "mode_set": true,
+      "mode": "translated",
+      "input_tags": [
+        {
+          "translated_name": null
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        },
+        "novel": {
+          "tags": null,
+          "messages": [],
+          "error": "KeyError"
+        }
+      }
+    },
+    {
+      "name": "missing_name_falsy_translation_original",
+      "mode_set": true,
+      "mode": "original",
+      "input_tags": [
+        {
+          "translated_name": null
+        }
+      ],
+      "malformed": true,
+      "expected": {
+        "illustration": {
+          "tags": [
+            {
+              "translated_name": null
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "translated_name": null
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "translated_name": null
+                }
+              ]
+            }
+          ],
+          "error": null
+        },
+        "novel": {
+          "tags": [
+            {
+              "translated_name": null
+            }
+          ],
+          "messages": [
+            {
+              "message": "post",
+              "tags": [
+                {
+                  "translated_name": null
+                }
+              ]
+            },
+            {
+              "message": "media",
+              "tags": [
+                {
+                  "translated_name": null
+                }
+              ]
+            }
+          ],
+          "error": null
+        }
+      }
+    }
+  ]
+}

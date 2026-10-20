@@ -1125,6 +1125,7 @@ fn extract_input<'a>(
                                         full_series: novel_options.full_series.unwrap_or(false),
                                     })
                                     .with_max_posts(novel_options.max_posts)
+                                    .with_tags(novel_options.tags.unwrap_or_default())
                                     .with_refresh_token(novel_options.refresh_token.as_deref())
                                     .with_retries(novel_options.retries.unwrap())
                                     .with_request_timeout(novel_options.timeout.unwrap())
@@ -1150,6 +1151,7 @@ fn extract_input<'a>(
                                             .with_include(options.include.clone())
                                             .with_ugoira(options.ugoira.unwrap_or(true))
                                             .with_max_posts(options.max_posts)
+                                            .with_tags(options.tags.unwrap_or_default())
                                             .with_refresh_token(options.refresh_token.as_deref())
                                             .with_retries(options.retries.unwrap())
                                             .with_request_timeout(options.timeout.unwrap())
@@ -1304,6 +1306,9 @@ fn extract_input<'a>(
                                 .flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
+                            tags: matches!(category, "pixiv" | "pixiv-novel")
+                                .then_some(options.tags)
+                                .flatten(),
                             covers: (category == "pixiv-novel")
                                 .then_some(options.covers)
                                 .flatten(),
@@ -1480,6 +1485,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         user_id: None,
         reposts: None,
         ugoira: None,
+        tags: None,
         access_token: None,
         text_posts: None,
         unavailable: None,

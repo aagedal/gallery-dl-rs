@@ -16,6 +16,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
     let mut media = extract::direct(&extract::http_url(url).unwrap()).unwrap();
     media.category = "instagram".into();
     media.metadata = Some(PostMetadata {
+        tags: None,
         pixivision: None,
         pixivision_archive: false,
         user_follow: None,

@@ -620,6 +620,20 @@ at 200 pages. Stopping a selected child leaves later followed users available;
 dropping the input stops later users and pages. Authenticated live following
 extraction remains unverified.
 
+Native Pixiv illustrations and novels expose `tags` in inspection, sidecars,
+post/file predicates and templates. Configure `tags` independently in `pixiv`
+and `pixiv-novel`: `"japanese"` (default) keeps names in source order, including
+duplicates; `"translated"` uses each translation or falls back to its name,
+then removes duplicates in first-occurrence order; `"original"` retains complete
+tag objects, including extra fields. Any other setting falls back to Japanese,
+matching upstream. Strings preserve whitespace and Unicode. Examples include
+`'cat' in tags` for names and `{tags[0][name]}` for original objects. Tag settings
+perform no extra API requests and do not change archives. Compatibility data
+retains upstream's already transformed tags. Missing, malformed or oversized
+arrays are omitted; upstream may instead abort on malformed tag fields.
+Original tag numbers must fit native expression limits (signed 128-bit integers
+or finite floating-point values); unsupported arrays are omitted.
+
 Native Pixiv's followed-artists feed supports `/bookmark_new_illust.php` in
 the `pixiv` category, using `extractor.pixiv.refresh-token`. URL query options
 are ignored; the App API request always uses `restrict=all`. The initial OAuth
@@ -1670,7 +1684,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `file-filter`, `image-filter`, `post-range`, `post-filter`, `child-range`, `child-filter`, `include`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
-`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
+`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `tags`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`,

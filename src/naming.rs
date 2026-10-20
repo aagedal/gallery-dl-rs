@@ -56,6 +56,7 @@ const FIELDS: &[&str] = &[
     "id",
     "metadata",
     "frames",
+    "tags",
     "profile_asset",
     "ranking",
     "search",
@@ -384,22 +385,36 @@ impl DirectoryTemplate {
 }
 
 fn convert(value: &crate::filter::Value, key: &str) -> Value {
+    convert_value(value, key, key != "tags")
+}
+
+fn convert_value(value: &crate::filter::Value, key: &str, dates: bool) -> Value {
     use crate::filter::Value as Source;
     match value {
         Source::None => Value::None,
         Source::Bool(value) => Value::Bool(*value),
         // Upstream exposes these as datetimes; native metadata stores seconds.
-        Source::Int(value) if matches!(key, "date" | "date_updated") => format::timestamp(*value),
+        Source::Int(value) if dates && matches!(key, "date" | "date_updated") => {
+            format::timestamp(*value)
+        }
         Source::Int(value) => Value::Int(*value),
         Source::Float(value) => Value::Float(*value),
         Source::String(value) => Value::Str(value.to_string()),
-        Source::List(values) | Source::Tuple(values) => {
-            Value::List(values.iter().map(|value| convert(value, "")).collect())
-        }
+        Source::List(values) | Source::Tuple(values) => Value::List(
+            values
+                .iter()
+                .map(|value| convert_value(value, "", dates))
+                .collect(),
+        ),
         Source::Map(values) => Value::Map(
             values
                 .iter()
-                .map(|(key, value)| (key.clone(), convert(value, key)))
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        convert_value(value, key, dates && key != "tags"),
+                    )
+                })
                 .collect(),
         ),
     }

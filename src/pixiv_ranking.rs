@@ -447,7 +447,7 @@ impl Pixiv {
                                 state,
                             ));
                         };
-                        let mut metadata = super::illustration_metadata(&work, &id);
+                        let mut metadata = self.illustration_metadata(&work, &id);
                         metadata.ranking = Some(ranking);
                         metadata.ranking_archive = true;
                         state.pending = VecDeque::from([

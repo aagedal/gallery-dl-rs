@@ -6,7 +6,6 @@
 //! `J`, `R`, `A`, `C`, `S`, and `O` forms before a final Python format spec or,
 //! for dates, a `strftime` pattern. Nothing evaluates arbitrary code.
 use crate::{Result, error};
-use std::collections::BTreeMap;
 use time::{OffsetDateTime, UtcOffset};
 
 /// Intermediate text cannot grow past this many bytes during rendering.
@@ -21,7 +20,7 @@ pub(super) enum Value {
     Float(f64),
     Str(String),
     List(Vec<Value>),
-    Map(BTreeMap<String, Value>),
+    Map(Vec<(String, Value)>),
     Date(OffsetDateTime),
 }
 
@@ -348,10 +347,14 @@ fn access(value: Value, accessor: &Accessor) -> Value {
         (start, stop.max(start))
     };
     match (value, accessor) {
-        (Value::Map(mut values), Accessor::Key(key)) => values.remove(key).unwrap_or(Value::None),
-        (Value::Map(mut values), Accessor::Index(index)) => {
-            values.remove(&index.to_string()).unwrap_or(Value::None)
-        }
+        (Value::Map(values), Accessor::Key(key)) => values
+            .into_iter()
+            .find(|(name, _)| name == key)
+            .map_or(Value::None, |(_, value)| value),
+        (Value::Map(values), Accessor::Index(index)) => values
+            .into_iter()
+            .find(|(name, _)| name == &index.to_string())
+            .map_or(Value::None, |(_, value)| value),
         (Value::List(values), Accessor::Index(index)) => {
             position(*index, values.len()).map_or(Value::None, |index| values[index].clone())
         }
@@ -525,9 +528,8 @@ fn json(value: &Value) -> serde_json::Value {
     match value {
         Value::None => Json::Null,
         Value::Bool(value) => Json::Bool(*value),
-        Value::Int(value) => i64::try_from(*value)
-            .map(Json::from)
-            .unwrap_or_else(|_| Json::String(value.to_string())),
+        Value::Int(value) => serde_json::Number::from_i128(*value)
+            .map_or_else(|| Json::String(value.to_string()), Json::Number),
         Value::Float(value) => {
             serde_json::Number::from_f64(*value).map_or(Json::Null, Json::Number)
         }

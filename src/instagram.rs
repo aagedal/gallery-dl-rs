@@ -649,6 +649,7 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                 category: "instagram".into(),
                 filename: format!("{post_id}_{media_id}.{extension}"),
                 metadata: Some(PostMetadata {
+                    tags: None,
                     pixivision: None,
                     pixivision_archive: false,
                     user_follow: None,
