@@ -302,6 +302,7 @@ impl Outcome {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DownloadOptions<'a> {
     pub retries: u8,
+    pub postprocessors: Option<&'a crate::postprocess::Postprocessors>,
     /// Override category folders with per-media directory components.
     pub directory: Option<&'a DirectoryTemplate>,
     /// Save versioned post metadata beside completed or already existing media.
@@ -346,27 +347,250 @@ pub async fn download_with_template(
 ) -> Result<Outcome> {
     let effective_media = client.effective_media(media);
     let media = effective_media.as_ref();
-    let outcome = download_media(
-        client,
-        root,
-        media,
-        options.retries,
-        template,
-        options.directory,
-        options.limits,
-    )
-    .await?;
+    let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
+    let output_media = prepared.as_ref().unwrap_or(media);
+    let original_frames = media
+        .metadata
+        .as_ref()
+        .is_some_and(|m| m.ugoira_frame_index.is_some());
+    let selected = options
+        .postprocessors
+        .map(|pp| pp.selected(media))
+        .unwrap_or_default();
+    if original_frames && !selected.is_empty() {
+        let path = destination_with_templates(root, media, template, options.directory)?;
+        options
+            .postprocessors
+            .unwrap()
+            .frames
+            .register(media, &path)?;
+    }
+    let mut converted_media = None;
+    let mut outcome = if !original_frames && !selected.is_empty() {
+        download_ugoira(
+            client,
+            root,
+            media,
+            output_media,
+            options,
+            template,
+            &selected,
+        )
+        .await?
+    } else {
+        download_media(client, root, media, options, template, None).await?
+    };
+    if original_frames
+        && !selected.is_empty()
+        && let Some((path, converted)) =
+            complete_original(client, root, media, &outcome, options, template).await?
+    {
+        outcome = Outcome::Downloaded(path);
+        converted_media = Some(converted);
+    }
     if options.write_metadata
         && let Some(path) = outcome.saved_path()
     {
-        write_metadata(path, media).await.map_err(|e| {
-            error(format!(
-                "media is saved at {}; metadata sidecar failed: {e}",
-                path.display()
-            ))
-        })?;
+        write_metadata(path, converted_media.as_ref().unwrap_or(output_media))
+            .await
+            .map_err(|e| {
+                error(format!(
+                    "media is saved at {}; metadata sidecar failed: {e}",
+                    path.display()
+                ))
+            })?;
     }
     Ok(outcome)
+}
+
+pub(crate) async fn complete_original(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    outcome: &Outcome,
+    options: DownloadOptions<'_>,
+    template: Option<&FilenameTemplate>,
+) -> Result<Option<(PathBuf, Media)>> {
+    if let Some(pp) = options.postprocessors
+        && let Some(path) = outcome.saved_path()
+        && let Some(collection) =
+            pp.frames
+                .complete(media, path, matches!(outcome, Outcome::Downloaded(_)))?
+    {
+        let mut converted_media = None;
+        let fingerprints = match &collection.input {
+            crate::postprocess::FrameInput::Files(frames) => frames
+                .iter()
+                .map(|frame| {
+                    std::fs::symlink_metadata(&frame.path)
+                        .ok()
+                        .map(|metadata| (frame.path.clone(), metadata))
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let mut last = None;
+        for spec in options.postprocessors.unwrap().selected(&collection.media) {
+            let converted =
+                crate::postprocess::with_extension(&collection.media, spec.options.extension());
+            let path = destination_with_templates(root, &converted, template, options.directory)?;
+            crate::postprocess::convert(
+                spec,
+                &collection.input,
+                &converted,
+                &path,
+                client.wait_limit,
+            )
+            .await?;
+            last = Some(path);
+            converted_media = Some(converted);
+        }
+        // Delay removal until every converter has finished using the source frames.
+        if options
+            .postprocessors
+            .unwrap()
+            .selected(&collection.media)
+            .iter()
+            .any(|spec| !spec.options.keep_files())
+            && let crate::postprocess::FrameInput::Files(frames) = &collection.input
+        {
+            for (frame, before) in frames.iter().zip(fingerprints) {
+                if last.as_ref() != Some(&frame.path)
+                    && let Some((_, before)) = before
+                    && let Ok(after) = std::fs::symlink_metadata(&frame.path)
+                    && unchanged_file(&before, &after)
+                {
+                    tokio::fs::remove_file(&frame.path).await?;
+                }
+            }
+        }
+        let result = last.zip(converted_media);
+        if options.write_metadata
+            && let Some((path, media)) = &result
+        {
+            write_metadata(path, media).await.map_err(|e| {
+                error(format!(
+                    "media is saved at {}; metadata sidecar failed: {e}",
+                    path.display()
+                ))
+            })?;
+        }
+        return Ok(result);
+    }
+    Ok(None)
+}
+
+fn unchanged_file(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bool {
+    if !after.is_file()
+        || before.len() != after.len()
+        || before.modified().ok() != after.modified().ok()
+    {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if before.dev() != after.dev() || before.ino() != after.ino() {
+            return false;
+        }
+    }
+    true
+}
+
+/// Preserve a fully downloaded source even when the conversion future is cancelled.
+struct UgoiraSource {
+    directory: tempfile::TempDir,
+    source: Option<PathBuf>,
+    recovery: PathBuf,
+    recover_at_original: bool,
+}
+impl Drop for UgoiraSource {
+    fn drop(&mut self) {
+        if let Some(source) = &self.source
+            && (!self.recover_at_original || std::fs::hard_link(source, &self.recovery).is_err())
+            && let Some(parent) = self.recovery.parent()
+            && let Ok(file) = tempfile::Builder::new()
+                .prefix(".gallery-dl-ugoira-source-")
+                .suffix(".zip")
+                .tempfile_in(parent)
+        {
+            let path = file.into_temp_path();
+            if std::fs::rename(source, &path).is_ok() {
+                let _ = path.keep();
+            }
+        }
+    }
+}
+async fn download_ugoira(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    prepared: &Media,
+    options: DownloadOptions<'_>,
+    template: Option<&FilenameTemplate>,
+    selected: &[&crate::postprocess::Specification],
+) -> Result<Outcome> {
+    let path = destination_with_templates(root, prepared, template, options.directory)?;
+    if crate::postprocess::regular_file(&path)? {
+        return Ok(Outcome::Skipped(path));
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| error("invalid postprocessor destination"))?;
+    tokio::fs::create_dir_all(parent).await?;
+    let recovery = destination_with_templates(root, media, template, options.directory)?;
+    if let Some(parent) = recovery.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut source = UgoiraSource {
+        directory: tempfile::TempDir::new_in(parent)?,
+        source: None,
+        recover_at_original: recovery != path,
+        recovery,
+    };
+    let downloaded = download_media(
+        client,
+        source.directory.path(),
+        media,
+        DownloadOptions {
+            directory: None,
+            ..options
+        },
+        None,
+        Some(&source.recovery),
+    )
+    .await?;
+    let Some(input_path) = downloaded.saved_path() else {
+        return Ok(downloaded);
+    };
+    source.source = Some(input_path.to_owned());
+    let frames = media
+        .metadata
+        .as_ref()
+        .and_then(|m| m.frames.clone())
+        .ok_or_else(|| error("ugoira frame metadata missing"))?;
+    let input = crate::postprocess::FrameInput::Zip {
+        path: input_path.to_owned(),
+        frames,
+    };
+    let mut published = std::collections::HashSet::new();
+    for spec in selected {
+        let converted = crate::postprocess::with_extension(prepared, spec.options.extension());
+        let output = destination_with_templates(root, &converted, template, options.directory)?;
+        crate::postprocess::convert(spec, &input, &converted, &output, client.wait_limit).await?;
+        published.insert(output);
+    }
+    if selected.iter().all(|spec| spec.options.keep_files()) && !published.contains(&path) {
+        match std::fs::hard_link(input_path, &path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                crate::postprocess::regular_file(&path)?;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    source.source = None;
+    Ok(Outcome::Downloaded(path))
 }
 
 /// Deliberately exclude URLs and private transport/adapter options, including
@@ -445,11 +669,16 @@ async fn download_media(
     client: &DownloadClient,
     root: &Path,
     media: &Media,
-    retries: u8,
+    options: DownloadOptions<'_>,
     template: Option<&FilenameTemplate>,
-    directory: Option<&DirectoryTemplate>,
-    limits: SizeLimits,
+    checkpoint_destination: Option<&Path>,
 ) -> Result<Outcome> {
+    let DownloadOptions {
+        retries,
+        directory,
+        limits,
+        ..
+    } = options;
     let primary_validation = validate_job(media);
     if let Err(failure) = &primary_validation
         && (!failure.fallback || !client.fallback || !media.handoff.contains_key("_fallback"))
@@ -516,7 +745,13 @@ async fn download_media(
                     headers.insert(name, HeaderValue::from_str(value)?);
                 }
                 partial = if client.resume {
-                    Some(crate::resume::Partial::open(&path, &candidate.identity()).await?)
+                    Some(
+                        crate::resume::Partial::open(
+                            checkpoint_destination.unwrap_or(&path),
+                            &candidate.identity(),
+                        )
+                        .await?,
+                    )
                 } else {
                     None
                 };

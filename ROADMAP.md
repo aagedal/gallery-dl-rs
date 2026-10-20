@@ -940,8 +940,13 @@ account only after child selection. Anonymous first-photo output from the public
 2026-10-20. Live pagination/profile discovery remains unverified. Configured
 cookies, default directory layout and source `filename` template semantics remain
 unfinished.
-Remaining: ugoira conversion,
-bookmark resume-cursor diagnostics, additional metadata fields and
+Native ugoira postprocessing now supports ZIP and original-frame inputs,
+FFmpeg concat/image2, MKVToolNix remuxing, archive repacking, timing strategies,
+two-pass encoding, scoped lists/options and named definitions. Conversion outputs
+are atomic and failures preserve inputs without recording success. Other
+postprocessor types, extractor-subcategory selectors, converter diagnostic
+forwarding and full hook/event parity remain unfinished.
+Remaining: bookmark resume-cursor diagnostics, additional metadata fields and
 Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and

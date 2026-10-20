@@ -35,6 +35,7 @@ pub mod newgrounds;
 pub mod pinterest;
 pub mod pixiv;
 pub mod post_selection;
+pub mod postprocess;
 pub mod profile_asset;
 mod range;
 pub mod reddit;

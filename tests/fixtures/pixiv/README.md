@@ -316,3 +316,45 @@ zeros, digit prefixes followed by text/query/fragment/path suffixes, and
 unsupported empty/space-prefixed/nonnumeric targets. Forced linked artwork
 matching accepts a leading digit prefix without requiring the URL to end;
 the captured leading zeros are preserved in its App API request argument.
+
+`ugoira_postprocessor.json` records 82 source cases from gallery-dl 1.32.17:
+20 option-normalization, 24 framerate, 13 command, eight archive, and 17
+lifecycle cases. Unlike the extractor fixtures above, its source is
+`/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/postprocessor/ugoira.py`,
+SHA-256 `a0d46c0ff939ac16ea1c6001c351e9f34ee291855b65443ee8a8252ae7f6baa6`.
+The actual `DownloadJob.handle_url` implementation also runs; its source
+`job.py` SHA-256 is
+`b1d630adb73404342d236f7af807041186f0a38a436cff6979749d411a5d9a75`.
+
+The actual postprocessor methods, selected `PathFormat` mutation/finalize
+methods, and job lifecycle run with synthetic frames and fake Popen, path,
+archive, and download adapters. The fake process records real source command
+arguments and returns a selected exit code; successful commands create only
+synthetic output bytes. Real temporary files support concat/timecode output,
+image2 copying/timestamps, and archive creation. Temporary roots are normalized
+to `$WORK`/`$TEMP`, and the generator process fixes its timezone to UTC.
+No actual encoder, media download, HTTP, OAuth, or user archive is used.
+
+Cases include automatic mkvmerge detection, aliases/defaults, codec/odd-size
+filters, framerate rules, repeated last frames, image2 frame mutation and
+nanosecond mtimes, concat/mkvmerge/two-pass arguments, subprocess failure,
+existing-output skips, exact animation metadata JSON bytes, ZIP member order,
+compression, and timestamps. Lifecycle cases record prepare before archive
+checks, keep-files extension changes, default archive writes before original
+frame after-hook conversion, preserved inputs after conversion failure,
+archived/existing frame skips, partial frame groups, one-frame source behavior,
+and original JPEG filename normalization. Source quirks such as an uninitialized
+partial-frame group raising `AttributeError` are recorded as evidence without
+requiring native code to reproduce them. All paths, frame bytes, dates, IDs,
+and options are synthetic.
+
+Fifteen additional `category_filter_vectors` run the source
+`util.build_extractor_filter` with the download-job truthiness gate. They cover
+comma-separated strings, literal `all`/`*`, category wildcard/empty suffixes,
+empty whitelist precedence, and qualified source selectors. The native bounded
+parser explicitly rejects non-wildcard subcategory selectors because its media
+context does not identify every extractor subcategory. Three
+`config_scope_vectors` run actual `config.accumulate` and `config.interpolate`
+helpers to record category-first list accumulation, root common-option priority,
+and explicit null clearing. The fixture records SHA-256 values for both helper
+source files. All selector names and configurations are synthetic.

@@ -179,7 +179,7 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"filename":{"1":["secret-value"]}}}"#,
         r#"{"extractor":{"filename":"{secret-value}"}}"#,
         r#"{"extractor":{"filename":"secret-value/{filename}"}}"#,
-        r#"{"extractor":{"postprocessors":[{"name":"exec","command":"secret-value"}]}}"#,
+        r#"{"extractor":{"postprocessors":["ugoira", {"secret-value": true}, 1]}}"#,
         r#"{"extractor":{"archive":"postgresql://secret-value"}}"#,
         r#"{"extractor":{"archive":"$secret-value"}}"#,
         r#"{"extractor":{"archive":"~secret-value"}}"#,

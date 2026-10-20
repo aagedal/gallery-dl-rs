@@ -93,7 +93,20 @@ impl Archive {
     ) -> Result<ArchiveOutcome> {
         let effective_media = client.effective_media(media);
         let media = effective_media.as_ref();
-        let identity = media.archive_key();
+        if let Some(pp) = options.postprocessors
+            && media
+                .metadata
+                .as_ref()
+                .is_some_and(|m| m.ugoira_frame_index.is_some())
+            && !pp.selected(media).is_empty()
+        {
+            pp.frames.register(
+                media,
+                &download::destination_with_templates(root, media, template, options.directory)?,
+            )?;
+        }
+        let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
+        let identity = prepared.as_ref().unwrap_or(media).archive_key();
         // Serialize the same stable identity within this instance, without
         // suppressing a refreshed URL if a previous request failed. Weak entries
         // retain no per-item state once pending downloads have finished.
@@ -104,6 +117,33 @@ impl Archive {
         if let Some(identity) = &identity
             && self.contains(identity).await?
         {
+            // An earlier archived frame can become ready after a newly downloaded
+            // final frame when downloads run concurrently. Finish collection without
+            // making another HTTP request or changing the archived frame's identity.
+            if options
+                .postprocessors
+                .is_some_and(|pp| !pp.selected(media).is_empty())
+                && media
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|m| m.ugoira_frame_index.is_some())
+            {
+                let path =
+                    download::destination_with_templates(root, media, template, options.directory)?;
+                if crate::postprocess::regular_file(&path)?
+                    && let Some((path, _)) = download::complete_original(
+                        client,
+                        root,
+                        media,
+                        &Outcome::Skipped(path),
+                        options,
+                        template,
+                    )
+                    .await?
+                {
+                    return Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path)));
+                }
+            }
             return Ok(ArchiveOutcome::AlreadyArchived);
         }
         let outcome =

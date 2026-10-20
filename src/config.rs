@@ -3,7 +3,7 @@
 //! See <https://gdl-org.github.io/docs/configuration.html>. Extractor defaults
 //! are overridden by category settings, then by top-level global settings.
 //! Paths are literal, relative to the configuration directory; expansion,
-//! conditions, hooks, subcategories, and unsupported options are rejected.
+//! unsupported hooks, subcategories, and unsupported options are rejected.
 use crate::{
     Result,
     date::parse_date,
@@ -28,6 +28,7 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 /// Sparse settings: absent fields leave the caller's defaults unchanged.
 #[derive(Clone, Default, PartialEq)]
 pub struct Options {
+    pub postprocessors: Option<crate::postprocess::Configuration>,
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
     /// Ordered `(filter, template)` pairs from an object-valued `filename`;
@@ -204,6 +205,10 @@ impl Options {
     /// when a programmatic override supplies both representations.
     pub fn overlay(&self, overrides: &Self) -> Self {
         Self {
+            postprocessors: match (&self.postprocessors, &overrides.postprocessors) {
+                (Some(base), Some(specific)) => Some(base.overlaid(specific)),
+                (base, specific) => specific.clone().or_else(|| base.clone()),
+            },
             base_directory: overrides
                 .base_directory
                 .clone()
@@ -388,6 +393,9 @@ pub struct Config {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawRoot {
+    postprocessor: Field,
+    postprocessors: Field,
+    postprocessor_options: Field,
     base_directory: Field,
     filename: Field,
     file_range: Field,
@@ -464,6 +472,8 @@ struct RawRoot {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawExtractor {
+    postprocessors: Field,
+    postprocessor_options: Field,
     base_directory: Field,
     filename: Field,
     file_range: Field,
@@ -573,6 +583,10 @@ struct RawExtractor {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawOptions {
+    #[serde(skip)]
+    postprocessor_definitions: Field,
+    postprocessors: Field,
+    postprocessor_options: Field,
     base_directory: Field,
     filename: Field,
     file_range: Field,
@@ -758,6 +772,9 @@ impl Config {
         let root: RawRoot = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let global = RawOptions {
+            postprocessors: root.postprocessors,
+            postprocessor_options: root.postprocessor_options,
+            postprocessor_definitions: root.postprocessor,
             base_directory: root.base_directory,
             filename: root.filename,
             file_range: root.file_range,
@@ -841,6 +858,9 @@ impl Config {
         .resolve(directory)?;
         let extractor = root.extractor;
         let defaults = RawOptions {
+            postprocessors: extractor.postprocessors,
+            postprocessor_options: extractor.postprocessor_options,
+            postprocessor_definitions: Field::default(),
             base_directory: extractor.base_directory,
             filename: extractor.filename,
             file_range: extractor.file_range,
@@ -1123,7 +1143,15 @@ impl Config {
         if let Some(specific) = self.categories.get(category) {
             settings = settings.overlay(specific);
         }
-        Ok(settings.overlay(&self.global))
+        let mut resolved = settings.overlay(&self.global);
+        // Postprocessor lists accumulate most-specific first, unlike scalar overrides.
+        resolved.postprocessors = match (&self.global.postprocessors, &settings.postprocessors) {
+            (Some(global), Some(specific)) => {
+                Some(global.overlaid(specific).with_global_options(global))
+            }
+            (global, specific) => specific.clone().or_else(|| global.clone()),
+        };
+        Ok(resolved)
     }
 }
 
@@ -1707,6 +1735,12 @@ impl RawOptions {
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
+            postprocessors: crate::postprocess::Configuration::parse(
+                self.postprocessors.0,
+                self.postprocessor_options.0,
+                self.postprocessor_definitions.0,
+                directory,
+            )?,
             covers: self.covers.0.as_ref().map(value_truthy),
             full_series: self.full_series.0.as_ref().map(value_truthy),
             api_server,

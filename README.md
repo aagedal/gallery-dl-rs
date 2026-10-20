@@ -606,7 +606,27 @@ limited works can still request AJAX artwork details first. Only the exact strin
 `"original"` selects individual frames,
 while other values follow upstream truthiness for ZIP versus skip.
 Bookmark date selection preserves later newer artworks in source order.
-Animation conversion remains unimplemented. `post_id`/`id` is the illustration
+Native `postprocessors` supports `ugoira` conversion from ZIPs or individual
+original frames. For example, add `"postprocessors": [{"name": "ugoira",
+"extension": "webm", "mode": "concat"}]` to the Pixiv extractor configuration.
+Modes `auto`, `concat`, `image2`, `mkvmerge` and `archive` support upstream timing,
+repeat-last-frame, custom/uniform framerates, FFmpeg arguments and two-pass
+encoding, MKVToolNix arguments, metadata and mtime options. Install FFmpeg for
+video conversion and MKVToolNix for `mkvmerge`; `archive` needs neither.
+`keep-files`, `skip`, filters, category lists, named global `postprocessor`
+definitions and scoped `postprocessor-options` are supported. Scoped lists run
+from the most specific extractor configuration to the root list; root common
+options take precedence. Category lists accept arrays or comma-separated strings;
+selectors for specific extractor subcategories remain unsupported. Converter
+output is consumed with a size limit; forwarding diagnostics to the terminal
+remains unfinished.
+Converted files are published atomically, and interrupted ZIP downloads retain
+resume checkpoints when resuming is enabled. Failed conversion reports an error, preserves source
+files and does not add a success archive entry; this deliberately differs from
+upstream paths that can archive failed conversions. Original-frame conversion
+requires the complete frame set and a newly downloaded final frame; selecting
+only part of an animation retains those frames. Other postprocessor types remain
+unimplemented. `post_id`/`id` is the illustration
 ID, `media_id` `ID_pN`, `username` the account, caption the title plus HTML-stripped
 caption, with `create_date` timestamp and page-0 App API width/height (AJAX recovery
 retains dimensions on every page). Default filenames
@@ -1890,7 +1910,7 @@ Without `--native-config`, the first existing file among `$GALLERY_DL_RS_CONFIG`
 `~/.gallery-dl-rs.conf` is loaded (`%APPDATA%\gallery-dl-rs\config.json` and
 `%USERPROFILE%\gallery-dl-rs.conf` on Windows). `--native-config-ignore` skips
 discovery. Upstream gallery-dl configuration files are never read natively. Full gallery-dl
-configuration compatibility and postprocessors remain
+configuration compatibility and postprocessor types beyond `ugoira` remain
 unimplemented.
 
 ## Current behavior

@@ -483,6 +483,7 @@ async fn run(args: Args) -> Result<()> {
                     .map(|path| (&archives[path], path));
                 let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
+                    postprocessors: settings.postprocessors.as_ref(),
                     retries: settings.options.retries.unwrap(),
                     limits: settings.limits,
                     write_metadata: args.write_metadata,
@@ -1517,6 +1518,7 @@ struct Settings {
     child_range: Option<RangeSelection>,
     child_filter: Option<FilterExpression>,
     network: NetworkOptions,
+    postprocessors: Option<gallery_dl_rs::postprocess::Postprocessors>,
     download_client: OnceCell<Result<download::DownloadClient>>,
     limits: SizeLimits,
 }
@@ -1538,6 +1540,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         ..ConfigOptions::default()
     };
     let overrides = ConfigOptions {
+        postprocessors: None,
         base_directory: args
             .exact_directory
             .clone()
@@ -1749,6 +1752,15 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .filter(|clauses| !clauses.is_empty())
             .map(FilterExpression::parse_all)
             .transpose()?;
+        let postprocessors = options
+            .postprocessors
+            .as_ref()
+            .map(|config| {
+                config
+                    .specifications()
+                    .map(gallery_dl_rs::postprocess::Postprocessors::new)
+            })
+            .transpose()?;
         settings.insert(
             category,
             Settings {
@@ -1763,6 +1775,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 child_range,
                 child_filter,
                 network,
+                postprocessors,
                 download_client: OnceCell::new(),
                 limits,
             },
