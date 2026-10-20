@@ -563,7 +563,9 @@ upstream options (`duplicates`, `revisions`, `max-posts`, `endpoint`).
 
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
 lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
-and image pages. Pixeldrain API keys authenticate API requests and file downloads.
+and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
+and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
+change media selection. Pixeldrain API keys authenticate API requests and file downloads.
 Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
 `/c/` descriptions; imgbox per-image metadata (width/height); Postimg
 JS-paginated gallery pages beyond the server-rendered listing.

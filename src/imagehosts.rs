@@ -499,8 +499,8 @@ fn html(site: Site, bytes: &[u8]) -> Result<&str> {
 // ---------------------------------------------------------------------------
 // Catbox.
 
-/// `DD Month YYYY` (as on catbox album pages) to Unix seconds at midnight UTC.
-fn day_month_year(text: &str) -> Option<i64> {
+/// Catbox's `Month DD YYYY`, plus the previously accepted `DD Month YYYY` format.
+fn catbox_date(text: &str) -> Option<i64> {
     const MONTHS: [&str; 12] = [
         "january",
         "february",
@@ -516,20 +516,29 @@ fn day_month_year(text: &str) -> Option<i64> {
         "december",
     ];
     let mut parts = text.split_whitespace();
-    let day: u8 = parts.next()?.parse().ok()?;
-    let month = parts.next()?.to_ascii_lowercase();
+    let (first, second, year) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let (day, month) = if let Ok(day) = first.parse::<u8>() {
+        (day, second.to_ascii_lowercase())
+    } else {
+        (second.parse::<u8>().ok()?, first.to_ascii_lowercase())
+    };
     let month = MONTHS.iter().position(|m| *m == month)? as u8 + 1;
-    let year: i32 = parts.next()?.parse().ok()?;
+    let year: i32 = year.parse().ok()?;
     let date =
         time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
     Some(date.midnight().assume_utc().unix_timestamp())
 }
 
-/// Parse an album page: `<h1>` title, `Uploaded DATE` and file links.
+/// Parse an album page: `<h1>` title, `Created DATE` and file links.
 pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let page = html(Site::Catbox, bytes)?;
     let title = between(page, "<h1>", "<").and_then(clean_text);
-    let timestamp = between(page, "<p>Uploaded ", "</p>").and_then(day_month_year);
+    let timestamp = between(page, "<p>Created ", "<")
+        .or_else(|| between(page, "<p>Uploaded ", "<"))
+        .and_then(catbox_date);
     let items = between_all(page, "href=\"https://files.catbox.moe/", "\"")
         .filter_map(|name| {
             if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.') {
@@ -1172,6 +1181,44 @@ mod tests {
         assert_eq!(m.media_id, "abc123");
         assert_eq!(m.timestamp, Some(1677974400));
         assert!(parse_catbox_album(b"<h1>Empty</h1>", "alb1").is_err());
+    }
+
+    #[test]
+    fn catbox_created_dates_match_upstream_and_preserve_media_identity() {
+        let legacy = parse_catbox_album(CATBOX.as_bytes(), "alb1").unwrap();
+        for date in ["March 05 2023", "march 5 2023", "05 March 2023"] {
+            let page = CATBOX.replace("Uploaded 05 March 2023", &format!("Created {date}"));
+            let media = parse_catbox_album(page.as_bytes(), "alb1").unwrap();
+            for (actual, expected) in media.iter().zip(&legacy) {
+                assert_eq!(meta(actual).timestamp, Some(1677974400));
+                assert_eq!(actual.filename, expected.filename);
+                assert_eq!(actual.identity(), expected.identity());
+                assert_eq!(actual.archive_key(), expected.archive_key());
+            }
+        }
+        assert_eq!(catbox_date("February 29 2024"), Some(1709164800));
+    }
+
+    #[test]
+    fn invalid_catbox_dates_are_optional_and_do_not_change_media_selection() {
+        let expected = parse_catbox_album(CATBOX.as_bytes(), "alb1").unwrap();
+        for date in [
+            "",
+            "March 0 2023",
+            "February 29 2023",
+            "March 32 2023",
+            "May 2 2023 extra",
+            "private-value",
+        ] {
+            let page = CATBOX.replace("Uploaded 05 March 2023", &format!("Created {date}"));
+            let media = parse_catbox_album(page.as_bytes(), "alb1").unwrap();
+            assert_eq!(media.len(), expected.len());
+            for (actual, expected) in media.iter().zip(&expected) {
+                assert_eq!(meta(actual).timestamp, None);
+                assert_eq!(actual.url, expected.url);
+                assert_eq!(actual.archive_key(), expected.archive_key());
+            }
+        }
     }
 
     const IMGBOX_GALLERY: &str = r#"<h1>Holiday &quot;2024&quot;</h1>

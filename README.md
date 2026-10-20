@@ -355,7 +355,7 @@ zero-based `#item=N` selection with original list numbering (out-of-range
 selection produces no files). Set `extractor.pixeldrain.api-key` to use HTTP
 Basic authentication for API requests and file downloads; credentials stay in
 private request headers and are omitted from inspection JSON. `catbox` albums
-(`/c/ID`, file links and `<h1>` title from the page); `imgbox` galleries
+(`/c/ID`, file links, `<h1>` title and creation date from the page); `imgbox` galleries
 (`/g/ID`, thumbnails mapped to `imagesN.imgbox.com/.../ID_o.EXT`) and image pages
 (`/ID`); `postimg` (postimg.cc/postimages.org) image pages (download link, else
 `og:image`) and galleries (thumbnail links, each image page fetched; capped at
