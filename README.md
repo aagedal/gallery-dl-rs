@@ -576,8 +576,14 @@ bookmarks; all other values select public bookmarks. Without `id`,
 the legacy bookmark URL uses the authenticated user's ID from OAuth.
 A `tag` query overrides the path tag, following upstream's URL decoding.
 Pagination preserves the selected user, visibility, and tag.
-Bookmarked files retain the original artist metadata and
-(illustration, page) archive identity. `/users/ID/avatar` and `/background`
+Named illustration bookmark jobs load `user/detail` before the first listing;
+ownerless jobs capture the initial OAuth owner without an extra profile request.
+`user_bookmark.id`, `.name` and `.account` remain fixed across token refreshes,
+separately from the original artist metadata. Archives include bookmark owner,
+illustration, page and extension, excluding tag, visibility, cursor and display
+fields. Existing ordinary artwork archive entries no longer suppress these
+owner-scoped bookmark entries. Additional upstream owner fields remain unfinished.
+`/users/ID/avatar` and `/background`
 read `user/detail`, remove upstream's thumbnail/crop suffixes and emit original
 profile images. JPEG backgrounds without query suffixes carry upstream's PNG/GIF
 fallbacks. Dated profile filenames use UTC dates; archives use kind, owner and
@@ -619,6 +625,18 @@ requests. Pagination preserves owner and visibility, detects cycles, and stops
 at 200 pages. Stopping a selected child leaves later followed users available;
 dropping the input stops later users and pages. Authenticated live following
 extraction remains unverified.
+
+Illustration and novel bookmark jobs support a category-scoped `cursor` starting
+bookmark ID, as a string or integer of at most 1,024 bytes. `null` clears an
+inherited cursor and omits the query parameter; `""` and zero are sent literally.
+Only the first request uses the configured cursor. Later API cursors can change
+or disappear while owner, tag and visibility remain fixed. URL query cursors
+are ignored. The separate `pixiv-novel` client retains its own cursor when
+dispatched from a Pixiv profile; novel bookmark archives remain ordinary novel
+archives and do not fetch bookmark-owner metadata. Compatibility mode forwards
+the selected root category's cursor with its JSON type preserved. Automatic
+resume-cursor diagnostics and separate compatibility child overrides remain
+unfinished.
 
 Native Pixiv illustrations and novels expose `tags` in inspection, sidecars,
 post/file predicates and templates. Configure `tags` independently in `pixiv`
@@ -731,7 +749,7 @@ flat aliases such as `user`, `text` and `created_at`. On files, `id` is the
 photo ID; `post_id` remains the containing post. A failed photo closes its post
 and stops the wall. Date selection scans later entries without assuming order.
 Pagination stays on the selected wall, detects cycles and stops at 200 pages.
-Sketch ignores Pixiv-specific `max-posts`, `tags` and `ugoira` settings, matching
+Sketch ignores Pixiv-specific `max-posts`, `tags`, `cursor` and `ugoira` settings, matching
 upstream's separate extractor. Global post/file filters and ranges still apply.
 An included profile Sketch view resolves the Pixiv account only after its child
 job is accepted. Anonymous first-photo extraction was verified against upstream
@@ -753,7 +771,7 @@ save exact UTF-8 as `ID_p0.txt`, preserving newlines and embedded-image markers.
 and belong under `extractor.pixiv-novel`. Text and covers share the novel ID
 but have separate archive entries, isolated from illustration IDs. Profile
 `include` novel children use the novel category's credentials, network and output
-settings. Embedded-image expansion, bookmark cursors and upstream's extended
+settings. Embedded-image expansion and upstream's extended
 novel metadata options remain unfinished. Text/cover failures close the current
 post and allow later novels to continue; native mode currently reports these as
 errors where upstream warns. Authenticated live novel extraction is unverified;
@@ -1707,7 +1725,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `tags`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
-`cards-blacklist`, `size`, `fallback`, `max-posts`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
+`cards-blacklist`, `size`, `fallback`, `max-posts`, `cursor`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`,
 `order-posts`, `favorites` (Kemono/Coomer options), category-scoped Bluesky
 `api-server` and likes `endpoint`, `retries` (integer 0–10), and `timeout`

@@ -56,6 +56,9 @@ pub use tags::{TagMode, Tags};
 #[path = "pixiv_sketch.rs"]
 pub mod sketch;
 pub use sketch::SketchMetadata;
+#[path = "pixiv_cursor.rs"]
+pub mod cursor;
+pub use cursor::BookmarkCursor;
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -755,6 +758,7 @@ pub struct Pixiv {
     sketch_root: Url,
     max_posts: Option<usize>,
     tags: TagMode,
+    cursor: Option<BookmarkCursor>,
     refresh_token: Option<String>,
     access_token: tokio::sync::Mutex<Option<String>>,
     authenticated_user: tokio::sync::Mutex<Option<String>>,
@@ -812,6 +816,8 @@ impl PostBudget {
 }
 
 struct ListingState {
+    bookmarks: bool,
+    bookmark_owner: Option<Arc<FollowedUserMetadata>>,
     budget: PostBudget,
     kinds: VecDeque<Feed>,
     active: Option<Feed>,
@@ -833,6 +839,7 @@ impl Pixiv {
             pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
             max_posts: None,
             tags: TagMode::default(),
+            cursor: None,
             refresh_token: None,
             access_token: tokio::sync::Mutex::new(None),
             authenticated_user: tokio::sync::Mutex::new(None),
@@ -935,6 +942,11 @@ impl Pixiv {
     /// Override the public Sketch origin for bounded local fixtures.
     pub fn with_sketch_root(mut self, root: Url) -> Self {
         self.sketch_root = root;
+        self
+    }
+
+    pub fn with_cursor(mut self, cursor: Option<BookmarkCursor>) -> Self {
+        self.cursor = cursor;
         self
     }
 
@@ -1086,6 +1098,9 @@ impl Pixiv {
                 if let Some(tag) = tag {
                     url.query_pairs_mut().append_pair("tag", tag);
                 }
+                if let Some(cursor) = self.cursor.as_ref().and_then(BookmarkCursor::query_value) {
+                    url.query_pairs_mut().append_pair("max_bookmark_id", cursor);
+                }
             }
         }
         url
@@ -1096,10 +1111,13 @@ impl Pixiv {
         let url = Url::parse(raw).map_err(|_| error("Pixiv returned an invalid next page"))?;
         let expected = self.first_page(user, feed);
         let query: Vec<_> = url.query_pairs().collect();
-        let valid_scope = expected.query_pairs().all(|(key, value)| {
-            let mut values = query.iter().filter(|(name, _)| *name == key);
-            values.next().is_some_and(|(_, actual)| *actual == value) && values.next().is_none()
-        });
+        let valid_scope = expected
+            .query_pairs()
+            .filter(|(key, _)| key != "max_bookmark_id")
+            .all(|(key, value)| {
+                let mut values = query.iter().filter(|(name, _)| *name == key);
+                values.next().is_some_and(|(_, actual)| *actual == value) && values.next().is_none()
+            });
         if url.origin() != self.api_root.origin()
             || url.path() != expected.path()
             || !url.username().is_empty()
@@ -1114,7 +1132,44 @@ impl Pixiv {
         Ok(url)
     }
 
+    async fn bookmark_owner(&self, user: Option<&str>) -> Result<Arc<FollowedUserMetadata>> {
+        if let Some(id) = user {
+            let mut endpoint = self
+                .api_root
+                .join("v1/user/detail")
+                .expect("static endpoint");
+            endpoint.query_pairs_mut().append_pair("user_id", id);
+            let body = json(&self.get(&endpoint).await?)?;
+            let owner = body
+                .get("user")
+                .and_then(FollowedUserMetadata::parse_compat)
+                .filter(|owner| owner.id == id)
+                .ok_or_else(|| error("Pixiv returned an invalid bookmark owner"))?;
+            return Ok(Arc::new(owner));
+        }
+        tokio::time::timeout(self.timeout, async {
+            // Freeze the public profile associated with this initial token while
+            // refreshes are excluded; subsequent API refreshes cannot replace it.
+            let mut cached = self.access_token.lock().await;
+            if cached.is_none() {
+                *cached = Some(self.authenticate().await?);
+            }
+            self.authenticated_profile
+                .lock()
+                .await
+                .clone()
+                .ok_or_else(|| error("Pixiv OAuth response contains no current bookmark user ID"))
+        })
+        .await
+        .map_err(|_| error("native Pixiv extraction timed out"))?
+    }
+
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
+        if state.bookmarks && state.bookmark_owner.is_none() {
+            let owner = self.bookmark_owner(state.user.as_deref()).await?;
+            state.user = Some(owner.id.clone());
+            state.bookmark_owner = Some(owner);
+        }
         if state.user.is_none() {
             tokio::time::timeout(self.timeout, self.access_token(None))
                 .await
@@ -1299,6 +1354,10 @@ impl Pixiv {
             Target::Bookmarks { id, tag, private } => (id, vec![Feed::Bookmarks { tag, private }]),
         };
         let state = ListingState {
+            bookmarks: kinds
+                .iter()
+                .any(|feed| matches!(feed, Feed::Bookmarks { .. })),
+            bookmark_owner: None,
             budget: PostBudget::new(self.max_posts),
             kinds: kinds.into(),
             active: None,
@@ -1331,10 +1390,47 @@ impl Pixiv {
                     {
                         continue;
                     }
-                    match self.work(&work, true).await {
-                        Ok(media) => state.pending.extend(self.finish(media)),
-                        Err(e) => return Some((Err(e), Some(state))),
+                    let (mut media, failure) = match self.work(&work, true).await {
+                        Ok(media) => (media, None),
+                        Err(error) => (Vec::new(), Some(error)),
+                    };
+                    if let Some(owner) = &state.bookmark_owner {
+                        if media.is_empty() {
+                            let Some(id) = id_of(&work) else {
+                                return Some((
+                                    Err(error(
+                                        "Pixiv bookmark contains an invalid illustration ID",
+                                    )),
+                                    Some(state),
+                                ));
+                            };
+                            let mut metadata = self.illustration_metadata(&work, &id);
+                            metadata.user_bookmark = Some(owner.clone());
+                            metadata.bookmark_archive = true;
+                            state.pending.extend([
+                                ExtractionEvent::Post(Box::new(crate::event::Post {
+                                    category: "pixiv".into(),
+                                    metadata: Some(metadata),
+                                    count: Some(0),
+                                })),
+                                ExtractionEvent::EndPost,
+                            ]);
+                            if let Some(error) = failure {
+                                return Some((Err(error), Some(state)));
+                            }
+                            continue;
+                        }
+                        for file in &mut media {
+                            let metadata =
+                                file.metadata.as_mut().expect("Pixiv illustration metadata");
+                            metadata.user_bookmark = Some(owner.clone());
+                            metadata.bookmark_archive = true;
+                        }
                     }
+                    if let Some(error) = failure {
+                        return Some((Err(error), Some(state)));
+                    }
+                    state.pending.extend(self.finish(media));
                     continue;
                 }
                 if state.next.is_none() && state.kinds.is_empty() {
@@ -2095,6 +2191,10 @@ mod tests {
         )
     }
 
+    pub(super) fn bookmark_owner_reply(id: u64) -> Vec<u8> {
+        response("200 OK",json!({"user":{"id":id,"name":"Bookmark Owner","account":"bookmark-owner","email":"PRIVATE_EMAIL","access_token":"PRIVATE_PROFILE_TOKEN"}}).to_string().as_bytes())
+    }
+
     #[tokio::test]
     async fn fetches_detail_with_oauth_and_refreshes_once() {
         let detail = json!({"illust": illust(42, 2)}).to_string();
@@ -2403,6 +2503,7 @@ mod tests {
             let next = root.join("v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB&max_bookmark_id=100").unwrap();
             vec![
                 token("bookmark-access"),
+                bookmark_owner_reply(9),
                 page(vec![illust(41, 2)], Some(next)),
                 page(vec![animation(42)], None),
                 response("200 OK", animation_metadata().to_string().as_bytes()),
@@ -2426,8 +2527,8 @@ mod tests {
             ["41_p0.png", "41_p1.png", "42_p0.zip"]
         );
         let ordinary = parse_illust(&illust(41, 2)).unwrap();
-        assert_eq!(items[0].archive_key(), ordinary[0].archive_key());
-        assert_eq!(items[1].archive_key(), ordinary[1].archive_key());
+        assert_ne!(items[0].archive_key(), ordinary[0].archive_key());
+        assert_ne!(items[1].archive_key(), ordinary[1].archive_key());
         assert_eq!(
             items[0].metadata.as_ref().unwrap().username.as_deref(),
             Some("alice")
@@ -2444,6 +2545,16 @@ mod tests {
             3
         );
         for item in &items {
+            let owner = item
+                .metadata
+                .as_ref()
+                .unwrap()
+                .user_bookmark
+                .as_ref()
+                .unwrap();
+            assert_eq!(owner.id, "9");
+            assert_eq!(owner.account.as_deref(), Some("bookmark-owner"));
+            assert!(!serde_json::to_string(item).unwrap().contains("PRIVATE"));
             assert_eq!(
                 item.headers,
                 BTreeMap::from([("Referer".into(), REFERER.into())])
@@ -2452,12 +2563,12 @@ mod tests {
         }
         let requests = server.join().unwrap();
         assert!(
-            requests[1].starts_with(
+            requests[2].starts_with(
                 "GET /v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB "
             )
         );
-        assert!(requests[2].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB&max_bookmark_id=100 "));
-        assert!(requests[3].starts_with("GET /v1/ugoira/metadata?illust_id=42 "));
+        assert!(requests[3].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB&max_bookmark_id=100 "));
+        assert!(requests[4].starts_with("GET /v1/ugoira/metadata?illust_id=42 "));
         for request in &requests[1..] {
             assert!(
                 request
@@ -2519,11 +2630,15 @@ mod tests {
             let mut second = illust(42, 1);
             second["user"]["account"] = json!("second-artist");
             let (root, server) = serve_with(|root| {
-                vec![
+                let mut replies=vec![
                 response("200 OK", json!({"response":{"access_token":"private-access","user":{"id":17}}}).to_string().as_bytes()),
                 response("200 OK", json!({"illusts":[illust(41,1)], "next_url":root.join(&format!("v1/user/bookmarks/illust?user_id={user}&restrict=private&tag=cat&max_bookmark_id=100")).unwrap()}).to_string().as_bytes()),
                 response("200 OK", json!({"illusts":[second.clone()], "next_url":null}).to_string().as_bytes()),
-            ]
+            ];
+                if user == "9" {
+                    replies.insert(1, bookmark_owner_reply(9));
+                }
+                replies
             });
             let files = pixiv(root)
                 .stream(&Url::parse(raw).unwrap())
@@ -2535,7 +2650,18 @@ mod tests {
             assert_eq!(files.len(), 2);
             for (media, original) in files.iter().zip([illust(41, 1), second]) {
                 let original = parse_illust(&original).unwrap().remove(0);
-                assert_eq!(media.archive_key(), original.archive_key());
+                assert_ne!(media.archive_key(), original.archive_key());
+                assert_eq!(
+                    media
+                        .metadata
+                        .as_ref()
+                        .unwrap()
+                        .user_bookmark
+                        .as_ref()
+                        .unwrap()
+                        .id,
+                    user
+                );
                 assert_eq!(
                     media.metadata.as_ref().unwrap().username,
                     original.metadata.as_ref().unwrap().username
@@ -2547,13 +2673,14 @@ mod tests {
                 assert!(!format!("{media:?}").contains("private-access"));
             }
             let requests = server.join().unwrap();
-            assert_eq!(requests.len(), 3);
-            assert!(requests[1].starts_with(&format!(
+            let first = if user == "9" { 2 } else { 1 };
+            assert_eq!(requests.len(), first + 2);
+            assert!(requests[first].starts_with(&format!(
                 "GET /v1/user/bookmarks/illust?user_id={user}&restrict=private&tag=cat "
             )));
-            assert!(requests[2].starts_with(&format!("GET /v1/user/bookmarks/illust?user_id={user}&restrict=private&tag=cat&max_bookmark_id=100 ")));
+            assert!(requests[first+1].starts_with(&format!("GET /v1/user/bookmarks/illust?user_id={user}&restrict=private&tag=cat&max_bookmark_id=100 ")));
             assert!(
-                requests[1]
+                requests[first]
                     .to_ascii_lowercase()
                     .contains("authorization: bearer private-access")
             );
@@ -2567,21 +2694,21 @@ mod tests {
             "https://www.pixiv.net/bookmark.php?id=9&rest=hide",
         ] {
             let (root, server) = serve_with(|root| {
-                vec![token("t"), response("200 OK",
+                vec![token("t"), bookmark_owner_reply(9), response("200 OK",
                 json!({"illusts":[illust(41,1),animation(42)],"next_url":root.join("v1/user/bookmarks/illust?user_id=9&restrict=private&max_bookmark_id=100").unwrap()}).to_string().as_bytes())]
             });
             let native = pixiv(root);
             let mut files = native.stream(&Url::parse(raw).unwrap());
             assert_eq!(files.next().await.unwrap().unwrap().filename, "41_p0.jpg");
             drop(files);
-            assert_eq!(server.join().unwrap().len(), 2);
+            assert_eq!(server.join().unwrap().len(), 3);
         }
     }
 
     #[tokio::test]
     async fn private_bookmarks_refuse_public_next_page_before_sending_authenticated_request() {
         let (root, server) = serve_with(|root| {
-            vec![token("t"), response("200 OK",
+            vec![token("t"), bookmark_owner_reply(9), response("200 OK",
             json!({"illusts":[illust(41,1)], "next_url":root.join("v1/user/bookmarks/illust?user_id=9&restrict=public").unwrap()}).to_string().as_bytes())]
         });
         let files = pixiv(root)
@@ -2596,7 +2723,7 @@ mod tests {
             files[1].as_ref().unwrap_err().to_string(),
             "Pixiv returned an unexpected next page"
         );
-        assert_eq!(server.join().unwrap().len(), 2);
+        assert_eq!(server.join().unwrap().len(), 3);
     }
 
     #[tokio::test]
@@ -2611,7 +2738,7 @@ mod tests {
             assert_eq!(result.len(), 1);
             assert_eq!(
                 result[0].as_ref().unwrap_err().to_string(),
-                "Pixiv OAuth response contains no current user ID"
+                "Pixiv OAuth response contains no current bookmark user ID"
             );
             assert_eq!(server.join().unwrap().len(), 1);
         }
@@ -2625,6 +2752,7 @@ mod tests {
                 .unwrap();
             vec![
                 token("t"),
+                bookmark_owner_reply(9),
                 response(
                     "200 OK",
                     json!({"illusts": [illust(42, 1), animation(43)],
@@ -2639,7 +2767,7 @@ mod tests {
             native.stream(&Url::parse("https://www.pixiv.net/bookmark.php?id=9").unwrap());
         assert_eq!(items.next().await.unwrap().unwrap().filename, "42_p0.jpg");
         drop(items);
-        assert_eq!(server.join().unwrap().len(), 2);
+        assert_eq!(server.join().unwrap().len(), 3);
     }
 
     #[tokio::test]
@@ -2650,6 +2778,7 @@ mod tests {
                 .unwrap();
             vec![
                 token("t"),
+                bookmark_owner_reply(9),
                 response(
                     "200 OK",
                     json!({"illusts": [illust(42, 1)],
@@ -2669,7 +2798,7 @@ mod tests {
             result[1].as_ref().unwrap_err().to_string(),
             "Pixiv returned an unexpected next page"
         );
-        assert_eq!(server.join().unwrap().len(), 2);
+        assert_eq!(server.join().unwrap().len(), 3);
     }
 
     #[tokio::test]
@@ -2793,6 +2922,9 @@ mod tests {
                         .as_bytes(),
                 ),
             ];
+            if view == "bookmarks/artworks" {
+                responses.insert(1, bookmark_owner_reply(9));
+            }
             if view == "artworks" {
                 responses.push(response("200 OK", br#"{"illusts":[],"next_url":null}"#));
             }
@@ -2811,7 +2943,11 @@ mod tests {
             assert_eq!(items[0].as_ref().unwrap().filename, "42_p0.jpg");
             assert_eq!(
                 server.join().unwrap().len(),
-                if view == "artworks" { 3 } else { 2 }
+                if matches!(view, "artworks" | "bookmarks/artworks") {
+                    3
+                } else {
+                    2
+                }
             );
         }
     }
@@ -2954,6 +3090,7 @@ mod tests {
             profile.clone(),
             page(41),
             response("200 OK", br#"{"illusts":[],"next_url":null}"#),
+            profile.clone(),
             page(42),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
@@ -2995,12 +3132,12 @@ mod tests {
         assert_eq!(results.len(), 4);
         assert!(results.iter().all(|value| !value.contains("secret")));
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 10);
+        assert_eq!(requests.len(), 11);
         assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
         assert!(requests[2].starts_with("GET /v1/user/detail?user_id=9 "));
         assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
         assert!(
-            requests[5].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public ")
+            requests[6].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public ")
         );
     }
 
@@ -3094,7 +3231,13 @@ mod tests {
                     response("200 OK", json!({"illusts": [illust(id, 2), illust(id + 1, 1)],
                     "next_url": root.join(&format!("v1/user/bookmarks/illust?user_id=9&restrict=public&max_bookmark_id={cursor}")).unwrap()}).to_string().as_bytes())
                 };
-                vec![token("t"), page(41, 100), page(43, 200)]
+                vec![
+                    token("t"),
+                    bookmark_owner_reply(9),
+                    page(41, 100),
+                    bookmark_owner_reply(9),
+                    page(43, 200),
+                ]
             });
             let native = pixiv(root).with_include(Some(included(&["favorite", "favorite"])));
             let selection = if post_range {
@@ -3124,7 +3267,7 @@ mod tests {
                 items.last().unwrap().metadata.as_ref().unwrap().post_id,
                 "43"
             );
-            assert_eq!(server.join().unwrap().len(), 3);
+            assert_eq!(server.join().unwrap().len(), 5);
         }
     }
 
@@ -3309,6 +3452,404 @@ mod tests {
             .await;
             assert!(files.is_empty());
             assert_eq!(server.join().unwrap().len(), 2);
+        }
+    }
+    #[tokio::test]
+    async fn bookmark_owner_snapshot_survives_refresh_with_empty_failed_posts_and_distinct_archives()
+     {
+        let login = |token: &str, id: u64| {
+            response("200 OK",json!({"response":{"access_token":token,"user":{"id":id,"name":"Owner","account":"owner-account","email":"PRIVATE_EMAIL","access_token":"PRIVATE_TOKEN"}}}).to_string().as_bytes())
+        };
+        let (root, server) = serve_with(|root| {
+            vec![
+            login("first",17),
+            response("200 OK",json!({"illusts":[illust(41,2)],"next_url":root.join("v1/user/bookmarks/illust?user_id=17&restrict=private&max_bookmark_id=100").unwrap()}).to_string().as_bytes()),
+            response("400 Bad Request",br#"{"error":{"message":"invalid_grant"}}"#),
+            login("second",99),
+            response("200 OK",json!({"illusts":[animation(42),illust(43,1)],"next_url":null}).to_string().as_bytes()),
+            response("404 Not Found",b""),
+        ]
+        });
+        let native = pixiv(root);
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/bookmark.php?rest=hide").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        let mut posts = Vec::new();
+        let mut ends = 0;
+        let mut files = Vec::new();
+        let mut errors = 0;
+        for event in events {
+            match event {
+                Ok(ExtractionEvent::Post(post)) => {
+                    let metadata = post.metadata.unwrap();
+                    assert_eq!(metadata.user_bookmark.unwrap().id, "17");
+                    assert!(metadata.bookmark_archive);
+                    posts.push((metadata.post_id, post.count));
+                }
+                Ok(ExtractionEvent::EndPost) => ends += 1,
+                Ok(ExtractionEvent::Media(file)) => {
+                    let metadata = file.metadata.as_ref().unwrap();
+                    assert_eq!(metadata.user_bookmark.as_ref().unwrap().id, "17");
+                    assert_eq!(metadata.username.as_deref(), Some("alice"));
+                    assert!(!serde_json::to_string(&file).unwrap().contains("PRIVATE"));
+                    files.push(file);
+                }
+                Err(_) => errors += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(
+            posts,
+            [
+                ("41".into(), Some(2)),
+                ("42".into(), Some(0)),
+                ("43".into(), Some(1))
+            ]
+        );
+        assert_eq!(ends, 3);
+        assert_eq!(errors, 1);
+        assert_eq!(files.len(), 3);
+        assert_eq!(
+            native
+                .authenticated_profile
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .id,
+            "99"
+        );
+        let mut modified = files[0].clone();
+        let metadata = modified.metadata.as_mut().unwrap();
+        metadata.user_bookmark = Some(Arc::new(FollowedUserMetadata {
+            id: "17".into(),
+            name: Some("renamed".into()),
+            account: None,
+        }));
+        assert_eq!(modified.archive_key(), files[0].archive_key());
+        modified.metadata.as_mut().unwrap().user_bookmark = Some(Arc::new(FollowedUserMetadata {
+            id: "99".into(),
+            name: None,
+            account: None,
+        }));
+        assert_ne!(modified.archive_key(), files[0].archive_key());
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 6);
+        assert!(
+            requests
+                .iter()
+                .all(|request| !request.contains("/v1/user/detail"))
+        );
+        assert!(requests[4].contains("user_id=17&restrict=private"));
+    }
+
+    #[tokio::test]
+    async fn invalid_named_bookmark_owners_abort_before_feed_and_rejected_favorite_never_authenticates()
+     {
+        for reply in [
+            bookmark_owner_reply(99),
+            response("404 Not Found", b""),
+            response("200 OK", br#"{"user":{"id":"PRIVATE_BAD_ID"}}"#),
+        ] {
+            let (root, server) = serve(vec![token("t"), reply]);
+            let events = pixiv(root)
+                .events(&Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(events.len(), 1);
+            assert!(events[0].is_err());
+            assert!(
+                !events[0]
+                    .as_ref()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("PRIVATE")
+            );
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
+        }
+        let (root, server) = serve(vec![]);
+        let native = pixiv(root)
+            .with_refresh_token(None)
+            .with_include(Some(included(&["favorite"])));
+        let files = crate::job_selection::JobSelection {
+            child_filter: Some(crate::filter::FilterExpression::parse("False").unwrap()),
+            ..Default::default()
+        }
+        .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+        .collect::<Vec<_>>()
+        .await;
+        assert!(files.is_empty());
+        assert!(server.join().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_bookmark_animation_posts_keep_positions_before_ranges_and_max_posts() {
+        use crate::{
+            job_selection::JobSelection, post_selection::PostSelection, selection::RangeSelection,
+        };
+        for range in ["1", "2"] {
+            let (root, server) = serve(vec![
+                token("t"),
+                bookmark_owner_reply(9),
+                response(
+                    "200 OK",
+                    json!({"illusts":[animation(42),illust(43,2),animation(44)],"next_url":null})
+                        .to_string()
+                        .as_bytes(),
+                ),
+            ]);
+            let native = pixiv(root).with_ugoira(false);
+            let files =
+                JobSelection {
+                    post_selection: Some(PostSelection::new(
+                        Some(RangeSelection::parse(range).unwrap()),
+                        None,
+                    )),
+                    ..Default::default()
+                }
+                .apply(native.events(
+                    &Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks").unwrap(),
+                ))
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(files.len(), if range == "1" { 0 } else { 2 });
+            for file in files {
+                assert_eq!(file.metadata.unwrap().user_bookmark.unwrap().id, "9");
+            }
+            assert_eq!(server.join().unwrap().len(), 3);
+        }
+        let mut missing = illust(40, 1);
+        missing["user"]["id"] = json!(0);
+        let (root, server) = serve(vec![
+            token("t"),
+            bookmark_owner_reply(9),
+            response(
+                "200 OK",
+                json!({"illusts":[missing,animation(42),illust(43,1)],"next_url":null})
+                    .to_string()
+                    .as_bytes(),
+            ),
+        ]);
+        let events = pixiv(root)
+            .with_max_posts(Some(2))
+            .with_ugoira(false)
+            .events(&Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("expected empty bookmark post")
+        };
+        assert_eq!(post.count, Some(0));
+        assert_eq!(post.metadata.as_ref().unwrap().post_id, "42");
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn bookmark_config_cursor_starts_feed_once_and_does_not_pin_changing_or_missing_next_cursor()
+     {
+        for value in [
+            Value::Null,
+            json!(""),
+            json!(0),
+            json!("100"),
+            json!("猫 cursor"),
+        ] {
+            let cursor = BookmarkCursor::parse(&value).unwrap();
+            let (root, server) = serve_with(|root| {
+                vec![token("t"),bookmark_owner_reply(9),response("200 OK",json!({"illusts":[illust(41,1)],"next_url":root.join("v1/user/bookmarks/illust?user_id=9&restrict=private&max_bookmark_id=77").unwrap()}).to_string().as_bytes()),response("200 OK",json!({"illusts":[illust(42,1)],"next_url":root.join("v1/user/bookmarks/illust?user_id=9&restrict=private&offset=60").unwrap()}).to_string().as_bytes()),response("200 OK",json!({"illusts":[illust(43,1)],"next_url":null}).to_string().as_bytes())]
+            });
+            let native = pixiv(root).with_cursor(Some(cursor.clone()));
+            let files=native.stream(&Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide&cursor=URL_IGNORED&max_bookmark_id=URL_IGNORED").unwrap()).collect::<Vec<_>>().await.into_iter().collect::<Result<Vec<_>>>().unwrap();
+            assert_eq!(files.len(), 3);
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 5);
+            let query = |request: &str| {
+                Url::parse(&format!(
+                    "http://localhost{}",
+                    request.split_whitespace().nth(1).unwrap()
+                ))
+                .unwrap()
+            };
+            let first = query(&requests[2]);
+            assert_eq!(
+                first
+                    .query_pairs()
+                    .find(|(key, _)| key == "max_bookmark_id")
+                    .map(|(_, value)| value.into_owned()),
+                cursor.query_value().map(str::to_owned)
+            );
+            assert!(
+                query(&requests[3])
+                    .query_pairs()
+                    .any(|(key, value)| key == "max_bookmark_id" && value == "77")
+            );
+            assert!(
+                !query(&requests[4])
+                    .query_pairs()
+                    .any(|(key, _)| key == "max_bookmark_id")
+            );
+            assert!(
+                requests
+                    .iter()
+                    .all(|request| !request.contains("URL_IGNORED"))
+            );
+        }
+        let native = pixiv(Url::parse("http://localhost/").unwrap())
+            .with_cursor(Some(BookmarkCursor::parse(&json!("100")).unwrap()));
+        assert!(
+            !native
+                .first_page("9", &Feed::Works(Kind::Illust))
+                .query_pairs()
+                .any(|(key, _)| key == "max_bookmark_id")
+        );
+    }
+    #[tokio::test]
+    async fn recorded_upstream_bookmark_owner_oracle_matches_lookup_paging_context_and_empty_posts()
+    {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/pixiv/bookmark_owner.json"))
+                .unwrap();
+        for case in fixture["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| !case["name"].as_str().unwrap().starts_with("novel"))
+        {
+            let calls = case["calls"].as_array().unwrap();
+            let named = calls[0]["method"] == "user_detail";
+            let owner = FollowedUserMetadata::parse_compat(&case["owner"]).unwrap();
+            let (root, server) = serve_with(|root| {
+                let mut replies = vec![response(
+                    "200 OK",
+                    json!({"response":{"access_token":"oracle-access","user":case["owner"]}})
+                        .to_string()
+                        .as_bytes(),
+                )];
+                if named {
+                    replies.push(response(
+                        "200 OK",
+                        json!({"user":case["owner"]}).to_string().as_bytes(),
+                    ));
+                }
+                for raw in case["responses"].as_array().unwrap() {
+                    let mut body = raw.clone();
+                    if let Some(next) = body["next_url"].as_str() {
+                        let next = Url::parse(next).unwrap();
+                        body["next_url"] = json!(
+                            root.join(&format!("{}?{}", next.path(), next.query().unwrap()))
+                                .unwrap()
+                        );
+                    }
+                    replies.push(response("200 OK", body.to_string().as_bytes()));
+                }
+                replies
+            });
+            let native = pixiv(root)
+                .with_ugoira(false)
+                .with_cursor(BookmarkCursor::parse(&case["options"]["cursor"]));
+            let input = Url::parse(case["url"].as_str().unwrap()).unwrap();
+            let mut stream = native.events(&input);
+            let mut expected = case["events"].as_array().unwrap().iter();
+            let mut posts = 0;
+            let mut ends = 0;
+            let mut swapped = false;
+            while let Some(event) = stream.next().await {
+                match event.unwrap() {
+                    ExtractionEvent::Post(post) => {
+                        posts += 1;
+                        let oracle = expected.next().unwrap();
+                        assert_eq!(oracle["kind"], "post");
+                        assert_eq!(
+                            post.count,
+                            oracle["metadata"]["count"]
+                                .as_u64()
+                                .map(|count| count as usize)
+                        );
+                        let metadata = post.metadata.unwrap();
+                        assert_eq!(metadata.post_id, oracle["metadata"]["id"].to_string());
+                        assert_eq!(metadata.user_bookmark.as_deref(), Some(&owner));
+                        assert!(metadata.bookmark_archive);
+                        if !swapped && !case["final_api_user"].is_null() {
+                            *native.authenticated_profile.lock().await = Some(Arc::new(
+                                FollowedUserMetadata::parse_compat(&case["final_api_user"])
+                                    .unwrap(),
+                            ));
+                            swapped = true;
+                        }
+                    }
+                    ExtractionEvent::Media(file) => {
+                        let oracle = expected.next().unwrap();
+                        assert_eq!(oracle["kind"], "media");
+                        assert_eq!(file.filename, oracle["default_filename"].as_str().unwrap());
+                        assert_eq!(file.url.as_str(), oracle["url"].as_str().unwrap());
+                        let metadata = file.metadata.as_ref().unwrap();
+                        assert_eq!(metadata.user_bookmark.as_deref(), Some(&owner));
+                        assert_eq!(
+                            metadata.username.as_deref(),
+                            oracle["metadata"]["user"]["account"].as_str()
+                        );
+                        assert!(file.archive_key().is_some());
+                        assert!(
+                            !serde_json::to_string(&file)
+                                .unwrap()
+                                .contains("SYNTHETIC_PRIVATE")
+                        );
+                    }
+                    ExtractionEvent::EndPost => ends += 1,
+                    _ => {}
+                }
+            }
+            assert!(expected.next().is_none());
+            assert_eq!(posts, ends);
+            let requests = server.join().unwrap();
+            let api_calls: Vec<_> = calls
+                .iter()
+                .filter(|call| call["method"] != "login")
+                .collect();
+            assert_eq!(requests.len(), 1 + api_calls.len());
+            for (request, call) in requests.iter().skip(1).zip(api_calls) {
+                let request = Url::parse(&format!(
+                    "http://localhost{}",
+                    request.split_whitespace().nth(1).unwrap()
+                ))
+                .unwrap();
+                let query: BTreeMap<_, _> = request
+                    .query_pairs()
+                    .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                    .collect();
+                if call["method"] == "user_detail" {
+                    assert_eq!(request.path(), "/v1/user/detail");
+                    assert_eq!(query["user_id"], call["user_id"].as_str().unwrap());
+                } else {
+                    assert_eq!(request.path(), call["endpoint"].as_str().unwrap());
+                    let expected: BTreeMap<_, _> = call["params"]
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .filter(|(_, value)| !value.is_null())
+                        .map(|(key, value)| {
+                            (
+                                key.clone(),
+                                value
+                                    .as_str()
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(|| value.to_string()),
+                            )
+                        })
+                        .collect();
+                    assert_eq!(query, expected);
+                }
+            }
         }
     }
 }

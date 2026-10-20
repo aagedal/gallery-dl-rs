@@ -251,6 +251,13 @@ impl Feed {
                 if let Some(tag) = tag {
                     url.query_pairs_mut().append_pair("tag", tag);
                 }
+                if let Some(cursor) = native
+                    .cursor
+                    .as_ref()
+                    .and_then(|cursor| cursor.query_value())
+                {
+                    url.query_pairs_mut().append_pair("max_bookmark_id", cursor);
+                }
             }
         }
         url
@@ -261,10 +268,14 @@ impl Feed {
         let url = Url::parse(raw).map_err(|_| invalid())?;
         let expected = self.first(native);
         let query: Vec<_> = url.query_pairs().collect();
-        let scope = expected.query_pairs().all(|(key, value)| {
-            let mut entries = query.iter().filter(|(actual, _)| *actual == key);
-            entries.next().is_some_and(|(_, actual)| *actual == value) && entries.next().is_none()
-        });
+        let scope = expected
+            .query_pairs()
+            .filter(|(key, _)| key != "max_bookmark_id")
+            .all(|(key, value)| {
+                let mut entries = query.iter().filter(|(actual, _)| *actual == key);
+                entries.next().is_some_and(|(_, actual)| *actual == value)
+                    && entries.next().is_none()
+            });
         if url.origin() != native.api_root.origin()
             || url.path() != expected.path()
             || !url.username().is_empty()
@@ -1429,5 +1440,133 @@ mod tests {
             assert_eq!(media, 2);
             assert_eq!(server.join().unwrap().len(), 3);
         }
+    }
+    fn cursor(value: Value) -> Option<super::super::BookmarkCursor> {
+        Some(super::super::BookmarkCursor::parse(&value).unwrap())
+    }
+
+    #[tokio::test]
+    async fn bookmark_cursor_preserves_zero_blank_null_and_ignores_input_url_cursor_lazily() {
+        for value in [Value::Null, json!(0), json!(""), json!("猫 \n")] {
+            let (root, server) = serve_with(|root| {
+                vec![token("t"),
+                page(vec![novel(41, "one"), novel(42, "two")], Some(root.join("v1/user/bookmarks/novel?user_id=9&restrict=private&tag=tag&max_bookmark_id=next").unwrap())),
+                webview("one")]
+            });
+            let native = pixiv(root).with_cursor(cursor(value.clone()));
+            let url = Url::parse("https://www.pixiv.net/users/9/bookmarks/novels/tag?rest=hide&cursor=ignored&max_bookmark_id=ignored").unwrap();
+            let mut files = native.stream(&url);
+            assert_eq!(files.next().await.unwrap().unwrap().filename, "41_p0.txt");
+            drop(files);
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 3);
+            let path = requests[1].split_whitespace().nth(1).unwrap();
+            let requested = Url::parse(&format!("http://fixture{path}")).unwrap();
+            let actual = requested
+                .query_pairs()
+                .find(|(key, _)| key == "max_bookmark_id")
+                .map(|(_, value)| value.into_owned());
+            assert_eq!(
+                actual.as_deref(),
+                super::super::BookmarkCursor::parse(&value)
+                    .unwrap()
+                    .query_value()
+            );
+            assert!(requests[1].contains("user_id=9&restrict=private&tag=tag"));
+            assert!(!requests[1].contains("ignored"));
+        }
+    }
+
+    #[tokio::test]
+    async fn bookmark_cursor_changes_and_disappears_on_successor_pages() {
+        let (root, server) = serve_with(|root| {
+            vec![token("t"),
+            page(vec![novel(41,"one")], Some(root.join("v1/user/bookmarks/novel?user_id=9&restrict=private&tag=tag&max_bookmark_id=second").unwrap())), webview("one"),
+            page(vec![novel(42,"two")], Some(root.join("v1/user/bookmarks/novel?user_id=9&restrict=private&tag=tag&offset=60").unwrap())), webview("two"),
+            page(vec![novel(43,"three")], None), webview("three")]
+        });
+        let native = pixiv(root).with_cursor(cursor(json!("initial")));
+        let files = native
+            .stream(
+                &Url::parse("https://www.pixiv.net/users/9/bookmarks/novels/tag?rest=hide")
+                    .unwrap(),
+            )
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 3);
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("max_bookmark_id=initial"));
+        assert!(requests[3].contains("max_bookmark_id=second"));
+        assert!(!requests[5].contains("max_bookmark_id"));
+        assert!(requests[5].contains("user_id=9&restrict=private&tag=tag&offset=60"));
+    }
+
+    #[tokio::test]
+    async fn bookmark_cursor_never_applies_to_user_series_or_single_novel_requests() {
+        for route in ["users/9/novels", "novel/series/7", "n/41"] {
+            let body = if route == "n/41" {
+                detail(novel(41, "one"))
+            } else {
+                page(vec![novel(41, "one")], None)
+            };
+            let (root, server) = serve(vec![token("t"), body, webview("one")]);
+            let files = pixiv(root)
+                .with_cursor(cursor(json!("bookmark-only")))
+                .stream(&Url::parse(&format!("https://www.pixiv.net/{route}")).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(files.len(), 1);
+            assert!(
+                server
+                    .join()
+                    .unwrap()
+                    .iter()
+                    .all(|request| !request.contains("max_bookmark_id")
+                        && !request.contains("bookmark-only"))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatched_novel_bookmarks_use_the_novel_clients_cursor_without_owner_lookup() {
+        let (root, server) = serve(vec![
+            token("novel-token"),
+            page(vec![novel(41, "author")], None),
+            webview("one"),
+        ]);
+        let novel_native = Arc::new(pixiv(root).with_cursor(cursor(json!("novel-cursor"))));
+        let native = Pixiv::new(std::time::Duration::from_secs(2))
+            .unwrap()
+            .with_cursor(cursor(json!("illustration-cursor")))
+            .with_include(Some(crate::dispatch::Include::Views(vec![
+                "novel-bookmark".into(),
+            ])))
+            .with_novel_extractor(novel_native);
+        let files = JobSelection::default()
+            .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].starts_with(
+            "GET /v1/user/bookmarks/novel?user_id=9&restrict=public&max_bookmark_id=novel-cursor "
+        ));
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request.contains("illustration-cursor")
+                    || request.contains("user/detail"))
+        );
+        assert!(files[0].archive_key().unwrap().starts_with("pixiv-novel:"));
     }
 }

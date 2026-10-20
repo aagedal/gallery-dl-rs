@@ -1127,6 +1127,7 @@ fn extract_input<'a>(
                                     })
                                     .with_max_posts(novel_options.max_posts)
                                     .with_tags(novel_options.tags.unwrap_or_default())
+                                    .with_cursor(novel_options.cursor.clone())
                                     .with_refresh_token(novel_options.refresh_token.as_deref())
                                     .with_retries(novel_options.retries.unwrap())
                                     .with_request_timeout(novel_options.timeout.unwrap())
@@ -1153,6 +1154,7 @@ fn extract_input<'a>(
                                             .with_ugoira(options.ugoira.unwrap_or(true))
                                             .with_max_posts(options.max_posts)
                                             .with_tags(options.tags.unwrap_or_default())
+                                            .with_cursor(options.cursor.clone())
                                             .with_refresh_token(options.refresh_token.as_deref())
                                             .with_retries(options.retries.unwrap())
                                             .with_request_timeout(options.timeout.unwrap())
@@ -1309,6 +1311,9 @@ fn extract_input<'a>(
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
                             tags: matches!(category, "pixiv" | "pixiv-novel")
                                 .then_some(options.tags)
+                                .flatten(),
+                            cursor: matches!(category, "pixiv" | "pixiv-novel")
+                                .then(|| options.cursor.clone())
                                 .flatten(),
                             covers: (category == "pixiv-novel")
                                 .then_some(options.covers)
@@ -1487,6 +1492,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         reposts: None,
         ugoira: None,
         tags: None,
+        cursor: None,
         access_token: None,
         text_posts: None,
         unavailable: None,

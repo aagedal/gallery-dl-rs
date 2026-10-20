@@ -80,3 +80,31 @@ separate extractor's results. A malformed second photo records the source
 this documents source failure timing, not the native stream's balanced-end policy.
 All domains, identities, text, dates, and media data are synthetic. No extractor
 initialization, authentication, session creation, or network requests ran.
+
+`bookmark_owner.json` records actual `PixivFavoriteExtractor.items`, `metadata`,
+and `works`, plus `PixivNovelBookmarkExtractor.items` and `novels`, from gallery-dl
+1.32.17. The installed source path and SHA-256 are recorded for `tags.json` above
+and repeated in this fixture. The real illustration `_extract_files` method ran
+on synthetic works; optional enrichment, sanity requests, ugoira loading, novel
+covers, and embeds were disabled. A fake API provides owner details, explicit
+metadata login, novel text, and page responses while delegating both bookmark
+API methods and `_pagination` to the actual installed implementation. Recorded
+`login` calls denote explicit metadata login, not the authentication performed
+inside real HTTP requests. No HTTP or OAuth requests ran.
+
+Cases cover named public/private bookmark owners, mixed artwork authors,
+multipage media, an empty disabled animation, an ownerless initial OAuth-owner
+snapshot that survives replacement of the API's current user, and private novel
+bookmarks without illustration-owner metadata or archive scope. Initial cursor
+values and mutable successor cursor parameters are captured from the real API
+helper. Separate cursor wire vectors use `requests.Request.prepare` locally to
+record omitted null, included empty/zero strings, and source behavior for values
+outside the documented string type. Expected filename/archive strings use the
+actual extractor's formats. Dates are normalized to naive UTC ISO text and lazy
+fallback URL iterators are materialized at emission.
+
+Owner dictionaries deliberately include synthetic private-looking fields because
+the source retains the complete owner object. Native tests should compare the
+implemented public owner subset rather than infer full-owner metadata parity.
+All identities, URLs, strings, dates, and private-looking markers are synthetic;
+no captured user data or credentials are included.

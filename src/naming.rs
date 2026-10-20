@@ -68,6 +68,7 @@ const FIELDS: &[&str] = &[
     "series",
     "num_series",
     "user_follow",
+    "user_bookmark",
     "pixivision",
     "pixivision_id",
     "pixivision_title",

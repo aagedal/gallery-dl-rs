@@ -48,6 +48,8 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
         tags: None,
         sketch: None,
         sketch_archive: false,
+        user_bookmark: None,
+        bookmark_archive: false,
         pixivision: None,
         pixivision_archive: false,
         user_follow: None,

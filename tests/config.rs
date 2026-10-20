@@ -2867,3 +2867,109 @@ fn pixiv_tag_modes_use_upstream_fallback_for_every_other_present_value() {
     assert_eq!(novels.ugoira, None);
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
+
+#[test]
+fn pixiv_bookmark_cursors_preserve_scalar_types_and_clear_inherited_settings() {
+    use gallery_dl_rs::pixiv::BookmarkCursor;
+    use serde_json::json;
+    let cursor = |value: serde_json::Value| BookmarkCursor::parse(&value).unwrap();
+    let cfg = parse(
+        r#"{"extractor":{"cursor":42,"pixiv":{"cursor":"0"},"pixiv-novel":{"cursor":null}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv").unwrap().cursor,
+        Some(cursor(json!("0")))
+    );
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().cursor,
+        Some(cursor(json!(null)))
+    );
+    assert_eq!(
+        cfg.resolve("direct").unwrap().cursor,
+        Some(cursor(json!(42)))
+    );
+    let cfg = parse(r#"{"cursor":"root","extractor":{"cursor":-1,"pixiv":{"cursor":"art"},"pixiv-novel":{"cursor":"novel"}}}"#).unwrap();
+    for category in ["pixiv", "pixiv-novel"] {
+        let options = cfg.resolve(category).unwrap();
+        assert_eq!(options.cursor, Some(cursor(json!("root"))));
+        let cleared = options.overlay(&Options {
+            cursor: Some(cursor(json!(null))),
+            ..Options::default()
+        });
+        assert_eq!(cleared.cursor.as_ref().unwrap().query_value(), None);
+        let blank = cleared.overlay(&Options {
+            cursor: Some(cursor(json!(""))),
+            ..Options::default()
+        });
+        assert_eq!(blank.cursor.as_ref().unwrap().query_value(), Some(""));
+    }
+    for value in [
+        json!(null),
+        json!(0),
+        json!(-15),
+        json!(""),
+        json!("猫 \n"),
+        json!("a".repeat(1024)),
+    ] {
+        for document in [
+            json!({"cursor":value}),
+            json!({"extractor":{"cursor":value}}),
+            json!({"extractor":{"pixiv":{"cursor":value}}}),
+        ] {
+            let cfg = parse(&document.to_string()).unwrap();
+            assert_eq!(
+                cfg.resolve("pixiv")
+                    .unwrap()
+                    .cursor
+                    .as_ref()
+                    .unwrap()
+                    .as_json(),
+                &value
+            );
+        }
+    }
+    let big = "9".repeat(1024);
+    let cfg = parse(&format!(
+        r#"{{"extractor":{{"pixiv-novel":{{"cursor":{big}}}}}}}"#
+    ))
+    .unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv-novel")
+            .unwrap()
+            .cursor
+            .unwrap()
+            .query_value(),
+        Some(big.as_str())
+    );
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().cursor, None);
+}
+
+#[test]
+fn pixiv_bookmark_cursor_invalid_types_and_bounds_fail_privately_in_every_scope() {
+    use serde_json::json;
+    for value in [
+        json!(true),
+        json!(false),
+        json!(1.5),
+        json!([]),
+        json!(["cursor-private-payload"]),
+        json!({"private":"cursor-private-payload"}),
+        json!("private-payload".repeat(100)),
+    ] {
+        for document in [
+            json!({"cursor":value}),
+            json!({"extractor":{"cursor":value}}),
+            json!({"extractor":{"pixiv":{"cursor":value}}}),
+            json!({"extractor":{"pixiv-novel":{"cursor":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(message.contains("cursor"));
+            assert!(!message.contains("private"));
+            assert!(!message.contains("payload"));
+        }
+    }
+    for value in ["1e10", "1.0", &"9".repeat(1025)] {
+        assert!(parse(&format!(r#"{{"cursor":{value}}}"#)).is_err());
+    }
+}

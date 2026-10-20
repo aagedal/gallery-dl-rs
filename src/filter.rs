@@ -506,6 +506,28 @@ fn context_parts(
                 ])),
             );
         }
+        if let Some(owner) = &post.user_bookmark {
+            metadata.insert(
+                "user_bookmark".into(),
+                map(BTreeMap::from([
+                    ("id".into(), identifier(&owner.id)),
+                    (
+                        "name".into(),
+                        owner
+                            .name
+                            .as_ref()
+                            .map_or(Value::None, |name| text(name.clone())),
+                    ),
+                    (
+                        "account".into(),
+                        owner
+                            .account
+                            .as_ref()
+                            .map_or(Value::None, |account| text(account.clone())),
+                    ),
+                ])),
+            );
+        }
         if let Some(article) = &post.pixivision {
             let fields = BTreeMap::from([
                 ("id".into(), identifier(&article.id)),

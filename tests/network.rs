@@ -270,6 +270,8 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
         tags: None,
         sketch: None,
         sketch_archive: false,
+        user_bookmark: None,
+        bookmark_archive: false,
         pixivision: None,
         pixivision_archive: false,
         user_follow: None,

@@ -239,6 +239,8 @@ mod tests {
                 tags: None,
                 sketch: None,
                 sketch_archive: false,
+                user_bookmark: None,
+                bookmark_archive: false,
                 pixivision: None,
                 pixivision_archive: false,
                 user_follow: None,

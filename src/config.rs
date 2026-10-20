@@ -88,6 +88,8 @@ pub struct Options {
     pub ugoira: Option<bool>,
     /// Pixiv tag names: Japanese strings, original objects or translated strings.
     pub tags: Option<crate::pixiv::TagMode>,
+    /// Initial Pixiv bookmark cursor; explicit null clears inherited values.
+    pub cursor: Option<crate::pixiv::BookmarkCursor>,
     /// Explicit Mastodon bearer token, confined to API requests. Empty disables.
     pub access_token: Option<String>,
     /// Include Mastodon statuses without selected media.
@@ -275,6 +277,7 @@ impl Options {
             reposts: overrides.reposts.or(self.reposts),
             ugoira: overrides.ugoira.or(self.ugoira),
             tags: overrides.tags.or(self.tags),
+            cursor: overrides.cursor.clone().or_else(|| self.cursor.clone()),
             access_token: overrides
                 .access_token
                 .clone()
@@ -403,6 +406,7 @@ struct RawRoot {
     reposts: Field,
     ugoira: Field,
     tags: Field,
+    cursor: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -471,6 +475,7 @@ struct RawExtractor {
     reposts: Field,
     ugoira: Field,
     tags: Field,
+    cursor: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -572,6 +577,7 @@ struct RawOptions {
     reposts: Field,
     ugoira: Field,
     tags: Field,
+    cursor: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -751,6 +757,7 @@ impl Config {
             reposts: root.reposts,
             ugoira: root.ugoira,
             tags: root.tags,
+            cursor: root.cursor,
             text_posts: root.text_posts,
             unavailable: root.unavailable,
             text_tweets: root.text_tweets,
@@ -828,6 +835,7 @@ impl Config {
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
             tags: extractor.tags,
+            cursor: extractor.cursor,
             text_posts: extractor.text_posts,
             unavailable: extractor.unavailable,
             text_tweets: extractor.text_tweets,
@@ -1263,6 +1271,10 @@ impl RawOptions {
             .tags
             .0
             .map(|value| crate::pixiv::TagMode::parse(value.as_str().unwrap_or("")));
+        let cursor = self.cursor.0.as_ref().map(|value| {
+            crate::pixiv::BookmarkCursor::parse(value)
+                .ok_or_else(|| error("native configuration cursor must be null, a string or an integer of at most 1024 bytes"))
+        }).transpose()?;
         let access_token = match self.access_token.0 {
             None => None,
             Some(Value::Bool(false)) => Some(String::new()),
@@ -1699,6 +1711,7 @@ impl RawOptions {
             reposts,
             ugoira,
             tags,
+            cursor,
             access_token,
             text_posts,
             unavailable,

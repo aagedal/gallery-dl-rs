@@ -785,14 +785,28 @@ Public/private illustration bookmarks support user/legacy URLs, path/query tag
 filters, and own bookmarks resolved from OAuth, with lazy pagination scoped to
 the selected visibility, owner and tag. Private access still requires an account
 authorized by Pixiv; live authenticated bookmark verification remains unverified.
+Illustration bookmark jobs resolve a named owner before listing or snapshot the
+initial OAuth owner. Public `user_bookmark` identity is shared across posts and
+files, while artist metadata stays separate. Archives now include bookmark owner,
+artwork, page and extension; tag, visibility, cursor and display fields do not
+change identity. Prior ordinary artwork entries do not suppress the corrected
+bookmark archive namespace. Extended owner fields remain unfinished.
 The separate `pixiv-novel` category supports single novels, user works, series,
 public/private bookmarks, exact UTF-8 text, optional original covers and
 `full-series` expansion. Profile novel views use novel-scoped credentials and
 network/output settings. HTTP fixtures cover lazy selection, scoped pagination,
 raw text publication and recovery; authenticated live novel extraction remains
-unverified. Embedded-image expansion, extended novel metadata and bookmark
-cursors remain unfinished; text/cover failures currently report errors where
+unverified. Embedded-image expansion and extended novel metadata remain
+unfinished; text/cover failures currently report errors where
 upstream warns. Per-child category predicate overrides remain unfinished.
+Illustration and novel bookmark `cursor` settings support strings, integers and
+explicit null clearing in independent category scopes. The starting cursor is
+sent only on the first request; pagination can replace or remove it without
+changing fixed owner/tag/visibility scope. Recorded source/API vectors and HTTP
+fixtures cover owner snapshots, empty animations, cursor encoding and novel
+archive exclusions. Compatibility forwarding retains the cursor's JSON type;
+automatic resume hints and separate child-category compatibility overrides remain
+unfinished.
 Native following lists queue selected users through normal profile `include`
 dispatch, with bounded preview fields for child filters, lazy scoped pagination,
 cycle detection and a 200-page cap. Modern and legacy URLs support public/private
@@ -861,7 +875,7 @@ account only after child selection. Anonymous first-photo output from the public
 cookies, default directory layout and source `filename` template semantics remain
 unfinished.
 Remaining: ugoira original individual-frame mode and conversion,
-bookmark cursor/metadata options,
+bookmark resume-cursor diagnostics and optional metadata enrichment,
 upstream metadata options
 (`metadata`), and Referer-routed plain `i.pximg.net` links.
 

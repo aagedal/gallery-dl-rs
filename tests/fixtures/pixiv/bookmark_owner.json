@@ -1,0 +1,1021 @@
+{
+  "source": "PixivFavoriteExtractor.items/metadata/works + PixivNovelBookmarkExtractor.items/novels + PixivAppAPI.user_bookmarks_illust/user_bookmarks_novel/_pagination",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py",
+  "source_sha256": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+  "generator": "Real extractor items/metadata/works/novels and real _extract_files; FakeAPI stubs user_detail/login/_call/novel_webview, delegates both bookmark methods and _pagination to real PixivAppAPI. Call login records explicit metadata login only, not HTTP authentication. Optional metadata/sanity/ugoira/covers/embeds disabled. Date fields normalized to naive UTC ISO; _fallback iterators materialized at emission. No network/authentication. Cursor wire vectors use requests.Request.prepare locally.",
+  "cases": [
+    {
+      "name": "named_public_tag_cursor_mixed_artists_and_empty_animation",
+      "url": "https://www.pixiv.net/users/9/bookmarks/artworks/%E7%8C%AB",
+      "options": {
+        "cursor": "200"
+      },
+      "owner": {
+        "id": 9,
+        "name": "Fixture Owner",
+        "account": "fixture.owner",
+        "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+        "profile_image_urls": {
+          "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+        }
+      },
+      "responses": [
+        {
+          "illusts": [
+            {
+              "id": 42,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "illust",
+              "user": {
+                "id": 5,
+                "account": "artist5"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png"
+              },
+              "meta_pages": [
+                {
+                  "image_urls": {
+                    "original": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png"
+                  }
+                },
+                {
+                  "image_urls": {
+                    "original": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p1.png"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 44,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "ugoira",
+              "user": {
+                "id": 5,
+                "account": "artist5"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/44_p0.png"
+              },
+              "meta_pages": []
+            }
+          ],
+          "next_url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&tag=%E7%8C%AB&restrict=public&max_bookmark_id=100"
+        },
+        {
+          "illusts": [
+            {
+              "id": 43,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "illust",
+              "user": {
+                "id": 6,
+                "account": "artist6"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/43_p0.png"
+              },
+              "meta_pages": []
+            }
+          ],
+          "next_url": null
+        }
+      ],
+      "calls": [
+        {
+          "method": "user_detail",
+          "user_id": "9"
+        },
+        {
+          "method": "feed",
+          "endpoint": "/v1/user/bookmarks/illust",
+          "params": {
+            "user_id": 9,
+            "tag": "猫",
+            "restrict": "public",
+            "max_bookmark_id": "200"
+          }
+        },
+        {
+          "method": "feed",
+          "endpoint": "/v1/user/bookmarks/illust",
+          "params": {
+            "user_id": "9",
+            "tag": "猫",
+            "restrict": "public",
+            "max_bookmark_id": "100"
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            }
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            },
+            "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png",
+            "_fallback": [
+              "https://i.pximg.net/img-master/2024/01/02/03/04/05/42_p0_master1200.jpg"
+            ],
+            "filename": "42_p0",
+            "extension": "png",
+            "date_url": null,
+            "hash": ""
+          },
+          "default_filename": "42_p0.png",
+          "archive": "f_9_420.png"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p1.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            },
+            "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p1.png",
+            "_fallback": [
+              "https://i.pximg.net/img-master/2024/01/02/03/04/05/42_p1_master1200.jpg"
+            ],
+            "filename": "42_p1",
+            "extension": "png",
+            "date_url": null,
+            "hash": ""
+          },
+          "default_filename": "42_p1.png",
+          "archive": "f_9_421.png"
+        },
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 44,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            }
+          }
+        },
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 43,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 6,
+              "account": "artist6"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            }
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/43_p0.png",
+          "metadata": {
+            "id": 43,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 6,
+              "account": "artist6"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            },
+            "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/43_p0.png",
+            "_fallback": [
+              "https://i.pximg.net/img-master/2024/01/02/03/04/05/43_p0_master1200.jpg"
+            ],
+            "filename": "43_p0",
+            "extension": "png",
+            "date_url": null,
+            "hash": ""
+          },
+          "default_filename": "43_p0.png",
+          "archive": "f_9_430.png"
+        }
+      ],
+      "error": null,
+      "final_api_user": null
+    },
+    {
+      "name": "named_private_same_owner_other_display_tag_cursor",
+      "url": "https://www.pixiv.net/bookmark.php?id=9&rest=hide&tag=other",
+      "options": {
+        "cursor": ""
+      },
+      "owner": {
+        "id": 9,
+        "name": "Renamed Owner",
+        "account": "renamed.owner",
+        "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+        "profile_image_urls": {
+          "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+        }
+      },
+      "responses": [
+        {
+          "illusts": [
+            {
+              "id": 42,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "illust",
+              "user": {
+                "id": 5,
+                "account": "artist5"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png"
+              },
+              "meta_pages": []
+            }
+          ],
+          "next_url": null
+        }
+      ],
+      "calls": [
+        {
+          "method": "user_detail",
+          "user_id": "9"
+        },
+        {
+          "method": "feed",
+          "endpoint": "/v1/user/bookmarks/illust",
+          "params": {
+            "user_id": 9,
+            "tag": "other",
+            "restrict": "private",
+            "max_bookmark_id": ""
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Renamed Owner",
+              "account": "renamed.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            }
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 9,
+              "name": "Renamed Owner",
+              "account": "renamed.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            },
+            "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png",
+            "_fallback": [
+              "https://i.pximg.net/img-master/2024/01/02/03/04/05/42_p0_master1200.jpg"
+            ],
+            "filename": "42_p0",
+            "extension": "png",
+            "date_url": null,
+            "hash": ""
+          },
+          "default_filename": "42_p0.png",
+          "archive": "f_9_420.png"
+        }
+      ],
+      "error": null,
+      "final_api_user": null
+    },
+    {
+      "name": "ownerless_initial_oauth_snapshot_ignores_replaced_api_user",
+      "url": "https://www.pixiv.net/bookmark.php?rest=hide",
+      "options": {
+        "cursor": null
+      },
+      "owner": {
+        "id": 17,
+        "name": "Fixture Owner",
+        "account": "fixture.owner",
+        "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+        "profile_image_urls": {
+          "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+        }
+      },
+      "responses": [
+        {
+          "illusts": [
+            {
+              "id": 42,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "illust",
+              "user": {
+                "id": 5,
+                "account": "artist5"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png"
+              },
+              "meta_pages": []
+            },
+            {
+              "id": 43,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "illust",
+              "user": {
+                "id": 6,
+                "account": "artist6"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/43_p0.png"
+              },
+              "meta_pages": []
+            }
+          ],
+          "next_url": null
+        }
+      ],
+      "calls": [
+        {
+          "method": "login"
+        },
+        {
+          "method": "feed",
+          "endpoint": "/v1/user/bookmarks/illust",
+          "params": {
+            "user_id": 17,
+            "tag": null,
+            "restrict": "private",
+            "max_bookmark_id": null
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 17,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            }
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 17,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            },
+            "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/42_p0.png",
+            "_fallback": [
+              "https://i.pximg.net/img-master/2024/01/02/03/04/05/42_p0_master1200.jpg"
+            ],
+            "filename": "42_p0",
+            "extension": "png",
+            "date_url": null,
+            "hash": ""
+          },
+          "default_filename": "42_p0.png",
+          "archive": "f_17_420.png"
+        },
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 43,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 6,
+              "account": "artist6"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 17,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            }
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/43_p0.png",
+          "metadata": {
+            "id": 43,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "user": {
+              "id": 6,
+              "account": "artist6"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "user_bookmark": {
+              "id": 17,
+              "name": "Fixture Owner",
+              "account": "fixture.owner",
+              "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+              "profile_image_urls": {
+                "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+              }
+            },
+            "url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/43_p0.png",
+            "_fallback": [
+              "https://i.pximg.net/img-master/2024/01/02/03/04/05/43_p0_master1200.jpg"
+            ],
+            "filename": "43_p0",
+            "extension": "png",
+            "date_url": null,
+            "hash": ""
+          },
+          "default_filename": "43_p0.png",
+          "archive": "f_17_430.png"
+        }
+      ],
+      "error": null,
+      "final_api_user": {
+        "id": 99,
+        "name": "Later OAuth User",
+        "account": "later.user",
+        "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+        "profile_image_urls": {
+          "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+        }
+      }
+    },
+    {
+      "name": "novel_private_path_tag_cursor_has_no_bookmark_owner",
+      "url": "https://www.pixiv.net/users/9/bookmarks/novels/%E7%8C%AB?rest=hide&type=user&tag=ignored",
+      "options": {
+        "cursor": "300"
+      },
+      "owner": {
+        "id": 9,
+        "name": "Fixture Owner",
+        "account": "fixture.owner",
+        "mail_address": "SYNTHETIC_PRIVATE_MAIL",
+        "profile_image_urls": {
+          "medium": "https://images.example.test/SYNTHETIC_PRIVATE_AVATAR.jpg"
+        }
+      },
+      "responses": [
+        {
+          "novels": [
+            {
+              "id": 51,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "novel",
+              "user": {
+                "id": 5,
+                "account": "artist5"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/51_p0.png"
+              },
+              "meta_pages": []
+            }
+          ],
+          "next_url": "https://app-api.pixiv.net/v1/user/bookmarks/novel?user_id=9&tag=%E7%8C%AB&restrict=private&max_bookmark_id=150"
+        },
+        {
+          "novels": [
+            {
+              "id": 52,
+              "title": "Fixture title",
+              "caption": "Fixture caption",
+              "type": "novel",
+              "user": {
+                "id": 6,
+                "account": "artist6"
+              },
+              "tags": [
+                {
+                  "name": "猫",
+                  "translated_name": "cat"
+                }
+              ],
+              "create_date": "2024-01-02T12:04:05+09:00",
+              "x_restrict": 0,
+              "image_urls": {},
+              "meta_single_page": {
+                "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/52_p0.png"
+              },
+              "meta_pages": []
+            }
+          ],
+          "next_url": null
+        }
+      ],
+      "calls": [
+        {
+          "method": "feed",
+          "endpoint": "/v1/user/bookmarks/novel",
+          "params": {
+            "user_id": "9",
+            "tag": "猫",
+            "restrict": "private",
+            "max_bookmark_id": "300"
+          }
+        },
+        {
+          "method": "novel_webview",
+          "novel_id": "51"
+        },
+        {
+          "method": "feed",
+          "endpoint": "/v1/user/bookmarks/novel",
+          "params": {
+            "user_id": "9",
+            "tag": "猫",
+            "restrict": "private",
+            "max_bookmark_id": "150"
+          }
+        },
+        {
+          "method": "novel_webview",
+          "novel_id": "52"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 51,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "novel",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "image_urls": {},
+            "meta_single_page": {
+              "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/51_p0.png"
+            },
+            "meta_pages": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text",
+          "metadata": {
+            "id": 51,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "novel",
+            "user": {
+              "id": 5,
+              "account": "artist5"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "image_urls": {},
+            "meta_single_page": {
+              "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/51_p0.png"
+            },
+            "meta_pages": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "51_p0.txt",
+          "archive": "51.txt"
+        },
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 52,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "novel",
+            "user": {
+              "id": 6,
+              "account": "artist6"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "image_urls": {},
+            "meta_single_page": {
+              "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/52_p0.png"
+            },
+            "meta_pages": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text",
+          "metadata": {
+            "id": 52,
+            "title": "Fixture title",
+            "caption": "Fixture caption",
+            "type": "novel",
+            "user": {
+              "id": 6,
+              "account": "artist6"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "image_urls": {},
+            "meta_single_page": {
+              "original_image_url": "https://i.pximg.net/img-original/2024/01/02/03/04/05/52_p0.png"
+            },
+            "meta_pages": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "52_p0.txt",
+          "archive": "52.txt"
+        }
+      ],
+      "error": null,
+      "final_api_user": null
+    }
+  ],
+  "cursor_wire_cases": [
+    {
+      "value": null,
+      "url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9"
+    },
+    {
+      "value": "",
+      "url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&max_bookmark_id="
+    },
+    {
+      "value": "0",
+      "url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&max_bookmark_id=0"
+    },
+    {
+      "value": 0,
+      "url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&max_bookmark_id=0"
+    },
+    {
+      "value": false,
+      "url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&max_bookmark_id=False"
+    },
+    {
+      "value": true,
+      "url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&max_bookmark_id=True"
+    },
+    {
+      "value": " 17 ",
+      "url": "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&max_bookmark_id=+17+"
+    }
+  ]
+}

@@ -320,7 +320,40 @@ impl Media {
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
-                if post.sketch_archive || post.sketch.is_some() {
+                if post.bookmark_archive || post.user_bookmark.is_some() {
+                    let owner = post.user_bookmark.as_ref()?;
+                    let extension = self.filename.rsplit_once('.')?.1;
+                    if !owner.valid()
+                        || !valid_extension(extension)
+                        || post.sketch_archive
+                        || post.sketch.is_some()
+                        || post.pixivision_archive
+                        || post.pixivision.is_some()
+                        || post.followed_archive
+                        || post.user_follow.is_some()
+                        || post.search_archive
+                        || post.search.is_some()
+                        || post.ranking_archive
+                        || post.ranking.is_some()
+                        || post.profile_asset.is_some()
+                        || post.series.is_some()
+                        || post.num_series.is_some()
+                        || !crate::pixiv::valid_media_id(&post.post_id, &post.media_id)
+                    {
+                        return None;
+                    }
+                    (
+                        "pixiv",
+                        serde_json::json!([
+                            "bookmarks",
+                            owner.id,
+                            post.post_id,
+                            post.media_id,
+                            extension
+                        ])
+                        .to_string(),
+                    )
+                } else if post.sketch_archive || post.sketch.is_some() {
                     let sketch = post.sketch.as_ref()?;
                     if !sketch.valid()
                         || sketch
@@ -540,6 +573,11 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_bookmark: Option<std::sync::Arc<crate::pixiv::FollowedUserMetadata>>,
+    /// Preserve a declared bookmark scope if its owner metadata is invalid.
+    #[serde(skip_serializing)]
+    pub bookmark_archive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sketch: Option<std::sync::Arc<crate::pixiv::SketchMetadata>>,
     /// Retain declared Sketch scope when its owner metadata is invalid.
@@ -796,6 +834,7 @@ pub struct BackendOptions {
     pub reposts: Option<bool>,
     pub ugoira: Option<bool>,
     pub tags: Option<crate::pixiv::TagMode>,
+    pub cursor: Option<crate::pixiv::BookmarkCursor>,
     pub covers: Option<bool>,
     pub full_series: Option<bool>,
     pub access_token: Option<String>,
@@ -1223,6 +1262,11 @@ impl Backend {
                 .arg("--option")
                 .arg(format!("tags=\"{}\"", mode.as_str()));
         }
+        if let Some(cursor) = &options.cursor {
+            command
+                .arg("--option")
+                .arg(format!("cursor={}", cursor.as_json()));
+        }
         if let Some(limit) = options.search_limit {
             command.arg("--option").arg(format!("search-limit={limit}"));
         }
@@ -1603,6 +1647,7 @@ fn compatibility_metadata(
                     || data.contains_key("search")
                     || data.contains_key("num_series")
                     || data.contains_key("user_follow")
+                    || data.contains_key("user_bookmark")
                     || data.contains_key("pixivision_id")
                 {
                     let caption = string("caption")
@@ -1724,6 +1769,19 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        user_bookmark: (category == "pixiv")
+            .then(|| {
+                data.get("user_bookmark")
+                    .and_then(crate::pixiv::FollowedUserMetadata::parse_compat)
+                    .map(std::sync::Arc::new)
+            })
+            .flatten(),
+        bookmark_archive: category == "pixiv"
+            && (data.contains_key("user_bookmark")
+                || data
+                    .get("subcategory")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| matches!(value, "favorite" | "bookmark"))),
         sketch: sketch_archive
             .then(|| crate::pixiv::SketchMetadata::parse_compat(data).map(std::sync::Arc::new))
             .flatten(),
