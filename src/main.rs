@@ -34,6 +34,7 @@ use std::{
     cell::Cell,
     collections::{BTreeMap, HashSet},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 use tokio::sync::OnceCell;
@@ -335,7 +336,10 @@ async fn run(args: Args) -> Result<()> {
                             )
                             || matches!(
                                 gallery_dl_rs::pixiv::target(&url),
-                                Ok(gallery_dl_rs::pixiv::Target::Bookmarks { .. })
+                                Ok(gallery_dl_rs::pixiv::Target::Bookmarks { .. }
+                                    | gallery_dl_rs::pixiv::Target::Novel(
+                                        gallery_dl_rs::pixiv::novel::Target::Bookmarks { .. }
+                                    ))
                             )
                             || matches!(
                                 gallery_dl_rs::mastodon::target(&url),
@@ -424,6 +428,7 @@ async fn run(args: Args) -> Result<()> {
                     | "postimg"
                     | "tumblr"
                     | "pixiv"
+                    | "pixiv-novel"
                     | "deviantart"
                     | "flickr"
                     | "wallhaven"
@@ -612,6 +617,7 @@ struct Extractors {
     imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
     pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
+    pixiv_novel: OnceCell<Result<Arc<gallery_dl_rs::pixiv::Pixiv>>>,
     deviantart: OnceCell<Result<gallery_dl_rs::deviantart::DeviantArt>>,
     flickr: OnceCell<Result<gallery_dl_rs::flickr::Flickr>>,
     wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
@@ -1102,24 +1108,56 @@ fn extract_input<'a>(
                         })?;
                     native.events(&url)
                 }
-                Extractor::Native if category == "pixiv" => {
-                    let native = extractors
-                        .pixiv
+                Extractor::Native if matches!(category, "pixiv" | "pixiv-novel") => {
+                    let novel_settings = &settings["pixiv-novel"];
+                    let novel_options = &novel_settings.options;
+                    let novel = extractors
+                        .pixiv_novel
                         .get_or_init(|| async {
                             gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
                                 native
-                                    .with_include(options.include.clone())
-                                    .with_ugoira(options.ugoira.unwrap_or(true))
-                                    .with_refresh_token(options.refresh_token.as_deref())
-                                    .with_retries(options.retries.unwrap())
-                                    .with_request_timeout(options.timeout.unwrap())
-                                    .with_network(&configured.network)
+                                    .with_novel_options(gallery_dl_rs::pixiv::NovelOptions {
+                                        covers: novel_options.covers.unwrap_or(false),
+                                        full_series: novel_options.full_series.unwrap_or(false),
+                                    })
+                                    .with_refresh_token(novel_options.refresh_token.as_deref())
+                                    .with_retries(novel_options.retries.unwrap())
+                                    .with_request_timeout(novel_options.timeout.unwrap())
+                                    .with_network(&novel_settings.network)
+                                    .map(Arc::new)
                             })
                         })
                         .await
                         .as_ref()
-                        .map_err(|e| error(format!("native Pixiv initialization failed: {e}")))?;
-                    native.events(&url)
+                        .map_err(|e| {
+                            error(format!("native Pixiv novel initialization failed: {e}"))
+                        })?;
+                    if category == "pixiv-novel" {
+                        novel.events(&url)
+                    } else {
+                        let native = extractors
+                            .pixiv
+                            .get_or_init(|| async {
+                                gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
+                                    |native| {
+                                        native
+                                            .with_novel_extractor(Arc::clone(novel))
+                                            .with_include(options.include.clone())
+                                            .with_ugoira(options.ugoira.unwrap_or(true))
+                                            .with_refresh_token(options.refresh_token.as_deref())
+                                            .with_retries(options.retries.unwrap())
+                                            .with_request_timeout(options.timeout.unwrap())
+                                            .with_network(&configured.network)
+                                    },
+                                )
+                            })
+                            .await
+                            .as_ref()
+                            .map_err(|e| {
+                                error(format!("native Pixiv initialization failed: {e}"))
+                            })?;
+                        native.events(&url)
+                    }
                 }
                 Extractor::Native
                     if let Some(site) =
@@ -1257,6 +1295,12 @@ fn extract_input<'a>(
                                 .flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
+                            covers: (category == "pixiv-novel")
+                                .then_some(options.covers)
+                                .flatten(),
+                            full_series: (category == "pixiv-novel")
+                                .then_some(options.full_series)
+                                .flatten(),
                             access_token: (category == "mastodon")
                                 .then(|| options.access_token.clone())
                                 .flatten(),
@@ -1456,6 +1500,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         metadata: None,
         api_key: None,
         refresh_token: None,
+        covers: None,
+        full_series: None,
         client_id: None,
         client_secret: None,
         proxy: args.proxy.clone(),
@@ -1490,6 +1536,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "postimg",
         "tumblr",
         "pixiv",
+        "pixiv-novel",
         "deviantart",
         "flickr",
         "wallhaven",

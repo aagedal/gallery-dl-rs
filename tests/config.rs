@@ -1883,7 +1883,7 @@ fn api_key_is_tumblr_flickr_wallhaven_and_weasyl_only_and_never_echoed() {
 }
 
 #[test]
-fn refresh_token_is_pixiv_only_and_never_echoed() {
+fn refresh_token_is_pixiv_scoped_and_never_echoed() {
     let config = parse(r#"{"extractor":{"pixiv":{"refresh-token":"abc_123-x"}}}"#).unwrap();
     assert_eq!(
         config.resolve("pixiv").unwrap().refresh_token.as_deref(),
@@ -1899,6 +1899,39 @@ fn refresh_token_is_pixiv_only_and_never_echoed() {
     ] {
         let error = parse(json).err().unwrap().to_string();
         assert!(!error.contains("abc"), "{error}");
+    }
+}
+
+#[test]
+fn novel_settings_and_credentials_are_separate_from_illustrations() {
+    let config = parse(r#"{"extractor":{"pixiv":{"refresh-token":"art_token"},"pixiv-novel":{"refresh-token":"novel_token","covers":true,"full-series":true,"filename":"novel.{extension}"}}}"#).unwrap();
+    let novels = config.resolve("pixiv-novel").unwrap();
+    assert_eq!(novels.refresh_token.as_deref(), Some("novel_token"));
+    assert_eq!(novels.covers, Some(true));
+    assert_eq!(novels.full_series, Some(true));
+    assert_eq!(novels.filename.as_deref(), Some("novel.{extension}"));
+    let art = config.resolve("pixiv").unwrap();
+    assert_eq!(art.refresh_token.as_deref(), Some("art_token"));
+    assert_eq!(art.covers, None);
+    assert_eq!(art.full_series, None);
+    let overridden = novels.overlay(&Options {
+        covers: Some(false),
+        full_series: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(overridden.covers, Some(false));
+    assert_eq!(overridden.full_series, Some(false));
+    for invalid in [
+        r#"{"covers":true}"#,
+        r#"{"extractor":{"covers":true}}"#,
+        r#"{"extractor":{"pixiv":{"full-series":true}}}"#,
+        r#"{"extractor":{"tumblr":{"covers":false}}}"#,
+        r#"{"extractor":{"pixiv-novel":{"covers":"secret-value"}}}"#,
+        r#"{"extractor":{"pixiv-novel":{"full-series":1}}}"#,
+        r#"{"extractor":{"pixiv-novel":{"refresh-token":"secret value"}}}"#,
+    ] {
+        let message = parse(invalid).err().unwrap().to_string();
+        assert!(!message.contains("secret"), "{message}");
     }
 }
 

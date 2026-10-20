@@ -339,6 +339,16 @@ impl Media {
                     )
                 }
             }
+            "pixiv-novel" => {
+                let post = self.metadata.as_ref()?;
+                if !crate::pixiv::valid_media_id(&post.post_id, &post.media_id) {
+                    return None;
+                }
+                (
+                    "pixiv-novel",
+                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                )
+            }
             "twitter"
                 if self
                     .metadata
@@ -556,8 +566,8 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     if crate::deviantart::is_deviantart_url(url) {
         return Some("deviantart");
     }
-    if crate::pixiv::is_pixiv_url(url) {
-        return Some("pixiv");
+    if let Some(category) = crate::pixiv::category(url) {
+        return Some(category);
     }
     if crate::tumblr::is_blog_url(url) {
         return Some("tumblr");
@@ -651,6 +661,8 @@ pub struct BackendOptions {
     pub api_key: Option<String>,
     pub reposts: Option<bool>,
     pub ugoira: Option<bool>,
+    pub covers: Option<bool>,
+    pub full_series: Option<bool>,
     pub access_token: Option<String>,
     pub text_posts: Option<bool>,
     pub unavailable: Option<bool>,
@@ -795,6 +807,14 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("include={}", include.value()));
+        }
+        if let Some(covers) = options.covers {
+            command.arg("--option").arg(format!("covers={covers}"));
+        }
+        if let Some(full_series) = options.full_series {
+            command
+                .arg("--option")
+                .arg(format!("full-series={full_series}"));
         }
         if let Some(clauses) = &options.child_filter {
             // An empty clause list explicitly clears inherited backend filters.
@@ -1299,7 +1319,7 @@ fn compatibility_metadata(
         .unwrap_or(0);
     let index = if crate::booru::Site::from_category(category).is_some() {
         1
-    } else if category == "pixiv" {
+    } else if matches!(category, "pixiv" | "pixiv-novel") {
         data.get("num")
             .and_then(Value::as_u64)
             .and_then(|n| usize::try_from(n).ok()?.checked_add(1))
@@ -1371,7 +1391,7 @@ fn compatibility_metadata(
                 .map(str::to_owned),
             string("text"),
         ),
-        "pixiv" => {
+        "pixiv" | "pixiv-novel" => {
             let post_id = id("id");
             let media_id = data
                 .get("num")
@@ -1387,8 +1407,21 @@ fn compatibility_metadata(
                     .and_then(|user| user.get("account"))
                     .and_then(Value::as_str)
                     .map(str::to_owned),
-                string("title")
-                    .or_else(|| string("caption").map(|s| crate::mastodon::strip_html(&s))),
+                if category == "pixiv-novel" {
+                    let caption = string("caption")
+                        .map(|s| crate::mastodon::strip_html(&s))
+                        .filter(|s| !s.trim().is_empty());
+                    match (string("title"), caption) {
+                        (Some(title), Some(caption)) => {
+                            Some(format!("{title}\n\n{}", caption.trim()))
+                        }
+                        (Some(title), None) => Some(title),
+                        (None, caption) => caption,
+                    }
+                } else {
+                    string("title")
+                        .or_else(|| string("caption").map(|s| crate::mastodon::strip_html(&s)))
+                },
             )
         }
         "danbooru" | "e621" | "gelbooru" | "safebooru" => {

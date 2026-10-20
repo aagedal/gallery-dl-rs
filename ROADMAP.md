@@ -485,9 +485,9 @@ upstream Dispatch reference vectors cover string/list distinctions and unknown
 entries. Native mode currently omits unknown include names without upstream's
 warning. All X profile views have native paths; Bluesky adds replies/video,
 avatar/banner blobs and normalized fileless info; Pixiv adds original
-avatar/background images and extension fallbacks. Native Pixiv novels/Sketch
-still produce scoped unsupported errors, including in `all`,
-without suppressing later selected children. Profile info retains only the
+avatar/background images and extension fallbacks. Native Pixiv novels now use
+their own category client for user/bookmark child views; Sketch still produces
+a scoped unsupported error without suppressing later selected children. Profile info retains only the
 normalized public subset; full metadata-only JSON dumping remains unfinished.
 X/Pixiv typed profile image identity isolates owner/kind/version archives from
 ordinary posts and agrees with compatibility rows. Inspection, filters and
@@ -783,9 +783,17 @@ works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
 with ordered frame filenames/delays in metadata (`ugoira: false` skips them).
 Public illustration bookmarks support user/legacy URLs, path/query tag filters,
 and own bookmarks resolved from OAuth, with scoped lazy pagination.
+The separate `pixiv-novel` category supports single novels, user works, series,
+public/private bookmarks, exact UTF-8 text, optional original covers and
+`full-series` expansion. Profile novel views use novel-scoped credentials and
+network/output settings. HTTP fixtures cover lazy selection, scoped pagination,
+raw text publication and recovery; authenticated live novel extraction remains
+unverified. Embedded-image expansion, extended novel metadata and bookmark
+cursors remain unfinished; text/cover failures currently report errors where
+upstream warns. Per-child category predicate overrides remain unfinished.
 Remaining: ugoira original individual-frame mode and conversion,
 private bookmarks and bookmark cursor/metadata options, following, rankings,
-searches, novels, sketch,
+searches, sketch,
 pixivision, series, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
 

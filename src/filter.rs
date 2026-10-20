@@ -535,6 +535,7 @@ fn context_parts(
                 | "kemono"
                 | "coomer"
                 | "pixiv"
+                | "pixiv-novel"
                 | "deviantart"
                 | "flickr"
                 | "wallhaven"

@@ -560,7 +560,7 @@ ignore `posts`, matching upstream. Disabling `original` avoids token lookups;
 legacy inline `_1280` rewriting remains enabled. Plain media links stay direct downloads.
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
-requires `extractor.pixiv.refresh-token` (accepted only in the `pixiv`
+requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
 category, never echoed); without it selected Pixiv jobs fail before any network access.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
@@ -574,7 +574,7 @@ capped at 200 pages per type). Public illustration bookmarks support
 the legacy bookmark URL uses the authenticated user's ID from OAuth.
 A `tag` query overrides the path tag, following upstream's URL decoding.
 Pagination preserves the selected user, public visibility, and tag;
-private (`rest=hide`), following (`type=user`), and novel bookmarks remain
+private illustration bookmarks (`rest=hide`) and following (`type=user`) remain
 unsupported. Bookmarked files retain the original artist metadata and
 (illustration, page) archive identity. `/users/ID/avatar` and `/background`
 read `user/detail`, remove upstream's thumbnail/crop suffixes and emit original
@@ -595,6 +595,25 @@ title plus HTML-stripped caption, with `create_date` timestamp and page-0
 width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
 is (illustration, page). Plain `i.pximg.net` links stay direct downloads and
 usually fail without the Referer.
+
+Native Pixiv novels use the separate `pixiv-novel` category and
+`extractor.pixiv-novel.refresh-token`. Supported URLs are `/novel/show.php?id=ID`,
+`/n/ID`, `/users/ID/novels`, `/novel/series/ID`, and
+`/users/ID/bookmarks/novels[/TAG]` (including private bookmarks with `rest=hide`).
+Bookmark tags come from the path; the `tag` query is ignored, matching upstream.
+Listings page lazily with a 200-page limit and retain their owner, series,
+visibility and tag scopes. Selected works fetch the App API webview text and
+save exact UTF-8 as `ID_p0.txt`, preserving newlines and embedded-image markers.
+`covers: true` adds the original JPG cover with a PNG fallback;
+`full-series: true` expands a single novel into its series. Both default false
+and belong under `extractor.pixiv-novel`. Text and covers share the novel ID
+but have separate archive entries, isolated from illustration IDs. Profile
+`include` novel children use the novel category's credentials, network and output
+settings. Embedded-image expansion, bookmark cursors and upstream's extended
+novel metadata options remain unfinished. Text/cover failures close the current
+post and allow later novels to continue; native mode currently reports these as
+errors where upstream warns. Authenticated live novel extraction is unverified;
+local HTTP fixtures cover selection, pagination, text publication and recovery.
 
 Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
 category) uses the OAuth2 API with a client-credentials token (upstream's public
@@ -1369,8 +1388,8 @@ default. At most 128 entries of 128 bytes are accepted. Unknown names are omitte
 child positions; downstream deduplication/archive selection still applies.
 X accepts `replies` as an alias for `with-replies`. Pixiv's illustration bookmarks
 are `favorite`; `bookmark` and `user` select novels, also available as
-`novel-bookmark` and `novel-user`. Native Pixiv novels/Sketch
-report errors inside their selected scopes and leave later children available.
+`novel-bookmark` and `novel-user`. Native Pixiv novel views are supported;
+Sketch reports an error inside its selected scope and leaves later children available.
 `"all"` includes those entries; child ranges/filters can reject them without
 requests. Include settings forward to compatibility mode as typed options.
 Explicit view URLs ignore `include`. Post/file ranges reset for each selected

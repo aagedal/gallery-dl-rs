@@ -56,6 +56,7 @@ for source do :; done
 case "$source" in
   *instagram.com*) category=instagram ;;
   *x.com*) category=twitter ;;
+  *pixiv.net*) category=pixiv-novel ;;
   *) category=facebook ;;
 esac
 printf '[[3,"https://cdn.example/%s.jpg",{"filename":"remote","extension":"jpg"}]]\n' "$category"
@@ -81,6 +82,7 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
             "instagram":{"base-directory":"ig","filename":"ig.jpg"},
             "twitter":{"base-directory":"tw","filename":"tw.jpg"},
             "facebook":{"base-directory":"fb","filename":"fb.jpg"},
+            "pixiv-novel":{"base-directory":"novels","filename":"novels.jpg"},
             "direct":{"base-directory":"direct","filename":"direct.jpg"}
         }}),
     );
@@ -88,6 +90,7 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
         ("ig", "instagram"),
         ("tw", "twitter"),
         ("fb", "facebook"),
+        ("novels", "pixiv-novel"),
         ("direct", "direct"),
     ] {
         touch(
@@ -106,13 +109,14 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
             "https://instagram.com/p/post/",
             "https://x.com/user/status/1",
             "https://facebook.com/photo.php?fbid=1",
+            "https://www.pixiv.net/n/42",
             "https://example.com/remote.jpg",
         ]);
     let result = output(&mut command).await;
     success(&result);
     assert!(result.stdout.is_empty());
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert_eq!(stderr.matches("skipped ").count(), 4);
+    assert_eq!(stderr.matches("skipped ").count(), 5);
     assert!(!cwd.join("downloads").exists());
     assert!(!settings.join("base").exists());
 }
@@ -645,19 +649,25 @@ async fn bluesky_and_pixiv_selection_forward_only_to_matching_backends() {
         root.path(),
         serde_json::json!({"extractor": {
             "bluesky": {"reposts": true, "quoted": true, "videos": false},
-            "pixiv": {"ugoira": false}
+            "pixiv": {"ugoira": false},
+            "pixiv-novel": {"covers": true, "full-series": false}
         }}),
     );
     for (url, expected, absent) in [
         (
             "https://bsky.app/profile/alice.test",
             vec!["reposts=true", "quoted=true", "videos=false"],
-            vec!["ugoira="],
+            vec!["ugoira=", "covers=", "full-series="],
         ),
         (
             "https://www.pixiv.net/artworks/42",
             vec!["ugoira=false"],
-            vec!["reposts=", "quoted=", "videos="],
+            vec!["reposts=", "quoted=", "videos=", "covers=", "full-series="],
+        ),
+        (
+            "https://www.pixiv.net/novel/show.php?id=42",
+            vec!["covers=true", "full-series=false"],
+            vec!["ugoira=", "reposts=", "quoted=", "videos="],
         ),
         (
             "https://instagram.com/p/abc/",
@@ -792,6 +802,11 @@ printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","au
         ("https://bsky.app/profile/alice.test", "new", "bafykreib"),
         (
             "https://www.pixiv.net/users/9/bookmarks/artworks",
+            "43",
+            "43_p0",
+        ),
+        (
+            "https://www.pixiv.net/users/9/bookmarks/novels?rest=hide",
             "43",
             "43_p0",
         ),

@@ -1,0 +1,1165 @@
+//! Native Pixiv novels, using the authenticated App API and webview text payload.
+//! Embedded image markers remain literal text; embedded assets are not expanded.
+use super::{Pixiv, REFERER, id_of, percent_decode, string, valid_id};
+use crate::{
+    Result, error,
+    event::{ExtractionEvent, Post},
+    extract::{Media, PostMetadata, inline_text},
+};
+use futures_util::{
+    StreamExt,
+    stream::{self, BoxStream},
+};
+use serde_json::Value;
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    sync::Arc,
+};
+use url::Url;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NovelOptions {
+    pub covers: bool,
+    pub full_series: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Novel(String),
+    User(String),
+    Series(String),
+    Bookmarks {
+        user: String,
+        tag: Option<String>,
+        private: bool,
+    },
+}
+
+pub(super) fn is_route(url: &Url) -> bool {
+    let segments = super::segments(url);
+    let segments = segments.strip_prefix(&["en"]).unwrap_or(&segments);
+    matches!(
+        segments,
+        ["n", _]
+            | ["novel", "show.php"]
+            | ["novel", "series", _]
+            | ["users", _, "novels"]
+            | ["users", _, "bookmarks", "novels"]
+            | ["users", _, "bookmarks", "novels", _]
+    )
+}
+
+pub fn target(url: &Url) -> Result<Target> {
+    let unsupported = || error("unsupported Pixiv novel URL");
+    if !matches!(url.scheme(), "https" | "http")
+        || !matches!(url.host_str(), Some("pixiv.net" | "www.pixiv.net"))
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(unsupported());
+    }
+    let segments = super::segments(url);
+    let segments = segments.strip_prefix(&["en"]).unwrap_or(&segments);
+    let id = |value: &str| {
+        valid_id(value)
+            .then(|| value.to_owned())
+            .ok_or_else(unsupported)
+    };
+    let query = |name: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+    };
+    let bookmarks = |user: &str, tag: Option<&str>| {
+        let tag = tag
+            .map(|tag| percent_decode(tag).ok_or_else(unsupported))
+            .transpose()?;
+        if tag
+            .as_ref()
+            .is_some_and(|tag| tag.len() > 1024 || tag.chars().any(char::is_control))
+        {
+            return Err(unsupported());
+        }
+        Ok(Target::Bookmarks {
+            user: id(user)?,
+            tag,
+            private: query("rest").as_deref() == Some("hide"),
+        })
+    };
+    match segments {
+        ["n", raw] => Ok(Target::Novel(id(raw)?)),
+        ["novel", "show.php"] => Ok(Target::Novel(id(&query("id").ok_or_else(unsupported)?)?)),
+        ["novel", "series", raw] => Ok(Target::Series(id(raw)?)),
+        ["users", raw, "novels"] => Ok(Target::User(id(raw)?)),
+        ["users", raw, "bookmarks", "novels"] => bookmarks(raw, None),
+        ["users", raw, "bookmarks", "novels", tag] => bookmarks(raw, Some(tag)),
+        _ => Err(unsupported()),
+    }
+}
+
+/// Extract exactly the App API webview's `novel: JSON,\n` data member. JSON
+/// decoding is the only text transformation; markers and Unicode stay intact.
+pub fn parse_webview(bytes: &[u8]) -> Result<String> {
+    let invalid = || error("Pixiv returned invalid novel webview content");
+    if bytes.len() > super::MAX_RESPONSE {
+        return Err(invalid());
+    }
+    let html = std::str::from_utf8(bytes).map_err(|_| invalid())?;
+    let (_, data) = html.split_once("novel: ").ok_or_else(invalid)?;
+    let (data, _) = data.split_once(",\n").ok_or_else(invalid)?;
+    let body: Value = serde_json::from_str(data).map_err(|_| invalid())?;
+    let text = body
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(invalid)?;
+    if text.len() > crate::extract::MAX_INLINE_TEXT {
+        return Err(error("Pixiv novel text exceeds the payload size limit"));
+    }
+    Ok(text.to_owned())
+}
+
+#[derive(Clone)]
+struct Novel {
+    data: Value,
+    metadata: PostMetadata,
+}
+
+impl Novel {
+    fn parse(data: Value) -> Result<Self> {
+        let id = id_of(&data).ok_or_else(|| error("Pixiv returned an invalid novel ID"))?;
+        let title = string(&data, "title");
+        let caption = string(&data, "caption")
+            .map(crate::mastodon::strip_html)
+            .filter(|caption| !caption.trim().is_empty());
+        let caption = match (title, caption) {
+            (Some(title), Some(caption)) => Some(format!("{title}\n\n{}", caption.trim())),
+            (Some(title), None) => Some(title.to_owned()),
+            (None, caption) => caption,
+        }
+        .map(Arc::from);
+        let metadata = PostMetadata {
+            post_id: id.clone(),
+            media_id: format!("{id}_p0"),
+            index: 1,
+            username: data
+                .get("user")
+                .and_then(|user| string(user, "account"))
+                .map(Arc::from),
+            timestamp: string(&data, "create_date")
+                .and_then(|date| crate::date::parse_date(date).ok()),
+            caption,
+            ..PostMetadata::default()
+        };
+        Ok(Self { data, metadata })
+    }
+
+    fn post(&self, covers: bool) -> Post {
+        let mut metadata = self.metadata.clone();
+        metadata.media_id.clear();
+        metadata.index = 0;
+        Post {
+            category: "pixiv-novel".into(),
+            metadata: Some(metadata),
+            count: Some(if covers { 2 } else { 1 }),
+        }
+    }
+
+    fn text(&self, text: String) -> Result<Media> {
+        let (url, job) = inline_text(text)?;
+        Ok(Media {
+            url,
+            job,
+            category: "pixiv-novel".into(),
+            filename: format!("{}_p0.txt", self.metadata.post_id),
+            metadata: Some(self.metadata.clone()),
+            headers: BTreeMap::new(),
+            handoff: BTreeMap::new(),
+        })
+    }
+
+    fn cover(&self) -> Result<Media> {
+        let invalid = || error("Pixiv novel contains no supported cover image");
+        let raw = self
+            .data
+            .get("image_urls")
+            .and_then(|images| string(images, "large"))
+            .ok_or_else(invalid)?;
+        let source = super::media_url(raw).ok_or_else(invalid)?;
+        let (_, path) = source.path().split_once("/img/").ok_or_else(invalid)?;
+        let (path, _) = path.rsplit_once('.').ok_or_else(invalid)?;
+        if path.is_empty() {
+            return Err(invalid());
+        }
+        let base = format!(
+            "https://i.pximg.net/novel-cover-original/img/{}",
+            path.replace("_master1200", "")
+        );
+        let url = super::media_url(&format!("{base}.jpg")).ok_or_else(invalid)?;
+        let mut metadata = self.metadata.clone();
+        metadata.media_id = format!("{}_p1", metadata.post_id);
+        metadata.index = 2;
+        Ok(Media {
+            url,
+            job: crate::extract::MediaJob::DirectHttp,
+            category: "pixiv-novel".into(),
+            filename: format!("{}_p1.jpg", metadata.post_id),
+            metadata: Some(metadata),
+            headers: BTreeMap::from([("Referer".into(), REFERER.into())]),
+            handoff: BTreeMap::from([(
+                "_fallback".into(),
+                serde_json::json!([format!("{base}.png")]),
+            )]),
+        })
+    }
+}
+
+#[derive(Clone)]
+enum Feed {
+    User(String),
+    Series(String),
+    Bookmarks {
+        user: String,
+        tag: Option<String>,
+        private: bool,
+    },
+}
+
+impl Feed {
+    fn first(&self, native: &Pixiv) -> Url {
+        let endpoint = match self {
+            Self::User(_) => "v1/user/novels",
+            Self::Series(_) => "v1/novel/series",
+            Self::Bookmarks { .. } => "v1/user/bookmarks/novel",
+        };
+        let mut url = native
+            .api_root
+            .join(endpoint)
+            .expect("static novel endpoint");
+        match self {
+            Self::User(id) => {
+                url.query_pairs_mut().append_pair("user_id", id);
+            }
+            Self::Series(id) => {
+                url.query_pairs_mut().append_pair("series_id", id);
+            }
+            Self::Bookmarks { user, tag, private } => {
+                url.query_pairs_mut()
+                    .append_pair("user_id", user)
+                    .append_pair("restrict", if *private { "private" } else { "public" });
+                if let Some(tag) = tag {
+                    url.query_pairs_mut().append_pair("tag", tag);
+                }
+            }
+        }
+        url
+    }
+
+    fn checked(&self, native: &Pixiv, raw: &str) -> Result<Url> {
+        let invalid = || error("Pixiv returned an unexpected novel next page");
+        let url = Url::parse(raw).map_err(|_| invalid())?;
+        let expected = self.first(native);
+        let query: Vec<_> = url.query_pairs().collect();
+        let scope = expected.query_pairs().all(|(key, value)| {
+            let mut entries = query.iter().filter(|(actual, _)| *actual == key);
+            entries.next().is_some_and(|(_, actual)| *actual == value) && entries.next().is_none()
+        });
+        if url.origin() != native.api_root.origin()
+            || url.path() != expected.path()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.fragment().is_some()
+            || !scope
+            || matches!(self, Self::Bookmarks { tag: None, .. })
+                && query.iter().any(|(key, _)| key == "tag")
+        {
+            return Err(invalid());
+        }
+        Ok(url)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Stage {
+    Load,
+    Text,
+    Cover,
+    End,
+}
+struct State {
+    target: Option<Target>,
+    feed: Option<Feed>,
+    next: Option<String>,
+    pages: usize,
+    seen: BTreeSet<String>,
+    works: VecDeque<Value>,
+    active: Option<Novel>,
+    stage: Stage,
+    done: bool,
+}
+
+impl Pixiv {
+    async fn initialize_novels(&self, state: &mut State) -> Result<()> {
+        let Some(target) = state.target.take() else {
+            return Ok(());
+        };
+        let feed = match target {
+            Target::Novel(id) => {
+                let mut endpoint = self
+                    .api_root
+                    .join("v2/novel/detail")
+                    .expect("static novel endpoint");
+                endpoint.query_pairs_mut().append_pair("novel_id", &id);
+                let body = super::json(&self.get(&endpoint).await?)?;
+                let novel = body
+                    .get("novel")
+                    .ok_or_else(|| error("Pixiv response contains no novel"))?;
+                if id_of(novel).as_deref() != Some(id.as_str()) {
+                    return Err(error("Pixiv returned an unexpected novel"));
+                }
+                if self.novel_options.full_series
+                    && novel
+                        .get("series")
+                        .is_some_and(|series| !series.is_null() && series != &serde_json::json!({}))
+                {
+                    let series = novel
+                        .get("series")
+                        .and_then(id_of)
+                        .ok_or_else(|| error("Pixiv novel contains an invalid series ID"))?;
+                    Some(Feed::Series(series))
+                } else {
+                    state.works.push_back(novel.clone());
+                    None
+                }
+            }
+            Target::User(id) => Some(Feed::User(id)),
+            Target::Series(id) => Some(Feed::Series(id)),
+            Target::Bookmarks { user, tag, private } => {
+                Some(Feed::Bookmarks { user, tag, private })
+            }
+        };
+        if let Some(feed) = feed {
+            state.next = Some(feed.first(self).to_string());
+            state.feed = Some(feed);
+        }
+        Ok(())
+    }
+
+    async fn novel_page(&self, state: &mut State) -> Result<()> {
+        let Some(raw) = state.next.take() else {
+            state.done = true;
+            return Ok(());
+        };
+        if state.pages >= super::MAX_PAGES {
+            state.done = true;
+            return Ok(());
+        }
+        let endpoint = state
+            .feed
+            .as_ref()
+            .expect("novel listing feed")
+            .checked(self, &raw)?;
+        let mut key = endpoint.clone();
+        let mut pairs: Vec<_> = key
+            .query_pairs()
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        pairs.sort();
+        key.set_query(None);
+        key.query_pairs_mut().extend_pairs(pairs);
+        if !state.seen.insert(key.to_string()) {
+            return Err(error("Pixiv novel pagination repeated a page"));
+        }
+        let body = super::json(&self.get(&endpoint).await?)?;
+        let works = body
+            .get("novels")
+            .and_then(Value::as_array)
+            .ok_or_else(|| error("Pixiv response contains no novel list"))?;
+        state.works.extend(works.iter().cloned());
+        state.next = string(&body, "next_url").map(str::to_owned);
+        state.pages += 1;
+        Ok(())
+    }
+
+    pub(super) fn novel_events(&self, target: Target) -> BoxStream<'_, Result<ExtractionEvent>> {
+        if self.refresh_token.is_none() {
+            return stream::once(async { Err(error("native Pixiv novel extraction requires the pixiv-novel refresh-token setting in --native-config")) }).boxed();
+        }
+        let state = State {
+            target: Some(target),
+            feed: None,
+            next: None,
+            pages: 0,
+            seen: BTreeSet::new(),
+            works: VecDeque::new(),
+            active: None,
+            stage: Stage::Load,
+            done: false,
+        };
+        stream::unfold(state, move |mut state| async move {
+            loop {
+                match state.stage {
+                    Stage::Load => {
+                        if let Err(error) = self.initialize_novels(&mut state).await {
+                            state.done = true;
+                            return Some((Err(error), state));
+                        }
+                        if state.done {
+                            return None;
+                        }
+                        if let Some(data) = state.works.pop_front() {
+                            match Novel::parse(data) {
+                                Ok(novel) => {
+                                    let post = novel.post(self.novel_options.covers);
+                                    state.active = Some(novel);
+                                    state.stage = Stage::Text;
+                                    return Some((
+                                        Ok(ExtractionEvent::Post(Box::new(post))),
+                                        state,
+                                    ));
+                                }
+                                Err(error) => return Some((Err(error), state)),
+                            }
+                        }
+                        state.next.as_ref()?;
+                        if let Err(error) = self.novel_page(&mut state).await {
+                            state.done = true;
+                            return Some((Err(error), state));
+                        }
+                    }
+                    Stage::Text => {
+                        let novel = state.active.as_ref().expect("active novel");
+                        let mut endpoint = self
+                            .api_root
+                            .join("webview/v2/novel")
+                            .expect("static novel endpoint");
+                        endpoint
+                            .query_pairs_mut()
+                            .append_pair("id", &novel.metadata.post_id)
+                            .append_pair("viewer_version", "20221031_ai");
+                        let text = match self
+                            .get(&endpoint)
+                            .await
+                            .and_then(|body| parse_webview(&body))
+                            .and_then(|text| novel.text(text))
+                        {
+                            Ok(mut media) => {
+                                self.network.apply_media(&mut media);
+                                media
+                            }
+                            Err(error) => {
+                                state.stage = Stage::End;
+                                return Some((Err(error), state));
+                            }
+                        };
+                        state.stage = if self.novel_options.covers {
+                            Stage::Cover
+                        } else {
+                            Stage::End
+                        };
+                        return Some((Ok(ExtractionEvent::Media(Box::new(text))), state));
+                    }
+                    Stage::Cover => {
+                        state.stage = Stage::End;
+                        let result = state.active.as_ref().expect("active novel").cover().map(
+                            |mut media| {
+                                self.network.apply_media(&mut media);
+                                ExtractionEvent::Media(Box::new(media))
+                            },
+                        );
+                        return Some((result, state));
+                    }
+                    Stage::End => {
+                        state.active = None;
+                        state.stage = Stage::Load;
+                        return Some((Ok(ExtractionEvent::EndPost), state));
+                    }
+                }
+            }
+        })
+        .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        event::{self, ExtractionEvent},
+        extract::MediaJob,
+        job_selection::JobSelection,
+        pixiv::tests::{pixiv, response, serve, serve_with, token},
+        post_selection::PostSelection,
+        selection::RangeSelection,
+    };
+    use serde_json::json;
+
+    fn novel(id: u64, author: &str) -> Value {
+        json!({"id": id, "title": format!("Novel {id}"), "caption": "Hello <b>world</b>",
+            "user": {"id": 77, "account": author}, "create_date": "2024-01-01T09:00:00+09:00",
+            "series": {}, "image_urls": {"large": format!("https://i.pximg.net/c/600x600/novel-cover-master/img/2024/01/01/00/00/00/{id}_master1200.jpg")}})
+    }
+
+    fn webview(text: &str) -> Vec<u8> {
+        response(
+            "200 OK",
+            format!(
+                "<script>data={{novel: {},\nother: null}};</script>",
+                json!({"text": text})
+            )
+            .as_bytes(),
+        )
+    }
+
+    fn detail(data: Value) -> Vec<u8> {
+        response("200 OK", json!({"novel": data}).to_string().as_bytes())
+    }
+    fn page(works: Vec<Value>, next: Option<Url>) -> Vec<u8> {
+        response(
+            "200 OK",
+            json!({"novels": works, "next_url": next})
+                .to_string()
+                .as_bytes(),
+        )
+    }
+
+    #[test]
+    fn classifies_novel_categories_and_exact_bookmark_path_tag_semantics() {
+        for (raw, expected) in [
+            (
+                "https://www.pixiv.net/novel/show.php?id=42",
+                Target::Novel("42".into()),
+            ),
+            ("https://pixiv.net/n/42", Target::Novel("42".into())),
+            (
+                "https://www.pixiv.net/en/users/9/novels",
+                Target::User("9".into()),
+            ),
+            (
+                "https://www.pixiv.net/novel/series/7",
+                Target::Series("7".into()),
+            ),
+            (
+                "https://www.pixiv.net/users/9/bookmarks/novels/%E7%8C%AB?tag=ignored&rest=hide",
+                Target::Bookmarks {
+                    user: "9".into(),
+                    tag: Some("猫".into()),
+                    private: true,
+                },
+            ),
+            (
+                "https://www.pixiv.net/users/9/bookmarks/novels/C++?rest=show&rest=hide",
+                Target::Bookmarks {
+                    user: "9".into(),
+                    tag: Some("C++".into()),
+                    private: false,
+                },
+            ),
+            (
+                "https://www.pixiv.net/users/9/bookmarks/novels?tag=ignored",
+                Target::Bookmarks {
+                    user: "9".into(),
+                    tag: None,
+                    private: false,
+                },
+            ),
+        ] {
+            let url = Url::parse(raw).unwrap();
+            assert_eq!(target(&url).unwrap(), expected);
+            assert_eq!(super::super::category(&url), Some("pixiv-novel"));
+            assert!(super::super::is_pixiv_url(&url));
+        }
+        for raw in [
+            "https://www.pixiv.net/n/042",
+            "https://www.pixiv.net/novel/show.php?id=bad",
+            "https://www.pixiv.net/novel/series/0",
+            "https://evil.example/n/42",
+            "https://x:y@www.pixiv.net/n/42",
+            "https://www.pixiv.net:444/n/42",
+        ] {
+            assert!(target(&Url::parse(raw).unwrap()).is_err(), "{raw}");
+        }
+        assert_eq!(
+            super::super::category(&Url::parse("https://www.pixiv.net/artworks/42").unwrap()),
+            Some("pixiv")
+        );
+    }
+
+    #[test]
+    fn webview_decodes_json_only_and_bounds_invalid_html_and_text() {
+        let text = "日本語\r\n[newpage]\n[chapter:段落]\n[ruby:漢字 > かんじ]\n[pixivimage:42-1]\n[uploadedimage:1]\n<&> \\ \" 🦀\0";
+        let html = format!("before novel: {},\nafter", json!({"text": text}));
+        assert_eq!(parse_webview(html.as_bytes()).unwrap(), text);
+        assert_eq!(parse_webview(b"novel: {\"text\":\"\"},\n").unwrap(), "");
+        for html in [
+            b"no novel".as_slice(),
+            b"novel: {},\n",
+            b"novel: {\"text\":42},\n",
+            b"novel: broken,\n",
+            b"novel: {\"text\":\"x\"}",
+            &[0xff],
+        ] {
+            assert_eq!(
+                parse_webview(html).unwrap_err().to_string(),
+                "Pixiv returned invalid novel webview content"
+            );
+        }
+        assert!(parse_webview(&vec![b'x'; super::super::MAX_RESPONSE + 1]).is_err());
+        let oversize = format!(
+            "novel: {},\n",
+            json!({"text": "x".repeat(crate::extract::MAX_INLINE_TEXT + 1)})
+        );
+        assert!(
+            parse_webview(oversize.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("payload size limit")
+        );
+    }
+
+    #[tokio::test]
+    async fn single_novel_preserves_text_and_emits_cover_after_text_with_separate_archive_ids() {
+        let text = "日本語\n[newpage]\n[pixivimage:42-1]\n\r\nEND";
+        let (root, server) = serve(vec![
+            token("access-secret"),
+            detail(novel(42, "author")),
+            webview(text),
+        ]);
+        let native = pixiv(root).with_novel_options(NovelOptions {
+            covers: true,
+            full_series: false,
+        });
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/novel/show.php?id=42").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            matches!(&events[0], ExtractionEvent::Post(post) if post.category == "pixiv-novel" && post.count == Some(2))
+        );
+        let ExtractionEvent::Media(text_media) = &events[1] else {
+            panic!("missing text")
+        };
+        assert_eq!(text_media.category, "pixiv-novel");
+        assert_eq!(text_media.filename, "42_p0.txt");
+        assert!(matches!(&text_media.job, MediaJob::InlineText { data } if data == text));
+        let metadata = text_media.metadata.as_ref().unwrap();
+        assert_eq!(metadata.username.as_deref(), Some("author"));
+        assert_eq!(metadata.caption.as_deref(), Some("Novel 42\n\nHello world"));
+        assert_eq!(metadata.timestamp, Some(1704067200));
+        let ExtractionEvent::Media(cover) = &events[2] else {
+            panic!("missing cover")
+        };
+        assert_eq!(
+            cover.url.as_str(),
+            "https://i.pximg.net/novel-cover-original/img/2024/01/01/00/00/00/42.jpg"
+        );
+        assert_eq!(cover.filename, "42_p1.jpg");
+        assert_eq!(cover.metadata.as_ref().unwrap().index, 2);
+        assert_eq!(
+            cover.handoff["_fallback"],
+            json!(["https://i.pximg.net/novel-cover-original/img/2024/01/01/00/00/00/42.png"])
+        );
+        assert!(text_media.archive_key().is_some());
+        assert_ne!(text_media.archive_key(), cover.archive_key());
+        assert!(matches!(events[3], ExtractionEvent::EndPost));
+        assert_eq!(events.len(), 4);
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /v2/novel/detail?novel_id=42 "));
+        assert!(requests[2].starts_with("GET /webview/v2/novel?id=42&viewer_version=20221031_ai "));
+        assert!(
+            requests[2]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer access-secret")
+        );
+        assert!(text_media.headers.is_empty());
+        assert_eq!(
+            cover.headers,
+            BTreeMap::from([("Referer".into(), REFERER.into())])
+        );
+    }
+
+    #[tokio::test]
+    async fn post_boundary_precedes_webview_request_and_consumer_drop_is_lazy() {
+        let (root, server) = serve(vec![token("t"), detail(novel(42, "author"))]);
+        let native = pixiv(root);
+        let mut events = native.events(&Url::parse("https://www.pixiv.net/n/42").unwrap());
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::Post(_)
+        ));
+        drop(events);
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn optional_cover_metadata_is_not_parsed_until_consumed_after_text() {
+        for covers in [false, true] {
+            let mut work = novel(42, "author");
+            work["image_urls"] = json!({"large":"https://evil.example/cover.jpg"});
+            let (root, server) = serve(vec![token("t"), detail(work), webview("text")]);
+            let native = pixiv(root).with_novel_options(NovelOptions {
+                covers,
+                full_series: false,
+            });
+            let files = JobSelection {
+                file_range: Some(RangeSelection::parse("1").unwrap()),
+                ..Default::default()
+            }
+            .apply(native.events(&Url::parse("https://www.pixiv.net/n/42").unwrap()))
+            .collect::<Vec<_>>()
+            .await;
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].as_ref().unwrap().filename, "42_p0.txt");
+            assert_eq!(server.join().unwrap().len(), 3);
+        }
+    }
+
+    #[tokio::test]
+    async fn listing_webview_failure_closes_post_and_recovers_later_novels() {
+        let (root, server) = serve(vec![
+            token("t"),
+            page(vec![novel(41, "first"), novel(42, "second")], None),
+            response("200 OK", b"PRIVATE invalid webview"),
+            webview("second text"),
+        ]);
+        let native = pixiv(root).with_novel_options(NovelOptions {
+            covers: true,
+            full_series: false,
+        });
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events[0], Ok(ExtractionEvent::Post(_))));
+        assert_eq!(
+            events[1].as_ref().unwrap_err().to_string(),
+            "Pixiv returned invalid novel webview content"
+        );
+        assert!(matches!(events[2], Ok(ExtractionEvent::EndPost)));
+        assert!(matches!(events[3], Ok(ExtractionEvent::Post(_))));
+        assert!(
+            matches!(&events[4], Ok(ExtractionEvent::Media(media)) if media.filename == "42_p0.txt")
+        );
+        assert!(
+            matches!(&events[5], Ok(ExtractionEvent::Media(media)) if media.filename == "42_p1.jpg")
+        );
+        assert!(matches!(events[6], Ok(ExtractionEvent::EndPost)));
+        assert_eq!(events.len(), 7);
+        assert_eq!(server.join().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn lazy_listing_does_not_fetch_next_novel_webview_or_page_after_first_file() {
+        let (root, server) = serve_with(|root| {
+            vec![
+                token("t"),
+                page(
+                    vec![novel(41, "first"), novel(42, "second")],
+                    Some(root.join("v1/user/novels?user_id=9&offset=30").unwrap()),
+                ),
+                webview("first"),
+            ]
+        });
+        let native = pixiv(root);
+        let mut files = native.stream(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap());
+        assert_eq!(files.next().await.unwrap().unwrap().filename, "41_p0.txt");
+        drop(files);
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn private_novel_bookmarks_preserve_mixed_authors_and_public_scope_is_explicit() {
+        for private in [false, true] {
+            let (root, server) = serve(vec![
+                token("t"),
+                page(vec![novel(41, "first"), novel(42, "second")], None),
+                webview("first"),
+                webview("second"),
+            ]);
+            let native = pixiv(root);
+            let suffix = if private {
+                "?rest=hide&tag=ignored"
+            } else {
+                "?tag=ignored"
+            };
+            let url = Url::parse(&format!(
+                "https://www.pixiv.net/users/9/bookmarks/novels/%E7%8C%AB{suffix}"
+            ))
+            .unwrap();
+            let files = native
+                .stream(&url)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(
+                files
+                    .iter()
+                    .map(|media| media
+                        .metadata
+                        .as_ref()
+                        .unwrap()
+                        .username
+                        .as_deref()
+                        .unwrap())
+                    .collect::<Vec<_>>(),
+                ["first", "second"]
+            );
+            assert_eq!(
+                files[0].archive_key(),
+                Novel::parse(novel(41, "first"))
+                    .unwrap()
+                    .text("same".into())
+                    .unwrap()
+                    .archive_key()
+            );
+            let requests = server.join().unwrap();
+            assert!(requests[1].starts_with(&format!(
+                "GET /v1/user/bookmarks/novel?user_id=9&restrict={}&tag=%E7%8C%AB ",
+                if private { "private" } else { "public" }
+            )));
+        }
+    }
+
+    #[tokio::test]
+    async fn full_series_expands_single_detail_only_when_enabled_and_uses_series_scope() {
+        for full_series in [false, true] {
+            let mut work = novel(42, "author");
+            work["series"] = json!({"id":7,"title":"Series"});
+            let mut replies = vec![token("t"), detail(work)];
+            if full_series {
+                replies.push(page(vec![novel(41, "earlier"), novel(42, "author")], None));
+            }
+            replies.push(webview("text"));
+            if full_series {
+                replies.push(webview("later"));
+            }
+            let (root, server) = serve(replies);
+            let native = pixiv(root).with_novel_options(NovelOptions {
+                covers: false,
+                full_series,
+            });
+            let files = native
+                .stream(&Url::parse("https://www.pixiv.net/n/42").unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(files.len(), if full_series { 2 } else { 1 });
+            assert_eq!(
+                files[0].metadata.as_ref().unwrap().post_id,
+                if full_series { "41" } else { "42" }
+            );
+            let requests = server.join().unwrap();
+            if full_series {
+                assert!(requests[2].starts_with("GET /v1/novel/series?series_id=7 "));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn novel_pagination_preserves_scope_and_rejects_cycles_before_duplicate_request() {
+        for feed in [
+            Feed::User("9".into()),
+            Feed::Series("7".into()),
+            Feed::Bookmarks {
+                user: "9".into(),
+                tag: Some("猫".into()),
+                private: true,
+            },
+        ] {
+            let native = Pixiv::new(std::time::Duration::from_secs(2)).unwrap();
+            let mut next = feed.first(&native);
+            next.query_pairs_mut().append_pair("offset", "30");
+            assert!(feed.checked(&native, next.as_str()).is_ok());
+            let mut cross = next.clone();
+            cross.set_host(Some("evil.example")).unwrap();
+            assert!(feed.checked(&native, cross.as_str()).is_err());
+            let mut cross = next.clone();
+            cross.set_path("/v1/user/illusts");
+            assert!(feed.checked(&native, cross.as_str()).is_err());
+            let mut cross = next.clone();
+            cross
+                .query_pairs_mut()
+                .append_pair("user_id", "10")
+                .append_pair("series_id", "8")
+                .append_pair("restrict", "public");
+            assert!(feed.checked(&native, cross.as_str()).is_err());
+        }
+        let (root, server) = serve_with(|root| {
+            vec![
+                token("t"),
+                page(
+                    vec![novel(41, "author")],
+                    Some(root.join("v1/user/novels?user_id=9").unwrap()),
+                ),
+                webview("first"),
+            ]
+        });
+        let native = pixiv(root);
+        let files = native
+            .stream(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].as_ref().unwrap().filename, "41_p0.txt");
+        assert_eq!(
+            files[1].as_ref().unwrap_err().to_string(),
+            "Pixiv novel pagination repeated a page"
+        );
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn user_series_and_private_bookmark_feeds_fetch_following_pages_after_current_text() {
+        for (path, endpoint) in [
+            ("users/9/novels", "v1/user/novels?user_id=9"),
+            ("novel/series/7", "v1/novel/series?series_id=7"),
+            (
+                "users/9/bookmarks/novels/tag?rest=hide",
+                "v1/user/bookmarks/novel?user_id=9&restrict=private&tag=tag",
+            ),
+        ] {
+            let (root, server) = serve_with(|root| {
+                vec![
+                    token("t"),
+                    page(
+                        vec![novel(41, "first")],
+                        Some(root.join(&format!("{endpoint}&offset=30")).unwrap()),
+                    ),
+                    webview("first"),
+                    page(vec![novel(42, "second")], None),
+                    webview("second"),
+                ]
+            });
+            let files = pixiv(root)
+                .stream(&Url::parse(&format!("https://www.pixiv.net/{path}")).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(
+                files
+                    .iter()
+                    .map(|file| file.filename.as_str())
+                    .collect::<Vec<_>>(),
+                ["41_p0.txt", "42_p0.txt"]
+            );
+            let requests = server.join().unwrap();
+            assert!(requests[1].starts_with(&format!("GET /{endpoint} ")));
+            assert!(requests[2].starts_with("GET /webview/v2/novel?id=41&viewer_version="));
+            assert!(requests[3].starts_with(&format!("GET /{endpoint}&offset=30 ")));
+            assert!(requests[4].starts_with("GET /webview/v2/novel?id=42&viewer_version="));
+        }
+    }
+
+    #[tokio::test]
+    async fn novel_pagination_stops_at_two_hundred_pages_without_requesting_the_next() {
+        let (root, server) = serve_with(|root| {
+            let mut replies = vec![token("t")];
+            replies.extend((1..=super::super::MAX_PAGES).map(|offset| {
+                page(
+                    Vec::new(),
+                    Some(
+                        root.join(&format!("v1/user/novels?user_id=9&offset={offset}"))
+                            .unwrap(),
+                    ),
+                )
+            }));
+            replies
+        });
+        let files = pixiv(root)
+            .stream(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert!(files.is_empty(), "{files:?}");
+        assert_eq!(server.join().unwrap().len(), super::super::MAX_PAGES + 1);
+    }
+
+    #[tokio::test]
+    async fn webview_http_failures_close_their_post_and_leave_later_novels_available() {
+        for status in ["404 Not Found", "503 Service Unavailable"] {
+            let (root, server) = serve(vec![
+                token("t"),
+                page(vec![novel(41, "first"), novel(42, "second")], None),
+                response(status, b"SECRET server response"),
+                webview("second"),
+            ]);
+            let events = pixiv(root)
+                .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert!(matches!(events[0], Ok(ExtractionEvent::Post(_))));
+            assert!(events[1].is_err());
+            assert!(
+                !events[1]
+                    .as_ref()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("SECRET")
+            );
+            assert!(matches!(events[2], Ok(ExtractionEvent::EndPost)));
+            assert!(matches!(events[3], Ok(ExtractionEvent::Post(_))));
+            assert!(
+                matches!(&events[4], Ok(ExtractionEvent::Media(media)) if media.filename == "42_p0.txt")
+            );
+            assert!(matches!(events[5], Ok(ExtractionEvent::EndPost)));
+            assert_eq!(server.join().unwrap().len(), 4);
+        }
+    }
+
+    #[tokio::test]
+    async fn unexpected_single_id_is_rejected_before_any_webview_request() {
+        let (root, server) = serve(vec![token("t"), detail(novel(43, "wrong"))]);
+        let files = pixiv(root)
+            .stream(&Url::parse("https://www.pixiv.net/n/42").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].as_ref().unwrap_err().to_string(),
+            "Pixiv returned an unexpected novel"
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn root_profile_novel_children_use_separately_configured_client_after_begin() {
+        let (root, server) = serve(vec![
+            token("novel-only-access"),
+            page(vec![novel(41, "author")], None),
+            webview("text"),
+        ]);
+        let novel_native = Arc::new(pixiv(root));
+        let root_native = Pixiv::new(std::time::Duration::from_secs(2))
+            .unwrap()
+            .with_include(Some(crate::dispatch::Include::Views(vec![
+                "novel-user".into(),
+            ])))
+            .with_novel_extractor(novel_native);
+        let mut events = root_native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap());
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::BeginChild(_)
+        ));
+        let files = event::media_only(events)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].category, "pixiv-novel");
+        assert!(
+            server.join().unwrap()[1]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer novel-only-access")
+        );
+    }
+
+    #[tokio::test]
+    async fn native_novel_publication_saves_exact_utf8_sidecar_and_archive_without_text_leak() {
+        use crate::{
+            archive::{Archive, ArchiveOutcome},
+            download::{self, DownloadOptions},
+        };
+        let text =
+            "NOVEL_PAYLOAD_SECRET\r\n日本語 🦀\n[newpage]\n[ruby:漢字 > かんじ]\n100% %20\0END";
+        let (api, server) = serve(vec![
+            token("access-secret"),
+            detail(novel(42, "author")),
+            webview(text),
+        ]);
+        let mut files = pixiv(api)
+            .stream(&Url::parse("https://www.pixiv.net/n/42").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(server.join().unwrap().len(), 3);
+        let media = files.remove(0);
+        let key = media.archive_key().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let archive = Archive::open(root.path().join("novels.sqlite"))
+            .await
+            .unwrap();
+        let client = download::client(std::time::Duration::from_secs(2)).unwrap();
+        let outcome = archive
+            .download(
+                &client,
+                root.path(),
+                &media,
+                DownloadOptions {
+                    write_metadata: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let ArchiveOutcome::Completed(outcome) = outcome else {
+            panic!("expected novel publication")
+        };
+        let path = outcome.saved_path().unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), text.as_bytes());
+        let sidecar = std::fs::read_to_string(format!("{}.json", path.display())).unwrap();
+        assert!(!sidecar.contains("NOVEL_PAYLOAD_SECRET"));
+        assert!(!sidecar.contains("text:"));
+        assert!(!sidecar.contains("access-secret"));
+        let sidecar: Value = serde_json::from_str(&sidecar).unwrap();
+        assert_eq!(sidecar["category"], "pixiv-novel");
+        assert_eq!(sidecar["metadata"]["post_id"], "42");
+        assert_eq!(sidecar["metadata"]["media_id"], "42_p0");
+        assert_eq!(sidecar["metadata"]["username"], "author");
+        assert!(archive.contains(&key).await.unwrap());
+        assert!(matches!(
+            archive
+                .download(&client, root.path(), &media, DownloadOptions::default())
+                .await
+                .unwrap(),
+            ArchiveOutcome::AlreadyArchived
+        ));
+    }
+
+    #[tokio::test]
+    async fn child_post_ranges_restart_across_novel_user_and_novel_bookmarks() {
+        let (root, server) = serve(vec![
+            token("t"),
+            page(vec![novel(41, "one"), novel(42, "two")], None),
+            webview("one"),
+            page(vec![novel(43, "three"), novel(44, "four")], None),
+            webview("three"),
+        ]);
+        let native = pixiv(root).with_include(Some(crate::dispatch::Include::Views(vec![
+            "novel-user".into(),
+            "novel-bookmark".into(),
+        ])));
+        let files = JobSelection {
+            post_selection: Some(PostSelection::new(
+                Some(RangeSelection::parse("1").unwrap()),
+                None,
+            )),
+            ..Default::default()
+        }
+        .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()
+        .unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|media| media.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["41_p0.txt", "43_p0.txt"]
+        );
+        assert_eq!(server.join().unwrap().len(), 5);
+    }
+}

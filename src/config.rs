@@ -126,8 +126,10 @@ pub struct Options {
     pub metadata: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
-    /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
+    /// Pixiv OAuth refresh token; accepted in pixiv and pixiv-novel scopes.
     pub refresh_token: Option<String>,
+    pub covers: Option<bool>,
+    pub full_series: Option<bool>,
     /// DeviantArt OAuth client ID; only accepted in the `deviantart` category.
     pub client_id: Option<String>,
     /// DeviantArt OAuth client secret; only accepted in the `deviantart` category.
@@ -302,6 +304,8 @@ impl Options {
                 .refresh_token
                 .clone()
                 .or_else(|| self.refresh_token.clone()),
+            covers: overrides.covers.or(self.covers),
+            full_series: overrides.full_series.or(self.full_series),
             client_id: overrides
                 .client_id
                 .clone()
@@ -514,6 +518,7 @@ struct RawExtractor {
     postimg: Box<RawOptions>,
     tumblr: Box<RawOptions>,
     pixiv: Box<RawOptions>,
+    pixiv_novel: Box<RawOptions>,
     deviantart: Box<RawOptions>,
     flickr: Box<RawOptions>,
     wallhaven: Box<RawOptions>,
@@ -587,6 +592,8 @@ struct RawOptions {
     user_id: Field,
     access_token: Field,
     refresh_token: Field,
+    covers: Field,
+    full_series: Field,
     api_server: Field,
     client_id: Field,
     client_secret: Field,
@@ -684,6 +691,7 @@ impl Config {
                 "postimg",
                 "tumblr",
                 "pixiv",
+                "pixiv-novel",
                 "deviantart",
                 "flickr",
                 "wallhaven",
@@ -762,6 +770,8 @@ impl Config {
             user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
+            covers: Field::default(),
+            full_series: Field::default(),
             api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
@@ -836,6 +846,8 @@ impl Config {
             user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
+            covers: Field::default(),
+            full_series: Field::default(),
             api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
@@ -874,6 +886,7 @@ impl Config {
             ("postimg", extractor.postimg),
             ("tumblr", extractor.tumblr),
             ("pixiv", extractor.pixiv),
+            ("pixiv-novel", extractor.pixiv_novel),
             ("deviantart", extractor.deviantart),
             ("flickr", extractor.flickr),
             ("wallhaven", extractor.wallhaven),
@@ -957,9 +970,16 @@ impl Config {
                     "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
                 ));
             }
-            if name != "pixiv" && settings.refresh_token.0.is_some() {
+            if !matches!(name, "pixiv" | "pixiv-novel") && settings.refresh_token.0.is_some() {
                 return Err(error(
-                    "native configuration refresh-token is only supported for pixiv",
+                    "native configuration refresh-token is only supported for pixiv or pixiv-novel",
+                ));
+            }
+            if name != "pixiv-novel"
+                && (settings.covers.0.is_some() || settings.full_series.0.is_some())
+            {
+                return Err(error(
+                    "native configuration covers/full-series require a pixiv-novel scope",
                 ));
             }
             if name != "deviantart"
@@ -1027,6 +1047,7 @@ impl Config {
                 | "postimg"
                 | "tumblr"
                 | "pixiv"
+                | "pixiv-novel"
                 | "deviantart"
                 | "flickr"
                 | "wallhaven"
@@ -1618,6 +1639,8 @@ impl RawOptions {
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
+            covers: boolean(self.covers, "covers")?,
+            full_series: boolean(self.full_series, "full-series")?,
             api_server,
             bluesky_endpoint: None,
             proxy,

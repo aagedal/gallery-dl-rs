@@ -32,6 +32,10 @@ use std::{
 };
 use url::Url;
 
+#[path = "pixiv_novel.rs"]
+pub mod novel;
+pub use novel::NovelOptions;
+
 /// Upstream gallery-dl's public iOS app constants.
 const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
 const CLIENT_SECRET: &str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj";
@@ -100,6 +104,7 @@ impl ProfileKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
+    Novel(novel::Target),
     Illust(String),
     User {
         id: String,
@@ -139,9 +144,20 @@ fn percent_decode(raw: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
+/// The native category of a supported Pixiv artwork or novel URL.
+pub fn category(url: &Url) -> Option<&'static str> {
+    target(url).ok().map(|target| {
+        if matches!(target, Target::Novel(_)) {
+            "pixiv-novel"
+        } else {
+            "pixiv"
+        }
+    })
+}
+
 /// Whether a URL is a Pixiv page handled by this extractor.
 pub fn is_pixiv_url(url: &Url) -> bool {
-    matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net")) && target(url).is_ok()
+    category(url).is_some()
 }
 
 pub fn target(url: &Url) -> Result<Target> {
@@ -157,6 +173,9 @@ pub fn target(url: &Url) -> Result<Target> {
         || !matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net"))
     {
         return Err(unsupported());
+    }
+    if novel::is_route(url) {
+        return novel::target(url).map(Target::Novel);
     }
     let all = segments(url);
     let rest = match all.as_slice() {
@@ -658,6 +677,8 @@ pub struct Pixiv {
     rate_limits: RateLimits,
     ugoira: bool,
     include: Option<Include>,
+    novel_options: NovelOptions,
+    novel_extractor: Option<Arc<Pixiv>>,
 }
 
 #[derive(Clone)]
@@ -701,6 +722,8 @@ impl Pixiv {
             rate_limits: RateLimits::default(),
             ugoira: true,
             include: None,
+            novel_options: NovelOptions::default(),
+            novel_extractor: None,
         })
     }
 
@@ -713,6 +736,17 @@ impl Pixiv {
 
     pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
         self.refresh_token = token.map(str::to_owned);
+        self
+    }
+
+    pub fn with_novel_options(mut self, options: NovelOptions) -> Self {
+        self.novel_options = options;
+        self
+    }
+
+    /// Apply independently configured pixiv-novel credentials/options to queued novel views.
+    pub fn with_novel_extractor(mut self, native: Arc<Pixiv>) -> Self {
+        self.novel_extractor = Some(native);
         self
     }
 
@@ -999,12 +1033,12 @@ impl Pixiv {
             "favorite" => Target::Bookmarks { id: Some(id), tag: None },
             "avatar" => Target::Profile { id, kind: ProfileKind::Avatar },
             "background" => Target::Profile { id, kind: ProfileKind::Background },
-            "bookmark" => return stream::once(async {
-                Err(error("native Pixiv novel bookmarks are not supported; use --extractor compatibility"))
-            }).boxed(),
-            "user" => return stream::once(async {
-                Err(error("native Pixiv user novels are not supported; use --extractor compatibility"))
-            }).boxed(),
+            "bookmark" | "user" => {
+                let target = if view == "bookmark" { novel::Target::Bookmarks { user: id, tag: None, private: false } }
+                    else { novel::Target::User(id) };
+                let native = self.novel_extractor.as_deref().unwrap_or(self);
+                return native.novel_events(target);
+            }
             "sketch" => return stream::once(async {
                 Err(error("native Pixiv Sketch extraction is not supported; use --extractor compatibility"))
             }).boxed(),
@@ -1014,10 +1048,14 @@ impl Pixiv {
     }
 
     fn target_events(&self, target: Target) -> BoxStream<'_, Result<ExtractionEvent>> {
+        if let Target::Novel(target) = target {
+            return self.novel_events(target);
+        }
         if self.refresh_token.is_none() {
             return stream::once(async { Err(missing_token()) }).boxed();
         }
         let (user, kinds) = match target {
+            Target::Novel(target) => return self.novel_events(target),
             Target::Profile { id, kind } => {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/user/detail").expect("static");
@@ -1416,7 +1454,7 @@ mod tests {
             "https://www.pixiv.net/",
             "https://www.pixiv.net/artworks/abc",
             "https://www.pixiv.net/artworks/0123",
-            "https://www.pixiv.net/users/9/bookmarks/novels",
+            "https://www.pixiv.net/users/9/bookmarks/novel-unknown",
             "https://www.pixiv.net/member_illust.php?id=9",
             "https://i.pximg.net/img-original/img/1_p0.png",
             "https://www.pixiv.net:444/artworks/1",
@@ -1471,7 +1509,7 @@ mod tests {
             "https://www.pixiv.net/bookmark.php?id=9&rest=hide",
             "https://www.pixiv.net/bookmark.php?type=user",
             "https://www.pixiv.net/bookmark.php?type=novel",
-            "https://www.pixiv.net/users/9/bookmarks/novels",
+            "https://www.pixiv.net/users/9/bookmarks/novel-unknown",
             "https://www.pixiv.net/users/9/following",
             "https://www.pixiv.net/users/9/bookmarks/artworks/%00",
             "https://www.pixiv.net/users/9/bookmarks/artworks/%FF",
@@ -1678,7 +1716,7 @@ mod tests {
         assert_eq!(client_time(time), "2024-01-01T00:00:00+00:00");
     }
 
-    fn response(status: &str, body: &[u8]) -> Vec<u8> {
+    pub(super) fn response(status: &str, body: &[u8]) -> Vec<u8> {
         let mut out = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nRetry-After: 0\r\n\r\n",
             body.len()
@@ -1688,11 +1726,13 @@ mod tests {
         out
     }
 
-    fn serve(responses: Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
+    pub(super) fn serve(responses: Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
         serve_with(|_| responses)
     }
 
-    fn serve_with(responses: impl FnOnce(&Url) -> Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
+    pub(super) fn serve_with(
+        responses: impl FnOnce(&Url) -> Vec<Vec<u8>>,
+    ) -> (Url, JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let responses = responses(&root);
@@ -1744,7 +1784,7 @@ mod tests {
         (root, task)
     }
 
-    fn pixiv(root: Url) -> Pixiv {
+    pub(super) fn pixiv(root: Url) -> Pixiv {
         Pixiv::new(Duration::from_secs(5))
             .unwrap()
             .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
@@ -1754,7 +1794,7 @@ mod tests {
             .with_refresh_token(Some("refresh-secret"))
     }
 
-    fn token(value: &str) -> Vec<u8> {
+    pub(super) fn token(value: &str) -> Vec<u8> {
         response(
             "200 OK",
             json!({"access_token": value, "expires_in": 3600})
@@ -2525,6 +2565,8 @@ mod tests {
             page(41),
             response("200 OK", br#"{"illusts":[],"next_url":null}"#),
             page(42),
+            response("200 OK", br#"{"novels":[],"next_url":null}"#),
+            response("200 OK", br#"{"novels":[],"next_url":null}"#),
         ]);
         let native = pixiv(root).with_include(Some(Include::All));
         let events = native
@@ -2556,12 +2598,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(&results[..4], ["avatar", "background", "41", "42"]);
-        assert!(results[4].contains("novel bookmarks"));
-        assert!(results[5].contains("user novels"));
-        assert!(results[6].contains("Sketch"));
+        assert!(results[4].contains("Sketch"));
         assert!(results.iter().all(|value| !value.contains("secret")));
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 6);
+        assert_eq!(requests.len(), 8);
         assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
         assert!(requests[2].starts_with("GET /v1/user/detail?user_id=9 "));
         assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
@@ -2575,7 +2615,13 @@ mod tests {
      {
         use crate::job_selection::JobSelection;
         let profile = response("200 OK", user_detail().to_string().as_bytes());
-        let (root, server) = serve(vec![token("t"), profile.clone(), profile]);
+        let (root, server) = serve(vec![
+            token("t"),
+            response("503 Service Unavailable", b""),
+            profile.clone(),
+            response("503 Service Unavailable", b""),
+            profile,
+        ]);
         let native = pixiv(root).with_include(Some(included(&[
             "novel-user",
             "avatar",
@@ -2587,29 +2633,17 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
         assert_eq!(results.len(), 4, "{results:?}");
-        assert!(
-            results[0]
-                .as_ref()
-                .unwrap_err()
-                .to_string()
-                .contains("user novels")
-        );
+        assert!(results[0].as_ref().unwrap_err().to_string().contains("503"));
         assert_eq!(
             results[1].as_ref().unwrap().filename,
             "avatar_2023-12-31.jpg"
         );
-        assert!(
-            results[2]
-                .as_ref()
-                .unwrap_err()
-                .to_string()
-                .contains("novel bookmarks")
-        );
+        assert!(results[2].as_ref().unwrap_err().to_string().contains("503"));
         assert_eq!(
             results[3].as_ref().unwrap().filename,
             "avatar_2023-12-31.jpg"
         );
-        assert_eq!(server.join().unwrap().len(), 3);
+        assert_eq!(server.join().unwrap().len(), 5);
     }
 
     #[tokio::test]
