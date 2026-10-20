@@ -320,7 +320,26 @@ impl Media {
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
-                if let Some(asset) = &post.profile_asset {
+                if post.ranking_archive || post.ranking.is_some() {
+                    let ranking = post.ranking.as_ref()?;
+                    if !ranking.valid()
+                        || post.profile_asset.is_some()
+                        || !crate::pixiv::valid_media_id(&post.post_id, &post.media_id)
+                    {
+                        return None;
+                    }
+                    (
+                        "pixiv",
+                        serde_json::json!([
+                            "ranking",
+                            ranking.mode,
+                            ranking.date,
+                            post.post_id,
+                            post.media_id
+                        ])
+                        .to_string(),
+                    )
+                } else if let Some(asset) = &post.profile_asset {
                     if !crate::pixiv::valid_id(&asset.owner_id) || !asset.valid_version() {
                         return None;
                     }
@@ -440,6 +459,12 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Pixiv ranking context; ranks do not participate in archive identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranking: Option<std::sync::Arc<crate::pixiv::RankingMetadata>>,
+    /// Retain a declared ranking scope even if its public metadata is invalid.
+    #[serde(skip_serializing)]
+    pub ranking_archive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_asset: Option<crate::profile_asset::ProfileAssetMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1407,7 +1432,7 @@ fn compatibility_metadata(
                     .and_then(|user| user.get("account"))
                     .and_then(Value::as_str)
                     .map(str::to_owned),
-                if category == "pixiv-novel" {
+                if category == "pixiv-novel" || data.contains_key("ranking") {
                     let caption = string("caption")
                         .map(|s| crate::mastodon::strip_html(&s))
                         .filter(|s| !s.trim().is_empty());
@@ -1416,6 +1441,9 @@ fn compatibility_metadata(
                             Some(format!("{title}\n\n{}", caption.trim()))
                         }
                         (Some(title), None) => Some(title),
+                        (None, caption) if category == "pixiv" => {
+                            caption.map(|s| s.trim().to_owned())
+                        }
                         (None, caption) => caption,
                     }
                 } else {
@@ -1524,6 +1552,14 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        ranking: (category == "pixiv")
+            .then(|| {
+                data.get("ranking")
+                    .and_then(crate::pixiv::RankingMetadata::parse_compat)
+                    .map(std::sync::Arc::new)
+            })
+            .flatten(),
+        ranking_archive: category == "pixiv" && data.contains_key("ranking"),
         profile_asset,
         discord: discord.clone(),
         creator,

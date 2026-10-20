@@ -368,6 +368,17 @@ fn context_parts(
         if let Some(rating) = &post.rating {
             metadata.insert("rating".into(), text(rating.clone()));
         }
+        if let Some(ranking) = &post.ranking {
+            metadata.insert(
+                "ranking".into(),
+                map(BTreeMap::from([
+                    ("mode".into(), text(ranking.mode.as_str())),
+                    ("date".into(), text(ranking.date.as_str())),
+                    ("rank".into(), Value::Int(ranking.rank.into())),
+                    ("type".into(), text(ranking.kind.as_str())),
+                ])),
+            );
+        }
         if let Some(score) = post.score {
             metadata.insert("score".into(), Value::Int(score.into()));
         }

@@ -236,6 +236,8 @@ mod tests {
             category: "direct".into(),
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
+                ranking: None,
+                ranking_archive: false,
                 profile_asset: None,
                 file: None,
                 frames: None,

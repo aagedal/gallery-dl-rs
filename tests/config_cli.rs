@@ -789,7 +789,7 @@ async fn mastodon_bookmark_date_filter_keeps_later_newer_posts() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn date_selection_preserves_later_newer_bluesky_posts_and_pixiv_bookmarks() {
+async fn date_selection_preserves_later_newer_bluesky_posts_and_unordered_pixiv_feeds() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
     let cfg = config(root.path(), serde_json::json!({}));
@@ -802,6 +802,11 @@ printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","au
         ("https://bsky.app/profile/alice.test", "new", "bafykreib"),
         (
             "https://www.pixiv.net/users/9/bookmarks/artworks",
+            "43",
+            "43_p0",
+        ),
+        (
+            "https://www.pixiv.net/ranking.php?mode=daily&date=20261020",
             "43",
             "43_p0",
         ),

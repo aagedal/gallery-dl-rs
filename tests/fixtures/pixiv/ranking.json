@@ -1,0 +1,83 @@
+{
+  "source": "gallery_dl.extractor.pixiv.PixivRankingExtractor.metadata",
+  "version": "1.32.17",
+  "cases": [
+    {
+      "url": "https://www.pixiv.net/ranking.php",
+      "metadata": {
+        "mode": "day",
+        "rank": 0,
+        "type": "all"
+      },
+      "fallback_date": true
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode=WEEKLY&date=20240231",
+      "metadata": {
+        "mode": "week",
+        "date": "2024-02-31",
+        "rank": 0,
+        "type": "all"
+      },
+      "fallback_date": false
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode=daily_ai&date=20261020&content=manga",
+      "metadata": {
+        "mode": "day_ai",
+        "date": "2026-10-20",
+        "rank": 0,
+        "type": "manga"
+      },
+      "fallback_date": false
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode=day&date=20261020",
+      "error": true
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode=&mode=daily&date=20261020",
+      "error": true
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode&mode=daily&date=20261020",
+      "metadata": {
+        "mode": "day",
+        "date": "2026-10-20",
+        "rank": 0,
+        "type": "all"
+      },
+      "fallback_date": false
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode=daily&date=20261020&content=all",
+      "metadata": {
+        "mode": "day",
+        "date": "2026-10-20",
+        "rank": 0,
+        "type": "all"
+      },
+      "fallback_date": false
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode=daily&date=20261020&content=",
+      "metadata": {
+        "mode": "day",
+        "date": "2026-10-20",
+        "rank": 0,
+        "type": "all"
+      },
+      "fallback_date": false
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php?mode=daily&date=２０２６１０２０",
+      "metadata": {
+        "mode": "day",
+        "date": "２０２６-１０-２０",
+        "rank": 0,
+        "type": "all"
+      },
+      "fallback_date": false
+    }
+  ]
+}

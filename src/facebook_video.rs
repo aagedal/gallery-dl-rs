@@ -92,6 +92,8 @@ pub fn parse_video(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                     filename: format!("{requested_id}.{extension}"),
                     handoff: BTreeMap::new(),
                     metadata: Some(PostMetadata {
+                        ranking: None,
+                        ranking_archive: false,
                         profile_asset: None,
                         file: Some(file),
                         frames: None,

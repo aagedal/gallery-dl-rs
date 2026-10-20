@@ -57,6 +57,7 @@ const FIELDS: &[&str] = &[
     "metadata",
     "frames",
     "profile_asset",
+    "ranking",
     "rating",
     "score",
     "filesize",

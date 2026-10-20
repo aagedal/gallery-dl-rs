@@ -35,6 +35,9 @@ use url::Url;
 #[path = "pixiv_novel.rs"]
 pub mod novel;
 pub use novel::NovelOptions;
+#[path = "pixiv_ranking.rs"]
+pub mod ranking;
+pub use ranking::{RankingMetadata, RankingOptions};
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -107,6 +110,7 @@ impl ProfileKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Novel(novel::Target),
+    Ranking(RankingOptions),
     Following {
         id: Option<String>,
         private: bool,
@@ -180,6 +184,9 @@ pub fn target(url: &Url) -> Result<Target> {
         || !matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net"))
     {
         return Err(unsupported());
+    }
+    if url.path() == "/ranking.php" {
+        return RankingOptions::parse(url).map(Target::Ranking);
     }
     if novel::is_route(url) {
         return novel::target(url).map(Target::Novel);
@@ -342,7 +349,7 @@ pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
     Ok(parse_files(illust, &id, urls))
 }
 
-fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
+fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     let username = illust
         .get("user")
         .and_then(|user| string(user, "account"))
@@ -358,6 +365,17 @@ fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
     }
     .map(Arc::<str>::from);
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
+    PostMetadata {
+        post_id: id.to_owned(),
+        username,
+        caption,
+        timestamp,
+        ..PostMetadata::default()
+    }
+}
+
+fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
+    let base = illustration_metadata(illust, id);
     let dimension = |key| illust.get(key).and_then(Value::as_u64).filter(|v| *v > 0);
     let headers = BTreeMap::from([("Referer".to_owned(), REFERER.to_owned())]);
     urls.into_iter()
@@ -379,13 +397,9 @@ fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
                         height,
                         ..FileMetadata::default()
                     }),
-                    post_id: id.to_owned(),
                     media_id: format!("{id}_p{page}"),
-                    username: username.clone(),
-                    caption: caption.clone(),
-                    timestamp,
                     index: page + 1,
-                    ..PostMetadata::default()
+                    ..base.clone()
                 }),
                 url,
                 headers: headers.clone(),
@@ -1074,6 +1088,7 @@ impl Pixiv {
         let (user, kinds) = match target {
             Target::Novel(target) => return self.novel_events(target),
             Target::Following { id, private } => return self.following_events(id, private),
+            Target::Ranking(options) => return self.ranking_events(options),
             Target::Profile { id, kind } => {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/user/detail").expect("static");

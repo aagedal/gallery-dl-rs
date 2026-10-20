@@ -799,8 +799,17 @@ cycle detection and a 200-page cap. Modern and legacy URLs support public/privat
 visibility; ownerless legacy routes resolve the OAuth user. Fixture/oracle tests
 cover queue metadata, selection and recovery. Live authenticated following remains
 unverified.
+Native rankings support all upstream web mode aliases, UTC-yesterday/default
+dates, exact content filtering before rank assignment, lazy scoped pagination
+and ranking-specific mode/date archives. Ranking metadata is available in
+inspection, sidecars, predicates and templates; post/file selection retains
+original ranks and unordered date selection scans later entries. Recorded
+upstream metadata vectors and HTTP fixtures cover query semantics and request
+behavior. Live authenticated ranking extraction remains unverified.
+Empty or failed animation entries retain post-range positions; metadata failures
+still report native errors where upstream warns.
 Remaining: ugoira original individual-frame mode and conversion,
-bookmark cursor/metadata options, rankings,
+bookmark cursor/metadata options,
 searches, sketch,
 pixivision, series, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.

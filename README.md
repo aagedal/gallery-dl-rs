@@ -609,6 +609,24 @@ at 200 pages. Stopping a selected child leaves later followed users available;
 dropping the input stops later users and pages. Authenticated live following
 extraction remains unverified.
 
+Native Pixiv rankings support `/ranking.php?mode=daily&date=YYYYMMDD` in the
+`pixiv` category. The default mode is `daily`; omitted or malformed dates use
+yesterday in UTC. Supported mode names are `daily`, `daily_r18`, `daily_ai`,
+`daily_r18_ai`, `weekly`, `weekly_r18`, `monthly`, `male`, `male_r18`, `female`,
+`female_r18`, `original`, `rookie` and `r18g` (case-insensitive).
+`content` filters exact work types before assigning ranks; omit it or leave it
+empty for all types. The literal `content=all` filters for a work type named
+`all`, matching upstream. Inspection, filters and templates expose
+`ranking.mode` (the App API mode), `ranking.date`, `ranking.rank` and
+`ranking.type`, for example `{ranking[rank]:03}_{id}.{extension}`. Ranks span
+pages and retain their positions after post/file selection. Ranking archives
+include mode and date, remain separate from ordinary artworks, and ignore rank
+and content filter. Pagination preserves mode/date, detects cycles and stops at
+200 pages. Date filtering scans the whole ranking because artwork dates are not
+ordered. Live authenticated ranking extraction remains unverified.
+Animation metadata failures retain an empty post position and allow later works
+to continue; native mode currently reports these as errors where upstream warns.
+
 Native Pixiv novels use the separate `pixiv-novel` category and
 `extractor.pixiv-novel.refresh-token`. Supported URLs are `/novel/show.php?id=ID`,
 `/n/ID`, `/users/ID/novels`, `/novel/series/ID`, and
