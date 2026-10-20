@@ -616,6 +616,22 @@ rewritten. Sketch, profile-image and novel archive identities are unchanged.
 Plain `i.pximg.net` links stay direct downloads and
 usually fail without the Referer.
 
+Native Pixiv illustrations also support `comments` and `metadata-bookmark`, both
+disabled by default and using upstream JSON truthiness (explicit null disables
+an inherited value). `comments` retains complete API comment objects in source
+order, including nested user/stamp fields. Works with no reported comments
+emit an empty list without another request; exhausted comment fetches discard
+partial results and emit an empty list. `metadata-bookmark` fetches only works
+marked as bookmarked and exposes registered names as `tags_bookmark`, preserving
+order and duplicates. A bookmark-detail failure aborts that job before emitting
+the affected post. Both fields are shared by post/file inspection, sidecars,
+predicates and filename templates, and do not affect archive identity.
+Enrichment runs after file discovery and stays lazy across works and selection
+limits. Comment pagination uses a fixed API endpoint and illustration scope,
+with cycle, page and aggregate-size bounds. These settings currently apply to
+illustration jobs, including Pixivision; native novel comment/bookmark enrichment
+remains unfinished. Live authenticated enrichment remains unverified.
+
 Native Pixiv illustrations and novels honor `max-posts` in their respective
 `pixiv` and `pixiv-novel` scopes; zero removes an inherited limit. The limit
 counts source works before post filters and media extraction, including skipped
@@ -1739,7 +1755,8 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `tags`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `cursor`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
-`search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`,
+`search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `comments`,
+`metadata-bookmark`, `endpoint`,
 `order-posts`, `favorites` (Kemono/Coomer options), category-scoped Bluesky
 `api-server` and likes `endpoint`, `retries` (integer 0–10), and `timeout`
 (positive seconds, including fractions).

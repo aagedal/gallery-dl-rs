@@ -339,7 +339,7 @@ impl Pixiv {
                     .join("v1/illust/detail")
                     .expect("static detail endpoint");
                 endpoint.query_pairs_mut().append_pair("illust_id", &id);
-                let body = match self
+                let mut body = match self
                     .get(&endpoint)
                     .await
                     .and_then(|bytes| super::json(&bytes))
@@ -350,7 +350,7 @@ impl Pixiv {
                         return Some((Err(error), state));
                     }
                 };
-                let Some(work) = body.get("illust") else {
+                let Some(work) = body.get_mut("illust") else {
                     state.done = true;
                     return Some((Err(error("Pixiv response contains no illustration")), state));
                 };
@@ -372,7 +372,11 @@ impl Pixiv {
                 let context = state.metadata.as_ref().expect("article metadata").clone();
                 let (mut media, failure) = match self.work(work, true).await {
                     Ok(media) => (media, None),
-                    Err(error) => (Vec::new(), Some(error)),
+                    Err(super::WorkFailure::Enrichment(error)) => {
+                        state.done = true;
+                        return Some((Err(error), state));
+                    }
+                    Err(super::WorkFailure::Files(error)) => (Vec::new(), Some(error)),
                 };
                 if media.is_empty() {
                     let mut metadata = self.empty_work_metadata(work, &id, failure.is_none());

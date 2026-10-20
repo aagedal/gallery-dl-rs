@@ -181,7 +181,7 @@ impl Pixiv {
                         }
                     }
                 }
-                if let Some(work) = state.works.pop_front() {
+                if let Some(mut work) = state.works.pop_front() {
                     state.budget.consume();
                     skipped = skipped.wrapping_add(1);
                     if skipped == 0 {
@@ -199,9 +199,13 @@ impl Pixiv {
                         .as_ref()
                         .expect("followed owner snapshot")
                         .clone();
-                    let (mut media, failure) = match self.work(&work, true).await {
+                    let (mut media, failure) = match self.work(&mut work, true).await {
                         Ok(media) => (media, None),
-                        Err(error) => (Vec::new(), Some(error)),
+                        Err(super::WorkFailure::Enrichment(error)) => {
+                            state.done = true;
+                            return Some((Err(error), state));
+                        }
+                        Err(super::WorkFailure::Files(error)) => (Vec::new(), Some(error)),
                     };
                     if media.is_empty() {
                         let Some(id) = super::id_of(&work) else {

@@ -815,6 +815,16 @@ fixtures cover owner snapshots, empty animations, cursor encoding and novel
 archive exclusions. Compatibility forwarding retains the cursor's JSON type;
 automatic resume hints and separate child-category compatibility overrides remain
 unfinished.
+Native illustration `comments` and `metadata-bookmark` enrich selected works
+lazily after file discovery. Comment objects retain nested source fields and
+ordered pagination; enabled empty/error cases emit an empty list, discarding
+partial failed traversals. Registered bookmark tags retain order and duplicates;
+bookmark-detail failures abort before the affected post. Both fields reach
+inspection, sidecars, predicates and templates without changing archives.
+Configuration honors JSON truthiness and explicit-null inheritance clearing.
+Fixed comment endpoint/scope, cycle/page/aggregate bounds and cancellation protect
+pagination. Native novel enrichment and live authenticated verification remain
+unfinished.
 Native following lists queue selected users through normal profile `include`
 dispatch, with bounded preview fields for child filters, lazy scoped pagination,
 cycle detection and a 200-page cap. Modern and legacy URLs support public/private
@@ -883,7 +893,7 @@ account only after child selection. Anonymous first-photo output from the public
 cookies, default directory layout and source `filename` template semantics remain
 unfinished.
 Remaining: ugoira conversion,
-bookmark resume-cursor diagnostics and optional metadata enrichment,
+bookmark resume-cursor diagnostics and additional metadata enrichment,
 upstream metadata options
 (`metadata`), and Referer-routed plain `i.pximg.net` links.
 

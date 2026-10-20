@@ -428,3 +428,53 @@ async fn terminal_process_errors_never_publish_a_successful_end_post() {
     assert!(matches!(&events[1], Ok(ExtractionEvent::Media(_))));
     assert!(events[2].is_err());
 }
+
+#[tokio::test]
+async fn pixiv_empty_posts_keep_upstream_comment_and_bookmark_metadata() {
+    use gallery_dl_rs::{event::ExtractionEvent, extract::BackendOptions};
+    use serde_json::{Value, json};
+    let source: Value =
+        serde_json::from_str(include_str!("fixtures/pixiv/enrichment.json")).unwrap();
+    let case = source["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| {
+            case["file_count"] == 0
+                && case["events"].as_array().is_some_and(|events| {
+                    events.first().is_some_and(|event| {
+                        event["metadata"]["comments"]
+                            .as_array()
+                            .is_some_and(|comments| !comments.is_empty())
+                    })
+                })
+        })
+        .unwrap();
+    let metadata = &case["events"][0]["metadata"];
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(root.path(), "cat \"$0.data\"", Duration::from_secs(3));
+    std::fs::write(
+        root.path().join("backend.data"),
+        serde_json::to_vec(&json!([[2, "", metadata]])).unwrap(),
+    )
+    .unwrap();
+    let events = backend
+        .events_with_options(
+            &Url::parse("https://www.pixiv.net/artworks/42").unwrap(),
+            BackendOptions::default(),
+        )
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<gallery_dl_rs::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(events.len(), 2);
+    let ExtractionEvent::Post(post) = &events[0] else {
+        panic!("missing empty post")
+    };
+    assert_eq!(post.count, Some(0));
+    let actual = serde_json::to_value(post.metadata.as_ref().unwrap()).unwrap();
+    assert_eq!(actual["comments"], metadata["comments"]);
+    assert_eq!(actual["tags_bookmark"], metadata["tags_bookmark"]);
+    assert!(matches!(events[1], ExtractionEvent::EndPost));
+}

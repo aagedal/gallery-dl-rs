@@ -136,3 +136,31 @@ source session can additionally inherit authenticated headers. Native public
 probes intentionally exclude OAuth credentials and App API headers.
 All identities, dates, URLs, text, and metadata are synthetic. No HTTP, OAuth,
 session initialization, ZIP downloads, or frame downloads ran.
+
+`enrichment.json` records 37 cases from the actual `PixivExtractor.items`
+implementation in gallery-dl 1.32.17, using a `PixivWorkExtractor` instance.
+The installed source path and SHA-256 match the values above and are repeated
+in the fixture. Only `works`, `metadata`, `_extract_files`, and the two API
+methods `illust_comments` and `illust_bookmark_detail` were stubbed; the two
+source `_init` option assignments were evaluated without initializing a
+session. This isolates illustration enrichment while retaining real source
+config truthiness, gates, sequencing, tag transformation, and emitted metadata.
+Each emitted dictionary was deep-copied before the next yield; dates use naive
+UTC ISO text, and expected filenames/archives use the real extractor formats.
+
+Cases record absent and JSON truthy/falsy option values; zero, missing, and
+truthy comment counts; `_ajax` set during file extraction; comment generators
+that fail before or after yielding values; ordered duplicate registered tags;
+unregistered tags without names; absent versus empty enrichment fields; and
+zero or multiple media files. The call log demonstrates file extraction before
+comments, comments before bookmark detail, and both enrichments before tag
+transformation and post emission. Comment exceptions discard the entire
+partially collected list. Malformed source responses and request failures
+record their actual exception class without imposing the same failure policy
+on native optional metadata. Japanese, translated, and original tag modes
+remain independent of bookmark tags.
+
+This oracle covers illustration `items` only. The source novel implementation
+has different comment behavior: it lacks this illustration `_ajax` gate and
+comment exception handler. All identities, comment contents, URLs, dates, and
+metadata are synthetic. No HTTP, OAuth, sessions, or media downloads ran.

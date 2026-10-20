@@ -3064,3 +3064,82 @@ fn pixiv_ugoira_modes_override_original_with_false_and_null_without_scope_leaks(
         Some(UgoiraMode::Original)
     );
 }
+
+#[test]
+fn pixiv_enrichment_switches_accept_truthiness_and_discard_private_values() {
+    use serde_json::json;
+    let sparse = parse("{}").unwrap().resolve("pixiv").unwrap();
+    assert_eq!(sparse.comments, None);
+    assert_eq!(sparse.metadata_bookmark, None);
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"comments":value,"metadata-bookmark":value}),
+            json!({"extractor":{"comments":value,"metadata-bookmark":value}}),
+            json!({"extractor":{"pixiv":{"comments":value,"metadata-bookmark":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv")
+                .unwrap();
+            assert_eq!(resolved.comments, Some(expected));
+            assert_eq!(resolved.metadata_bookmark, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_enrichment_switches_are_scoped_and_explicit_null_clears_defaults() {
+    let cfg = parse(r#"{"extractor":{"comments":true,"metadata-bookmark":true,"pixiv":{"comments":null,"metadata-bookmark":false},"pixiv-novel":{"comments":false}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.comments, Some(false));
+    assert_eq!(pixiv.metadata_bookmark, Some(false));
+    let novel = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(novel.comments, Some(false));
+    assert_eq!(novel.metadata_bookmark, Some(true));
+    let generic = cfg.resolve("direct").unwrap();
+    assert_eq!(generic.comments, Some(true));
+    assert_eq!(generic.metadata_bookmark, Some(true));
+    let cfg = parse(r#"{"comments":null,"metadata-bookmark":false,"extractor":{"comments":true,"metadata-bookmark":true,"pixiv":{"comments":true,"metadata-bookmark":true}}}"#).unwrap();
+    let resolved = cfg.resolve("pixiv").unwrap();
+    assert_eq!(resolved.comments, Some(false));
+    assert_eq!(resolved.metadata_bookmark, Some(false));
+    let overridden = resolved.overlay(&Options {
+        comments: Some(true),
+        metadata_bookmark: Some(true),
+        ..Options::default()
+    });
+    assert_eq!(overridden.comments, Some(true));
+    assert_eq!(overridden.metadata_bookmark, Some(true));
+    assert_eq!(overridden.overlay(&Options::default()), overridden);
+    for document in [
+        r#"{"metadata":null}"#,
+        r#"{"extractor":{"metadata":"private-payload"}}"#,
+    ] {
+        let message = parse(document).unwrap_err().to_string();
+        assert!(message.contains("metadata"));
+        assert!(!message.contains("private-payload"));
+    }
+    let cfg =
+        parse(r#"{"extractor":{"pixiv":{"comments":true,"metadata-bookmark":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().comments, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata_bookmark, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}

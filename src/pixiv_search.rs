@@ -377,7 +377,7 @@ impl Pixiv {
                 if state.budget.exhausted() {
                     return None;
                 }
-                if let Some(work) = state.works.pop_front() {
+                if let Some(mut work) = state.works.pop_front() {
                     skipped = skipped.wrapping_add(1);
                     if skipped == 0 {
                         tokio::task::yield_now().await;
@@ -402,9 +402,14 @@ impl Pixiv {
                     {
                         continue;
                     }
-                    let (mut media, failure) = match self.work(&work, true).await {
+                    let (mut media, failure) = match self.work(&mut work, true).await {
                         Ok(media) => (media, None),
-                        Err(error) => (Vec::new(), Some(error)),
+                        Err(super::WorkFailure::Enrichment(error)) => {
+                            state.done = true;
+                            state.works.clear();
+                            return Some((Err(error), state));
+                        }
+                        Err(super::WorkFailure::Files(error)) => (Vec::new(), Some(error)),
                     };
                     if media.is_empty() {
                         let Some(id) = super::id_of(&work) else {

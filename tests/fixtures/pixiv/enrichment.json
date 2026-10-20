@@ -1,0 +1,7074 @@
+{
+  "source": "PixivExtractor.items via PixivWorkExtractor instance",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py",
+  "source_sha256": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+  "generator": "Actual items implementation; _extract_files and API comment/bookmark methods stubbed. Exact source _init config assignments evaluated without session initialization. Stub files may mutate _ajax, fail, or produce zero/multiple files; API comments may yield then raise. Deep-copy metadata at each real source yield; dates serialized as naive UTC ISO. No network/authentication. Illustration-only oracle; source novel comments have different failure and _ajax behavior.",
+  "cases": [
+    {
+      "name": "defaults_absent",
+      "options": {},
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "enabled_two_files",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 2,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+            "filename": "42_p1",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "enabled_zero_files",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 0,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_only",
+      "options": {
+        "comments": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bookmark_only",
+      "options": {
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_total_zero",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 0,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 0,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_total_missing",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_ajax_truthy",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": true,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "_ajax": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "_ajax": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_ajax_falsy",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": false,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "_ajax": false,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "_ajax": false,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_failure_before_first_discards_all",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": 0
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_failure_after_first_discards_partial",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": 1
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_failure_after_all_discards_all",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": 2
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bookmark_false_absent",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": false
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": false,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": false,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bookmark_missing_errors_before_post",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "bookmark_request_failure_before_post",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": true,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "RuntimeError"
+    },
+    {
+      "name": "bookmark_empty_tags_present",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": []
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bookmark_missing_tags_source_error",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {},
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "bookmark_registered_missing_name_source_error",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "bookmark_missing_registered_flag_source_error",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "fixture"
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "file_failure_prevents_enrichment",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": true,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "RuntimeError"
+    },
+    {
+      "name": "translated_tags_independent",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "tags": "translated"
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "cat",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "cat",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "original_tags_independent",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "tags": "original"
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              {
+                "name": "猫",
+                "translated_name": "cat",
+                "extra": {
+                  "kept": true
+                }
+              },
+              {
+                "name": "猫",
+                "translated_name": null
+              }
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              {
+                "name": "猫",
+                "translated_name": "cat",
+                "extra": {
+                  "kept": true
+                }
+              },
+              {
+                "name": "猫",
+                "translated_name": null
+              }
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "malformed_tags_error_after_enrichment",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {}
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "falsy_total_empty_string",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": "",
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": "",
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": "",
+            "is_bookmarked": true,
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "truthy_total_string",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": "0",
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": "0",
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": "0",
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "truthy_ajax_string_skips_comments",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": "false",
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "_ajax": "false",
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "_ajax": "false",
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_null",
+      "options": {
+        "comments": null,
+        "metadata-bookmark": null
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_false",
+      "options": {
+        "comments": false,
+        "metadata-bookmark": false
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_zero",
+      "options": {
+        "comments": 0,
+        "metadata-bookmark": 0
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_string",
+      "options": {
+        "comments": "",
+        "metadata-bookmark": ""
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_array",
+      "options": {
+        "comments": [],
+        "metadata-bookmark": []
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_object",
+      "options": {
+        "comments": {},
+        "metadata-bookmark": {}
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_true",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_negative",
+      "options": {
+        "comments": -1,
+        "metadata-bookmark": -1
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_string",
+      "options": {
+        "comments": "false",
+        "metadata-bookmark": "false"
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_array",
+      "options": {
+        "comments": [
+          false
+        ],
+        "metadata-bookmark": [
+          false
+        ]
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_object",
+      "options": {
+        "comments": {
+          "enabled": false
+        },
+        "metadata-bookmark": {
+          "enabled": false
+        }
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture enrichment",
+        "caption": "Fixture caption",
+        "type": "illust",
+        "width": 640,
+        "height": 480,
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat",
+            "extra": {
+              "kept": true
+            }
+          },
+          {
+            "name": "猫",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 2,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "file_ajax": null,
+      "file_fail": false,
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture enrichment",
+            "caption": "Fixture caption",
+            "type": "illust",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        }
+      ],
+      "error": null
+    }
+  ]
+}

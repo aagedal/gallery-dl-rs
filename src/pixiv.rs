@@ -62,6 +62,9 @@ pub use cursor::BookmarkCursor;
 #[path = "pixiv_ugoira.rs"]
 pub mod ugoira;
 pub use ugoira::UgoiraMode;
+#[path = "pixiv_enrichment.rs"]
+mod enrichment;
+use enrichment::WorkFailure;
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -423,6 +426,12 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
     PostMetadata {
         post_id: id.to_owned(),
+        comments: illust
+            .get("comments")
+            .and_then(crate::extract::pixiv_comments),
+        tags_bookmark: illust
+            .get("tags_bookmark")
+            .and_then(crate::extract::pixiv_bookmark_tags),
         tags: illust
             .get("tags")
             .and_then(|tags| TagMode::Japanese.transform(tags)),
@@ -764,6 +773,8 @@ pub struct Pixiv {
     max_posts: Option<usize>,
     tags: TagMode,
     cursor: Option<BookmarkCursor>,
+    comments: bool,
+    metadata_bookmark: bool,
     refresh_token: Option<String>,
     access_token: tokio::sync::Mutex<Option<String>>,
     authenticated_user: tokio::sync::Mutex<Option<String>>,
@@ -846,6 +857,8 @@ impl Pixiv {
             max_posts: None,
             tags: TagMode::default(),
             cursor: None,
+            comments: false,
+            metadata_bookmark: false,
             refresh_token: None,
             access_token: tokio::sync::Mutex::new(None),
             authenticated_user: tokio::sync::Mutex::new(None),
@@ -1067,8 +1080,8 @@ impl Pixiv {
         .map_err(|_| error("native Pixiv extraction timed out"))?
     }
 
-    async fn work(&self, illust: &Value, listing: bool) -> Result<Vec<Media>> {
-        let mut media = match parse_illust(illust) {
+    async fn work_files(&self, illust: &Value, listing: bool) -> Result<Vec<Media>> {
+        match parse_illust(illust) {
             Ok(media) => Ok(media),
             Err(Skip::Ugoira) if !self.ugoira.enabled() => Ok(Vec::new()),
             Err(Skip::Ugoira) => {
@@ -1087,13 +1100,35 @@ impl Pixiv {
             }
             Err(Skip::NoMedia) if listing => Ok(Vec::new()),
             Err(Skip::NoMedia) => Err(error("Pixiv illustration contains no supported media")),
-        }?;
+        }
+    }
+
+    async fn work(
+        &self,
+        illust: &mut Value,
+        listing: bool,
+    ) -> std::result::Result<Vec<Media>, WorkFailure> {
+        let mut media = self
+            .work_files(illust, listing)
+            .await
+            .map_err(WorkFailure::Files)?;
+        self.enrich_work(illust)
+            .await
+            .map_err(WorkFailure::Enrichment)?;
         let tags = illust
             .get("tags")
             .and_then(|tags| self.tags.transform(tags));
+        let comments = illust
+            .get("comments")
+            .and_then(crate::extract::pixiv_comments);
+        let tags_bookmark = illust
+            .get("tags_bookmark")
+            .and_then(crate::extract::pixiv_bookmark_tags);
         for file in &mut media {
             if let Some(metadata) = &mut file.metadata {
                 metadata.tags = tags.clone();
+                metadata.comments = comments.clone();
+                metadata.tags_bookmark = tags_bookmark.clone();
             }
         }
         Ok(media)
@@ -1351,9 +1386,9 @@ impl Pixiv {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/illust/detail").expect("static");
                     endpoint.query_pairs_mut().append_pair("illust_id", &id);
-                    let body = json(&self.get(&endpoint).await?)?;
+                    let mut body = json(&self.get(&endpoint).await?)?;
                     let illust = body
-                        .get("illust")
+                        .get_mut("illust")
                         .ok_or_else(|| error("Pixiv response contains no illustration"))?;
                     if id_of(illust).as_deref() != Some(id.as_str()) {
                         return Err(error("Pixiv returned an unexpected illustration"));
@@ -1361,8 +1396,8 @@ impl Pixiv {
                     let animation = string(illust, "type") == Some("ugoira");
                     let (media, failure) = match self.work(illust, false).await {
                         Ok(media) => (media, None),
-                        Err(error) if animation => (Vec::new(), Some(error)),
-                        Err(error) => return Err(error),
+                        Err(WorkFailure::Files(error)) if animation => (Vec::new(), Some(error)),
+                        Err(error) => return Err(error.into_error()),
                     };
                     if media.is_empty() && animation {
                         let metadata = self.empty_work_metadata(illust, &id, failure.is_none());
@@ -1421,7 +1456,7 @@ impl Pixiv {
                 if state.budget.exhausted() {
                     return None;
                 }
-                if let Some(work) = state.works.pop_front() {
+                if let Some(mut work) = state.works.pop_front() {
                     state.budget.consume();
                     skipped = skipped.wrapping_add(1);
                     if skipped == 0 {
@@ -1434,9 +1469,10 @@ impl Pixiv {
                     {
                         continue;
                     }
-                    let (mut media, failure) = match self.work(&work, true).await {
+                    let (mut media, failure) = match self.work(&mut work, true).await {
                         Ok(media) => (media, None),
-                        Err(error) => (Vec::new(), Some(error)),
+                        Err(WorkFailure::Enrichment(error)) => return Some((Err(error), None)),
+                        Err(WorkFailure::Files(error)) => (Vec::new(), Some(error)),
                     };
                     let animation = string(&work, "type") == Some("ugoira");
                     if media.is_empty() && (state.bookmark_owner.is_some() || animation) {

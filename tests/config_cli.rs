@@ -1602,3 +1602,44 @@ async fn original_ugoira_and_truthy_fallback_modes_forward_only_to_pixiv() {
         }
     }
 }
+
+#[tokio::test]
+async fn pixiv_optional_enrichment_forwards_truthiness_only_to_illustrations() {
+    for (setting, expected) in [
+        (serde_json::json!(["enabled"]), "true"),
+        (serde_json::Value::Null, "false"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let cfg = config(
+            root.path(),
+            serde_json::json!({"extractor":{"pixiv":{"comments":setting,"metadata-bookmark":setting}}}),
+        );
+        for (url, supported) in [
+            ("https://www.pixiv.net/artworks/42", true),
+            ("https://www.pixivision.net/en/a/77", true),
+            ("https://www.pixiv.net/novel/show.php?id=42", false),
+            ("https://instagram.com/p/abc/", false),
+        ] {
+            let log = root.path().join("backend.log");
+            let _ = std::fs::remove_file(&log);
+            let mut command = binary(root.path(), &cfg);
+            command
+                .arg("--extractor-command")
+                .arg(backend(root.path()))
+                .env("CONFIG_TEST_LOG", &log)
+                .args(["-g", url]);
+            success(&output(&mut command).await);
+            let log = std::fs::read_to_string(log).unwrap();
+            for key in ["comments", "metadata-bookmark"] {
+                if supported {
+                    assert!(
+                        log.contains(&format!("--option\n{key}={expected}\n")),
+                        "{log}"
+                    );
+                } else {
+                    assert!(!log.contains(&format!("{key}=")), "{log}");
+                }
+            }
+        }
+    }
+}

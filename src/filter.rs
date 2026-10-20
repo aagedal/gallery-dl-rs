@@ -429,6 +429,18 @@ fn context_parts(
                 Value::List(tags.values().iter().map(json_value).collect()),
             );
         }
+        if let Some(comments) = &post.comments {
+            metadata.insert(
+                "comments".into(),
+                Value::List(comments.iter().map(json_value).collect()),
+            );
+        }
+        if let Some(tags) = &post.tags_bookmark {
+            metadata.insert(
+                "tags_bookmark".into(),
+                Value::List(tags.iter().map(|tag| text(tag.as_str())).collect()),
+            );
+        }
         if let Some(original) = post.ugoira_original {
             for key in ["ugoira_original", "_ugoira_original"] {
                 metadata.insert(key.into(), Value::Bool(original));

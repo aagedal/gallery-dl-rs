@@ -1152,6 +1152,10 @@ fn extract_input<'a>(
                                             .with_novel_extractor(Arc::clone(novel))
                                             .with_include(options.include.clone())
                                             .with_ugoira_mode(options.ugoira.unwrap_or_default())
+                                            .with_comments(options.comments.unwrap_or(false))
+                                            .with_metadata_bookmark(
+                                                options.metadata_bookmark.unwrap_or(false),
+                                            )
                                             .with_max_posts(options.max_posts)
                                             .with_tags(options.tags.unwrap_or_default())
                                             .with_cursor(options.cursor.clone())
@@ -1308,6 +1312,10 @@ fn extract_input<'a>(
                                 .then_some(options.order_revisions)
                                 .flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
+                            comments: (category == "pixiv").then_some(options.comments).flatten(),
+                            metadata_bookmark: (category == "pixiv")
+                                .then_some(options.metadata_bookmark)
+                                .flatten(),
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
                             tags: matches!(category, "pixiv" | "pixiv-novel")
                                 .then_some(options.tags)
@@ -1490,6 +1498,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         password: None,
         user_id: None,
         reposts: None,
+        comments: None,
+        metadata_bookmark: None,
         ugoira: None,
         tags: None,
         cursor: None,

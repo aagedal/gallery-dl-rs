@@ -597,6 +597,12 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Optional complete Pixiv illustration comment objects, in API order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comments: Option<std::sync::Arc<[Value]>>,
+    /// Registered bookmark tag names, retaining source order and duplicates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags_bookmark: Option<std::sync::Arc<[String]>>,
     /// Whether ugoira output consists of original frames rather than a ZIP.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ugoira_original: Option<bool>,
@@ -862,6 +868,8 @@ pub struct BackendOptions {
     pub user_id: Option<String>,
     pub api_key: Option<String>,
     pub reposts: Option<bool>,
+    pub comments: Option<bool>,
+    pub metadata_bookmark: Option<bool>,
     pub ugoira: Option<crate::pixiv::UgoiraMode>,
     pub tags: Option<crate::pixiv::TagMode>,
     pub cursor: Option<crate::pixiv::BookmarkCursor>,
@@ -1036,6 +1044,8 @@ impl Backend {
         }
         for (name, value) in [
             ("metadata", options.metadata),
+            ("comments", options.comments),
+            ("metadata-bookmark", options.metadata_bookmark),
             ("mp4", options.mp4),
             ("reblogs", options.reblogs),
             ("original", options.original),
@@ -1571,6 +1581,29 @@ fn decimal_id(value: &str) -> bool {
         && value.bytes().any(|byte| byte != b'0')
 }
 
+/// Bounded source metadata shared by native and compatibility Pixiv paths.
+pub(crate) fn pixiv_comments(value: &Value) -> Option<std::sync::Arc<[Value]>> {
+    let values = value.as_array().filter(|values| values.len() <= 100_000)?;
+    if serde_json::to_vec(values).ok()?.len() > 32 * 1024 * 1024 {
+        return None;
+    }
+    Some(values.clone().into())
+}
+
+pub(crate) fn pixiv_bookmark_tags(value: &Value) -> Option<std::sync::Arc<[String]>> {
+    let values = value.as_array().filter(|values| values.len() <= 100_000)?;
+    let mut size = 0usize;
+    let tags = values
+        .iter()
+        .map(|value| {
+            let tag = value.as_str()?;
+            size = size.checked_add(tag.len())?;
+            (size <= 32 * 1024 * 1024).then(|| tag.to_owned())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(tags.into())
+}
+
 fn valid_extension(value: &str) -> bool {
     !value.is_empty() && value.len() <= 16 && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
@@ -1836,6 +1869,12 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        comments: (category == "pixiv")
+            .then(|| data.get("comments").and_then(pixiv_comments))
+            .flatten(),
+        tags_bookmark: (category == "pixiv")
+            .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
+            .flatten(),
         ugoira_original: (category == "pixiv")
             .then(|| data.get("_ugoira_original").and_then(Value::as_bool))
             .flatten(),

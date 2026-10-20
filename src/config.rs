@@ -128,6 +128,10 @@ pub struct Options {
     pub max_posts: Option<usize>,
     /// Look up Kemono/Coomer creator profiles.
     pub metadata: Option<bool>,
+    /// Include Pixiv illustration comments.
+    pub comments: Option<bool>,
+    /// Include Pixiv illustration bookmark metadata.
+    pub metadata_bookmark: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
     /// Pixiv OAuth refresh token; accepted in pixiv and pixiv-novel scopes.
@@ -305,6 +309,8 @@ impl Options {
             search_stop: overrides.search_stop.or(self.search_stop),
             max_posts: overrides.max_posts.or(self.max_posts),
             metadata: overrides.metadata.or(self.metadata),
+            comments: overrides.comments.or(self.comments),
+            metadata_bookmark: overrides.metadata_bookmark.or(self.metadata_bookmark),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             refresh_token: overrides
                 .refresh_token
@@ -427,6 +433,8 @@ struct RawRoot {
     search_stop: Field,
     max_posts: Field,
     metadata: Field,
+    comments: Field,
+    metadata_bookmark: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -496,6 +504,8 @@ struct RawExtractor {
     search_stop: Field,
     max_posts: Field,
     metadata: Field,
+    comments: Field,
+    metadata_bookmark: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -598,6 +608,8 @@ struct RawOptions {
     search_stop: Field,
     max_posts: Field,
     metadata: Field,
+    comments: Field,
+    metadata_bookmark: Field,
     api_key: Field,
     username: Field,
     password: Field,
@@ -778,6 +790,8 @@ impl Config {
             search_stop: root.search_stop,
             max_posts: root.max_posts,
             metadata: root.metadata,
+            comments: root.comments,
+            metadata_bookmark: root.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
             password: Field::default(),
@@ -856,6 +870,8 @@ impl Config {
             search_stop: extractor.search_stop,
             max_posts: extractor.max_posts,
             metadata: extractor.metadata,
+            comments: extractor.comments,
+            metadata_bookmark: extractor.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
             password: Field::default(),
@@ -1472,6 +1488,8 @@ impl RawOptions {
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
         let metadata = boolean(self.metadata, "metadata")?;
+        let comments = self.comments.0.as_ref().map(value_truthy);
+        let metadata_bookmark = self.metadata_bookmark.0.as_ref().map(value_truthy);
         let max_posts = match self.max_posts.0 {
             None => None,
             Some(Value::Number(value)) => Some(
@@ -1733,6 +1751,8 @@ impl RawOptions {
             search_stop,
             max_posts,
             metadata,
+            comments,
+            metadata_bookmark,
             api_key,
             refresh_token,
             client_id,
@@ -2096,5 +2116,17 @@ fn selection_names(value: Value) -> Option<Vec<String>> {
             .map(|name| name.as_str().map(str::to_owned))
             .collect(),
         _ => None,
+    }
+}
+
+/// Match Python truthiness for configuration switches that accept arbitrary JSON.
+fn value_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64() != Some(0.),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
     }
 }

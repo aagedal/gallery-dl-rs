@@ -55,6 +55,8 @@ const FIELDS: &[&str] = &[
     "reposted_by_id",
     "id",
     "metadata",
+    "comments",
+    "tags_bookmark",
     "frames",
     "_ugoira_frame_data",
     "ugoira_original",
