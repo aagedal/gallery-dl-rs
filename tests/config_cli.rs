@@ -988,7 +988,7 @@ printf '%s\n' '[[2,"",{"id":"1","user":"42","service":"patreon","date":"2020-01-
             let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
             assert_eq!(items.len(), 1, "{items:?}");
             assert_eq!(items[0]["metadata"]["post_id"], "2");
-            assert_eq!(items[0]["metadata"]["username"], "43");
+            assert_eq!(items[0]["metadata"]["creator"]["id"], "43");
             assert_eq!(items[0]["metadata"]["instance"], "fanbox");
         }
     }
@@ -1136,4 +1136,35 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
     assert_eq!(jobs.len(), 2, "{jobs:?}");
     assert_eq!(jobs[0]["metadata"]["revision"]["id"], 0);
     assert_eq!(jobs[1]["metadata"]["revision"]["id"], 12);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn kemono_metadata_setting_forwards_only_to_kemono_and_coomer() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor":{"metadata":false,"kemono":{"metadata":true}}}),
+    );
+    for (url, expected) in [
+        ("https://kemono.cr/posts", Some("metadata=true")),
+        ("https://coomer.st/posts", Some("metadata=false")),
+        ("https://x.com/alice/status/42", None),
+        ("https://alice.tumblr.com/", None),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        match expected {
+            Some(option) => assert!(log.contains(&format!("--option\n{option}\n")), "{log}"),
+            None => assert!(!log.contains("metadata="), "{log}"),
+        }
+    }
 }

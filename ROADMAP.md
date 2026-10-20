@@ -567,11 +567,28 @@ compatibility forwarding, metadata/archive equivalence, parser identity checks,
 and local HTTP pagination/cancellation tests cover these paths. Reduced sanitized
 public listing/detail captures are included. On 2026-10-20 native Kemono global
 inspection and a separate one-post detail expansion each emitted two media jobs;
-no files were downloaded. Coomer returned non-JSON data, so live Coomer traversal,
-authenticated verification, wider service captures and original transfers remain.
-Remaining: creator names, favorites, Discord servers, popular views, revisions,
-comments/DMs, archive/link extraction from post text, cookies/login,
-endpoint options and full upstream metadata/default naming.
+no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
+thumbnail job and a Coomer MP4 original job with creator display names; no media
+was downloaded in those inspections. Authenticated verification, wider service
+captures and successful original transfers remain required.
+Remaining: favorites, Discord servers, popular views, comments/DMs, archive/link
+extraction from post text, cookies/login, endpoint options and full upstream
+metadata/default naming.
+
+**Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
+lookups attach typed immutable IDs and optional display names, public IDs, dates,
+counts and other validated profile fields. A host/service/creator cache retains
+up to 1,024 successes or failures; `metadata: false` suppresses lookups. Invalid
+or unavailable profiles preserve extraction with identity-only metadata.
+Profiles bind to the requested identity; display names never substitute for IDs
+in archives. Native and compatibility output, filters and templates share these
+fields, and renames preserve archive keys. Public API responses observed on
+2026-10-20 used gzip even when identity encoding was requested. Bounded gzip
+support now validates all members/checksums off the async executor, with input
+and output cancellation checkpoints. Local tests cover profile caching,
+concurrent lookup/cancellation, identity rejection, scoped configuration,
+compatibility parity, gzip limits/checksums and cancellation across empty gzip
+members. A sanitized public profile schema fixture accompanies these tests.
 
 **Implemented Kemono/Coomer file selection:** ordered `files`, per-kind
 `duplicates`, and `original` settings now match upstream category order and

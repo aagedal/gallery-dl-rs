@@ -19,7 +19,7 @@ fn native_and_compatibility_kemono_metadata_share_filters_templates_and_archive_
             serde_json::to_value(&compatible.metadata).unwrap()
         );
         assert!(
-            FilterExpression::parse("post_id == 7 and username == '42' and service == 'patreon'")
+            FilterExpression::parse("post_id == 7 and user == '42' and service == 'patreon'")
                 .unwrap()
                 .matches(&compatible)
                 .unwrap()
@@ -306,4 +306,181 @@ fn malformed_revision_identity_does_not_silently_gain_current_post_archive_scope
                 .contains("PRIVATE_VALUE")
         );
     }
+}
+
+#[test]
+fn creator_profiles_reach_filters_and_templates_without_changing_archive_ownership() {
+    use gallery_dl_rs::event::Post;
+    let profile: serde_json::Value =
+        serde_json::from_slice(include_bytes!("fixtures/kemono/profile.json")).unwrap();
+    let parsed = kemono::parse_creator_profile(
+        include_bytes!("fixtures/kemono/profile.json"),
+        "patreon",
+        "42",
+    )
+    .unwrap();
+    assert_eq!(parsed.indexed, Some(1704067200));
+    assert_eq!(parsed.updated, Some(1704153600));
+    let post = json!({"id":"7","user":"42","service":"patreon","file":{"name":"cover.jpg","path":"/aa/bb/aabb.jpg"}});
+    let mut native = kemono::parse_post(&post, "kemono.cr", "patreon", "42").remove(0);
+    let before = native.archive_key();
+    assert!(before.is_some());
+    native.metadata.as_mut().unwrap().creator = Some(parsed.clone());
+    native.metadata.as_mut().unwrap().username = parsed.name.clone();
+    assert_eq!(before, native.archive_key());
+    let data = json!({"id":"7","user":"42","service":"patreon","hash":"aabb","num":1,"type":"file","name":"cover.jpg","filename":"cover","extension":"jpg","username":"Alice","user_profile":profile,"private_key":"PRIVATE_VALUE"});
+    let compatible = extract::parse_messages(
+        &serde_json::to_vec(&json!([[3, native.url, data]])).unwrap(),
+        "kemono",
+    )
+    .unwrap()
+    .remove(0);
+    assert_eq!(
+        serde_json::to_value(&native.metadata).unwrap(),
+        serde_json::to_value(&compatible.metadata).unwrap()
+    );
+    assert_eq!(native.archive_key(), compatible.archive_key());
+    assert!(FilterExpression::parse("username == 'Alice' and user == '42' and creator_id == '42' and creator_name == 'Alice' and user_profile['post_count'] == 7 and metadata['creator']['dm_count'] == 0").unwrap().matches_post(&Post::from_media(std::slice::from_ref(&native),"kemono")).unwrap());
+    assert_eq!(
+        FilenameTemplate::parse(
+            "{user}_{username}_{creator[name]}_{user_profile[post_count]}.{extension}"
+        )
+        .unwrap()
+        .render(&native)
+        .unwrap(),
+        "42_Alice_Alice_7.jpg"
+    );
+    let meta = native.metadata.as_mut().unwrap();
+    meta.username = Some("Bob".into());
+    meta.creator.as_mut().unwrap().name = Some("Bob".into());
+    assert_eq!(before, native.archive_key());
+    native
+        .metadata
+        .as_mut()
+        .unwrap()
+        .creator
+        .as_mut()
+        .unwrap()
+        .id = "43".into();
+    assert_ne!(before, native.archive_key());
+    assert!(
+        !serde_json::to_string(&compatible)
+            .unwrap()
+            .contains("PRIVATE_VALUE")
+    );
+}
+
+#[test]
+fn compatibility_display_names_cannot_supply_missing_creator_identity() {
+    for (user, profile) in [
+        (json!("../private"), None),
+        (
+            json!("42"),
+            Some(json!({"id":"43","service":"patreon","name":"PRIVATE_VALUE"})),
+        ),
+    ] {
+        let mut data = json!({"id":"7","user":user,"service":"patreon","hash":"aabb","num":1,"filename":"file","extension":"jpg","username":"999"});
+        if let Some(profile) = profile {
+            data["user_profile"] = profile;
+        }
+        let media = extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, "https://kemono.cr/data/aa/bb/aabb.jpg", data]]))
+                .unwrap(),
+            "kemono",
+        )
+        .unwrap()
+        .remove(0);
+        let creator = media.metadata.as_ref().unwrap().creator.as_ref().unwrap();
+        if creator.id.is_empty() {
+            assert_eq!(media.archive_key(), None);
+        } else {
+            assert_eq!(creator.id, "42");
+            assert!(media.archive_key().is_some());
+            assert!(media.metadata.as_ref().unwrap().username.is_none());
+        }
+        assert!(
+            !serde_json::to_string(&media)
+                .unwrap()
+                .contains("PRIVATE_VALUE")
+        );
+    }
+}
+
+#[tokio::test]
+async fn gzip_post_and_profile_responses_decode_without_changing_media_encoding() {
+    use futures_util::StreamExt;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::Duration,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let root = format!("http://{}/", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let server = thread::spawn(move || {
+        let bodies=[json!({"post":{"id":"7","user":"42","service":"patreon","file":{"name":"cover.jpg","path":"/aa/bb/aabb.jpg"}}}).to_string().into_bytes(),include_bytes!("fixtures/kemono/profile.json").to_vec()];
+        let mut requests = Vec::new();
+        for body in bodies {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(&body).unwrap();
+            let compressed = encoder.finish().unwrap();
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).unwrap();
+                assert_ne!(count, 0);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            requests.push(String::from_utf8(request).unwrap());
+            write!(socket,"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",compressed.len()).unwrap();
+            socket.write_all(&compressed).unwrap();
+        }
+        requests
+    });
+    let extractor = kemono::Kemono::new(Duration::from_secs(4))
+        .unwrap()
+        .with_api_root(root)
+        .with_network(
+            &gallery_dl_rs::network::NetworkOptions::new(Some(String::new()), None).unwrap(),
+        )
+        .unwrap();
+    let media = extractor
+        .stream(&"https://kemono.cr/patreon/user/42/post/7".parse().unwrap())
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(media.len(), 1);
+    let media = media[0].as_ref().unwrap();
+    assert_eq!(
+        media.metadata.as_ref().unwrap().username.as_deref(),
+        Some("Alice")
+    );
+    assert_eq!(
+        media
+            .metadata
+            .as_ref()
+            .unwrap()
+            .creator
+            .as_ref()
+            .unwrap()
+            .id,
+        "42"
+    );
+    assert_eq!(
+        media.headers.get("Accept-Encoding").map(String::as_str),
+        Some("identity")
+    );
+    let requests = server.join().unwrap();
+    assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/profile "));
+    assert!(requests.iter().all(|request| {
+        request
+            .to_ascii_lowercase()
+            .contains("accept-encoding: gzip")
+    }));
 }

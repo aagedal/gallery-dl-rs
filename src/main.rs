@@ -893,6 +893,7 @@ fn extract_input<'a>(
                                         options.order_revisions.unwrap_or_default(),
                                     )
                                     .with_max_posts(options.max_posts)
+                                    .with_metadata(options.metadata.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1192,6 +1193,9 @@ fn extract_input<'a>(
                             max_posts: matches!(category, "kemono" | "coomer")
                                 .then_some(options.max_posts)
                                 .flatten(),
+                            metadata: matches!(category, "kemono" | "coomer")
+                                .then_some(options.metadata)
+                                .flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
                             text_tweets: (category == "twitter")
                                 .then_some(options.text_tweets)
@@ -1416,6 +1420,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         search_limit: None,
         search_stop: None,
         max_posts: None,
+        metadata: None,
         api_key: None,
         refresh_token: None,
         client_id: None,

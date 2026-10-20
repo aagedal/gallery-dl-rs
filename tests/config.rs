@@ -2399,3 +2399,49 @@ fn kemono_revision_settings_reject_unknown_types_and_values_privately() {
         }
     }
 }
+
+#[test]
+fn kemono_metadata_option_is_sparse_and_scoped_with_explicit_false_overlays() {
+    let cfg = parse(r#"{"extractor":{"metadata":false,"kemono":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(true));
+    assert_eq!(cfg.resolve("coomer").unwrap().metadata, Some(false));
+    assert_eq!(
+        cfg.resolve("kemono")
+            .unwrap()
+            .overlay(&Options {
+                metadata: Some(false),
+                ..Default::default()
+            })
+            .metadata,
+        Some(false)
+    );
+    assert_eq!(
+        parse(r#"{"metadata":false,"extractor":{"metadata":true,"kemono":{"metadata":true}}}"#)
+            .unwrap()
+            .resolve("kemono")
+            .unwrap()
+            .metadata,
+        Some(false)
+    );
+    assert_eq!(
+        parse("{}").unwrap().resolve("kemono").unwrap().metadata,
+        None
+    );
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(1),
+        serde_json::json!("PRIVATE_VALUE"),
+        serde_json::json!([]),
+    ] {
+        for doc in [
+            serde_json::json!({"metadata":value}),
+            serde_json::json!({"extractor":{"kemono":{"metadata":value}}}),
+        ] {
+            let error = parse(&doc.to_string()).unwrap_err().to_string();
+            assert!(
+                error.contains("metadata") && !error.contains("PRIVATE_VALUE"),
+                "{error}"
+            );
+        }
+    }
+}

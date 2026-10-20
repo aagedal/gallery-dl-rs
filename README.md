@@ -367,11 +367,12 @@ repeated files of those types. Hashless inline paths remain separate source
 files. Source numbering/counts include nonimages skipped by thumbnail mode, so
 file numbers can have gaps. At most 10,000 candidates are selected per post.
 
-`post_id` is the post ID, `media_id` the file hash when available, `username`
-the creator ID, `service` the service, caption the title, date from
-`published`/`added`, and file description the original name. File `type` identifies
-`file`, `attachment`, `inline` or `archive`. Compatibility output normalizes these
-fields; `service` and `user` are available in filename templates. Media names
+`post_id` is the post ID, `media_id` the file hash when available, `user` and
+`creator_id` the immutable creator ID, `username` the optional creator display
+name, `service` the service, caption the title, date from `published`/`added`, and
+file description the original name. File `type` identifies `file`, `attachment`,
+`inline` or `archive`. Compatibility output normalizes these fields; `service`,
+`user`, `creator_id` and `creator_name` are available in filename templates. Media names
 are `{post_id}_{index:02}.{extension}`; default destinations also carry the shared
 request digest. New media headers change that digest and resume checkpoint keys.
 Archive identity now uses service,
@@ -379,6 +380,23 @@ creator, post and source file number so requested duplicates and hashless inline
 files remain distinct. Previous hash-based archive entries and output paths are
 not migrated.
 Plain `/data/` file links stay direct downloads.
+
+`metadata` defaults to true for Kemono/Coomer and fetches each creator's profile
+when their first post is consumed. A bounded cache retains up to 1,024 successful
+or failed lookups, keyed by host, service and creator ID. `metadata: false`
+suppresses these requests. Missing, invalid or unavailable profiles leave media
+extraction available with the creator ID and service; `username` is then absent.
+Profiles must match the requested identity. Typed `metadata.creator` includes
+validated names, public ID, indexed/updated dates, relation ID, chat availability
+and post/DM/share/chat counts when present. Filters and templates expose these
+fields through `creator` and `user_profile`, plus `creator_id` and `creator_name`.
+Profile renames preserve archive identity. Templates that previously used
+`username` for the numeric ID should use `user` or `creator_id` instead.
+
+API responses support gzip with separate 32 MiB encoded and decoded limits,
+complete member/checksum validation and cancellable background decoding.
+Unsupported content encodings fail explicitly. Media requests retain identity
+encoding and their existing range/resume behavior.
 
 `revisions` defaults to false; true includes the current post and historical
 versions, while `"unique"` removes adjacent versions with equal content hashes.
@@ -1322,7 +1340,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
-`search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`search-results`, `limit`, `search-limit`, `search-stop`, `metadata` (Kemono/Coomer), `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
 Site-specific media options affect their respective extractors. Booru

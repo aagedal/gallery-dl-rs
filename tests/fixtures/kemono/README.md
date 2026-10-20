@@ -20,3 +20,10 @@ A native global-feed inspection and a separate `expand: true`, `max-posts: 1`
 inspection each emitted two media jobs successfully. No media were downloaded.
 The same Coomer global-feed inspection returned non-JSON data and was not a
 successful live verification.
+
+`profile.json` is a sanitized, reduced capture of the matching public creator's
+`/api/v1/SERVICE/user/USER/profile` response, inspected on 2026-10-20. The server
+returned `Content-Encoding: gzip` even with `Accept-Encoding: identity`.
+The fixture retains the decompressed JSON shape and field types; creator IDs,
+name, service, dates, public ID, counts and flag values are replacements.
+No compressed raw response or real creator identity is stored in the repository.

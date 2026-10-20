@@ -116,7 +116,11 @@ impl Media {
             category @ ("kemono" | "coomer") => {
                 let post = self.metadata.as_ref()?;
                 let service = post.instance.as_deref()?;
-                let user = post.username.as_deref()?;
+                let user = match &post.creator {
+                    Some(creator) if creator.service == service => creator.id.as_str(),
+                    Some(_) => return None,
+                    None => post.username.as_deref()?,
+                };
                 let host = self.url.host_str()?;
                 let thumbnail = host.strip_prefix("img.").is_some_and(|domain| {
                     crate::kemono::HOSTS.contains(&(domain, category))
@@ -355,6 +359,8 @@ impl Media {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<crate::kemono::CreatorMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<crate::kemono::RevisionMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<crate::file_metadata::FileMetadata>,
@@ -586,6 +592,7 @@ pub struct BackendOptions {
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
     pub max_posts: Option<usize>,
+    pub metadata: Option<bool>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -701,6 +708,7 @@ impl Backend {
                 .arg(format!("size={}", serde_json::json!(size.sizes())));
         }
         for (name, value) in [
+            ("metadata", options.metadata),
             ("mp4", options.mp4),
             ("reblogs", options.reblogs),
             ("original", options.original),
@@ -1231,7 +1239,7 @@ fn compatibility_metadata(
                 .filter(|hash| crate::kemono::valid_hash(hash))
                 .unwrap_or_default(),
             String::new(),
-            Some(id("user")).filter(|user| crate::kemono::valid_id(user)),
+            None,
             string("title"),
         ),
         _ => return None,
@@ -1256,7 +1264,17 @@ fn compatibility_metadata(
     {
         file.get_or_insert_default().media_type = Some(std::sync::Arc::from(kind));
     }
+    let creator = compatibility_creator(data, category);
+    let username = if matches!(category, "kemono" | "coomer") {
+        creator
+            .as_ref()
+            .and_then(|creator| creator.name.as_ref())
+            .map(ToString::to_string)
+    } else {
+        username
+    };
     Some(PostMetadata {
+        creator,
         revision: compatibility_revision(data, category),
         rating: crate::booru::Site::from_category(category)
             .and_then(|_| string("rating"))
@@ -1391,4 +1409,50 @@ fn compatibility_revision(
         index: position("revision_index"),
         count: position("revision_count"),
     })
+}
+
+fn compatibility_creator(
+    data: &serde_json::Map<String, Value>,
+    category: &str,
+) -> Option<crate::kemono::CreatorMetadata> {
+    if !matches!(category, "kemono" | "coomer") {
+        return None;
+    }
+    let id = data
+        .get("user")
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.clone()),
+            Value::Number(value) if value.is_u64() => Some(value.to_string()),
+            _ => None,
+        })
+        .filter(|id| crate::kemono::valid_id(id))
+        .unwrap_or_default();
+    let service = data
+        .get("service")
+        .and_then(Value::as_str)
+        .filter(|service| crate::kemono::valid_service(service))
+        .unwrap_or_default()
+        .to_owned();
+    let mut creator = crate::kemono::CreatorMetadata {
+        id,
+        service,
+        ..Default::default()
+    };
+    if let Some(profile) = data.get("user_profile") {
+        if !creator.id.is_empty() && !creator.service.is_empty() {
+            return Some(
+                crate::kemono::parse_profile_value(profile, &creator.service, &creator.id)
+                    .unwrap_or(creator),
+            );
+        }
+    } else {
+        creator.name = data
+            .get("username")
+            .and_then(Value::as_str)
+            .filter(|name| {
+                !name.is_empty() && name.len() <= 64 * 1024 && !name.chars().any(char::is_control)
+            })
+            .map(std::sync::Arc::from);
+    }
+    Some(creator)
 }

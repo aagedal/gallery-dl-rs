@@ -64,6 +64,10 @@ const FIELDS: &[&str] = &[
     "revision_hash",
     "revision_index",
     "revision_count",
+    "creator",
+    "creator_id",
+    "creator_name",
+    "user_profile",
 ];
 
 #[derive(Clone, Debug)]

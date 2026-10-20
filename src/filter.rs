@@ -323,6 +323,48 @@ fn context_parts(
         if let Some(score) = post.score {
             metadata.insert("score".into(), Value::Int(score.into()));
         }
+        if let Some(creator) = &post.creator {
+            let mut fields = BTreeMap::from([
+                ("id".into(), text(creator.id.as_str())),
+                ("service".into(), text(creator.service.as_str())),
+            ]);
+            for (key, value) in [("name", &creator.name), ("public_id", &creator.public_id)] {
+                if let Some(value) = value {
+                    fields.insert(key.into(), text(value.clone()));
+                }
+            }
+            for (key, value) in [("indexed", creator.indexed), ("updated", creator.updated)] {
+                if let Some(value) = value {
+                    fields.insert(key.into(), Value::Int(value.into()));
+                }
+            }
+            for (key, value) in [
+                ("post_count", creator.post_count),
+                ("dm_count", creator.dm_count),
+                ("share_count", creator.share_count),
+                ("chat_count", creator.chat_count),
+            ] {
+                if let Some(value) = value {
+                    fields.insert(key.into(), Value::Int(value.into()));
+                }
+            }
+            if let Some(value) = &creator.relation_id {
+                fields.insert("relation_id".into(), text(value.as_str()));
+            }
+            if let Some(value) = creator.has_chats {
+                fields.insert("has_chats".into(), Value::Bool(value));
+            }
+            metadata.insert("creator_id".into(), text(creator.id.as_str()));
+            metadata.insert(
+                "creator_name".into(),
+                creator
+                    .name
+                    .as_ref()
+                    .map_or(Value::None, |name| text(name.clone())),
+            );
+            metadata.insert("creator".into(), map(fields.clone()));
+            metadata.insert("user_profile".into(), map(fields));
+        }
         if let Some(revision) = &post.revision {
             let mut fields = BTreeMap::new();
             for (key, value) in [
@@ -390,7 +432,9 @@ fn context_parts(
         if let Some(instance) = &post.instance {
             if matches!(category, "kemono" | "coomer") {
                 values.insert("service".into(), text(instance.as_str()));
-                if let Some(user) = &post.username {
+                if let Some(creator) = &post.creator {
+                    values.insert("user".into(), text(creator.id.as_str()));
+                } else if let Some(user) = &post.username {
                     values.insert("user".into(), text(user.clone()));
                 }
             } else {

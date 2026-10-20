@@ -29,6 +29,10 @@ use std::{
 };
 use url::Url;
 
+#[path = "kemono_profile.rs"]
+mod profile;
+pub(crate) use profile::parse_profile_value;
+pub use profile::{CreatorMetadata, parse_creator_profile};
 #[path = "kemono_revisions.rs"]
 mod revisions;
 use revisions::RevisionPost;
@@ -326,7 +330,8 @@ fn post_identity(
 fn post_metadata(post: &Value, identity: &Identity) -> PostMetadata {
     PostMetadata {
         post_id: identity.id.clone(),
-        username: Some(Arc::from(identity.user.as_str())),
+        username: None,
+        creator: Some(CreatorMetadata::stub(&identity.service, &identity.user)),
         instance: Some(identity.service.clone()),
         caption: string(post, "title").map(Arc::from),
         timestamp: ["published", "added"]
@@ -793,6 +798,8 @@ pub struct Kemono {
     selection: Selection,
     revisions: RevisionMode,
     revision_order: RevisionOrder,
+    metadata: bool,
+    profiles: tokio::sync::Mutex<profile::Cache>,
 }
 
 struct ListingState {
@@ -806,6 +813,7 @@ struct ListingState {
     raw: VecDeque<Value>,
     revisions: VecDeque<RevisionPost>,
     revision_identity: Option<Identity>,
+    revision_creator: Option<Arc<CreatorMetadata>>,
     seen_pages: HashSet<[u8; 32]>,
     pending: VecDeque<ExtractionEvent>,
 }
@@ -825,7 +833,42 @@ impl Kemono {
             selection: Selection::default(),
             revisions: RevisionMode::None,
             revision_order: RevisionOrder::Newest,
+            metadata: true,
+            profiles: tokio::sync::Mutex::new(profile::Cache::default()),
         })
+    }
+
+    /// Enable optional descriptive creator profiles; immutable creator IDs are always retained.
+    pub fn with_metadata(mut self, metadata: bool) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    async fn creator(&self, host: &str, identity: &Identity) -> Arc<CreatorMetadata> {
+        let stub = || CreatorMetadata::stub(&identity.service, &identity.user);
+        if !self.metadata {
+            return Arc::new(stub());
+        }
+        let key = (
+            host.to_owned(),
+            identity.service.clone(),
+            identity.user.clone(),
+        );
+        // The guard is cancellation-safe and serializes first lookups. A dropped
+        // HTTP future releases it without inserting a partial cache entry.
+        let mut profiles = self.profiles.lock().await;
+        if let Some(profile) = profiles.get(&key) {
+            return profile;
+        }
+        let path = format!("api/v1/{}/user/{}/profile", identity.service, identity.user);
+        let profile = match self.call(host, &path, &[]).await {
+            Ok(bytes) => parse_creator_profile(&bytes, &identity.service, &identity.user)
+                .unwrap_or_else(|_| stub()),
+            Err(_) => stub(),
+        };
+        let profile = Arc::new(profile);
+        profiles.insert(key, profile.clone());
+        profile
     }
 
     pub fn with_revisions(mut self, revisions: RevisionMode) -> Self {
@@ -929,23 +972,29 @@ impl Kemono {
         host: &str,
         post: RevisionPost,
         identity: &Identity,
+        creator: &CreatorMetadata,
     ) -> VecDeque<ExtractionEvent> {
         let mut events = self.finish(host, &post.post, identity);
-        let Some(revision) = post.metadata else {
-            return events;
-        };
         for event in &mut events {
             match event {
-                ExtractionEvent::Post(post) => {
-                    if let Some(metadata) = &mut post.metadata {
-                        metadata.revision = Some(revision.clone());
+                ExtractionEvent::Post(boundary) => {
+                    if let Some(metadata) = &mut boundary.metadata {
+                        metadata.creator = Some(creator.clone());
+                        metadata.username = creator.name.clone();
+                        metadata.revision = post.metadata.clone();
                     }
                 }
                 ExtractionEvent::Media(media) => {
                     if let Some(metadata) = &mut media.metadata {
-                        metadata.revision = Some(revision.clone());
+                        metadata.creator = Some(creator.clone());
+                        metadata.username = creator.name.clone();
+                        metadata.revision = post.metadata.clone();
                     }
-                    if let Some(id) = revision.id.filter(|id| *id > 0)
+                    if let Some(id) = post
+                        .metadata
+                        .as_ref()
+                        .and_then(|revision| revision.id)
+                        .filter(|id| *id > 0)
                         && let Some((stem, ext)) = media.filename.rsplit_once('.')
                     {
                         media.filename = format!("{stem}_r{id}.{ext}");
@@ -1014,16 +1063,28 @@ impl Kemono {
             let revisions = self
                 .prepare_revisions(&host, body, &identity, explicit)
                 .await?;
+            let creator = if revisions.is_empty() {
+                None
+            } else {
+                Some(self.creator(&host, &identity).await)
+            };
             Ok::<_, crate::Error>(
                 stream::unfold(
-                    (host, identity, revisions, VecDeque::new()),
-                    move |(host, identity, mut revisions, mut pending)| async move {
+                    (host, identity, creator, revisions, VecDeque::new()),
+                    move |(host, identity, creator, mut revisions, mut pending)| async move {
                         loop {
                             if let Some(event) = pending.pop_front() {
-                                return Some((Ok(event), (host, identity, revisions, pending)));
+                                return Some((
+                                    Ok(event),
+                                    (host, identity, creator, revisions, pending),
+                                ));
                             }
-                            pending =
-                                self.finish_revision(&host, revisions.pop_front()?, &identity);
+                            pending = self.finish_revision(
+                                &host,
+                                revisions.pop_front()?,
+                                &identity,
+                                creator.as_deref().expect("prepared creator"),
+                            );
                         }
                     },
                 )
@@ -1127,6 +1188,7 @@ impl Kemono {
             raw: VecDeque::new(),
             revisions: VecDeque::new(),
             revision_identity: None,
+            revision_creator: None,
             seen_pages: HashSet::new(),
             pending: VecDeque::new(),
         };
@@ -1141,7 +1203,12 @@ impl Kemono {
                         .revision_identity
                         .as_ref()
                         .expect("prepared source identity");
-                    state.pending = self.finish_revision(&state.host, revision, identity);
+                    state.pending = self.finish_revision(
+                        &state.host,
+                        revision,
+                        identity,
+                        state.revision_creator.as_deref().expect("prepared creator"),
+                    );
                     continue;
                 }
                 if self.max_posts.is_some_and(|limit| state.emitted >= limit) {
@@ -1179,6 +1246,11 @@ impl Kemono {
                         Ok(revisions) => state.revisions = revisions,
                         Err(e) => return Some((Err(e), None)),
                     }
+                    state.revision_creator = if state.revisions.is_empty() {
+                        None
+                    } else {
+                        Some(self.creator(&state.host, &identity).await)
+                    };
                     state.revision_identity = Some(identity);
                     continue;
                 }
@@ -1217,6 +1289,7 @@ impl Kemono {
                 .timeout(self.request_timeout)
                 // The Kemono API only answers with JSON for this Accept value.
                 .header(header::ACCEPT, "text/css")
+                .header(header::ACCEPT_ENCODING, "gzip")
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Kemono request failed; check network access"))?;
@@ -1252,6 +1325,7 @@ impl Kemono {
         if !status.is_success() {
             return Err(error(format!("Kemono returned HTTP {status}")).into());
         }
+        let response_headers = response.headers().clone();
         let mut body = Vec::new();
         while let Some(chunk) = response
             .chunk()
@@ -1263,7 +1337,9 @@ impl Kemono {
             }
             body.extend_from_slice(&chunk);
         }
-        Ok(body)
+        crate::transport::decode_api_body(body, &response_headers, MAX_RESPONSE)
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -1343,7 +1419,10 @@ mod tests {
             let meta = media[0].metadata.as_ref().unwrap();
             assert_eq!(meta.post_id, "7");
             assert_eq!(meta.media_id, HASH_A);
-            assert_eq!(meta.username.as_deref(), Some("42"));
+            assert_eq!(
+                meta.creator.as_ref().map(|creator| creator.id.as_str()),
+                Some("42")
+            );
             assert_eq!(meta.caption.as_deref(), Some("Hello"));
             assert_eq!(meta.timestamp, Some(1704164645));
             assert_eq!(meta.index, 1);
@@ -1464,6 +1543,7 @@ mod tests {
             .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
             .unwrap()
             .with_api_root(root)
+            .with_metadata(false)
             .with_selection(Selection {
                 original: true,
                 ..Selection::default()
@@ -1538,7 +1618,13 @@ mod tests {
             Some("fanbox")
         );
         assert_eq!(
-            second.metadata.as_ref().unwrap().username.as_deref(),
+            second
+                .metadata
+                .as_ref()
+                .unwrap()
+                .creator
+                .as_ref()
+                .map(|creator| creator.id.as_str()),
             Some("other_creator")
         );
         assert_ne!(first.archive_key(), second.archive_key());
@@ -1685,8 +1771,9 @@ mod tests {
                 .metadata
                 .as_ref()
                 .unwrap()
-                .username
-                .as_deref(),
+                .creator
+                .as_ref()
+                .map(|creator| creator.id.as_str()),
             Some("alice")
         );
         let requests = server.join().unwrap();
@@ -1810,8 +1897,9 @@ mod tests {
                 .metadata
                 .as_ref()
                 .unwrap()
-                .username
-                .as_deref(),
+                .creator
+                .as_ref()
+                .map(|creator| creator.id.as_str()),
             Some("alice")
         );
         let requests = server.join().unwrap();
@@ -1843,7 +1931,10 @@ mod tests {
         assert_eq!(post.count, Some(0));
         let metadata = post.metadata.as_ref().unwrap();
         assert_eq!(metadata.post_id, "1");
-        assert_eq!(metadata.username.as_deref(), Some("42"));
+        assert_eq!(
+            metadata.creator.as_ref().map(|creator| creator.id.as_str()),
+            Some("42")
+        );
         assert_eq!(metadata.instance.as_deref(), Some("patreon"));
         assert_eq!(metadata.caption.as_deref(), Some("empty"));
         assert_eq!(metadata.timestamp, Some(1704164645));
@@ -1864,7 +1955,13 @@ mod tests {
         };
         assert_eq!(empty_post.category, "coomer");
         assert_eq!(
-            empty_post.metadata.as_ref().unwrap().username.as_deref(),
+            empty_post
+                .metadata
+                .as_ref()
+                .unwrap()
+                .creator
+                .as_ref()
+                .map(|creator| creator.id.as_str()),
             Some("alice")
         );
         server.join().unwrap();
@@ -2647,7 +2744,13 @@ mod tests {
         };
         assert_eq!(empty.count, Some(0));
         assert_eq!(
-            empty.metadata.as_ref().unwrap().username.as_deref(),
+            empty
+                .metadata
+                .as_ref()
+                .unwrap()
+                .creator
+                .as_ref()
+                .map(|creator| creator.id.as_str()),
             Some("42")
         );
         assert_eq!(
@@ -2764,6 +2867,397 @@ mod tests {
             }
             assert_eq!(server.join().unwrap().len(), 1);
         }
+    }
+
+    fn creator_profile(service: &str, user: &str, name: &str) -> Value {
+        json!({"id":user,"service":service,"name":name,"public_id":"public-handle",
+            "indexed":"2024-01-02T03:04:05","updated":"2024-02-02T00:00:00","post_count":8})
+    }
+
+    #[tokio::test]
+    async fn profile_cache_reuses_lookup_across_pages_posts_and_inputs() {
+        let full: Vec<_> = (1..=50).map(|id| post(&id.to_string())).collect();
+        let (root, server) = serve(vec![
+            response("200 OK", json!(full).to_string().as_bytes()),
+            response(
+                "200 OK",
+                creator_profile("patreon", "42", "Display Name")
+                    .to_string()
+                    .as_bytes(),
+            ),
+            response("200 OK", b"[]"),
+            response("200 OK", post("7").to_string().as_bytes()),
+        ]);
+        let client = kemono(root).with_metadata(true);
+        let media: Vec<_> = client
+            .stream(&Url::parse("https://kemono.cr/patreon/user/42").unwrap())
+            .collect()
+            .await;
+        assert_eq!(media.len(), 100);
+        for media in &media {
+            let metadata = media.as_ref().unwrap().metadata.as_ref().unwrap();
+            assert_eq!(metadata.username.as_deref(), Some("Display Name"));
+            assert_eq!(metadata.creator.as_ref().unwrap().id, "42");
+            assert_eq!(metadata.creator.as_ref().unwrap().indexed, Some(1704164645));
+        }
+        let again: Vec<_> = client
+            .stream(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert_eq!(again.len(), 2);
+        assert_eq!(
+            again[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .username
+                .as_deref(),
+            Some("Display Name")
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/profile "));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.contains("/profile "))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_enrichment_is_shared_across_revisions_without_changing_revision_hashes() {
+        let body = json!({"post":post("7"),"props":{"revisions":[[0,revision(1,"old")]]}});
+        let (root, server) = serve(vec![
+            response("200 OK", body.to_string().as_bytes()),
+            response(
+                "200 OK",
+                creator_profile("patreon", "42", "  Display 猫  ")
+                    .to_string()
+                    .as_bytes(),
+            ),
+        ]);
+        let events: Vec<_> = kemono(root)
+            .with_metadata(true)
+            .with_revisions(RevisionMode::All)
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        let revisions = post_revisions(&events);
+        assert_eq!(revisions.len(), 2);
+        assert_eq!(
+            revisions[0].hash.as_ref().unwrap(),
+            &revisions::hash(&post("7")).unwrap()
+        );
+        let mut first = None;
+        for event in &events {
+            let metadata = match event.as_ref().unwrap() {
+                ExtractionEvent::Post(post) => post.metadata.as_ref(),
+                ExtractionEvent::Media(media) => media.metadata.as_ref(),
+                _ => None,
+            };
+            if let Some(metadata) = metadata {
+                let name = metadata.username.as_ref().unwrap();
+                assert_eq!(name.as_ref(), "  Display 猫  ");
+                if let Some(first) = &first {
+                    assert!(Arc::ptr_eq(first, name));
+                } else {
+                    first = Some(name.clone());
+                }
+                assert_eq!(metadata.creator.as_ref().unwrap().id, "42");
+            }
+        }
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn profile_cache_isolates_host_service_and_creator_identity() {
+        let inputs = [
+            ("kemono.cr", "patreon", "42", "first"),
+            ("kemono.cr", "fanbox", "42", "second"),
+            ("coomer.st", "patreon", "42", "third"),
+            ("kemono.cr", "patreon", "43", "fourth"),
+        ];
+        let mut replies = Vec::new();
+        for (_, service, user, name) in inputs {
+            let mut payload = post("7");
+            payload["service"] = json!(service);
+            payload["user"] = json!(user);
+            replies.push(response("200 OK", payload.to_string().as_bytes()));
+            replies.push(response(
+                "200 OK",
+                creator_profile(service, user, name).to_string().as_bytes(),
+            ));
+        }
+        let (root, server) = serve(replies);
+        let client = kemono(root).with_metadata(true);
+        for (host, service, user, name) in inputs {
+            let media: Vec<_> = client
+                .stream(
+                    &Url::parse(&format!("https://{host}/{service}/user/{user}/post/7")).unwrap(),
+                )
+                .collect()
+                .await;
+            let metadata = media[0].as_ref().unwrap().metadata.as_ref().unwrap();
+            assert_eq!(metadata.username.as_deref(), Some(name));
+            assert_eq!(metadata.creator.as_ref().unwrap().id, user);
+            assert_eq!(metadata.creator.as_ref().unwrap().service, service);
+        }
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 8);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.contains("/profile "))
+                .count(),
+            4
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_failures_and_invalid_identity_cache_stubs_without_losing_files() {
+        for reply in [
+            response("404 Not Found", b"{}"),
+            response("403 Forbidden", b"{}"),
+            response("200 OK", b"private-invalid-json"),
+            response(
+                "200 OK",
+                creator_profile("patreon", "private-other", "wrong display")
+                    .to_string()
+                    .as_bytes(),
+            ),
+        ] {
+            let (root, server) = serve(vec![
+                response(
+                    "200 OK",
+                    json!([post("7"), post("8")]).to_string().as_bytes(),
+                ),
+                reply,
+            ]);
+            let media: Vec<_> = kemono(root)
+                .with_metadata(true)
+                .stream(&Url::parse("https://kemono.cr/patreon/user/42").unwrap())
+                .collect()
+                .await;
+            assert_eq!(media.len(), 4);
+            for media in media {
+                let media = media.unwrap();
+                let metadata = media.metadata.as_ref().unwrap();
+                assert!(metadata.username.is_none());
+                assert_eq!(
+                    metadata.creator.as_ref().unwrap(),
+                    &CreatorMetadata::stub("patreon", "42")
+                );
+                assert!(!serde_json::to_string(&media).unwrap().contains("private"));
+            }
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn profile_lookups_apply_to_empty_and_thumbnail_omitted_posts_but_can_be_disabled() {
+        assert!(Kemono::new(Duration::from_secs(5)).unwrap().metadata);
+        for nonimage in [false, true] {
+            let mut payload = json!({"id":"7","file":{},"attachments":[]});
+            if nonimage {
+                payload["file"] = json!({"path":format!("/aa/11/{HASH_A}.mp4")});
+            }
+            let (root, server) = serve(vec![
+                response("200 OK", payload.to_string().as_bytes()),
+                response(
+                    "200 OK",
+                    creator_profile("patreon", "42", "Name")
+                        .to_string()
+                        .as_bytes(),
+                ),
+            ]);
+            let events: Vec<_> = kemono(root)
+                .with_metadata(true)
+                .with_selection(Selection::default())
+                .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+                .collect()
+                .await;
+            assert_eq!(events.len(), 2);
+            let ExtractionEvent::Post(post) = events[0].as_ref().unwrap() else {
+                panic!("expected post")
+            };
+            assert_eq!(post.count, Some(usize::from(nonimage)));
+            assert_eq!(
+                post.metadata.as_ref().unwrap().username.as_deref(),
+                Some("Name")
+            );
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
+        let (root, server) = serve(vec![response("200 OK", post("7").to_string().as_bytes())]);
+        let events: Vec<_> = kemono(root)
+            .with_metadata(true)
+            .with_metadata(false)
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        for event in events {
+            let metadata = match event.unwrap() {
+                ExtractionEvent::Post(post) => post.metadata,
+                ExtractionEvent::Media(media) => media.metadata,
+                _ => None,
+            };
+            if let Some(metadata) = metadata {
+                assert!(metadata.username.is_none());
+                assert_eq!(
+                    metadata.creator,
+                    Some(CreatorMetadata::stub("patreon", "42"))
+                );
+            }
+        }
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn raw_cutoff_and_consumer_drop_avoid_later_creator_lookups() {
+        for cutoff in [true, false] {
+            let mut other = post("8");
+            other["user"] = json!("43");
+            let (root, server) = serve(vec![
+                response(
+                    "200 OK",
+                    json!({"posts":[post("7"),other]}).to_string().as_bytes(),
+                ),
+                response(
+                    "200 OK",
+                    creator_profile("patreon", "42", "first")
+                        .to_string()
+                        .as_bytes(),
+                ),
+            ]);
+            let client = kemono(root).with_metadata(true).with_max_posts(if cutoff {
+                Some(1)
+            } else {
+                None
+            });
+            let input = Url::parse("https://kemono.cr/posts").unwrap();
+            let mut events = client.events(&input);
+            if cutoff {
+                assert_eq!(events.collect::<Vec<_>>().await.len(), 4);
+            } else {
+                assert!(matches!(
+                    events.next().await.unwrap().unwrap(),
+                    ExtractionEvent::Post(_)
+                ));
+                drop(events);
+            }
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn simultaneous_profile_requests_share_one_completed_lookup() {
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            creator_profile("patreon", "42", "shared")
+                .to_string()
+                .as_bytes(),
+        )]);
+        let client = kemono(root).with_metadata(true);
+        let identity = Identity {
+            service: "patreon".into(),
+            user: "42".into(),
+            id: "7".into(),
+        };
+        let (first, second) = futures_util::future::join(
+            client.creator("kemono.cr", &identity),
+            client.creator("kemono.cr", &identity),
+        )
+        .await;
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(first.name.as_deref(), Some("shared"));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelling_profile_lookup_releases_http_and_cache_lock_for_retry() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let server = thread::spawn(move || {
+            let read_request = |stream: &mut std::net::TcpStream| {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert_ne!(count, 0);
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                String::from_utf8(request).unwrap()
+            };
+            let (mut first, _) = listener.accept().unwrap();
+            let first_request = read_request(&mut first);
+            started_tx.send(()).unwrap();
+            let mut byte = [0];
+            match first.read(&mut byte) {
+                Ok(0) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+                    ) => {}
+                other => panic!("profile request was not cancelled: {other:?}"),
+            };
+            let (mut second, _) = listener.accept().unwrap();
+            let second_request = read_request(&mut second);
+            second
+                .write_all(&response(
+                    "200 OK",
+                    creator_profile("patreon", "42", "retry")
+                        .to_string()
+                        .as_bytes(),
+                ))
+                .unwrap();
+            vec![first_request, second_request]
+        });
+        let client = Arc::new(kemono(root).with_metadata(true));
+        let lookup = tokio::spawn({
+            let client = client.clone();
+            async move {
+                let identity = Identity {
+                    service: "patreon".into(),
+                    user: "42".into(),
+                    id: "7".into(),
+                };
+                client.creator("kemono.cr", &identity).await
+            }
+        });
+        tokio::task::spawn_blocking(move || {
+            started_rx.recv_timeout(Duration::from_secs(3)).unwrap()
+        })
+        .await
+        .unwrap();
+        lookup.abort();
+        assert!(lookup.await.unwrap_err().is_cancelled());
+        let identity = Identity {
+            service: "patreon".into(),
+            user: "42".into(),
+            id: "7".into(),
+        };
+        let profile = tokio::time::timeout(
+            Duration::from_secs(3),
+            client.creator("kemono.cr", &identity),
+        )
+        .await
+        .unwrap();
+        assert_eq!(profile.name.as_deref(), Some("retry"));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.starts_with("GET /api/v1/patreon/user/42/profile "))
+        );
     }
 
     #[tokio::test]

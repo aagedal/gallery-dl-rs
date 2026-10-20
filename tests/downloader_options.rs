@@ -21,6 +21,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         rating: None,
         score: None,
         revision: None,
+        creator: None,
         community: None,
         community_archive: false,
         retweet_id: None,

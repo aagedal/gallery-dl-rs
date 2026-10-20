@@ -110,6 +110,8 @@ pub struct Options {
     pub search_stop: Option<u8>,
     /// Limit Kemono/Coomer source posts; zero clears an inherited limit.
     pub max_posts: Option<usize>,
+    /// Look up Kemono/Coomer creator profiles.
+    pub metadata: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
     /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
@@ -265,6 +267,7 @@ impl Options {
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
             max_posts: overrides.max_posts.or(self.max_posts),
+            metadata: overrides.metadata.or(self.metadata),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             refresh_token: overrides
                 .refresh_token
@@ -376,6 +379,7 @@ struct RawRoot {
     search_limit: Field,
     search_stop: Field,
     max_posts: Field,
+    metadata: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -436,6 +440,7 @@ struct RawExtractor {
     search_limit: Field,
     search_stop: Field,
     max_posts: Field,
+    metadata: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -528,6 +533,7 @@ struct RawOptions {
     search_limit: Field,
     search_stop: Field,
     max_posts: Field,
+    metadata: Field,
     api_key: Field,
     username: Field,
     password: Field,
@@ -695,6 +701,7 @@ impl Config {
             search_limit: root.search_limit,
             search_stop: root.search_stop,
             max_posts: root.max_posts,
+            metadata: root.metadata,
             api_key: Field::default(),
             username: Field::default(),
             password: Field::default(),
@@ -761,6 +768,7 @@ impl Config {
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
             max_posts: extractor.max_posts,
+            metadata: extractor.metadata,
             api_key: Field::default(),
             username: Field::default(),
             password: Field::default(),
@@ -1278,6 +1286,7 @@ impl RawOptions {
             Some(Value::String(value)) if value == "auto" => Some(3),
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
+        let metadata = boolean(self.metadata, "metadata")?;
         let max_posts = match self.max_posts.0 {
             None => None,
             Some(Value::Number(value)) => Some(
@@ -1502,6 +1511,7 @@ impl RawOptions {
             search_limit,
             search_stop,
             max_posts,
+            metadata,
             api_key,
             refresh_token,
             client_id,
