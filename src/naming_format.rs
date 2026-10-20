@@ -184,7 +184,7 @@ impl Field {
         if self.conversion.is_none() && self.ops.is_empty() && self.spec.is_empty() {
             Ok(self.select(lookup))
         } else {
-            self.render(lookup)
+            self.render_content(lookup)
                 .map(|value| value.map_or(Value::None, Value::Str))
         }
     }
@@ -211,16 +211,24 @@ impl Field {
     }
     /// Render the field. `Ok(None)` reports a missing or empty required value.
     pub(crate) fn render(&self, lookup: impl Fn(&str) -> Option<Value>) -> Result<Option<String>> {
-        let mut selected = self.select(lookup);
-        if let Some(conversion) = self.conversion {
-            selected = convert(selected, conversion)?;
-        }
         let optional = self.ops.iter().any(|op| matches!(op, Op::Optional { .. }));
-        let output = apply(&self.ops, &self.spec, selected)?;
+        let output = self.render_content(lookup)?;
         Ok(match output {
             Some(output) if output.is_empty() && !optional => None,
             output => output,
         })
+    }
+    /// Content formatting retains present empty strings; filename rendering
+    /// separately rejects an empty required field.
+    pub(crate) fn render_content(
+        &self,
+        lookup: impl Fn(&str) -> Option<Value>,
+    ) -> Result<Option<String>> {
+        let mut selected = self.select(lookup);
+        if let Some(conversion) = self.conversion {
+            selected = convert(selected, conversion)?;
+        }
+        apply(&self.ops, &self.spec, selected)
     }
 }
 

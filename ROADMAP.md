@@ -1073,11 +1073,15 @@ atomic publication. Mtime supports metadata/template values and file/directory
 targets. Selection preserves post/child boundaries so empty selected posts,
 concurrent downloads, abort/terminate, errors and finalization retain their hooks;
 inspection has no processor side effects. Source fixtures cover rendering,
-algorithm choices, timestamps and lifecycle traces. Remaining: processor archive
+algorithm choices, timestamps and lifecycle traces. Job paths now distinguish the
+current directory from the retained filename and completed file path, including
+empty posts and ordered hash/metadata hooks. Scoped `init` supports eager jobs,
+including no-result roots and children, with source truthiness fixtures.
+Remaining: processor archive
 databases, additional encodings/open modes and formatter dialects, arbitrary
 native filename fields, keyword-driven archive identity changes, further
 cross-processor hook parity, emitter-specific shared/copied keyword mutation
-inheritance, source job path lifetimes, and other processor types.
+inheritance, remaining temporary-path behavior, and other processor types.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

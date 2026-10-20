@@ -4,7 +4,7 @@ use crate::{
     event::{ChildControl, ExtractionEvent, Post},
     extract::{Media, MediaJob},
     naming::{DirectoryTemplate, FilenameTemplate},
-    postprocess::{Hook, Postprocessors},
+    postprocess::{Hook, HookPaths, Postprocessors},
 };
 use futures_util::{StreamExt, stream::BoxStream};
 use serde_json::{Map, Value};
@@ -24,6 +24,7 @@ pub struct JobConfiguration {
     pub root: PathBuf,
     pub filename: Option<FilenameTemplate>,
     pub directory: Option<DirectoryTemplate>,
+    pub init: bool,
 }
 pub struct JobMedia {
     pub media: Media,
@@ -160,28 +161,20 @@ struct Runtime {
     configuration: JobConfiguration,
     media: Media,
     context: Map<String, Value>,
-    path: Option<PathBuf>,
+    paths: HookPaths,
     failed: Arc<AtomicBool>,
 }
 impl Runtime {
     async fn hook(&mut self, hook: Hook) -> Result<()> {
-        let path = match &self.path {
-            Some(path) => path.clone(),
-            None => crate::download::destination_with_templates(
-                &self.configuration.root,
-                &self.media,
-                None,
-                self.configuration.directory.as_ref(),
-            )?,
-        };
         self.configuration
             .processors
-            .run_hook(
+            .run_job_hook(
                 hook,
                 &mut self.context,
                 &self.media,
-                &path,
+                &mut self.paths,
                 &self.configuration.root,
+                self.configuration.filename.as_ref(),
             )
             .await?;
         Ok(())
@@ -207,7 +200,21 @@ impl Frame {
             let (context, path) = post.finish().await;
             if let Some(runtime) = &mut self.runtime {
                 runtime.context = context;
-                runtime.path = path;
+                if let Some(path) = path {
+                    runtime.paths.filename = path.file_name().map(|name| name.to_os_string());
+                    runtime.paths.extension = runtime
+                        .context
+                        .get("extension")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| {
+                            path.extension()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned()
+                        });
+                    runtime.paths.realpath = Some(path);
+                }
                 runtime.hook(Hook::PostAfter).await?;
             }
         }
@@ -242,6 +249,8 @@ struct State<'a> {
     frames: Vec<Frame>,
     errors: VecDeque<crate::Error>,
     finished: bool,
+    started: bool,
+    root_category: Option<String>,
 }
 impl Drop for State<'_> {
     fn drop(&mut self) {
@@ -263,6 +272,17 @@ fn fake(post: Post) -> Media {
         handoff: BTreeMap::new(),
     }
 }
+fn post_directory(configuration: &JobConfiguration, media: &Media) -> Result<PathBuf> {
+    crate::download::destination_with_templates(
+        &configuration.root,
+        media,
+        None,
+        configuration.directory.as_ref(),
+    )?
+    .parent()
+    .map(Path::to_owned)
+    .ok_or_else(|| error("invalid postprocessor directory"))
+}
 fn public_context(media: &Media) -> Map<String, Value> {
     let mut context = crate::postprocess::context(media);
     for key in ["url", "_url", "filename", "name", "extension"] {
@@ -271,6 +291,38 @@ fn public_context(media: &Media) -> Map<String, Value> {
     context
 }
 impl State<'_> {
+    async fn initialize_eager(&mut self, category: &str) -> Result<()> {
+        let Some(configuration) = self
+            .configurations
+            .get(category)
+            .filter(|configuration| configuration.init)
+            .cloned()
+        else {
+            return Ok(());
+        };
+        let frame = self
+            .frames
+            .last_mut()
+            .ok_or_else(|| error("missing postprocessor job scope"))?;
+        if frame.runtime.is_some() {
+            return Ok(());
+        }
+        frame.runtime = Some(Runtime {
+            configuration,
+            media: fake(Post {
+                category: category.into(),
+                metadata: None,
+                count: None,
+            }),
+            context: Map::new(),
+            paths: HookPaths::default(),
+            failed: Arc::new(AtomicBool::new(frame.failed)),
+        });
+        let runtime = frame.runtime.as_mut().unwrap();
+        let result = runtime.hook(Hook::Init).await;
+        frame.post = Some(Shared::new(runtime.context.clone(), runtime.failed.clone()));
+        result
+    }
     async fn shutdown(&mut self) {
         self.input = None;
         while let Some(mut frame) = self.frames.pop() {
@@ -313,6 +365,7 @@ impl State<'_> {
                 }));
             }
             ExtractionEvent::Post(post) => {
+                self.initialize_eager(&post.category).await?;
                 let frame = self
                     .frames
                     .last_mut()
@@ -326,7 +379,12 @@ impl State<'_> {
                     let runtime = Runtime {
                         configuration: configuration.clone(),
                         context: public_context(&media),
-                        path: None,
+                        paths: HookPaths {
+                            directory: post_directory(configuration, &media)?,
+                            filename: None,
+                            realpath: None,
+                            extension: String::new(),
+                        },
                         media: media.clone(),
                         failed: Arc::new(AtomicBool::new(frame.failed)),
                     };
@@ -338,7 +396,7 @@ impl State<'_> {
                     if !initialized {
                         runtime.context = public_context(&media);
                     }
-                    runtime.path = None;
+                    runtime.paths.directory = post_directory(&runtime.configuration, &media)?;
                     runtime.media = media;
                     runtime.hook(Hook::Post).await?;
                     frame.post = Some(Shared::new(runtime.context.clone(), runtime.failed.clone()));
@@ -363,6 +421,7 @@ impl State<'_> {
                     scope.control.cancel();
                     return Err(error("invalid postprocessor child nesting"));
                 }
+                let category = scope.metadata.category().to_owned();
                 let mut queue = scope.metadata.fields().clone();
                 queue.insert("category".into(), scope.metadata.category().into());
                 queue.insert("subcategory".into(), scope.metadata.subcategory().into());
@@ -379,6 +438,7 @@ impl State<'_> {
                     queue: Some(queue),
                     ..Frame::default()
                 });
+                self.initialize_eager(&category).await?;
             }
             ExtractionEvent::EndChild(control) => {
                 if self.frames.len() <= 1
@@ -414,12 +474,21 @@ pub fn apply<'a>(
     input: BoxStream<'a, Result<ExtractionEvent>>,
     configurations: Arc<BTreeMap<String, JobConfiguration>>,
 ) -> BoxStream<'a, Result<JobMedia>> {
+    apply_with_category(input, configurations, None)
+}
+pub fn apply_with_category<'a>(
+    input: BoxStream<'a, Result<ExtractionEvent>>,
+    configurations: Arc<BTreeMap<String, JobConfiguration>>,
+    root_category: Option<String>,
+) -> BoxStream<'a, Result<JobMedia>> {
     let state = State {
         input: Some(input),
         configurations,
         frames: vec![Frame::default()],
         errors: VecDeque::new(),
         finished: false,
+        started: false,
+        root_category,
     };
     futures_util::stream::unfold(state, |mut state| async move {
         let mut skipped = 0u8;
@@ -429,6 +498,19 @@ pub fn apply<'a>(
             }
             if state.finished {
                 return None;
+            }
+            if !state.started {
+                state.started = true;
+                if let Some(category) = state.root_category.take()
+                    && let Err(error) = state.initialize_eager(&category).await
+                {
+                    for frame in &mut state.frames {
+                        frame.mark_failed();
+                    }
+                    state.errors.push_back(error);
+                    state.shutdown().await;
+                    continue;
+                }
             }
             let event = match state.input.as_mut() {
                 Some(input) => input.next().await,
@@ -513,6 +595,7 @@ mod tests {
                     root: root.to_owned(),
                     filename: None,
                     directory: None,
+                    init: false,
                 },
             )]
             .into_iter()
@@ -726,6 +809,85 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(root.path().join("trace.log")).unwrap(),
             "pixiv-novel:finalize-success|pixiv-novel:finalize|pixiv:child-after|pixiv:finalize-success|pixiv:finalize|"
+        );
+    }
+    #[tokio::test]
+    async fn eager_empty_job_runs_init_before_input_and_empty_post_after_then_finalize() {
+        let root = tempfile::tempdir().unwrap();
+        let mut configurations = (*configurations_for_trace(
+            root.path(),
+            "pixiv",
+            &["init", "post-after", "finalize-success", "finalize"],
+        ))
+        .clone();
+        configurations.get_mut("pixiv").unwrap().init = true;
+        let trace = root.path().join("trace.log");
+        let input = futures_util::stream::once(async move {
+            assert_eq!(std::fs::read_to_string(trace).unwrap(), "pixiv:init|");
+            None::<Result<ExtractionEvent>>
+        })
+        .filter_map(std::future::ready)
+        .boxed();
+        assert!(
+            apply_with_category(input, Arc::new(configurations), Some("pixiv".into()))
+                .collect::<Vec<_>>()
+                .await
+                .is_empty()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("trace.log")).unwrap(),
+            "pixiv:init|pixiv:post-after|pixiv:finalize-success|pixiv:finalize|"
+        );
+    }
+    #[tokio::test]
+    async fn eager_init_uses_empty_context_while_lazy_init_mutations_belong_to_first_post() {
+        for eager in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let mut configurations=(*configurations(root.path(),"pixiv",vec![
+                json!({"name":"metadata","mode":"modify","event":"init","fields":{"init_only":"yes","observed_post":"{post_id}"}}),
+            ])).clone();
+            configurations.get_mut("pixiv").unwrap().init = eager;
+            let input = futures_util::stream::iter(vec![
+                Ok(post("pixiv")),
+                Ok(ExtractionEvent::Media(Box::new(media()))),
+                Ok(ExtractionEvent::EndPost),
+            ])
+            .boxed();
+            let mut input =
+                apply_with_category(input, Arc::new(configurations), Some("pixiv".into()));
+            let item = input.next().await.unwrap().unwrap();
+            let context = item.scope.as_ref().unwrap().keywords();
+            assert_eq!(context.contains_key("init_only"), !eager);
+            assert_eq!(context.contains_key("observed_post"), !eager);
+            drop(item);
+            assert!(input.next().await.is_none());
+        }
+    }
+    #[tokio::test]
+    async fn eager_child_initializes_and_finalizes_even_without_child_posts() {
+        let root = tempfile::tempdir().unwrap();
+        let mut configurations = (*configurations_for_trace(
+            root.path(),
+            "pixiv-novel",
+            &["init", "post-after", "finalize-success", "finalize"],
+        ))
+        .clone();
+        configurations.get_mut("pixiv-novel").unwrap().init = true;
+        let child = ChildScope::new(ChildMetadata::from_raw("pixiv-novel", "novel", &Map::new()));
+        let input = futures_util::stream::iter(vec![
+            Ok(ExtractionEvent::BeginChild(child.clone())),
+            Ok(ExtractionEvent::EndChild(child.control)),
+        ])
+        .boxed();
+        assert!(
+            apply(input, Arc::new(configurations))
+                .collect::<Vec<_>>()
+                .await
+                .is_empty()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("trace.log")).unwrap(),
+            "pixiv-novel:init|pixiv-novel:post-after|pixiv-novel:finalize-success|pixiv-novel:finalize|"
         );
     }
 }

@@ -554,6 +554,73 @@ pub fn context(media: &Media) -> Map<String, Value> {
     }
     context
 }
+#[derive(Clone, Debug, Default)]
+pub(crate) struct HookPaths {
+    pub directory: PathBuf,
+    pub filename: Option<std::ffi::OsString>,
+    pub realpath: Option<PathBuf>,
+    pub extension: String,
+}
+impl Postprocessors {
+    pub(crate) async fn run_job_hook(
+        &self,
+        hook: Hook,
+        context: &mut Map<String, Value>,
+        media: &Media,
+        paths: &mut HookPaths,
+        root: &Path,
+        filename: Option<&crate::naming::FilenameTemplate>,
+    ) -> Result<()> {
+        for spec in &self.specifications {
+            if !spec.events.contains(&hook) || !spec.matches_keywords(media, context) {
+                continue;
+            }
+            match &spec.options {
+                Processor::Ugoira(_) => {}
+                Processor::Metadata(options) => {
+                    options
+                        .clone()
+                        .with_filename_template(filename.cloned())
+                        .run_job(context, media, paths, root)
+                        .await?
+                }
+                Processor::Mtime(options) if options.is_file() => {
+                    let timestamp = options.getter(context);
+                    context.insert(
+                        "_mtime_meta".into(),
+                        timestamp.map_or(Value::Null, Value::from),
+                    );
+                }
+                Processor::Mtime(options) => {
+                    // Upstream set_mtime ignores OS errors, including absent directories.
+                    let _ = options.apply(context, &paths.directory);
+                }
+                Processor::Hash(options) => {
+                    let path = paths
+                        .realpath
+                        .as_deref()
+                        .ok_or_else(|| error("missing postprocessor hash input"))?;
+                    if options.run(context, path).await? {
+                        let name = match filename {
+                            Some(template) => template.render_keywords(media, context)?,
+                            None => None,
+                        }
+                        .unwrap_or_else(|| {
+                            paths
+                                .filename
+                                .as_ref()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| media.filename.clone())
+                        });
+                        paths.filename = Some(name.clone().into());
+                        paths.realpath = Some(paths.directory.join(name));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 impl Postprocessors {
     pub async fn run_hook(
         &self,
@@ -590,5 +657,70 @@ impl Postprocessors {
             }
         }
         Ok(rebuild)
+    }
+}
+
+#[cfg(test)]
+mod job_mtime_path_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn job_file_mtime_records_timestamp_without_touching_missing_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let processors = Postprocessors::new(vec![
+            Specification::parse(&json!({"name":"mtime","event":"post"}), root.path()).unwrap(),
+            Specification::parse(
+                &json!({"name":"mtime","target":"directory","event":"post-after"}),
+                root.path(),
+            )
+            .unwrap(),
+        ]);
+        let media = Media {
+            url: "https://fixture.invalid/file.jpg".parse().unwrap(),
+            category: "fixture".into(),
+            filename: "post".into(),
+            metadata: None,
+            job: crate::extract::MediaJob::DirectHttp,
+            headers: Default::default(),
+            handoff: Default::default(),
+        };
+        let directory = root.path().join("not-created");
+        let missing_file = root.path().join("missing.jpg");
+        let mut paths = HookPaths {
+            directory: directory.clone(),
+            filename: None,
+            realpath: Some(missing_file.clone()),
+            extension: String::new(),
+        };
+        let mut context = Map::from_iter([("date".into(), json!(1704164646))]);
+        processors
+            .run_job_hook(
+                Hook::Post,
+                &mut context,
+                &media,
+                &mut paths,
+                root.path(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(context["_mtime_meta"], 1704164646);
+        assert!(!missing_file.exists());
+        assert!(!directory.exists());
+        processors
+            .run_job_hook(
+                Hook::PostAfter,
+                &mut context,
+                &media,
+                &mut paths,
+                root.path(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(context["_mtime_meta"], 1704164646);
+        assert!(!missing_file.exists());
+        assert!(!directory.exists());
     }
 }

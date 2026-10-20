@@ -28,6 +28,8 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 /// Sparse settings: absent fields leave the caller's defaults unchanged.
 #[derive(Clone, Default, PartialEq)]
 pub struct Options {
+    /// Initialize job state before extraction; exact source string "lazy" disables it.
+    pub init: Option<bool>,
     pub postprocessors: Option<crate::postprocess::Configuration>,
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
@@ -205,6 +207,7 @@ impl Options {
     /// when a programmatic override supplies both representations.
     pub fn overlay(&self, overrides: &Self) -> Self {
         Self {
+            init: overrides.init.or(self.init),
             postprocessors: match (&self.postprocessors, &overrides.postprocessors) {
                 (Some(base), Some(specific)) => Some(base.overlaid(specific)),
                 (base, specific) => specific.clone().or_else(|| base.clone()),
@@ -394,6 +397,7 @@ pub struct Config {
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawRoot {
     postprocessor: Field,
+    init: Field,
     postprocessors: Field,
     postprocessor_options: Field,
     base_directory: Field,
@@ -472,6 +476,7 @@ struct RawRoot {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawExtractor {
+    init: Field,
     postprocessors: Field,
     postprocessor_options: Field,
     base_directory: Field,
@@ -585,6 +590,7 @@ struct RawExtractor {
 struct RawOptions {
     #[serde(skip)]
     postprocessor_definitions: Field,
+    init: Field,
     postprocessors: Field,
     postprocessor_options: Field,
     base_directory: Field,
@@ -772,6 +778,7 @@ impl Config {
         let root: RawRoot = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let global = RawOptions {
+            init: root.init,
             postprocessors: root.postprocessors,
             postprocessor_options: root.postprocessor_options,
             postprocessor_definitions: root.postprocessor,
@@ -858,6 +865,7 @@ impl Config {
         .resolve(directory)?;
         let extractor = root.extractor;
         let defaults = RawOptions {
+            init: extractor.init,
             postprocessors: extractor.postprocessors,
             postprocessor_options: extractor.postprocessor_options,
             postprocessor_definitions: Field::default(),
@@ -1735,6 +1743,11 @@ impl RawOptions {
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
+            init: self
+                .init
+                .0
+                .as_ref()
+                .map(|value| value_truthy(value) && value.as_str() != Some("lazy")),
             postprocessors: crate::postprocess::Configuration::parse(
                 self.postprocessors.0,
                 self.postprocessor_options.0,

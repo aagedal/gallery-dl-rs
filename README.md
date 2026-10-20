@@ -1974,10 +1974,18 @@ hooks. Selected empty posts retain their hooks; rejected posts and children do
 not run them. Abort and terminate drain finalization hooks. URL/JSON inspection
 runs no postprocessors. Ugoira retains its fixed source hooks.
 
+The `init` configuration option runs initialization before extraction when truthy;
+`false`, `null`, and the exact string `"lazy"` retain initialization on the first
+selected post. Eager jobs run initialization and finalization even when they
+produce no results. Job metadata destinations use the current post directory and
+retain the previous filename across empty posts; before the first file, the
+default sidecar basename is `metadata`. Hash filename rebuilding updates the path
+seen by subsequent job hooks without moving an already completed file.
+
 The native formatter remains a bounded, non-executable subset of upstream's
 formatter. Processor archive databases, other text encodings/open modes,
 extractor-subcategory selectors, keyword-driven changes to native archive
-identities, emitter-specific keyword mutation inheritance and job path lifetimes,
+identities, emitter-specific keyword mutation inheritance and remaining temporary-path behavior,
 and additional
 processor types remain unfinished. These processors
 operate on metadata supported by the native extractor, which may omit fields

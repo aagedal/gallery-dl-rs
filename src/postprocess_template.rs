@@ -82,7 +82,7 @@ impl Template {
             let text = match part {
                 Part::Text(text) => text.clone(),
                 Part::Field(field) => field
-                    .render(|name| context.get(name).cloned())?
+                    .render_content(|name| context.get(name).cloned())?
                     .unwrap_or_else(|| "None".into()),
             };
             if text.len() > MAX_OUTPUT - output.len() {
@@ -246,6 +246,26 @@ mod tests {
                     .render_value(context)
                     .unwrap(),
                 expected
+            );
+        }
+    }
+    #[test]
+    fn present_empty_values_remain_empty_in_content_and_typed_output() {
+        let context = serde_json::json!({"extension":"","nested":{"empty":""}});
+        let context = context.as_object().unwrap();
+        for (source, expected) in [
+            ("{extension}.json", ".json"),
+            ("{nested[empty]}", ""),
+            ("{extension!s}", ""),
+            ("{extension:>0}", ""),
+            ("a{missing}b", "aNoneb"),
+        ] {
+            let template = Template::parse(source).unwrap();
+            assert_eq!(template.render(context).unwrap(), expected, "{source}");
+            assert_eq!(
+                template.render_value(context).unwrap(),
+                serde_json::json!(expected),
+                "{source}"
             );
         }
     }

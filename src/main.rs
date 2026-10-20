@@ -331,6 +331,7 @@ async fn run(args: Args) -> Result<()> {
                             root: settings.options.base_directory.clone().unwrap(),
                             filename: settings.filename.clone(),
                             directory: settings.directory.clone(),
+                            init: settings.options.init.unwrap_or(false),
                         },
                     )
                 })
@@ -345,6 +346,11 @@ async fn run(args: Args) -> Result<()> {
             let failed = &failed;
             let aborted = &aborted;
             let terminated = &terminated;
+            let root_category = source
+                .as_ref()
+                .ok()
+                .and_then(|source| extract::http_url(source).ok())
+                .map(|url| settings_category(&url, args.extractor).to_owned());
             let input = match source {
                 Ok(source) => {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
@@ -418,18 +424,21 @@ async fn run(args: Args) -> Result<()> {
                     )
                 })
                 .boxed();
-            gallery_dl_rs::postprocess::jobs::apply(input, job_configurations.clone()).filter_map(
-                move |result| {
-                    std::future::ready(match result {
-                        Ok(item) => Some((index, item)),
-                        Err(e) => {
-                            eprintln!("extraction failed for input {}: {e}", index + 1);
-                            failed.set(failed.get() + 1);
-                            None
-                        }
-                    })
-                },
+            gallery_dl_rs::postprocess::jobs::apply_with_category(
+                input,
+                job_configurations.clone(),
+                root_category,
             )
+            .filter_map(move |result| {
+                std::future::ready(match result {
+                    Ok(item) => Some((index, item)),
+                    Err(e) => {
+                        eprintln!("extraction failed for input {}: {e}", index + 1);
+                        failed.set(failed.get() + 1);
+                        None
+                    }
+                })
+            })
         })
         .map(|(index, mut job)| {
             settings[job.media.category.as_str()]
@@ -1597,6 +1606,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         ..ConfigOptions::default()
     };
     let overrides = ConfigOptions {
+        init: None,
         postprocessors: None,
         base_directory: args
             .exact_directory

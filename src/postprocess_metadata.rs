@@ -70,6 +70,11 @@ impl std::fmt::Debug for MetadataOptions {
         f.write_str("MetadataOptions { [redacted] }")
     }
 }
+struct DestinationState<'a> {
+    directory: &'a Path,
+    filename: Option<&'a std::ffi::OsStr>,
+    extension: &'a str,
+}
 impl MetadataOptions {
     pub fn default_events() -> Vec<String> {
         vec!["file".into()]
@@ -310,6 +315,45 @@ impl MetadataOptions {
         path: &Path,
         root: &Path,
     ) -> Result<()> {
+        let extension = path.extension().unwrap_or_default().to_string_lossy();
+        self.run_destination(
+            context,
+            media,
+            DestinationState {
+                directory: path.parent().unwrap_or(root),
+                filename: path.file_name(),
+                extension: &extension,
+            },
+            root,
+        )
+        .await
+    }
+    pub(crate) async fn run_job(
+        &self,
+        context: &mut Map<String, Value>,
+        media: &Media,
+        paths: &crate::postprocess::HookPaths,
+        root: &Path,
+    ) -> Result<()> {
+        self.run_destination(
+            context,
+            media,
+            DestinationState {
+                directory: &paths.directory,
+                filename: paths.filename.as_deref(),
+                extension: &paths.extension,
+            },
+            root,
+        )
+        .await
+    }
+    async fn run_destination(
+        &self,
+        context: &mut Map<String, Value>,
+        media: &Media,
+        paths: DestinationState<'_>,
+        root: &Path,
+    ) -> Result<()> {
         match &self.mode {
             Mode::Modify(fields) => {
                 for (key, template) in fields {
@@ -335,7 +379,12 @@ impl MetadataOptions {
                 .map_err(|_| error("could not write metadata output"))?;
             return Ok(());
         }
-        let destination = self.destination(context, media, path, root)?;
+        let destination = self.destination(context, media, &paths, root)?;
+        // Source restores kwdict.get("extension") after formatting, inserting
+        // None even when the key was initially absent.
+        if self.filename.is_none() && self.extension_format.is_some() {
+            context.entry("extension".to_owned()).or_insert(Value::Null);
+        }
         if let Some(key) = &self.meta_path {
             context.insert(
                 key.clone(),
@@ -438,13 +487,13 @@ impl MetadataOptions {
         &self,
         context: &Map<String, Value>,
         media: &Media,
-        path: &Path,
+        paths: &DestinationState<'_>,
         root: &Path,
     ) -> Result<PathBuf> {
         let base = self.base.as_deref().unwrap_or(if self.root_base {
             root
         } else {
-            path.parent().unwrap_or(root)
+            paths.directory
         });
         let dir = match &self.directory {
             Directory::Default => base.to_owned(),
@@ -466,15 +515,7 @@ impl MetadataOptions {
             let mut keywords = context.clone();
             // Source substitutes the current path extension while formatting,
             // then rebuilds the extractor's configured filename.
-            keywords.insert(
-                "extension".into(),
-                Value::String(
-                    path.extension()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned(),
-                ),
-            );
+            keywords.insert("extension".into(), Value::String(paths.extension.into()));
             let rendered = t.render(&keywords)?;
             keywords.insert("extension".into(), Value::String(rendered.clone()));
             if let Some(template) = &self.filename_template {
@@ -483,21 +524,31 @@ impl MetadataOptions {
                 } else {
                     format!(
                         "{}.{}",
-                        path.file_stem().unwrap_or_default().to_string_lossy(),
+                        paths
+                            .filename
+                            .and_then(|f| Path::new(f).file_stem())
+                            .unwrap_or_else(|| std::ffi::OsStr::new("metadata"))
+                            .to_string_lossy(),
                         clean(&rendered)
                     )
                 }
             } else {
                 format!(
                     "{}.{}",
-                    path.file_stem().unwrap_or_default().to_string_lossy(),
+                    paths
+                        .filename
+                        .and_then(|f| Path::new(f).file_stem())
+                        .unwrap_or_else(|| std::ffi::OsStr::new("metadata"))
+                        .to_string_lossy(),
                     clean(&rendered)
                 )
             }
         } else {
             format!(
                 "{}.{}",
-                path.file_name()
+                paths
+                    .filename
+                    .filter(|f| !f.is_empty())
                     .unwrap_or_else(|| std::ffi::OsStr::new("metadata"))
                     .to_string_lossy(),
                 self.extension
@@ -1218,5 +1269,65 @@ mod source_oracle {
         assert!(open_regular_output(&link, true, true).is_err());
         assert!(open_regular_output(&link, false, false).is_err());
         assert_eq!(std::fs::read(target).unwrap(), b"sentinel");
+    }
+}
+
+#[cfg(test)]
+mod job_path_oracle {
+    use super::*;
+    #[tokio::test]
+    async fn explicit_job_paths_match_actual_source_metadata_destinations() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/postprocessors/metadata_paths.json"
+        ))
+        .unwrap();
+        for case in fixture["cases"].as_array().unwrap() {
+            let temp = tempfile::tempdir().unwrap();
+            let expand = |s: &str| PathBuf::from(s.replace("$ROOT", temp.path().to_str().unwrap()));
+            let paths = crate::postprocess::HookPaths {
+                directory: expand(case["paths"]["directory"].as_str().unwrap()),
+                filename: case["paths"]["filename"]
+                    .as_str()
+                    .map(std::ffi::OsString::from),
+                realpath: case["paths"]["realpath"].as_str().map(expand),
+                extension: case["paths"]["extension"].as_str().unwrap().into(),
+            };
+            let mut context = case["keywords"].as_object().unwrap().clone();
+            let options = MetadataOptions::parse(case["options"].as_object().unwrap(), temp.path())
+                .unwrap()
+                .with_filename_template(Some(
+                    crate::naming::FilenameTemplate::parse(
+                        case["filename_template"].as_str().unwrap(),
+                    )
+                    .unwrap(),
+                ));
+            let media = Media {
+                url: "https://fixture.invalid/".parse().unwrap(),
+                category: "test".into(),
+                filename: "post".into(),
+                metadata: None,
+                job: crate::extract::MediaJob::DirectHttp,
+                headers: Default::default(),
+                handoff: Default::default(),
+            };
+            options
+                .run_job(&mut context, &media, &paths, temp.path())
+                .await
+                .unwrap();
+            let expected = expand(case["expected_path"].as_str().unwrap());
+            assert!(
+                expected.is_file(),
+                "{}: expected {}",
+                case["name"],
+                expected.display()
+            );
+            assert_eq!(
+                Value::Object(context),
+                case["keywords_after"],
+                "{}",
+                case["name"]
+            );
+            assert!(!temp.path().join("artist1/post.json").exists());
+        }
     }
 }

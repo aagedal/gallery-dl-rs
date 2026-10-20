@@ -1,0 +1,148 @@
+{
+  "source": "Actual gallery_dl.job.Job._init, synthetic extractor/config callbacks only; no network or filesystem side effects from Job.initialize.",
+  "version": "1.32.17",
+  "source_sha256": "b1d630adb73404342d236f7af807041186f0a38a436cff6979749d411a5d9a75",
+  "generator_source": "import hashlib,json\nfrom pathlib import Path\nfrom gallery_dl import job,version\ncases=[]\nfor name,value in [('null',None),('false',False),('zero',0),('zero_float',0.0),('empty_string',''),('empty_list',[]),('empty_object',{}),('lazy','lazy'),('true',True),('one',1),('negative',-1),('case_sensitive','Lazy'),('string_false','false'),('string_zero','0'),('nonempty_list',[False]),('nonempty_object',{'enabled':False})]:\n events=[]\n class Extractor:\n  skip_files=skip_posts=skip_children=()\n  def initialize(self):events.append('extractor.initialize')\n  def config(self,key,default):\n   assert key=='init' and default is False\n   return value\n class Synthetic:\n  extractor=Extractor()\n  def _prepare_predicates(self,*args):return None\n  def initialize(self):events.append('job.initialize')\n job.Job._init(Synthetic())\n cases.append({'name':name,'value':value,'events':events,'eager':'job.initialize' in events})\nsource=Path(job.__file__)\ndata={'source':'Actual gallery_dl.job.Job._init, synthetic extractor/config callbacks only; no network or filesystem side effects from Job.initialize.', 'version':version.__version__,'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'generator_source':Path(__file__).read_text(),'cases':cases}\nPath('tests/fixtures/postprocessors/init.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\\n')\n",
+  "cases": [
+    {
+      "name": "null",
+      "value": null,
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "false",
+      "value": false,
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "zero",
+      "value": 0,
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "zero_float",
+      "value": 0.0,
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "empty_string",
+      "value": "",
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "empty_list",
+      "value": [],
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "empty_object",
+      "value": {},
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "lazy",
+      "value": "lazy",
+      "events": [
+        "extractor.initialize"
+      ],
+      "eager": false
+    },
+    {
+      "name": "true",
+      "value": true,
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    },
+    {
+      "name": "one",
+      "value": 1,
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    },
+    {
+      "name": "negative",
+      "value": -1,
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    },
+    {
+      "name": "case_sensitive",
+      "value": "Lazy",
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    },
+    {
+      "name": "string_false",
+      "value": "false",
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    },
+    {
+      "name": "string_zero",
+      "value": "0",
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    },
+    {
+      "name": "nonempty_list",
+      "value": [
+        false
+      ],
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    },
+    {
+      "name": "nonempty_object",
+      "value": {
+        "enabled": false
+      },
+      "events": [
+        "extractor.initialize",
+        "job.initialize"
+      ],
+      "eager": true
+    }
+  ]
+}
