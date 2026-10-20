@@ -351,6 +351,11 @@ async fn run(args: Args) -> Result<()> {
                 .ok()
                 .and_then(|source| extract::http_url(source).ok())
                 .map(|url| settings_category(&url, args.extractor).to_owned());
+            let archive_descriptor = source
+                .as_ref()
+                .ok()
+                .and_then(|source| extract::http_url(source).ok())
+                .and_then(|url| gallery_dl_rs::source_archive::for_url(&url));
             let input = match source {
                 Ok(source) => {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
@@ -424,10 +429,11 @@ async fn run(args: Args) -> Result<()> {
                     )
                 })
                 .boxed();
-            gallery_dl_rs::postprocess::jobs::apply_with_category(
+            gallery_dl_rs::postprocess::jobs::apply_with_descriptor(
                 input,
                 job_configurations.clone(),
                 root_category,
+                archive_descriptor,
             )
             .filter_map(move |result| {
                 std::future::ready(match result {

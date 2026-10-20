@@ -18,6 +18,7 @@ fn item(url: &str) -> Media {
     media.category = "instagram".into();
     media.metadata = Some(PostMetadata {
         source_num: None,
+        source_suffix: None,
         keyword_updates: None,
         tags: None,
         sketch: None,

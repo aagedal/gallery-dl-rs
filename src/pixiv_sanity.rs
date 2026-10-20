@@ -218,7 +218,7 @@ impl Pixiv {
                 .collect::<Result<Vec<_>>>()?
         };
         let id = super::id_of(work).ok_or_else(invalid)?;
-        let mut files = super::parse_files(work, &id, urls);
+        let mut files = super::parse_files(work, &id, urls, true);
         for file in &mut files {
             if let Some(description) = file
                 .metadata

@@ -703,6 +703,9 @@ pub struct PostMetadata {
     /// Producer counter, which can be zero even though the native file index is one-based.
     #[serde(skip_serializing)]
     pub source_num: Option<Value>,
+    /// Exact producer suffix, retained independently of the native filename.
+    #[serde(skip_serializing)]
+    pub source_suffix: Option<Value>,
     /// Ordered producer writes, separate from the canonical emitted snapshot.
     #[serde(skip_serializing)]
     pub keyword_updates: Option<std::sync::Arc<[crate::event::KeywordUpdate]>>,
@@ -1943,6 +1946,7 @@ fn compatibility_metadata(
             .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
             .flatten(),
         source_num: data.get("num").cloned(),
+        source_suffix: data.get("suffix").cloned(),
         keyword_updates: None,
         ugoira_original: (category == "pixiv")
             .then(|| data.get("_ugoira_original").and_then(Value::as_bool))

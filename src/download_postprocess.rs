@@ -144,8 +144,13 @@ async fn run_hook(
         options,
         template,
     } = call;
-    let pp = options.postprocessors.expect("generic processors");
-    tokio::time::timeout(client.wait_limit, async {
+    let scoped = options
+        .postprocessor_scope
+        .and_then(|scope| scope.processors());
+    let pp = scoped
+        .as_deref()
+        .unwrap_or_else(|| options.postprocessors.expect("generic processors"));
+    let result = tokio::time::timeout(client.wait_limit, async {
         for spec in &pp.specifications {
             if !spec.events.contains(&hook) || !spec.matches_keywords(media, &prepared.keywords) {
                 continue;
@@ -206,7 +211,14 @@ async fn run_hook(
         Ok(())
     })
     .await
-    .map_err(|_| error("postprocessor hook timed out"))?
+    .map_err(|_| error("postprocessor hook timed out"))
+    .and_then(|result| result);
+    if result.is_err()
+        && let Some(scope) = options.postprocessor_scope
+    {
+        scope.fail_hook();
+    }
+    result
 }
 fn publish(input: &Path, output: &Path, replace: bool) -> Result<()> {
     if let Some(parent) = output.parent() {
@@ -330,6 +342,9 @@ pub(crate) async fn download(
     }
     let pp = options.postprocessors.expect("generic processors");
     let converters = pp.selected(media);
+    let scoped = options
+        .postprocessor_scope
+        .and_then(|scope| scope.processors());
     let zip = media
         .metadata
         .as_ref()
@@ -404,10 +419,13 @@ pub(crate) async fn download(
             && spec.matches_keywords(media, &prepared.keywords)
         {
             // Execute exactly one configured hook here, preserving processor order.
-            tokio::time::timeout(
+            let result = tokio::time::timeout(
                 client.wait_limit,
                 run_single_file(
-                    spec,
+                    scoped
+                        .as_ref()
+                        .and_then(|pp| pp.specifications.get(index))
+                        .unwrap_or(spec),
                     root,
                     media,
                     template,
@@ -417,7 +435,14 @@ pub(crate) async fn download(
                 ),
             )
             .await
-            .map_err(|_| error("postprocessor hook timed out"))??;
+            .map_err(|_| error("postprocessor hook timed out"))
+            .and_then(|result| result);
+            if result.is_err()
+                && let Some(scope) = options.postprocessor_scope
+            {
+                scope.fail_hook();
+            }
+            result?;
         }
     }
     // Source file-target hooks only record metadata; finalization applies it once.
@@ -551,6 +576,9 @@ async fn run_single_file(
     .await;
     if let Some(scope) = options.postprocessor_scope {
         scope.complete(&prepared.keywords);
+        if result.is_err() {
+            scope.fail_hook();
+        }
     }
     result
 }

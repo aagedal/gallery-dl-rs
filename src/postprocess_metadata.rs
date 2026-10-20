@@ -41,6 +41,8 @@ enum Directory {
 #[derive(Clone)]
 pub struct MetadataOptions {
     mode: Mode,
+    archive_config: Option<Arc<super::archive::ArchiveConfig>>,
+    archive_state: Arc<tokio::sync::Mutex<ArchiveState>>,
     base: Option<PathBuf>,
     root_base: bool,
     directory: Directory,
@@ -65,6 +67,12 @@ pub struct MetadataOptions {
     separators: (String, String),
     newline: Option<String>,
 }
+enum ArchiveState {
+    Uninitialized,
+    Disabled,
+    Open(super::archive::ArchiveSession),
+    Closed,
+}
 impl std::fmt::Debug for MetadataOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("MetadataOptions { [redacted] }")
@@ -80,12 +88,7 @@ impl MetadataOptions {
         vec!["file".into()]
     }
     pub fn parse(options: &Map<String, Value>, base: &Path) -> Result<Self> {
-        if options
-            .iter()
-            .any(|(k, v)| k.starts_with("archive") && truthy(v))
-        {
-            return Err(error("metadata postprocessor archives are not supported"));
-        }
+        let archive_config = super::archive::ArchiveConfig::parse(options, base)?.map(Arc::new);
         let flag = |k: &str| options.get(k).is_some_and(truthy);
         if let Some(encoding) = options.get("encoding") {
             match encoding.as_str() {
@@ -271,6 +274,8 @@ impl MetadataOptions {
         };
         let out = Self {
             mode,
+            archive_config,
+            archive_state: Arc::new(tokio::sync::Mutex::new(ArchiveState::Uninitialized)),
             base,
             root_base,
             directory,
@@ -300,6 +305,64 @@ impl MetadataOptions {
         };
         // Retain encoding validation without storing private configuration in errors.
         Ok(out)
+    }
+    pub(crate) fn fresh_job(&self) -> Self {
+        let mut options = self.clone();
+        options.archive_state = Arc::new(tokio::sync::Mutex::new(ArchiveState::Uninitialized));
+        options
+    }
+    pub(crate) async fn initialize_archive(
+        &self,
+        descriptor: Option<&crate::source_archive::ArchiveDescriptor>,
+        media: &Media,
+        context: &Map<String, Value>,
+        root: &Path,
+        directory: &Path,
+    ) {
+        let Some(config) = &self.archive_config else {
+            return;
+        };
+        let mut state = self.archive_state.lock().await;
+        if !matches!(*state, ArchiveState::Uninitialized) {
+            return;
+        }
+        if config.uses_source_format()
+            && !self.stdout
+            && !matches!(self.mode, Mode::Modify(_) | Mode::Delete(_))
+            && descriptor.is_some_and(|d| !crate::source_archive::default_keywords_supported(d))
+        {
+            eprintln!(
+                "metadata archive initialization failed: source archive keywords are unavailable; configure archive-format explicitly"
+            );
+            *state = ArchiveState::Disabled;
+            return;
+        }
+        let category = descriptor.map_or(media.category.as_str(), |d| d.category.as_str());
+        let format = descriptor.map(|d| d.format.as_str());
+        *state = match config
+            .open(category, format, context, root, directory)
+            .await
+        {
+            Ok(session) => ArchiveState::Open(session),
+            Err(failure) => {
+                eprintln!("metadata archive initialization failed: {failure}");
+                ArchiveState::Disabled
+            }
+        };
+    }
+    pub(crate) async fn close_archive(&self) -> Result<()> {
+        let mut state = self.archive_state.lock().await;
+        let previous = std::mem::replace(&mut *state, ArchiveState::Closed);
+        if let ArchiveState::Open(session) = previous {
+            session.close().await?;
+        }
+        Ok(())
+    }
+    async fn archive_session(&self) -> Option<super::archive::ArchiveSession> {
+        match &*self.archive_state.lock().await {
+            ArchiveState::Open(session) => Some(session.clone()),
+            _ => None,
+        }
     }
     pub fn with_filename_template(
         mut self,
@@ -354,6 +417,9 @@ impl MetadataOptions {
         paths: DestinationState<'_>,
         root: &Path,
     ) -> Result<()> {
+        let descriptor = crate::source_archive::for_media(media);
+        self.initialize_archive(descriptor.as_ref(), media, context, root, paths.directory)
+            .await;
         match &self.mode {
             Mode::Modify(fields) => {
                 for (key, template) in fields {
@@ -379,6 +445,18 @@ impl MetadataOptions {
                 .map_err(|_| error("could not write metadata output"))?;
             return Ok(());
         }
+        let archive = self.archive_session().await;
+        let check = if let Some(archive) = &archive {
+            let check = archive.check(context).await?;
+            if check.hit {
+                return Ok(());
+            }
+            Some(check)
+        } else {
+            None
+        };
+        // Retain the per-key execution lease until the write and add finish.
+        let _archive_guard = check.map(|check| check.guard);
         let destination = self.destination(context, media, &paths, root)?;
         // Source restores kwdict.get("extension") after formatting, inserting
         // None even when the key was initially absent.
@@ -400,6 +478,9 @@ impl MetadataOptions {
         }
         let mut content = self.content(context)?;
         if content.is_empty() && !self.empty {
+            if let Some(archive) = &archive {
+                archive.add(context).await?;
+            }
             return Ok(());
         }
         if self.encoding_ascii && !content.is_ascii() {
@@ -480,6 +561,9 @@ impl MetadataOptions {
                     .set_modified(time.ok_or_else(|| error("invalid metadata time"))?),
             )
             .map_err(|_| error("could not set metadata time"))?;
+        }
+        if let Some(archive) = &archive {
+            archive.add(context).await?;
         }
         Ok(())
     }
@@ -763,7 +847,7 @@ fn list(v: Option<&Value>) -> Result<Option<Vec<String>>> {
         _ => Err(fail()),
     }
 }
-fn expand(s: &str) -> Result<PathBuf> {
+pub(crate) fn expand(s: &str) -> Result<PathBuf> {
     if s.len() > 4096 || s.contains('\0') {
         return Err(fail());
     }
@@ -1183,7 +1267,7 @@ mod tests {
     #[test]
     fn unsupported_settings_fail_without_private_values_and_debug_is_redacted() {
         for v in [
-            json!({"archive":"private-path"}),
+            json!({"archive":"postgresql://private-path"}),
             json!({"encoding":"private-encoding"}),
             json!({"open":"private-mode"}),
             json!({"filename":"private-{bad"}),

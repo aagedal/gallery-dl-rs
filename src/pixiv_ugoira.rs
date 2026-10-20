@@ -128,7 +128,7 @@ impl Source {
         let urls = (0..frames.len())
             .map(|index| self.url(index, extension))
             .collect::<Result<Vec<_>>>()?;
-        let mut media = super::parse_files(illust, &id, urls);
+        let mut media = super::parse_files(illust, &id, urls, true);
         for (index, file) in media.iter_mut().enumerate() {
             file.filename = format!("{id}_p{index}.{}", original_extension(&file.url));
             let metadata = file.metadata.as_mut().expect("Pixiv frame metadata");

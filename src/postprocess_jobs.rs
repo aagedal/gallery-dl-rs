@@ -49,6 +49,8 @@ struct Shared {
     inner: Mutex<LeaseState>,
     notify: Notify,
     failed: Arc<AtomicBool>,
+    processors: Mutex<Option<Arc<Postprocessors>>>,
+    halt: Mutex<Option<Arc<AtomicBool>>>,
 }
 /// One emitted file's participation in its owning post. Drop on every outcome,
 /// including filtering, deduplication, cancellation and failures.
@@ -63,6 +65,29 @@ impl std::fmt::Debug for ScopeLease {
     }
 }
 impl ScopeLease {
+    pub(crate) fn processors(&self) -> Option<Arc<Postprocessors>> {
+        self.shared
+            .processors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+    /// A thrown processor callback aborts its extractor job; download failures
+    /// instead only call `fail`, allowing the extractor to continue.
+    pub(crate) fn fail_hook(&self) {
+        self.fail();
+        if let Some(halt) = &*self.shared.halt.lock().unwrap_or_else(|e| e.into_inner()) {
+            halt.store(true, Ordering::Release);
+        }
+    }
+    fn halted(&self) -> bool {
+        self.shared
+            .halt
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|halt| halt.load(Ordering::Acquire))
+    }
     /// Snapshot of post-hook keywords, before any file hooks. Use `inherit` to
     /// construct a file context with the producer's ownership semantics.
     pub fn keywords(&self) -> Map<String, Value> {
@@ -109,6 +134,9 @@ impl ScopeLease {
     }
     pub async fn inherit_for(&self, media: &Media, context: &mut Map<String, Value>) -> Result<()> {
         self.inherit(context).await;
+        if self.halted() {
+            return Err(error("postprocessor job stopped"));
+        }
         if self.shared.has_resume_error() {
             return Err(error("producer continuation failed"));
         }
@@ -172,6 +200,7 @@ impl Drop for ScopeLease {
         let resume = self.resume.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((ordinal, context, _)) = &mut state.last
             && *ordinal == self.ordinal
+            && !self.halted()
             && crate::postprocess::keywords::apply(context, &resume).is_err()
         {
             state.resume_failed = true;
@@ -207,6 +236,8 @@ impl Shared {
             }),
             notify: Notify::new(),
             failed,
+            processors: Mutex::new(None),
+            halt: Mutex::new(None),
         })
     }
     fn lease(self: &Arc<Self>) -> Result<ScopeLease> {
@@ -302,10 +333,12 @@ struct Runtime {
     context: Map<String, Value>,
     paths: HookPaths,
     failed: Arc<AtomicBool>,
+    halt: Arc<AtomicBool>,
 }
 impl Runtime {
     async fn hook(&mut self, hook: Hook) -> Result<()> {
-        self.configuration
+        let result = self
+            .configuration
             .processors
             .run_job_hook(
                 hook,
@@ -315,8 +348,12 @@ impl Runtime {
                 &self.configuration.root,
                 self.configuration.filename.as_ref(),
             )
-            .await?;
-        Ok(())
+            .await;
+        if result.is_err() {
+            self.failed.store(true, Ordering::Release);
+            self.halt.store(true, Ordering::Release);
+        }
+        result
     }
 }
 #[derive(Default)]
@@ -326,9 +363,20 @@ struct Frame {
     post: Option<Arc<Shared>>,
     queue: Option<Map<String, Value>>,
     queue_shared: bool,
+    archive_descriptor: Option<crate::source_archive::ArchiveDescriptor>,
+    infer_archive_descriptor: bool,
+    post_after_pending: bool,
+    halt: bool,
     failed: bool,
 }
 impl Frame {
+    fn halted(&self) -> bool {
+        self.halt
+            || self
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.halt.load(Ordering::Acquire))
+    }
     fn mark_failed(&mut self) {
         self.failed = true;
         if let Some(runtime) = &self.runtime {
@@ -364,7 +412,8 @@ impl Frame {
     }
     async fn end_post(&mut self) -> Result<()> {
         let result = self.sync_post().await;
-        if self.post.take().is_some() {
+        let pending = std::mem::take(&mut self.post_after_pending);
+        if self.post.take().is_some() || pending {
             if result.is_err() {
                 self.mark_failed();
             }
@@ -393,6 +442,7 @@ impl Frame {
             if let Err(error) = runtime.hook(Hook::Finalize).await {
                 errors.push(error);
             }
+            errors.extend(runtime.configuration.processors.close_archives().await);
         }
         errors
     }
@@ -401,6 +451,7 @@ struct State<'a> {
     input: Option<BoxStream<'a, Result<ExtractionEvent>>>,
     configurations: Arc<BTreeMap<String, JobConfiguration>>,
     frames: Vec<Frame>,
+    unopened_children: Vec<ChildControl>,
     errors: VecDeque<crate::Error>,
     finished: bool,
     started: bool,
@@ -461,6 +512,8 @@ impl State<'_> {
         if frame.runtime.is_some() {
             return Ok(());
         }
+        let mut configuration = configuration;
+        configuration.processors = Arc::new(configuration.processors.for_job());
         frame.runtime = Some(Runtime {
             configuration,
             media: fake(Post {
@@ -472,8 +525,26 @@ impl State<'_> {
             context: Map::new(),
             paths: HookPaths::default(),
             failed: Arc::new(AtomicBool::new(frame.failed)),
+            halt: Arc::new(AtomicBool::new(false)),
         });
         let runtime = frame.runtime.as_mut().unwrap();
+        let descriptor = frame.archive_descriptor.clone().or_else(|| {
+            frame
+                .infer_archive_descriptor
+                .then(|| crate::source_archive::for_media(&runtime.media))
+                .flatten()
+        });
+        runtime
+            .configuration
+            .processors
+            .initialize_archives(
+                descriptor.as_ref(),
+                &runtime.media,
+                &runtime.context,
+                &runtime.configuration.root,
+                &runtime.paths.directory,
+            )
+            .await;
         let result = runtime.hook(Hook::Init).await;
         frame.post = Some(Shared::new(
             Map::new(),
@@ -481,6 +552,20 @@ impl State<'_> {
             KeywordPolicy::Independent,
             runtime.failed.clone(),
         ));
+        *frame
+            .post
+            .as_ref()
+            .unwrap()
+            .processors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(runtime.configuration.processors.clone());
+        *frame
+            .post
+            .as_ref()
+            .unwrap()
+            .halt
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(runtime.halt.clone());
         result
     }
     async fn shutdown(&mut self) {
@@ -537,6 +622,7 @@ impl State<'_> {
                     .last_mut()
                     .ok_or_else(|| error("missing postprocessor job scope"))?;
                 frame.end_post().await?;
+                frame.post_after_pending = true;
                 let policy = post.keywords.clone();
                 let count = post.count;
                 let media = fake(*post);
@@ -555,20 +641,41 @@ impl State<'_> {
                 if frame.runtime.is_none()
                     && let Some(configuration) = self.configurations.get(&media.category)
                 {
+                    let mut configuration = configuration.clone();
+                    configuration.processors = Arc::new(configuration.processors.for_job());
                     let runtime = Runtime {
                         configuration: configuration.clone(),
                         context: original.clone(),
                         paths: HookPaths {
-                            directory: post_directory(configuration, &media)?,
+                            directory: post_directory(&configuration, &media)?,
                             filename: None,
                             realpath: None,
                             extension: String::new(),
                         },
                         media: media.clone(),
                         failed: Arc::new(AtomicBool::new(frame.failed)),
+                        halt: Arc::new(AtomicBool::new(false)),
                     };
                     frame.runtime = Some(runtime);
-                    frame.runtime.as_mut().unwrap().hook(Hook::Init).await?;
+                    let runtime = frame.runtime.as_mut().unwrap();
+                    let descriptor = frame.archive_descriptor.clone().or_else(|| {
+                        frame
+                            .infer_archive_descriptor
+                            .then(|| crate::source_archive::for_media(&media))
+                            .flatten()
+                    });
+                    runtime
+                        .configuration
+                        .processors
+                        .initialize_archives(
+                            descriptor.as_ref(),
+                            &runtime.media,
+                            &runtime.context,
+                            &runtime.configuration.root,
+                            &runtime.paths.directory,
+                        )
+                        .await;
+                    runtime.hook(Hook::Init).await?;
                     initialized = true;
                 }
                 if let Some(runtime) = &mut frame.runtime {
@@ -584,6 +691,21 @@ impl State<'_> {
                         policy,
                         runtime.failed.clone(),
                     ));
+                    *frame
+                        .post
+                        .as_ref()
+                        .unwrap()
+                        .processors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) =
+                        Some(runtime.configuration.processors.clone());
+                    *frame
+                        .post
+                        .as_ref()
+                        .unwrap()
+                        .halt
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) = Some(runtime.halt.clone());
                 }
             }
             ExtractionEvent::EndPost => {
@@ -606,6 +728,7 @@ impl State<'_> {
                     return Err(error("invalid postprocessor child nesting"));
                 }
                 let category = scope.metadata.target_category().to_owned();
+                let archive_descriptor = crate::source_archive::for_child(&scope.metadata);
                 let live = !scope.metadata.keyword_updates().is_empty();
                 let mut queue = scope.metadata.fields().clone();
                 queue.insert("category".into(), scope.metadata.category().into());
@@ -637,6 +760,7 @@ impl State<'_> {
                         if live && let Some(post) = &parent.post {
                             post.checkpoint(&runtime.context);
                         }
+                        self.unopened_children.push(scope.control.clone());
                         scope.control.cancel();
                         return Err(error);
                     }
@@ -649,11 +773,20 @@ impl State<'_> {
                     control: Some(scope.control),
                     queue: Some(queue),
                     queue_shared: live,
+                    archive_descriptor,
                     ..Frame::default()
                 });
                 self.initialize_eager(&category).await?;
             }
             ExtractionEvent::EndChild(control) => {
+                if let Some(index) = self
+                    .unopened_children
+                    .iter()
+                    .position(|child| child.same_scope(&control))
+                {
+                    self.unopened_children.remove(index);
+                    return Ok(None);
+                }
                 if self.frames.len() <= 1
                     || !self
                         .frames
@@ -664,7 +797,19 @@ impl State<'_> {
                     return Err(error("invalid postprocessor child closure"));
                 }
                 let mut child = self.frames.pop().unwrap();
-                self.errors.extend(child.finalize().await);
+                let mut errors = child.finalize().await.into_iter();
+                if let Some(error) = errors.next() {
+                    self.errors.extend(errors);
+                    // An exception escaping child finalization belongs to the
+                    // parent's queue callback, unlike a child dispatch error.
+                    let parent = self.frames.last_mut().unwrap();
+                    parent.mark_failed();
+                    parent.halt = true;
+                    if let Some(runtime) = &parent.runtime {
+                        runtime.halt.store(true, Ordering::Release);
+                    }
+                    return Err(error);
+                }
                 let parent = self.frames.last_mut().unwrap();
                 if child.failed
                     || child
@@ -700,10 +845,39 @@ pub fn apply_with_category<'a>(
     configurations: Arc<BTreeMap<String, JobConfiguration>>,
     root_category: Option<String>,
 ) -> BoxStream<'a, Result<JobMedia>> {
+    apply_inner(input, configurations, root_category, None, true)
+}
+/// Apply job hooks with the selected source extractor's archive identity format.
+pub fn apply_with_descriptor<'a>(
+    input: BoxStream<'a, Result<ExtractionEvent>>,
+    configurations: Arc<BTreeMap<String, JobConfiguration>>,
+    root_category: Option<String>,
+    archive_descriptor: Option<crate::source_archive::ArchiveDescriptor>,
+) -> BoxStream<'a, Result<JobMedia>> {
+    apply_inner(
+        input,
+        configurations,
+        root_category,
+        archive_descriptor,
+        false,
+    )
+}
+fn apply_inner<'a>(
+    input: BoxStream<'a, Result<ExtractionEvent>>,
+    configurations: Arc<BTreeMap<String, JobConfiguration>>,
+    root_category: Option<String>,
+    archive_descriptor: Option<crate::source_archive::ArchiveDescriptor>,
+    infer_archive_descriptor: bool,
+) -> BoxStream<'a, Result<JobMedia>> {
     let state = State {
         input: Some(input),
         configurations,
-        frames: vec![Frame::default()],
+        frames: vec![Frame {
+            archive_descriptor,
+            infer_archive_descriptor,
+            ..Frame::default()
+        }],
+        unopened_children: Vec::new(),
         errors: VecDeque::new(),
         finished: false,
         started: false,
@@ -717,6 +891,16 @@ pub fn apply_with_category<'a>(
             }
             if state.finished {
                 return None;
+            }
+            if let Some(frame) = state.frames.last()
+                && frame.halted()
+            {
+                if let Some(control) = &frame.control {
+                    control.cancel();
+                } else {
+                    state.shutdown().await;
+                    continue;
+                }
             }
             if !state.started {
                 state.started = true;
@@ -747,13 +931,25 @@ pub fn apply_with_category<'a>(
                     Ok(Some(media)) => return Some((Ok(media), state)),
                     Ok(None) => {}
                     Err(error) => {
+                        state.errors.push_back(error);
+                        // A callback exception aborts its owning job. The
+                        // balanced child wrapper emits EndChild after cancel,
+                        // allowing the parent to resume and observe status.
+                        if let Some(frame) = state.frames.last_mut()
+                            && frame.halted()
+                        {
+                            frame.mark_failed();
+                            if let Some(control) = &frame.control {
+                                control.cancel();
+                                continue;
+                            }
+                        }
                         for frame in &mut state.frames {
                             frame.mark_failed();
                             if let Some(control) = &frame.control {
                                 control.cancel();
                             }
                         }
-                        state.errors.push_back(error);
                         state.shutdown().await;
                     }
                 },
@@ -1119,6 +1315,10 @@ mod keywords_oracle;
 #[cfg(test)]
 #[path = "postprocess_child_failure_oracle.rs"]
 mod child_failure_oracle;
+
+#[cfg(test)]
+#[path = "postprocess_hook_failure_tests.rs"]
+mod hook_failure_tests;
 
 #[cfg(test)]
 mod keyword_order_tests {

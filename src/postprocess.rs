@@ -34,6 +34,8 @@ impl FrameInput {
     }
 }
 
+#[path = "postprocess_archive.rs"]
+pub(crate) mod archive;
 #[path = "postprocess_hash.rs"]
 pub mod hash;
 #[path = "postprocess_jobs.rs"]
@@ -424,6 +426,49 @@ impl Postprocessors {
             frames: Default::default(),
         }
     }
+    pub(crate) fn for_job(&self) -> Self {
+        Self::new(
+            self.specifications
+                .iter()
+                .cloned()
+                .map(|mut spec| {
+                    if let Processor::Metadata(options) = &spec.options {
+                        spec.options = Processor::Metadata(options.fresh_job());
+                    }
+                    spec
+                })
+                .collect(),
+        )
+    }
+    pub(crate) async fn initialize_archives(
+        &self,
+        descriptor: Option<&crate::source_archive::ArchiveDescriptor>,
+        media: &Media,
+        context: &Map<String, Value>,
+        root: &Path,
+        directory: &Path,
+    ) {
+        for spec in &self.specifications {
+            if spec.matches_category(media)
+                && let Processor::Metadata(options) = &spec.options
+            {
+                options
+                    .initialize_archive(descriptor, media, context, root, directory)
+                    .await;
+            }
+        }
+    }
+    pub(crate) async fn close_archives(&self) -> Vec<crate::Error> {
+        let mut errors = Vec::new();
+        for spec in &self.specifications {
+            if let Processor::Metadata(options) = &spec.options
+                && let Err(error) = options.close_archive().await
+            {
+                errors.push(error);
+            }
+        }
+        errors
+    }
     pub(crate) fn has_generic(&self) -> bool {
         self.specifications
             .iter()
@@ -532,6 +577,7 @@ pub fn context(media: &Media) -> Map<String, Value> {
         .into_iter()
         .map(|(k, v)| (k, json(&v)))
         .collect();
+    crate::source_archive::project_keywords(media, &mut context);
     if let Some(timestamp) = media.metadata.as_ref().and_then(|m| m.timestamp) {
         context.entry("date").or_insert(timestamp.into());
     }
@@ -575,6 +621,11 @@ impl Postprocessors {
     ) -> Result<()> {
         for spec in &self.specifications {
             if !spec.events.contains(&hook) || !spec.matches_keywords(media, context) {
+                if hook == Hook::Finalize
+                    && let Processor::Metadata(options) = &spec.options
+                {
+                    options.close_archive().await?;
+                }
                 continue;
             }
             match &spec.options {
@@ -619,6 +670,11 @@ impl Postprocessors {
                     }
                 }
             }
+            if hook == Hook::Finalize
+                && let Processor::Metadata(options) = &spec.options
+            {
+                options.close_archive().await?;
+            }
         }
         Ok(())
     }
@@ -632,6 +688,15 @@ impl Postprocessors {
         path: &Path,
         root: &Path,
     ) -> Result<bool> {
+        let descriptor = crate::source_archive::for_media(media);
+        self.initialize_archives(
+            descriptor.as_ref(),
+            media,
+            context,
+            root,
+            path.parent().unwrap_or(root),
+        )
+        .await;
         let mut rebuild = false;
         for spec in &self.specifications {
             if !spec.events.contains(&hook)
@@ -641,6 +706,11 @@ impl Postprocessors {
                     .as_ref()
                     .is_some_and(|filter| !filter.matches_keywords(context).unwrap_or(false))
             {
+                if hook == Hook::Finalize
+                    && let Processor::Metadata(options) = &spec.options
+                {
+                    options.close_archive().await?;
+                }
                 continue;
             }
             match &spec.options {
@@ -656,6 +726,11 @@ impl Postprocessors {
                     },
                 )?,
                 Processor::Hash(options) => rebuild |= options.run(context, path).await?,
+            }
+            if hook == Hook::Finalize
+                && let Processor::Metadata(options) = &spec.options
+            {
+                options.close_archive().await?;
             }
         }
         Ok(rebuild)

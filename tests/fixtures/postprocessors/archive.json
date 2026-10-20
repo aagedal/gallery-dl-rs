@@ -1,0 +1,1229 @@
+{
+  "version": "1.32.17",
+  "source_sha256": {
+    "archive.py": "18ad0fbb97ae135b89e84d969a4d56979c541dfcc7394bec48c346fdef5f78a4",
+    "metadata.py": "db7481267bbdbca3ed95ace30dcb05f3cec5511a84f75f1769a0362ae0fb53a5",
+    "common.py": "b6217d3080eb242ecf4d1bdb9db518e12190615fcd78c805a4b9c4dba984b7c6"
+  },
+  "source": "Actual MetadataPP construction/run, archive.check/add/close and SQLite results. Synthetic public metadata and minimal path adapter; string paths CWD-relative upstream. No network. See adjacent generator.",
+  "cases": [
+    {
+      "name": "default",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/default/archive.sqlite"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "fixture_MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "explicit_format",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/explicit_format/archive.sqlite",
+        "archive-format": "{id}"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "fixture17",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture17"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture17"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "explicit_prefix",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/explicit_prefix/archive.sqlite",
+        "archive-prefix": "custom_"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "custom__MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "custom__MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "custom__MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "explicit_empty_prefix",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/explicit_empty_prefix/archive.sqlite",
+        "archive-prefix": ""
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "_MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "explicit_table",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/explicit_table/archive.sqlite",
+        "archive-table": "artist_{id}"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "_MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "artist_17",
+          "sql": "CREATE TABLE \"artist_17\" (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "empty_table",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/empty_table/archive.sqlite",
+        "archive-table": ""
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "_MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "",
+          "sql": "CREATE TABLE \"\" (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "quoted_table",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/quoted_table/archive.sqlite",
+        "archive-table": "a\"b"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "_MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "a_b",
+          "sql": "CREATE TABLE \"a_b\" (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "cached_key_survives_mutation",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/cached_key_survives_mutation/archive.sqlite"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": {
+        "id": 99
+      },
+      "before": false,
+      "cached": "fixture_MD_17_2.jpg",
+      "after": false,
+      "keywords_after": {
+        "id": 99,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_99_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "empty_cache_regenerates",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/empty_cache_regenerates/archive.sqlite"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": {
+        "id": 99,
+        "_archive_metadata": ""
+      },
+      "before": false,
+      "cached": "fixture_MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 99,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_99_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_99_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "cached_key_override",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/cached_key_override/archive.sqlite"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": {
+        "_archive_metadata": "replacement"
+      },
+      "before": false,
+      "cached": "fixture_MD_17_2.jpg",
+      "after": false,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "replacement"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "json_success",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/json_success/archive.sqlite"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": [
+        "17_2.jpg.json"
+      ]
+    },
+    {
+      "name": "tags_success",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/tags_success/archive.sqlite",
+        "mode": "tags"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": [
+        "17_2.jpg.txt"
+      ]
+    },
+    {
+      "name": "custom_success",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/custom_success/archive.sqlite",
+        "mode": "custom",
+        "format": "{id}"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": [
+        "17_2.jpg.txt"
+      ]
+    },
+    {
+      "name": "jsonl_success",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/jsonl_success/archive.sqlite",
+        "mode": "jsonl"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "error": "AttributeError",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "skip_existing",
+      "action": "skip_existing",
+      "options": {
+        "archive": "$WORK/skip_existing/archive.sqlite",
+        "skip": true
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": [
+        "17_2.jpg.json"
+      ]
+    },
+    {
+      "name": "empty_no_file_is_recorded",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/empty_no_file_is_recorded/archive.sqlite",
+        "mode": "custom",
+        "format": "",
+        "empty": false
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "empty_file_is_recorded",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/empty_file_is_recorded/archive.sqlite",
+        "mode": "custom",
+        "format": "",
+        "empty": true
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": [
+        "17_2.jpg.txt"
+      ]
+    },
+    {
+      "name": "render_failure_not_recorded",
+      "action": "render_error",
+      "options": {
+        "archive": "$WORK/render_failure_not_recorded/archive.sqlite"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "error": "ValueError",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "write_failure_not_recorded",
+      "action": "write_error",
+      "options": {
+        "archive": "$WORK/write_failure_not_recorded/archive.sqlite"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "error": "OSError",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "metadata_path_overwrites_cache",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/metadata_path_overwrites_cache/archive.sqlite",
+        "metadata-path": "_archive_metadata"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "$WORK/metadata_path_overwrites_cache/17_2.jpg.json"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "$WORK/metadata_path_overwrites_cache/17_2.jpg.json"
+          ]
+        }
+      ],
+      "files": [
+        "17_2.jpg.json"
+      ]
+    },
+    {
+      "name": "modify_bypasses_archive",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/modify_bypasses_archive/archive.sqlite",
+        "mode": "modify",
+        "fields": {
+          "new": "{id}"
+        }
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "new": 17
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "delete_bypasses_archive",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/delete_bypasses_archive/archive.sqlite",
+        "mode": "delete",
+        "fields": [
+          "id"
+        ]
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "print_bypasses_archive",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/print_bypasses_archive/archive.sqlite",
+        "mode": "print",
+        "format": "{id}"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "17\n",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "stdout_bypasses_archive",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/stdout_bypasses_archive/archive.sqlite",
+        "filename": "-"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "{\n    \"id\": 17,\n    \"num\": 2,\n    \"extension\": \"jpg\",\n    \"tags\": [\n        \"alpha\",\n        \"alpha\",\n        \"beta\"\n    ]\n}\n",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": []
+        }
+      ],
+      "files": []
+    },
+    {
+      "name": "file_mode_ignores_archive_mode",
+      "action": "run",
+      "options": {
+        "archive": "$WORK/file_mode_ignores_archive_mode/archive.sqlite",
+        "archive-mode": "memory"
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "stdout": "",
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": [
+        "17_2.jpg.json"
+      ]
+    },
+    {
+      "name": "pragmas",
+      "action": "check_add",
+      "options": {
+        "archive": "$WORK/pragmas/archive.sqlite",
+        "archive-pragma": [
+          "journal_mode=WAL",
+          "synchronous=NORMAL"
+        ]
+      },
+      "keywords": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ]
+      },
+      "hooks": [
+        "file",
+        "finalize"
+      ],
+      "mutation": null,
+      "before": false,
+      "cached": "fixture_MD_17_2.jpg",
+      "after": true,
+      "keywords_after": {
+        "id": 17,
+        "num": 2,
+        "extension": "jpg",
+        "tags": [
+          "alpha",
+          "alpha",
+          "beta"
+        ],
+        "_archive_metadata": "fixture_MD_17_2.jpg"
+      },
+      "tables": [
+        {
+          "name": "archive",
+          "sql": "CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID",
+          "rows": [
+            "fixture_MD_17_2.jpg"
+          ]
+        }
+      ],
+      "files": []
+    }
+  ],
+  "reuse": [
+    {
+      "reuse": true,
+      "hit": false,
+      "cache_size": 23
+    },
+    {
+      "reuse": true,
+      "hit": true,
+      "cache_size": 23
+    },
+    {
+      "reuse": false,
+      "hit": true,
+      "cache_size": 47
+    }
+  ]
+}

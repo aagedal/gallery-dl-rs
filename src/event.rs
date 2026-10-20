@@ -47,6 +47,7 @@ pub struct ChildMetadata {
     fields: serde_json::Map<String, serde_json::Value>,
     keyword_updates: Option<Arc<[KeywordUpdate]>>,
     target_category: Option<String>,
+    source_archive: Option<Arc<crate::source_archive::ArchiveDescriptor>>,
 }
 
 impl ChildMetadata {
@@ -142,6 +143,7 @@ impl ChildMetadata {
         }
         Self {
             keyword_updates: None,
+            source_archive: None,
             target_category: None,
             category: label(category),
             subcategory: label(subcategory),
@@ -166,11 +168,24 @@ impl ChildMetadata {
         };
         Self {
             keyword_updates: None,
+            source_archive: None,
             target_category: Some("pixiv".into()),
             category: "pixiv-novel".into(),
             subcategory: subcategory.to_owned(),
             fields,
         }
+    }
+
+    /// Explicit target extractor format; producer queue metadata may be ambiguous.
+    pub fn with_source_archive(
+        mut self,
+        descriptor: crate::source_archive::ArchiveDescriptor,
+    ) -> Self {
+        self.source_archive = Some(Arc::new(descriptor));
+        self
+    }
+    pub fn source_archive(&self) -> Option<&crate::source_archive::ArchiveDescriptor> {
+        self.source_archive.as_deref()
     }
 
     pub fn with_keyword_updates(mut self, updates: Vec<KeywordUpdate>) -> Self {
@@ -313,6 +328,7 @@ impl Post {
             metadata.media_id.clear();
             metadata.index = 0;
             metadata.source_num = metadata.source_num.as_ref().map(|_| 0.into());
+            metadata.source_suffix = metadata.source_suffix.as_ref().map(|_| "".into());
         }
         Self {
             keywords: KeywordPolicy::default(),

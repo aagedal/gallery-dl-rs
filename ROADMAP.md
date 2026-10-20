@@ -1109,8 +1109,8 @@ format specs, dates and errors; native dates retain JSON representations rather
 than Python runtime datetime/sentinel objects. Novel runtime fixtures exercise
 conversion/arithmetic results through later file and child counter increments.
 Keyword-driven pre-download selection and request/text-fetch changes remain open.
-Remaining: processor archive
-databases, additional encodings/open modes and formatter dialects, Unicode
+Remaining: PostgreSQL processor archives and further default-key coverage,
+additional encodings/open modes and formatter dialects, Unicode
 decimal/underscore-float parsing, nested-container sorting, runtime Python
 datetime/sentinel object identity, arbitrary native filename fields,
 keyword-driven archive identity and pre-download selection changes, further
@@ -1119,21 +1119,25 @@ identity, additional counter policies and mutation-driven request URLs/text
 fetches, remaining temporary-path behavior, and
 other processor types.
 
-**Next processor archive step (source audit, gallery-dl 1.32.17):** implement
-SQLite metadata archives separately from the native download archive schema.
-Writing modes JSON/tags/custom/JSONL need source `archive(entry)` tables,
+**Implemented processor archive step (gallery-dl 1.32.17):** SQLite metadata
+archives are separate from the native download archive schema.
+Writing modes JSON/tags/custom/JSONL use source `archive(entry)` tables,
 producer category/extractor archive-format descriptors, and per-job sessions
 created before init hooks. Defaults use category + `_MD_` + extractor format;
 explicit table/prefix/format values have distinct default and empty semantics.
-Resolve path-list/table templates against initial Directory keywords. Check
+Path-list/table templates resolve against initial Directory keywords. Checks run
 before destination/path/skip/render side effects and preserve `_archive_metadata`
-for add; existing-file skips add nothing, while empty completed output adds.
+for additions; existing-file skips add nothing, while empty completed output adds.
 Modify/delete/stdout initialize and close sessions but bypass checks/additions;
-hash/mtime/ugoira have no such generic archive. Preserve connection reuse/pragma
-semantics, immediate row commits through later failures, and unconditional close
-after active work drains. Source fixtures must cover outcomes, key/path defaults,
-instance isolation, cancellation/concurrency, and Python SQLite interoperability.
-PostgreSQL remains a separate missing backend. See upstream
+hash/mtime/ugoira have no such generic archive. Connection reuse/pragma semantics,
+immediate commits through later failures, and unconditional close after active
+work drains are implemented. Source fixtures cover 26 archive cases, 21 complete
+processor cases across 22 jobs, 124 extractor routes, and three producer key
+traces. Tests cover instance isolation, cancellation/concurrency, and Python
+SQLite interoperability. Native sidecar publication remains atomic on failure.
+Default-key support is gated where native fields or source job framing are not
+yet preserved; explicit formats remain available. PostgreSQL remains a missing
+backend. See upstream
 `postprocessor/common.py:24`, `postprocessor/metadata.py:111`, `archive.py:19`,
 and `job.py:817` for initialization and lifecycle order.
 

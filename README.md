@@ -1968,6 +1968,27 @@ produces text; mixed literal/field templates stringify their field results.
 Invalid field assignments leave the previous keyword value in place. Numeric
 results can feed later producer increments and processor filters.
 
+Metadata processors support SQLite `archive`, `archive-format`, `archive-prefix`,
+`archive-table`, `archive-pragma`, and `archive-reuse`. These databases use Python
+gallery-dl's `archive(entry)` schema, separate from the native download archive.
+For example, `{"name":"metadata","archive":"metadata.sqlite3",
+"archive-format":"{id}_{num}"}` records successfully completed sidecars.
+Default keys use the source extractor's category and archive format where the
+native producer preserves the required fields and job boundaries. Unsupported
+defaults produce a warning and disable that processor's archive; an explicit
+`archive-format` selects keys from the available native keywords.
+
+Sessions initialize before `init` hooks and close after each job's final hooks.
+Archive hits bypass destination rendering and `metadata-path` updates. Existing
+sidecars skipped with `skip` add no row; completed empty output does. Rows commit
+immediately and survive later job failures. Modify/delete/stdout modes initialize
+and close archives but bypass checks and additions. String archive paths expand
+home/environment variables and resolve relative to the process working directory;
+path lists and table templates use the initial job keywords. Reused connections
+retain their first pragma settings. Dispatch-hook exceptions stop the affected
+job while allowing its parent to continue. Exceptions escaping child
+finalization abort the parent's queue callback.
+
 `mtime` uses `key: "date"` by default, or a `value` template. File mode updates
 the completed file's modification time. `target: "directory"` (also `dir`)
 updates its containing directory after the post completes. Missing or zero values
@@ -2015,7 +2036,8 @@ value and type. Both filters and filename/directory templates use the source
 counter, including zero; archive identities retain their existing native index.
 
 The native formatter remains a bounded, non-executable subset of upstream's
-formatter. Processor archive databases, other text encodings/open modes,
+formatter. PostgreSQL processor archives, further extractor default-key coverage,
+other text encodings/open modes,
 extractor-subcategory selectors, keyword-driven changes to native archive
 identities and pre-download selection, additional producer ownership policies,
 nested object aliases, additional counter policies, mutation-driven request URLs

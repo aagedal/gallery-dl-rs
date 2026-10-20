@@ -427,7 +427,7 @@ pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
                 .ok_or(Skip::NoMedia)?,
         ),
     }
-    Ok(parse_files(illust, &id, urls))
+    Ok(parse_files(illust, &id, urls, pages.is_some()))
 }
 
 fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
@@ -448,6 +448,7 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
     PostMetadata {
         source_num: Some(0.into()),
+        source_suffix: Some("".into()),
         post_id: id.to_owned(),
         caption_html: illust.get("caption").and_then(Value::as_str).map(Arc::from),
         ajax: illust.get("_ajax").and_then(Value::as_bool),
@@ -472,7 +473,7 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     }
 }
 
-fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
+fn parse_files(illust: &Value, id: &str, urls: Vec<Url>, assign_suffix: bool) -> Vec<Media> {
     let base = illustration_metadata(illust, id);
     let dimension = |key| illust.get(key).and_then(Value::as_u64).filter(|v| *v > 0);
     let headers = BTreeMap::from([("Referer".to_owned(), REFERER.to_owned())]);
@@ -498,6 +499,18 @@ fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
                     media_id: format!("{id}_p{page}"),
                     index: page + 1,
                     source_num: Some(page.into()),
+                    source_suffix: Some(if assign_suffix {
+                        format!("_p{page:02}").into()
+                    } else {
+                        "".into()
+                    }),
+                    keyword_updates: assign_suffix.then(|| {
+                        vec![crate::event::KeywordUpdate::Set {
+                            name: "suffix".into(),
+                            value: format!("_p{page:02}").into(),
+                        }]
+                        .into()
+                    }),
                     ..base.clone()
                 }),
                 url,
@@ -554,7 +567,7 @@ pub fn parse_ugoira(illust: &Value, bytes: &[u8]) -> Result<Vec<Media>> {
         .get("frames")
         .and_then(parse_frames)
         .ok_or_else(invalid)?;
-    let mut media = parse_files(illust, &id, vec![url]);
+    let mut media = parse_files(illust, &id, vec![url], false);
     let metadata = media[0].metadata.as_mut().expect("Pixiv metadata");
     metadata.frames = Some(frames);
     metadata.ugoira_original = Some(false);
@@ -687,6 +700,7 @@ pub fn parse_profile(bytes: &[u8], owner: &str, kind: ProfileKind) -> Result<Vec
             timestamp,
             index: 1,
             source_num: Some(0.into()),
+            source_suffix: None,
             profile_asset: profile_asset_identity(label, owner, timestamp),
             pixiv_user_detail: UserDetail::parse_compat(&serde_json::Map::from_iter([(
                 "user".to_owned(),
@@ -1805,7 +1819,6 @@ fn artwork_keywords() -> KeywordPolicy {
         "_ugoira_frame_index",
         "date_url",
         "hash",
-        "suffix",
         "_fallback",
     ])
 }
@@ -1860,7 +1873,6 @@ mod tests {
                 "_ugoira_frame_index",
                 "date_url",
                 "hash",
-                "suffix",
                 "_fallback",
             ]
         );
