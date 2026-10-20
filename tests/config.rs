@@ -3211,3 +3211,77 @@ fn metadata_switch_preserves_independent_pixiv_novel_scopes_and_explicit_null_cl
         );
     }
 }
+
+#[test]
+fn pixiv_captions_are_sparse_truthy_and_discard_private_configuration_values() {
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("pixiv").unwrap().captions,
+        None
+    );
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"captions":value}),
+            json!({"extractor":{"captions":value}}),
+            json!({"extractor":{"pixiv":{"captions":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv")
+                .unwrap();
+            assert_eq!(resolved.captions, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_captions_obey_hierarchy_null_clearing_and_independent_novel_scopes() {
+    let cfg = parse(r#"{"extractor":{"captions":true,"pixiv":{"captions":null},"pixiv-novel":{"captions":"false"}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().captions, Some(false));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, Some(true));
+    assert_eq!(cfg.resolve("direct").unwrap().captions, Some(true));
+    let cfg = parse(r#"{"captions":null,"extractor":{"captions":true,"pixiv":{"captions":true}}}"#)
+        .unwrap();
+    let resolved = cfg.resolve("pixiv").unwrap();
+    assert_eq!(resolved.captions, Some(false));
+    assert_eq!(
+        resolved
+            .overlay(&Options {
+                captions: Some(true),
+                ..Options::default()
+            })
+            .captions,
+        Some(true)
+    );
+    assert_eq!(resolved.overlay(&Options::default()).captions, Some(false));
+    let cfg =
+        parse(r#"{"captions":"enabled","extractor":{"captions":false,"pixiv":{"captions":null}}}"#)
+            .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().captions, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv":{"captions":true,"comments":false,"metadata":null,"metadata-bookmark":true}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.captions, Some(true));
+    assert_eq!(pixiv.comments, Some(false));
+    assert_eq!(pixiv.metadata, Some(false));
+    assert_eq!(pixiv.metadata_bookmark, Some(true));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}

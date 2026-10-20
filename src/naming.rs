@@ -27,6 +27,7 @@ const FIELDS: &[&str] = &[
     "timestamp",
     "date",
     "caption",
+    "caption_html",
     "content",
     "description",
     "community",

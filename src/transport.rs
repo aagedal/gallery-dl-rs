@@ -9,6 +9,16 @@ use std::{
 use tokio::time::Instant;
 use url::Url;
 
+/// A corrupt compressed response, distinct from permanent size/encoding limits.
+#[derive(Debug)]
+pub(crate) struct ApiContentDecodeError;
+impl std::fmt::Display for ApiContentDecodeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("could not decompress API response")
+    }
+}
+impl std::error::Error for ApiContentDecodeError {}
+
 /// Decode bounded API payloads without enabling automatic decompression on
 /// media clients, whose byte ranges and validators refer to wire bytes.
 pub(crate) async fn decode_api_body(
@@ -102,7 +112,7 @@ async fn decode_gzip_body(body: Vec<u8>, limit: usize, state: Arc<DecodeState>) 
             state.check()?;
             let count = decoder
                 .read(&mut chunk)
-                .map_err(|_| error("could not decompress API response"))?;
+                .map_err(|_| Box::new(ApiContentDecodeError) as crate::Error)?;
             if count == 0 {
                 break;
             }
@@ -485,16 +495,17 @@ mod api_body_tests {
         );
         let error = decode_api_body(gzip(&vec![b'x'; 65536]), &headers("gzip"), 1024)
             .await
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("size limit"));
+            .unwrap_err();
+        assert!(!error.is::<ApiContentDecodeError>());
+        assert!(error.to_string().contains("size limit"));
         let mut truncated = gzip(b"private response");
         truncated.truncate(truncated.len() - 3);
         let error = decode_api_body(truncated, &headers("gzip"), 1024)
             .await
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("decompress") && !error.contains("private response"));
+            .unwrap_err();
+        assert!(error.is::<ApiContentDecodeError>());
+        let message = error.to_string();
+        assert!(message.contains("decompress") && !message.contains("private response"));
     }
     #[tokio::test]
     async fn identity_and_unsupported_api_encodings_never_guess_payload_format() {

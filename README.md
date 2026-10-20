@@ -640,6 +640,28 @@ JSON truthiness, with explicit null disabling inherited settings; Pixiv defaults
 to disabled, separately from Kemono/Coomer's enabled default. Live authenticated
 user-detail extraction remains unverified.
 
+Native Pixiv illustrations support `captions: true` to fill missing captions
+through the web AJAX API after user details, comments and bookmark tags. Existing
+captions and `_mypixiv`/`_ajax` works skip the lookup. The source's literal
+`jump.php` anchor decoding and HTML5 entity handling are preserved. `caption_html`
+retains complete App API or sanitized AJAX HTML for inspection, sidecars, filters
+and templates; the existing `caption` remains normalized text. Novel jobs retain
+their existing caption HTML and ignore the `captions` switch, matching upstream.
+
+Pixiv web requests accept Netscape cookies or an explicitly selected Firefox
+profile, including `PHPSESSID`. Cookies stay URL-scoped and rotate in memory across
+retries and redirects without modifying their source. Web requests use browser
+headers and configured network settings, separate from App API authorization.
+Redirects stay within one origin, with a ten-hop limit. Both encoded and decoded
+bodies are limited to 32 MiB; cancellation stops pending reads and decoding.
+HTTP 4xx bodies other than 429 follow source JSON semantics. Failed requests,
+API errors and invalid JSON leave the original caption unchanged; corrupt gzip
+and transient requests retry within configured limits. Oversized payloads do
+not retry. Truthy successful bodies with malformed caption fields abort before
+that post. Source vectors and local HTTP tests cover these paths; authenticated
+live AJAX extraction remains unverified. Novel embedded-image expansion and
+sanity-limit recovery remain unfinished.
+
 Native Pixiv illustrations also support `comments` and `metadata-bookmark`, both
 disabled by default and using upstream JSON truthiness (explicit null disables
 an inherited value). `comments` retains complete API comment objects in source
@@ -1336,7 +1358,9 @@ Native mode can import an explicitly selected Firefox profile:
   -j 'https://www.instagram.com/p/SHORTCODE/'
 ```
 
-Log in to the site in that Firefox profile first (use `x.com` for X). Supply the
+Native imports support Instagram, Facebook, X, Pixiv web requests, Kemono/Coomer
+and FurAffinity. Log in to the site in that Firefox profile first (use `x.com`
+for X). Supply the
 profile directory containing `cookies.sqlite`, or that database file itself.
 Relative paths use the working directory; `~` expansion, automatic profile
 search, container selectors, and native imports from other browsers are not
@@ -1788,7 +1812,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `cursor`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `comments`,
-`metadata-bookmark`, `endpoint`,
+`metadata-bookmark`, `captions`, `endpoint`,
 `order-posts`, `favorites` (Kemono/Coomer options), category-scoped Bluesky
 `api-server` and likes `endpoint`, `retries` (integer 0–10), and `timeout`
 (positive seconds, including fractions).

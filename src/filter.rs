@@ -434,6 +434,9 @@ fn context_parts(
                 metadata.insert(key.clone(), json_value(value));
             }
         }
+        if let Some(caption) = &post.caption_html {
+            metadata.insert("caption_html".into(), text(caption.as_ref()));
+        }
         if let Some(comments) = &post.comments {
             metadata.insert(
                 "comments".into(),

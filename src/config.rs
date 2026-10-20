@@ -130,6 +130,8 @@ pub struct Options {
     pub metadata: Option<bool>,
     /// Include Pixiv illustration or novel comments.
     pub comments: Option<bool>,
+    /// Include Pixiv illustration HTML captions as inline text files.
+    pub captions: Option<bool>,
     /// Include Pixiv illustration or novel bookmark metadata.
     pub metadata_bookmark: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
@@ -310,6 +312,7 @@ impl Options {
             max_posts: overrides.max_posts.or(self.max_posts),
             metadata: overrides.metadata.or(self.metadata),
             comments: overrides.comments.or(self.comments),
+            captions: overrides.captions.or(self.captions),
             metadata_bookmark: overrides.metadata_bookmark.or(self.metadata_bookmark),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             refresh_token: overrides
@@ -434,6 +437,7 @@ struct RawRoot {
     max_posts: Field,
     metadata: Field,
     comments: Field,
+    captions: Field,
     metadata_bookmark: Field,
     directory: Field,
     cookies: Field,
@@ -505,6 +509,7 @@ struct RawExtractor {
     max_posts: Field,
     metadata: Field,
     comments: Field,
+    captions: Field,
     metadata_bookmark: Field,
     directory: Field,
     cookies: Field,
@@ -609,6 +614,7 @@ struct RawOptions {
     max_posts: Field,
     metadata: Field,
     comments: Field,
+    captions: Field,
     metadata_bookmark: Field,
     api_key: Field,
     username: Field,
@@ -791,6 +797,7 @@ impl Config {
             max_posts: root.max_posts,
             metadata: root.metadata,
             comments: root.comments,
+            captions: root.captions,
             metadata_bookmark: root.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
@@ -871,6 +878,7 @@ impl Config {
             max_posts: extractor.max_posts,
             metadata: extractor.metadata,
             comments: extractor.comments,
+            captions: extractor.captions,
             metadata_bookmark: extractor.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
@@ -1489,6 +1497,7 @@ impl RawOptions {
         };
         let metadata = self.metadata.0.as_ref().map(value_truthy);
         let comments = self.comments.0.as_ref().map(value_truthy);
+        let captions = self.captions.0.as_ref().map(value_truthy);
         let metadata_bookmark = self.metadata_bookmark.0.as_ref().map(value_truthy);
         let max_posts = match self.max_posts.0 {
             None => None,
@@ -1752,6 +1761,7 @@ impl RawOptions {
             max_posts,
             metadata,
             comments,
+            captions,
             metadata_bookmark,
             api_key,
             refresh_token,

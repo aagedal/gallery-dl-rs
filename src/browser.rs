@@ -97,7 +97,16 @@ impl FirefoxProfile {
     /// Import only the requested site's default, unpartitioned cookie context.
     /// Credentials remain in memory; the source database is never modified.
     pub async fn load(&self, site: &str) -> Result<CookieJar> {
-        if !matches!(site, "instagram.com" | "facebook.com" | "x.com") {
+        if !matches!(
+            site,
+            "instagram.com"
+                | "facebook.com"
+                | "x.com"
+                | "pixiv.net"
+                | "kemono.cr"
+                | "coomer.st"
+                | "furaffinity.net"
+        ) {
             return Err(error("unsupported browser cookie site"));
         }
         let path = self.path.clone();
@@ -442,6 +451,73 @@ mod tests {
         assert_eq!(header(&jar, "https://x.com/"), None);
         let jar = profile(&directory).load("x.com").await.unwrap();
         assert_eq!(header(&jar, "https://x.com/"), Some("x=secret".into()));
+    }
+
+    #[tokio::test]
+    async fn pixiv_import_keeps_only_default_context_and_matching_domains() {
+        let (directory, connection) = database();
+        insert(
+            &connection,
+            ".pixiv.net",
+            "PHPSESSID",
+            "synthetic-session",
+            "",
+        );
+        insert(&connection, "www.pixiv.net", "web", "yes", "");
+        insert(
+            &connection,
+            ".pixiv.net",
+            "container",
+            "excluded",
+            "^userContextId=2",
+        );
+        insert(&connection, ".evilpixiv.net", "suffix", "excluded", "");
+        insert(
+            &connection,
+            ".pixiv.net.evil.test",
+            "prefix",
+            "excluded",
+            "",
+        );
+        insert(&connection, ".instagram.com", "other", "excluded", "");
+        let jar = profile(&directory).load("pixiv.net").await.unwrap();
+        assert_eq!(
+            header(&jar, "https://www.pixiv.net/ajax/illust/42"),
+            Some("PHPSESSID=synthetic-session; web=yes".into())
+        );
+        assert_eq!(
+            header(&jar, "https://pixiv.net/"),
+            Some("PHPSESSID=synthetic-session".into())
+        );
+        assert_eq!(header(&jar, "https://evilpixiv.net/"), None);
+        assert_eq!(header(&jar, "https://instagram.com/"), None);
+    }
+
+    #[tokio::test]
+    async fn every_native_cookie_consumer_can_import_its_own_domain() {
+        let (directory, connection) = database();
+        let sites = [
+            "instagram.com",
+            "facebook.com",
+            "x.com",
+            "pixiv.net",
+            "kemono.cr",
+            "coomer.st",
+            "furaffinity.net",
+        ];
+        for site in sites {
+            insert(&connection, &format!(".{site}"), "session", site, "");
+        }
+        for site in sites {
+            let jar = profile(&directory).load(site).await.unwrap();
+            assert_eq!(
+                header(&jar, &format!("https://www.{site}/")),
+                Some(format!("session={site}"))
+            );
+            for other in sites.into_iter().filter(|other| *other != site) {
+                assert_eq!(header(&jar, &format!("https://{other}/")), None);
+            }
+        }
     }
 
     #[tokio::test]

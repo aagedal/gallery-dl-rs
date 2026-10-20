@@ -597,6 +597,9 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Original Pixiv caption HTML, including source AJAX URL/entity decoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption_html: Option<std::sync::Arc<str>>,
     /// Complete Pixiv artist detail fields, flattened into the public metadata.
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub pixiv_user_detail: Option<std::sync::Arc<crate::pixiv::UserDetail>>,
@@ -871,6 +874,7 @@ pub struct BackendOptions {
     pub user_id: Option<String>,
     pub api_key: Option<String>,
     pub reposts: Option<bool>,
+    pub captions: Option<bool>,
     pub comments: Option<bool>,
     pub metadata_bookmark: Option<bool>,
     pub ugoira: Option<crate::pixiv::UgoiraMode>,
@@ -1047,6 +1051,7 @@ impl Backend {
         }
         for (name, value) in [
             ("metadata", options.metadata),
+            ("captions", options.captions),
             ("comments", options.comments),
             ("metadata-bookmark", options.metadata_bookmark),
             ("mp4", options.mp4),
@@ -1886,6 +1891,13 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        caption_html: matches!(category, "pixiv" | "pixiv-novel")
+            .then(|| {
+                data.get("caption")
+                    .and_then(Value::as_str)
+                    .map(std::sync::Arc::from)
+            })
+            .flatten(),
         pixiv_user_detail: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| crate::pixiv::UserDetail::parse_compat(data).map(std::sync::Arc::new))
             .flatten(),

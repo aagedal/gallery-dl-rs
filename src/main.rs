@@ -1119,7 +1119,9 @@ fn extract_input<'a>(
                     let novel = extractors
                         .pixiv_novel
                         .get_or_init(|| async {
+                            let jar = extractors.cookie_jar(novel_settings, "pixiv.net").await?;
                             gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
+                                let native = native.with_cookies(jar);
                                 native
                                     .with_novel_options(gallery_dl_rs::pixiv::NovelOptions {
                                         covers: novel_options.covers.unwrap_or(false),
@@ -1151,9 +1153,12 @@ fn extract_input<'a>(
                         let native = extractors
                             .pixiv
                             .get_or_init(|| async {
+                                let jar = extractors.cookie_jar(configured, "pixiv.net").await?;
                                 gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
                                     |native| {
                                         native
+                                            .with_cookies(jar)
+                                            .with_captions(options.captions.unwrap_or(false))
                                             .with_novel_extractor(Arc::clone(novel))
                                             .with_include(options.include.clone())
                                             .with_ugoira_mode(options.ugoira.unwrap_or_default())
@@ -1321,6 +1326,7 @@ fn extract_input<'a>(
                                 .then_some(options.order_revisions)
                                 .flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
+                            captions: (category == "pixiv").then_some(options.captions).flatten(),
                             comments: matches!(category, "pixiv" | "pixiv-novel")
                                 .then_some(options.comments)
                                 .flatten(),
@@ -1509,6 +1515,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         password: None,
         user_id: None,
         reposts: None,
+        captions: None,
         comments: None,
         metadata_bookmark: None,
         ugoira: None,

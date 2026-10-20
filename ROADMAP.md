@@ -830,6 +830,18 @@ different runtime defaults. Source vectors and HTTP tests cover ordering, cache
 reuse, option scope, selection, shared snapshots and cancellation. Live authenticated
 verification and complete arbitrary compatibility-field normalization remain
 unfinished.
+Native illustration `captions` fills missing captions through the web AJAX API
+after other enrichment, preserving source gates, literal jump-link URL decoding
+and HTML5 entities. Full `caption_html` is exposed separately from normalized
+text, including unchanged novel captions. Web requests use scoped Netscape or
+Firefox cookies, rotate response cookies in memory, and isolate App API
+credentials. Same-origin redirects, request/retry deadlines and encoded/decoded
+32 MiB limits bound traversal; corrupt gzip retries while size excess does not.
+Source-compatible 4xx JSON semantics, soft request/API failures and fatal malformed
+caption bodies are covered by source vectors and HTTP tests, alongside ranges,
+empty posts and cancellation. Live authenticated AJAX, novel embeds and sanity
+recovery remain unfinished. Shared Firefox import now accepts every native
+cookie consumer's domain, fixing Kemono/Coomer/FurAffinity allowlist omissions.
 Native illustration `comments` and `metadata-bookmark` enrich selected works
 lazily after file discovery. Comment objects retain nested source fields and
 ordered pagination; enabled empty/error cases emit an empty list, discarding

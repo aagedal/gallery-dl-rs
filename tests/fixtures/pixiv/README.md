@@ -218,3 +218,42 @@ in native code. Metadata is deep-copied at each emitted boundary; dates use
 naive UTC ISO text and filename/archive formats are evaluated by the source.
 All identifiers, strings, dates, URLs, and metadata are synthetic. No HTTP,
 OAuth, sessions, or downloads ran.
+
+`captions.json` records 34 actual source `items` cases and 16 direct
+`_sanitize_ajax_caption` vectors from gallery-dl 1.32.17. The installed source
+path and SHA-256 match the values above and are repeated in the fixture.
+Illustration `items`, `_request_ajax`, and `_sanitize_ajax_caption` run
+unmodified, with synthetic work/file/API providers and a `request_json` stub.
+Source option assignments and the source jump-link regular expression are
+used without App API or OAuth initialization. One actual novel `items` case
+records that the captions option is ignored there.
+
+Cases cover default and JSON truthy/falsy options, existing versus absent or
+falsy captions, `_ajax`/`_mypixiv` gates, empty file lists, and full enrichment
+ordering. User metadata, comments, and registered bookmark tags precede the
+caption request; an existing caption supplied by user metadata suppresses it.
+The real AJAX helper swallows request exceptions, API errors, and missing
+body keys. Falsy bodies leave the existing caption untouched; truthy malformed
+bodies can fail outside the helper and abort before post emission. Raw HTML
+and sanitized caption outputs are retained in per-yield deep-copied metadata.
+
+Sanitizer vectors preserve the exact lowercase double-quoted jump-anchor
+rewrite, `urllib` percent decoding without plus conversion, double escapes,
+malformed UTF-8/percent escapes, HTML5 named and numeric references, and raw
+HTML. Falsy nonstring values return an empty string. The fixture's default web
+headers come from actual `Extractor._init_session` with absent config; that
+local session was closed without sending requests. `PixivAppAPI` snapshots
+these headers before installing mobile App API headers. Native web requests
+intentionally omit OAuth and App API authentication headers. Dates use naive
+UTC ISO text. All identifiers, URLs, dates, HTML, and metadata are synthetic;
+no HTTP, authentication, or media downloads ran.
+
+Seven additional `http_status_vectors` run the complete source `_request_ajax`
+→ `request_json` → `request` chain with in-memory `requests.Response` objects,
+zero retries, and a stubbed `session.request`; no network is used. A valid
+`error:false` JSON caption body survives statuses 200, 400, 403, and 404 because
+source `fatal=False` accepts 4xx other than 429. Exhausted 429, 500, and 503
+responses become `NullResponse`, so their original JSON body is not parsed.
+Recorded final request headers also show `request_json` adding `Origin`,
+`Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`, and
+`Sec-Fetch-Site: same-site` to the saved browser-header map.

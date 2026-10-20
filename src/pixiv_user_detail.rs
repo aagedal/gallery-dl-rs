@@ -92,6 +92,7 @@ fn valid(fields: &Map<String, Value>) -> bool {
                 | "shortcode"
                 | "username"
                 | "caption"
+                | "caption_html"
                 | "timestamp"
                 | "index"
                 | "tags"
@@ -890,6 +891,7 @@ mod tests {
             "shortcode",
             "username",
             "caption",
+            "caption_html",
             "timestamp",
             "index",
             "tags",

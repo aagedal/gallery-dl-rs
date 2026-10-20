@@ -67,6 +67,8 @@ pub mod user_detail;
 pub use user_detail::UserDetail;
 #[path = "pixiv_enrichment.rs"]
 mod enrichment;
+#[path = "pixiv_web.rs"]
+mod web;
 use enrichment::WorkFailure;
 #[path = "pixiv_following.rs"]
 mod following;
@@ -429,6 +431,7 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
     PostMetadata {
         post_id: id.to_owned(),
+        caption_html: illust.get("caption").and_then(Value::as_str).map(Arc::from),
         pixiv_user_detail: illust
             .as_object()
             .and_then(UserDetail::parse_compat)
@@ -655,6 +658,7 @@ pub fn parse_profile(bytes: &[u8], owner: &str, kind: ProfileKind) -> Result<Vec
         category: "pixiv".into(),
         filename: format!("{label}{date_suffix}.{ext}"),
         metadata: Some(PostMetadata {
+            caption_html: Some(Arc::from("")),
             post_id: label.into(),
             media_id: format!("{label}_{owner}_{version}"),
             username: string(user, "account").map(Arc::from),
@@ -787,6 +791,9 @@ pub struct Pixiv {
     cursor: Option<BookmarkCursor>,
     metadata: bool,
     user_detail_cache: Arc<tokio::sync::Mutex<user_detail::UserDetailCache>>,
+    captions: bool,
+    web_root: Url,
+    web_cookies: tokio::sync::Mutex<crate::cookies::CookieJar>,
     comments: bool,
     metadata_bookmark: bool,
     refresh_token: Option<String>,
@@ -876,6 +883,9 @@ impl Pixiv {
             user_detail_cache: Arc::new(tokio::sync::Mutex::new(
                 user_detail::UserDetailCache::default(),
             )),
+            captions: false,
+            web_root: Url::parse("https://www.pixiv.net/").expect("static web root"),
+            web_cookies: tokio::sync::Mutex::new(crate::cookies::CookieJar::default()),
             comments: false,
             metadata_bookmark: false,
             refresh_token: None,
@@ -1148,6 +1158,9 @@ impl Pixiv {
         self.enrich_work(illust)
             .await
             .map_err(WorkFailure::Enrichment)?;
+        self.enrich_caption(illust)
+            .await
+            .map_err(WorkFailure::Enrichment)?;
         let tags = illust
             .get("tags")
             .and_then(|tags| self.tags.transform(tags));
@@ -1157,14 +1170,14 @@ impl Pixiv {
         let tags_bookmark = illust
             .get("tags_bookmark")
             .and_then(crate::extract::pixiv_bookmark_tags);
-        let username = illust
-            .get("user")
-            .and_then(|user| string(user, "account"))
-            .map(Arc::<str>::from);
+        let enriched = illustration_metadata(illust, &id_of(illust).unwrap_or_default());
         for file in &mut media {
             if let Some(metadata) = &mut file.metadata {
                 metadata.pixiv_user_detail = user_detail.clone();
-                metadata.username = username.clone();
+                metadata.username = enriched.username.clone();
+                metadata.caption = enriched.caption.clone();
+                metadata.caption_html = enriched.caption_html.clone();
+                metadata.timestamp = enriched.timestamp;
                 metadata.tags = tags.clone();
                 metadata.comments = comments.clone();
                 metadata.tags_bookmark = tags_bookmark.clone();

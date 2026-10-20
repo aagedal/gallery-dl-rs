@@ -105,7 +105,7 @@ fn numeric(value: u32) -> String {
 
 /// Python html.unescape's HTML5 replacement rules, including longest named
 /// prefix matching, two-codepoint values and legacy numeric replacements.
-fn unescape(text: &str) -> String {
+pub(super) fn unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find('&') {

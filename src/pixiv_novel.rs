@@ -139,6 +139,7 @@ impl Novel {
         }
         .map(Arc::from);
         let metadata = PostMetadata {
+            caption_html: data.get("caption").and_then(Value::as_str).map(Arc::from),
             pixiv_user_detail: data
                 .as_object()
                 .and_then(super::UserDetail::parse_compat)
@@ -2373,5 +2374,54 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+    #[tokio::test]
+    async fn captions_option_ignores_novel_ajax_and_preserves_raw_html_on_all_outputs() {
+        let html = " \t<p>Hello &amp; <b>猫</b></p>\n ";
+        let mut work = novel(42, "author");
+        work["caption"] = json!(html);
+        let (root, server) = serve(vec![token("t"), detail(work), webview("novel text")]);
+        let native = pixiv(root.clone())
+            .with_web_root(root)
+            .with_captions(true)
+            .with_novel_options(NovelOptions {
+                covers: true,
+                full_series: false,
+            });
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/n/42").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(events.len(), 4);
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("expected novel post")
+        };
+        let raw = post
+            .metadata
+            .as_ref()
+            .unwrap()
+            .caption_html
+            .as_ref()
+            .unwrap();
+        assert_eq!(raw.as_ref(), html);
+        for event in &events[..3] {
+            let metadata = match event {
+                ExtractionEvent::Post(post) => post.metadata.as_ref().unwrap(),
+                ExtractionEvent::Media(file) => file.metadata.as_ref().unwrap(),
+                _ => panic!("expected post/text/cover"),
+            };
+            assert_eq!(metadata.caption.as_deref(), Some("Novel 42\n\nHello & 猫"));
+            assert_eq!(metadata.caption_html.as_deref(), Some(html));
+            assert!(Arc::ptr_eq(raw, metadata.caption_html.as_ref().unwrap()));
+        }
+        assert!(matches!(events[3], ExtractionEvent::EndPost));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].starts_with("GET /v2/novel/detail?novel_id=42 "));
+        assert!(requests[2].starts_with("GET /webview/v2/novel?id=42&viewer_version=20221031_ai "));
+        assert!(!requests.iter().any(|request| request.contains("/ajax/")));
     }
 }
