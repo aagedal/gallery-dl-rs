@@ -1,7 +1,7 @@
 //! Ordered post/job hooks around independently concurrent file downloads.
 use crate::{
     Result, error,
-    event::{ChildControl, ExtractionEvent, KeywordPolicy, Post},
+    event::{ChildControl, ExtractionEvent, KeywordPolicy, KeywordUpdate, Post},
     extract::{Media, MediaJob},
     naming::{DirectoryTemplate, FilenameTemplate},
     postprocess::{Hook, HookPaths, Postprocessors},
@@ -36,6 +36,7 @@ impl std::fmt::Debug for JobMedia {
     }
 }
 struct LeaseState {
+    resume_failed: bool,
     pending: usize,
     next: u64,
     initial: Map<String, Value>,
@@ -54,6 +55,7 @@ struct Shared {
 pub struct ScopeLease {
     shared: Arc<Shared>,
     ordinal: u64,
+    resume: Mutex<Vec<KeywordUpdate>>,
 }
 impl std::fmt::Debug for ScopeLease {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -105,6 +107,36 @@ impl ScopeLease {
             notified.await;
         }
     }
+    pub async fn inherit_for(&self, media: &Media, context: &mut Map<String, Value>) -> Result<()> {
+        self.inherit(context).await;
+        if self.shared.has_resume_error() {
+            return Err(error("producer continuation failed"));
+        }
+        let updates = media
+            .metadata
+            .as_ref()
+            .and_then(|m| m.keyword_updates.as_deref())
+            .unwrap_or_default();
+        let result = crate::postprocess::keywords::apply(context, updates);
+        self.complete(context);
+        if result.is_err() {
+            self.shared
+                .inner
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .resume_failed = true;
+            self.fail();
+        }
+        if result.is_ok() {
+            let mut resume = self.resume.lock().unwrap_or_else(|e| e.into_inner());
+            for update in updates {
+                if let KeywordUpdate::OnResume(updates) = update {
+                    resume.extend(updates.iter().cloned());
+                }
+            }
+        }
+        result
+    }
     /// Preserve source file order even when concurrent downloads finish out of order.
     pub fn complete(&self, context: &Map<String, Value>) {
         let mut state = self.shared.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -137,6 +169,14 @@ impl ScopeLease {
 impl Drop for ScopeLease {
     fn drop(&mut self) {
         let mut state = self.shared.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let resume = self.resume.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((ordinal, context, _)) = &mut state.last
+            && *ordinal == self.ordinal
+            && crate::postprocess::keywords::apply(context, &resume).is_err()
+        {
+            state.resume_failed = true;
+            self.shared.failed.store(true, Ordering::Release);
+        }
         state.pending -= 1;
         state.active.remove(&self.ordinal);
         self.shared.notify.notify_waiters();
@@ -156,6 +196,7 @@ impl Shared {
         }
         Arc::new(Self {
             inner: Mutex::new(LeaseState {
+                resume_failed: false,
                 pending: 0,
                 next: 0,
                 initial: context,
@@ -187,7 +228,22 @@ impl Shared {
         Ok(ScopeLease {
             shared: self.clone(),
             ordinal: state.next,
+            resume: Mutex::new(Vec::new()),
         })
+    }
+    fn has_resume_error(&self) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .resume_failed
+    }
+    fn checkpoint(&self, context: &Map<String, Value>) {
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, latest, _)) = &mut state.last {
+            *latest = context.clone();
+        } else {
+            state.initial = context.clone();
+        }
     }
     async fn finish(&self) -> (Map<String, Value>, Option<PathBuf>) {
         loop {
@@ -269,6 +325,7 @@ struct Frame {
     runtime: Option<Runtime>,
     post: Option<Arc<Shared>>,
     queue: Option<Map<String, Value>>,
+    queue_shared: bool,
     failed: bool,
 }
 impl Frame {
@@ -278,8 +335,8 @@ impl Frame {
             runtime.failed.store(true, Ordering::Release);
         }
     }
-    async fn end_post(&mut self) -> Result<()> {
-        if let Some(post) = self.post.take() {
+    async fn sync_post(&mut self) -> Result<()> {
+        if let Some(post) = &self.post {
             let (context, path) = post.finish().await;
             if let Some(runtime) = &mut self.runtime {
                 runtime.context = context;
@@ -298,10 +355,24 @@ impl Frame {
                         });
                     runtime.paths.realpath = Some(path);
                 }
-                runtime.hook(Hook::PostAfter).await?;
+            }
+            if post.has_resume_error() {
+                return Err(error("producer continuation failed"));
             }
         }
         Ok(())
+    }
+    async fn end_post(&mut self) -> Result<()> {
+        let result = self.sync_post().await;
+        if self.post.take().is_some() {
+            if result.is_err() {
+                self.mark_failed();
+            }
+            if let Some(runtime) = &mut self.runtime {
+                runtime.hook(Hook::PostAfter).await?;
+            }
+        }
+        result
     }
     async fn finalize(&mut self) -> Vec<crate::Error> {
         let mut errors = Vec::new();
@@ -430,7 +501,13 @@ impl State<'_> {
                 }
                 if let Some(runtime) = &mut parent.runtime {
                     runtime.context = frame.queue.take().unwrap_or_default();
-                    if let Err(error) = runtime.hook(Hook::ChildAfter).await {
+                    let result = runtime.hook(Hook::ChildAfter).await;
+                    if frame.queue_shared
+                        && let Some(post) = &parent.post
+                    {
+                        post.checkpoint(&runtime.context);
+                    }
+                    if let Err(error) = result {
                         parent.mark_failed();
                         self.errors.push_back(error);
                     }
@@ -528,21 +605,50 @@ impl State<'_> {
                     scope.control.cancel();
                     return Err(error("invalid postprocessor child nesting"));
                 }
-                let category = scope.metadata.category().to_owned();
+                let category = scope.metadata.target_category().to_owned();
+                let live = !scope.metadata.keyword_updates().is_empty();
                 let mut queue = scope.metadata.fields().clone();
                 queue.insert("category".into(), scope.metadata.category().into());
                 queue.insert("subcategory".into(), scope.metadata.subcategory().into());
-                if let Some(runtime) = self.frames.last_mut().and_then(|f| f.runtime.as_mut()) {
-                    runtime.context = queue.clone();
+                let parent = self
+                    .frames
+                    .last_mut()
+                    .ok_or_else(|| error("missing parent scope"))?;
+                if live && let Err(error) = parent.sync_post().await {
+                    scope.control.cancel();
+                    return Err(error);
+                }
+                if let Some(runtime) = &mut parent.runtime {
+                    if live {
+                        if let Err(error) = crate::postprocess::keywords::apply(
+                            &mut runtime.context,
+                            scope.metadata.keyword_updates(),
+                        ) {
+                            if let Some(post) = &parent.post {
+                                post.checkpoint(&runtime.context);
+                            }
+                            scope.control.cancel();
+                            return Err(error);
+                        }
+                    } else {
+                        runtime.context = queue.clone();
+                    }
                     if let Err(error) = runtime.hook(Hook::Child).await {
+                        if live && let Some(post) = &parent.post {
+                            post.checkpoint(&runtime.context);
+                        }
                         scope.control.cancel();
                         return Err(error);
                     }
                     queue = runtime.context.clone();
+                    if live && let Some(post) = &parent.post {
+                        post.checkpoint(&queue);
+                    }
                 }
                 self.frames.push(Frame {
                     control: Some(scope.control),
                     queue: Some(queue),
+                    queue_shared: live,
                     ..Frame::default()
                 });
                 self.initialize_eager(&category).await?;
@@ -571,6 +677,11 @@ impl State<'_> {
                 if let Some(runtime) = &mut parent.runtime {
                     runtime.context = child.queue.take().unwrap_or_default();
                     runtime.hook(Hook::ChildAfter).await?;
+                    if child.queue_shared
+                        && let Some(post) = &parent.post
+                    {
+                        post.checkpoint(&runtime.context);
+                    }
                 }
             }
         }
@@ -1007,6 +1118,13 @@ mod keywords_oracle;
 #[cfg(test)]
 mod keyword_order_tests {
     use super::*;
+    fn media() -> Media {
+        let mut media =
+            crate::extract::direct(&url::Url::parse("https://example.org/file.jpg").unwrap())
+                .unwrap();
+        media.metadata = Some(crate::extract::PostMetadata::default());
+        media
+    }
     use serde_json::json;
 
     #[tokio::test]
@@ -1145,5 +1263,77 @@ mod keyword_order_tests {
             assert_eq!(context.contains_key("caption"), !copied);
             assert_eq!(context["num"], 2);
         }
+    }
+    #[tokio::test]
+    async fn producer_operations_observe_hooks_and_resume_before_next_emission() {
+        let original = json!({"num":0,"suffix":""}).as_object().unwrap().clone();
+        let initial = json!({"num":42,"suffix":"hook"})
+            .as_object()
+            .unwrap()
+            .clone();
+        let shared = Shared::new(
+            original,
+            initial,
+            KeywordPolicy::shared(&["index"]),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let first = shared.lease().unwrap();
+        let second = shared.lease().unwrap();
+        let mut file = media();
+        file.metadata.as_mut().unwrap().keyword_updates = Some(
+            vec![
+                KeywordUpdate::Increment("num".into()),
+                KeywordUpdate::Format {
+                    name: "suffix".into(),
+                    template: "_p{num:02}".into(),
+                },
+                KeywordUpdate::Set {
+                    name: "_fallback".into(),
+                    value: json!(["cover.png"]),
+                },
+                KeywordUpdate::OnResume(vec![KeywordUpdate::RemoveRequired("_fallback".into())]),
+            ]
+            .into(),
+        );
+        let mut context = crate::postprocess::context(&file);
+        first.inherit_for(&file, &mut context).await.unwrap();
+        assert_eq!(context["num"], 43);
+        assert_eq!(context["suffix"], "_p43");
+        context.insert("num".into(), json!(900));
+        first.complete(&context);
+        drop(first);
+        let mut next = media();
+        next.metadata.as_mut().unwrap().keyword_updates =
+            Some(vec![KeywordUpdate::Increment("num".into())].into());
+        let mut context = crate::postprocess::context(&next);
+        second.inherit_for(&next, &mut context).await.unwrap();
+        assert_eq!(context["num"], 901);
+        assert!(!context.contains_key("_fallback"));
+        drop(second);
+        assert_eq!(shared.finish().await.0["num"], 901);
+    }
+    #[tokio::test]
+    async fn required_resume_deletion_failure_prevents_later_writes() {
+        let shared = Shared::new(
+            Map::new(),
+            json!({"num":1}).as_object().unwrap().clone(),
+            KeywordPolicy::shared(&[]),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let first = shared.lease().unwrap();
+        let mut file = media();
+        file.metadata.as_mut().unwrap().keyword_updates = Some(
+            vec![KeywordUpdate::OnResume(vec![
+                KeywordUpdate::RemoveRequired("_fallback".into()),
+            ])]
+            .into(),
+        );
+        first.inherit_for(&file, &mut Map::new()).await.unwrap();
+        drop(first);
+        assert!(shared.has_resume_error());
+        let second = shared.lease().unwrap();
+        assert!(second.inherit_for(&file, &mut Map::new()).await.is_err());
+        drop(second);
+        assert_eq!(shared.finish().await.0["num"], 1);
     }
 }

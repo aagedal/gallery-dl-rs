@@ -38,6 +38,8 @@ impl FrameInput {
 pub mod hash;
 #[path = "postprocess_jobs.rs"]
 pub mod jobs;
+#[path = "postprocess_keywords.rs"]
+pub(crate) mod keywords;
 #[path = "postprocess_metadata.rs"]
 pub mod metadata;
 #[path = "postprocess_mtime.rs"]

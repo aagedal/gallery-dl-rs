@@ -2,6 +2,7 @@
 use super::Novel;
 use crate::{
     Result, error,
+    event::KeywordUpdate,
     extract::{Media, MediaJob},
     file_metadata::FileMetadata,
 };
@@ -175,10 +176,28 @@ impl Novel {
         self.data["suffix"] = json!(format!("_p{index:02}"));
         Ok(index)
     }
+    pub(super) fn queue_updates(&mut self) -> Result<Vec<KeywordUpdate>> {
+        self.next_number()?;
+        self.data["date_url"] = Value::Null;
+        let mut updates = Vec::new();
+        if !self.queue_started {
+            updates.push(KeywordUpdate::Set {
+                name: "date_url".into(),
+                value: Value::Null,
+            });
+            self.queue_started = true;
+        }
+        updates.push(KeywordUpdate::Increment("num".into()));
+        updates.push(KeywordUpdate::Format {
+            name: "suffix".into(),
+            template: "_p{num:02}".into(),
+        });
+        Ok(updates)
+    }
     pub(super) fn uploaded(&mut self, image: Value, mode: super::super::TagMode) -> Result<Media> {
         let invalid = || error("Pixiv returned an invalid embedded novel image");
         let mut image = image.as_object().cloned().ok_or_else(invalid)?;
-        let urls = image.remove("urls").ok_or_else(invalid)?;
+        let urls = image.shift_remove("urls").ok_or_else(invalid)?;
         let raw = urls
             .get("original")
             .and_then(Value::as_str)
@@ -206,6 +225,11 @@ impl Novel {
         }) {
             return Err(invalid());
         }
+        let public_image = super::super::NovelMetadata::queue_fields(&image).ok_or_else(invalid)?;
+        let mut updates: Vec<_> = public_image
+            .into_iter()
+            .map(|(name, value)| KeywordUpdate::Set { name, value })
+            .collect();
         let previous_detail = self.metadata.pixiv_user_detail.clone();
         let user_changed = previous_detail
             .as_ref()
@@ -221,7 +245,26 @@ impl Novel {
         }
         self.data["filename"] = json!(filename);
         self.data["extension"] = json!(extension);
-        self.data["date_url"] = date_url;
+        self.data["date_url"] = date_url.clone();
+        updates.extend([
+            KeywordUpdate::Set {
+                name: "date_url".into(),
+                value: date_url,
+            },
+            KeywordUpdate::Increment("num".into()),
+            KeywordUpdate::Format {
+                name: "suffix".into(),
+                template: "_p{num:02}".into(),
+            },
+            KeywordUpdate::Set {
+                name: "filename".into(),
+                value: self.data["filename"].clone(),
+            },
+            KeywordUpdate::Set {
+                name: "extension".into(),
+                value: self.data["extension"].clone(),
+            },
+        ]);
         let mut metadata = Self::metadata(&self.data, mode)?;
         metadata.pixiv_user_detail = if user_changed {
             let fields: Map<_, _> = previous_detail
@@ -271,12 +314,14 @@ impl Novel {
         });
         self.metadata = metadata;
         self.refresh_snapshot()?;
+        let mut metadata = self.metadata.clone();
+        metadata.keyword_updates = Some(updates.into());
         Ok(Media {
             url,
             job: MediaJob::DirectHttp,
             category: "pixiv-novel".into(),
             filename: format!("{}_p{number}.{extension}", self.metadata.post_id),
-            metadata: Some(self.metadata.clone()),
+            metadata: Some(metadata),
             headers: std::collections::BTreeMap::from([(
                 "Referer".into(),
                 super::super::REFERER.into(),
@@ -289,6 +334,249 @@ impl Novel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn fixture_case(name: &str) -> Value {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/pixiv/novel_embeds.json"))
+                .unwrap();
+        fixture["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap()
+            .clone()
+    }
+    fn signature(updates: &[KeywordUpdate]) -> Vec<Value> {
+        updates
+            .iter()
+            .map(|update| match update {
+                KeywordUpdate::Set { name, value } => json!({"set":name,"value":value}),
+                KeywordUpdate::Increment(name) => json!({"increment":name}),
+                KeywordUpdate::Format { name, template } => {
+                    json!({"format":name,"template":template})
+                }
+                KeywordUpdate::Remove(name) => json!({"remove":name}),
+                KeywordUpdate::RemoveRequired(name) => json!({"remove_required":name}),
+                KeywordUpdate::OnResume(updates) => json!({"on_resume":signature(updates)}),
+            })
+            .collect()
+    }
+    fn apply(updates: &[KeywordUpdate], context: &mut Map<String, Value>) -> Vec<KeywordUpdate> {
+        let mut resume = Vec::new();
+        for update in updates {
+            match update {
+                KeywordUpdate::Set { name, value } => {
+                    context.insert(name.clone(), value.clone());
+                }
+                KeywordUpdate::Remove(name) => {
+                    context.remove(name);
+                }
+                KeywordUpdate::RemoveRequired(name) => {
+                    assert!(context.remove(name).is_some());
+                }
+                KeywordUpdate::Increment(name) => {
+                    let value = context[name].as_i64().unwrap() + 1;
+                    context.insert(name.clone(), json!(value));
+                }
+                KeywordUpdate::Format { name, template } => {
+                    let value = crate::postprocess::template::Template::parse(template)
+                        .unwrap()
+                        .render_value(context)
+                        .unwrap();
+                    context.insert(name.clone(), value);
+                }
+                KeywordUpdate::OnResume(updates) => resume.extend(updates.iter().cloned()),
+            }
+        }
+        resume
+    }
+    #[test]
+    fn recorded_cover_upload_and_queue_operations_reproduce_source_snapshots_in_order() {
+        let case = fixture_case("cover_offsets_upload_and_child_numbers");
+        let mut novel = Novel::parse(
+            case["input_works"][0].clone(),
+            super::super::super::TagMode::Japanese,
+        )
+        .unwrap();
+        let post = novel.post(true, true);
+        let crate::event::KeywordPolicy::Shared { file_fields, .. } = post.keywords else {
+            panic!()
+        };
+        assert_eq!(
+            file_fields.as_ref(),
+            ["index", "media_id", "url", "_url", "_filesize"]
+        );
+        let mut context = novel.data.as_object().unwrap().clone();
+        assert_eq!(
+            Value::Object(context.clone()),
+            case["events"][0]["metadata"]
+        );
+        let text = novel
+            .text(case["webview_text"].as_str().unwrap().into())
+            .unwrap();
+        let text_updates = text
+            .metadata
+            .as_ref()
+            .unwrap()
+            .keyword_updates
+            .as_deref()
+            .unwrap();
+        assert_eq!(
+            signature(text_updates),
+            [json!({"set":"extension","value":"txt"})]
+        );
+        assert!(apply(text_updates, &mut context).is_empty());
+        assert_eq!(
+            Value::Object(context.clone()),
+            case["events"][1]["metadata"]
+        );
+        let cover = novel.cover().unwrap();
+        let updates = cover
+            .metadata
+            .as_ref()
+            .unwrap()
+            .keyword_updates
+            .as_deref()
+            .unwrap();
+        let source = &case["events"][2]["metadata"];
+        assert_eq!(
+            signature(updates),
+            [
+                json!({"set":"date_url","value":source["date_url"]}),
+                json!({"increment":"num"}),
+                json!({"format":"suffix","template":"_p{num:02}"}),
+                json!({"set":"_fallback","value":source["_fallback"]}),
+                json!({"set":"filename","value":source["filename"]}),
+                json!({"set":"extension","value":"jpg"}),
+                json!({"on_resume":[{"remove_required":"_fallback"}]}),
+            ]
+        );
+        let resume = apply(updates, &mut context);
+        assert_eq!(Value::Object(context.clone()), *source);
+        assert!(apply(&resume, &mut context).is_empty());
+        for (index, image) in case["ajax_response"]["body"]["textEmbeddedImages"]
+            .as_object()
+            .unwrap()
+            .values()
+            .enumerate()
+        {
+            let uploaded = novel
+                .uploaded(image.clone(), super::super::super::TagMode::Japanese)
+                .unwrap();
+            let updates = uploaded
+                .metadata
+                .as_ref()
+                .unwrap()
+                .keyword_updates
+                .as_deref()
+                .unwrap();
+            let mut expected = image
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(key, _)| key.as_str() != "urls")
+                .map(|(name, value)| json!({"set":name,"value":value}))
+                .collect::<Vec<_>>();
+            let source = &case["events"][index + 3]["metadata"];
+            expected.extend([
+                json!({"set":"date_url","value":source["date_url"]}),
+                json!({"increment":"num"}),
+                json!({"format":"suffix","template":"_p{num:02}"}),
+                json!({"set":"filename","value":source["filename"]}),
+                json!({"set":"extension","value":source["extension"]}),
+            ]);
+            assert_eq!(signature(updates), expected);
+            assert!(apply(updates, &mut context).is_empty());
+            assert_eq!(Value::Object(context.clone()), *source);
+            assert!(novel.metadata.keyword_updates.is_none());
+        }
+        for index in 0..2 {
+            let updates = novel.queue_updates().unwrap();
+            let mut expected = Vec::new();
+            if index == 0 {
+                expected.push(json!({"set":"date_url","value":null}));
+            }
+            expected.extend([
+                json!({"increment":"num"}),
+                json!({"format":"suffix","template":"_p{num:02}"}),
+            ]);
+            assert_eq!(signature(&updates), expected);
+            assert!(apply(&updates, &mut context).is_empty());
+            let mut source = case["events"][index + 5]["metadata"]
+                .as_object()
+                .unwrap()
+                .clone();
+            source.remove("_extractor");
+            assert_eq!(context, source);
+        }
+        assert!(novel.metadata.keyword_updates.is_none());
+        assert!(post.metadata.unwrap().keyword_updates.is_none());
+    }
+    #[test]
+    fn producer_operations_preserve_hook_mutations_and_apply_explicit_image_num_override() {
+        let case = fixture_case("cover_offsets_upload_and_child_numbers");
+        let mut novel = Novel::parse(
+            case["input_works"][0].clone(),
+            super::super::super::TagMode::Japanese,
+        )
+        .unwrap();
+        let mut context = novel.data.as_object().unwrap().clone();
+        context.insert("num".into(), json!(40));
+        context.insert("suffix".into(), json!("post-hook"));
+        context.remove("caption");
+        let text = novel.text("text".into()).unwrap();
+        apply(
+            text.metadata
+                .as_ref()
+                .unwrap()
+                .keyword_updates
+                .as_deref()
+                .unwrap(),
+            &mut context,
+        );
+        assert_eq!(context["num"], 40);
+        assert_eq!(context["suffix"], "post-hook");
+        assert!(!context.contains_key("caption"));
+        let cover = novel.cover().unwrap();
+        let resume = apply(
+            cover
+                .metadata
+                .as_ref()
+                .unwrap()
+                .keyword_updates
+                .as_deref()
+                .unwrap(),
+            &mut context,
+        );
+        assert_eq!(context["num"], 41);
+        assert_eq!(context["suffix"], "_p41");
+        assert_eq!(cover.metadata.as_ref().unwrap().media_id, "42_p1");
+        apply(&resume, &mut context);
+        let mut image = case["ajax_response"]["body"]["textEmbeddedImages"]["a"].clone();
+        image["num"] = json!(7);
+        let uploaded = novel
+            .uploaded(image, super::super::super::TagMode::Japanese)
+            .unwrap();
+        let updates = uploaded
+            .metadata
+            .as_ref()
+            .unwrap()
+            .keyword_updates
+            .as_deref()
+            .unwrap();
+        assert!(signature(updates).contains(&json!({"set":"num","value":7})));
+        apply(updates, &mut context);
+        assert_eq!(context["num"], 8);
+        assert_eq!(context["suffix"], "_p08");
+        apply(&novel.queue_updates().unwrap(), &mut context);
+        assert!(context["date_url"].is_null());
+        context.insert("num".into(), json!(100));
+        context.insert("date_url".into(), json!("child-hook"));
+        apply(&novel.queue_updates().unwrap(), &mut context);
+        assert_eq!(context["num"], 101);
+        assert_eq!(context["suffix"], "_p101");
+        assert_eq!(context["date_url"], "child-hook");
+    }
     #[tokio::test]
     async fn marker_scan_matches_literal_source_brackets_pages_and_first_occurrence_order() {
         let plan=scan("[Uploadedimage:a][outer[pixivimage:99]][pixivimage:70-3][uploadedimage:b][pixivimage:71][pixivimage:70][pixivimage:][pixivimage:-2][pixivimage: 72 ][pixivimage:unfinished").await.unwrap();

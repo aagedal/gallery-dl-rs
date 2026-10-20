@@ -1093,11 +1093,21 @@ rendering retain zero. Source Directory counters remain available to post filter
 Canonical native indices, serialized metadata, and archive keys remain stable.
 Recorded consumed-generator cases verify ordinary/Pixivision counters against
 both native and compatibility inputs.
+Pixiv novel producer writes now run against live shared root keywords: cover and
+upload counters advance after preceding hooks; uploaded fields can override the
+counter before incrementing; cover fallback deletion runs on producer resume.
+Linked artwork queues wait for pending file hooks and retain child/child-after
+mutations across queues. Eager child initialization selects the artwork category.
+Raw native indices and archive identities remain separate from these live writes.
+Keyword-driven pre-download selection and request/text-fetch changes remain open.
 Remaining: processor archive
-databases, additional encodings/open modes and formatter dialects, arbitrary
+databases, additional encodings/open modes and formatter dialects (including
+typed numeric conversion/operator expressions), arbitrary
 native filename fields, keyword-driven archive identity and pre-download selection changes, further
-cross-processor hook parity, further producer policies and framing, nested alias
-identity, additional counter policies and mutation-driven counters/URLs, remaining temporary-path behavior, and
+cross-processor hook parity (including partial child-after mutations on hook
+failure), further producer policies and framing, nested alias
+identity, additional counter policies and mutation-driven request URLs/text
+fetches, remaining temporary-path behavior, and
 other processor types.
 
 **Implemented directory step:** native configuration `directory` lists replace

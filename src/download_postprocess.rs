@@ -34,7 +34,7 @@ pub(crate) async fn prepare(
     let prepared = pp.prepared_media(media);
     let mut keywords = postprocess::context(&prepared);
     if let Some(scope) = options.postprocessor_scope {
-        scope.inherit(&mut keywords).await;
+        scope.inherit_for(&prepared, &mut keywords).await?;
         scope.complete(&keywords);
     }
     let path = logical_path(root, &prepared, &keywords, options, template).or_else(|failure| {

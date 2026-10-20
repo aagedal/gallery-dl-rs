@@ -1989,8 +1989,13 @@ seen by subsequent job hooks without moving an already completed file.
 Native producers declare whether file keywords share the post dictionary, copy
 post keywords, or arrive independently. Ordinary Pixiv artwork, boorus, Flickr,
 Fur Affinity, ArtStation, Bluesky, Kemono/Coomer, Mastodon and Pinterest declare
-shared dictionaries. Shared files run in source order when generic processors
-are enabled, preserving post-hook deletions and earlier file-hook mutations;
+shared dictionaries. Pixiv novels also share their root dictionary; cover, upload,
+and linked-artwork counter increments build on preceding hook mutations. Upload
+fields are assigned before incrementing, and cover fallback cleanup runs when
+the producer resumes. Linked-artwork child hooks retain changes for the next
+queue, while eager child initialization uses the artwork configuration. Uploaded
+API counters retain native bounded nonnegative-integer validation. Shared files
+run in source order when generic processors are enabled, preserving post-hook deletions and earlier file-hook mutations;
 other file contexts can still run concurrently. Twitter/Tumblr copy post fields
 into prepared files; Instagram lets prepared file fields take precedence.
 ArtStation emits a post boundary per supported asset, retaining source asset
@@ -2005,9 +2010,10 @@ counter, including zero; archive identities retain their existing native index.
 The native formatter remains a bounded, non-executable subset of upstream's
 formatter. Processor archive databases, other text encodings/open modes,
 extractor-subcategory selectors, keyword-driven changes to native archive
-identities and pre-download selection, additional producer ownership policies, nested object aliases,
-additional counter policies, mutation-driven counters and URLs, remaining temporary-path behavior, and
-additional processor types remain unfinished. These processors
+identities and pre-download selection, additional producer ownership policies,
+nested object aliases, additional counter policies, mutation-driven request URLs
+and text fetches, remaining temporary-path behavior, and additional processor
+types remain unfinished. These processors
 operate on metadata supported by the native extractor, which may omit fields
 available from upstream.
 

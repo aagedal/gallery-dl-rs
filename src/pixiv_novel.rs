@@ -3,7 +3,7 @@
 use super::{Pixiv, REFERER, id_of, percent_decode, string, valid_id};
 use crate::{
     Result, error,
-    event::{ExtractionEvent, Post},
+    event::{ExtractionEvent, KeywordPolicy, KeywordUpdate, Post},
     extract::{Media, PostMetadata, inline_text},
 };
 use futures_util::{
@@ -127,12 +127,17 @@ pub fn parse_webview(bytes: &[u8]) -> Result<String> {
 struct Novel {
     data: Value,
     metadata: PostMetadata,
+    queue_started: bool,
 }
 
 impl Novel {
     fn parse(data: Value, mode: super::TagMode) -> Result<Self> {
         let metadata = Self::metadata(&data, mode)?;
-        let mut novel = Self { data, metadata };
+        let mut novel = Self {
+            data,
+            metadata,
+            queue_started: false,
+        };
         novel.prepare_source()?;
         Ok(novel)
     }
@@ -181,7 +186,7 @@ impl Novel {
         metadata.media_id.clear();
         metadata.index = 0;
         Post {
-            keywords: Default::default(),
+            keywords: KeywordPolicy::shared(&["index", "media_id", "url", "_url", "_filesize"]),
             category: "pixiv-novel".into(),
             metadata: Some(metadata),
             count: (!embeds).then_some(if covers { 2 } else { 1 }),
@@ -192,12 +197,20 @@ impl Novel {
         self.data["extension"] = serde_json::json!("txt");
         self.refresh_snapshot()?;
         let (url, job) = inline_text(text)?;
+        let mut metadata = self.metadata.clone();
+        metadata.keyword_updates = Some(
+            vec![KeywordUpdate::Set {
+                name: "extension".into(),
+                value: Value::String("txt".into()),
+            }]
+            .into(),
+        );
         Ok(Media {
             url,
             job,
             category: "pixiv-novel".into(),
             filename: format!("{}_p0.txt", self.metadata.post_id),
-            metadata: Some(self.metadata.clone()),
+            metadata: Some(metadata),
             headers: BTreeMap::new(),
             handoff: BTreeMap::new(),
         })
@@ -225,11 +238,38 @@ impl Novel {
         let (filename, extension, date_url) = embeds::url_fields(&url);
         self.data["filename"] = serde_json::json!(filename);
         self.data["extension"] = serde_json::json!(extension);
-        self.data["date_url"] = date_url;
+        self.data["date_url"] = date_url.clone();
         self.refresh_snapshot()?;
         let mut metadata = self.metadata.clone();
         metadata.media_id = format!("{}_p{number}", metadata.post_id);
         metadata.index = number + 1;
+        metadata.keyword_updates = Some(
+            vec![
+                KeywordUpdate::Set {
+                    name: "date_url".into(),
+                    value: date_url,
+                },
+                KeywordUpdate::Increment("num".into()),
+                KeywordUpdate::Format {
+                    name: "suffix".into(),
+                    template: "_p{num:02}".into(),
+                },
+                KeywordUpdate::Set {
+                    name: "_fallback".into(),
+                    value: serde_json::json!([format!("{base}.png")]),
+                },
+                KeywordUpdate::Set {
+                    name: "filename".into(),
+                    value: self.data["filename"].clone(),
+                },
+                KeywordUpdate::Set {
+                    name: "extension".into(),
+                    value: self.data["extension"].clone(),
+                },
+                KeywordUpdate::OnResume(vec![KeywordUpdate::RemoveRequired("_fallback".into())]),
+            ]
+            .into(),
+        );
         Ok(Media {
             url,
             job: crate::extract::MediaJob::DirectHttp,
@@ -634,19 +674,22 @@ impl Pixiv {
                         }
                         if let Some(id) = state.plan.ids.pop_front() {
                             let novel = state.active.as_mut().expect("active novel");
-                            if let Err(error) = novel.next_number() {
-                                state.done = true;
-                                state.works.clear();
-                                state.next = None;
-                                state.plan.ids.clear();
-                                state.stage = Stage::End;
-                                return Some((Err(error), state));
-                            }
-                            novel.data["date_url"] = Value::Null;
+                            let updates = match novel.queue_updates() {
+                                Ok(updates) => updates,
+                                Err(error) => {
+                                    state.done = true;
+                                    state.works.clear();
+                                    state.next = None;
+                                    state.plan.ids.clear();
+                                    state.stage = Stage::End;
+                                    return Some((Err(error), state));
+                                }
+                            };
                             let metadata = crate::event::ChildMetadata::from_pixiv_novel(
                                 state.subcategory,
                                 novel.data.as_object().expect("novel object"),
-                            );
+                            )
+                            .with_keyword_updates(updates);
                             let native = self.artwork_extractor.as_deref().unwrap_or(self);
                             let visited = state.visited.clone();
                             state.child = Some(crate::event::child_job(metadata, move || {

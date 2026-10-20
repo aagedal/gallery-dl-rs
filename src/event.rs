@@ -45,6 +45,8 @@ pub struct ChildMetadata {
     category: String,
     subcategory: String,
     fields: serde_json::Map<String, serde_json::Value>,
+    keyword_updates: Option<Arc<[KeywordUpdate]>>,
+    target_category: Option<String>,
 }
 
 impl ChildMetadata {
@@ -139,6 +141,8 @@ impl ChildMetadata {
             }
         }
         Self {
+            keyword_updates: None,
+            target_category: None,
             category: label(category),
             subcategory: label(subcategory),
             fields,
@@ -161,10 +165,24 @@ impl ChildMetadata {
             ""
         };
         Self {
+            keyword_updates: None,
+            target_category: Some("pixiv".into()),
             category: "pixiv-novel".into(),
             subcategory: subcategory.to_owned(),
             fields,
         }
+    }
+
+    pub fn with_keyword_updates(mut self, updates: Vec<KeywordUpdate>) -> Self {
+        self.keyword_updates = Some(updates.into());
+        self
+    }
+    pub fn keyword_updates(&self) -> &[KeywordUpdate] {
+        self.keyword_updates.as_deref().unwrap_or_default()
+    }
+    /// Child extractor configuration category; queue keywords retain the parent category.
+    pub fn target_category(&self) -> &str {
+        self.target_category.as_deref().unwrap_or(&self.category)
     }
 
     pub fn category(&self) -> &str {
@@ -198,6 +216,30 @@ impl ChildScope {
             control: ChildControl::default(),
             metadata,
         }
+    }
+}
+
+/// Ordered writes performed by a producer between Directory/Url/Queue messages.
+#[derive(Clone)]
+pub enum KeywordUpdate {
+    Set {
+        name: String,
+        value: serde_json::Value,
+    },
+    Remove(String),
+    /// Python-style `del`: absence is a producer error.
+    RemoveRequired(String),
+    /// Writes after the emitted file and its hooks complete, before the next emission.
+    OnResume(Vec<KeywordUpdate>),
+    Increment(String),
+    Format {
+        name: String,
+        template: String,
+    },
+}
+impl std::fmt::Debug for KeywordUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KeywordUpdate { fields: [redacted] }")
     }
 }
 
