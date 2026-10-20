@@ -204,3 +204,106 @@ fn hashless_inline_archives_keep_native_and_compatibility_source_identity() {
     .remove(0);
     assert_eq!(native.archive_key(), compatible.archive_key());
 }
+
+#[test]
+fn revision_metadata_reaches_post_filters_templates_and_stable_historical_archives() {
+    use gallery_dl_rs::event::Post;
+    let hash = "0123456789abcdef0123456789abcdef01234567";
+    let base = json!({"id":"7","user":"42","service":"patreon","hash":"aabb","num":1,"type":"file","filename":"file","extension":"jpg"});
+    let parse = |data| {
+        extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, "https://kemono.cr/data/aa/bb/aabb.jpg", data]]))
+                .unwrap(),
+            "kemono",
+        )
+        .unwrap()
+        .remove(0)
+    };
+    let ordinary = parse(base.clone());
+    let mut current = base.clone();
+    current["revision_id"] = json!(0);
+    current["revision_hash"] = json!(hash);
+    current["revision_index"] = json!(3);
+    current["revision_count"] = json!(3);
+    let current = parse(current);
+    assert_eq!(ordinary.archive_key(), current.archive_key());
+    let mut historical = base;
+    historical["revision_id"] = json!(12);
+    historical["revision_hash"] = json!(hash.to_ascii_uppercase());
+    historical["revision_index"] = json!(1);
+    historical["revision_count"] = json!(3);
+    let historical = parse(historical);
+    assert_ne!(current.archive_key(), historical.archive_key());
+    assert!(FilterExpression::parse("revision_id == 12 and revision_index == 1 and revision_count == 3 and revision['hash'] == revision_hash").unwrap().matches(&historical).unwrap());
+    assert!(
+        FilterExpression::parse("revision_id == 12 and metadata['revision']['count'] == 3")
+            .unwrap()
+            .matches_post(&Post::from_media(
+                std::slice::from_ref(&historical),
+                "kemono"
+            ))
+            .unwrap()
+    );
+    assert_eq!(
+        FilenameTemplate::parse(
+            "{post_id}_r{revision_id}_{revision_index:02}_{revision_count}.{extension}"
+        )
+        .unwrap()
+        .render(&historical)
+        .unwrap(),
+        "7_r12_01_3.jpg"
+    );
+    assert_eq!(
+        FilenameTemplate::parse("{revision[id]}_{metadata[revision][index]}.{extension}")
+            .unwrap()
+            .render(&historical)
+            .unwrap(),
+        "12_1.jpg"
+    );
+    let mut renamed = historical.clone();
+    let revision = renamed
+        .metadata
+        .as_mut()
+        .unwrap()
+        .revision
+        .as_mut()
+        .unwrap();
+    revision.hash = None;
+    revision.index = Some(2);
+    revision.count = Some(4);
+    assert_eq!(historical.archive_key(), renamed.archive_key());
+}
+
+#[test]
+fn malformed_revision_identity_does_not_silently_gain_current_post_archive_scope() {
+    for revision_id in [
+        json!(null),
+        json!(false),
+        json!(-1),
+        json!(1.5),
+        json!("PRIVATE_VALUE"),
+    ] {
+        let data = json!({"id":"7","user":"42","service":"patreon","hash":"aabb","num":1,"type":"file","filename":"file","extension":"jpg","revision_id":revision_id,"revision_hash":"PRIVATE_VALUE","revision_index":0,"revision_count":{}});
+        let media = extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, "https://kemono.cr/data/aa/bb/aabb.jpg", data]]))
+                .unwrap(),
+            "kemono",
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(media.archive_key(), None);
+        assert_eq!(media.metadata.as_ref().unwrap().post_id, "7");
+        let revision = media.metadata.as_ref().unwrap().revision.as_ref().unwrap();
+        assert!(
+            revision.id.is_none()
+                && revision.hash.is_none()
+                && revision.index.is_none()
+                && revision.count.is_none()
+        );
+        assert!(
+            !serde_json::to_string(&media)
+                .unwrap()
+                .contains("PRIVATE_VALUE")
+        );
+    }
+}

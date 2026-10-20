@@ -59,6 +59,11 @@ const FIELDS: &[&str] = &[
     "rating",
     "score",
     "filesize",
+    "revision",
+    "revision_id",
+    "revision_hash",
+    "revision_index",
+    "revision_count",
 ];
 
 #[derive(Clone, Debug)]

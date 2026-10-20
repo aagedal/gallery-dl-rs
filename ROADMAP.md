@@ -571,7 +571,7 @@ no files were downloaded. Coomer returned non-JSON data, so live Coomer traversa
 authenticated verification, wider service captures and original transfers remain.
 Remaining: creator names, favorites, Discord servers, popular views, revisions,
 comments/DMs, archive/link extraction from post text, cookies/login,
-revisions/endpoint options and full upstream metadata/default naming.
+endpoint options and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer file selection:** ordered `files`, per-kind
 `duplicates`, and `original` settings now match upstream category order and
@@ -591,6 +591,24 @@ inspection confirmed thumbnail-host jobs. This verifies one anonymous image
 transfer, not complete CDN/original/service coverage.
 A separate original-file attempt with a 15-second download timeout and 2 MiB
 size limit timed out without publication; successful original transfers remain
+unverified.
+
+**Implemented Kemono/Coomer revisions:** boolean/`unique` revision extraction,
+`asc`/`reverse`/`desc` ordering, explicit history and selected-revision URLs,
+embedded revision data and API fallback, and encoded historical file metadata.
+Unique mode removes adjacent equal content hashes before indexing/order changes;
+explicit history bypasses that filter and excludes the current post. Historical
+IDs/owners validate before output. Typed post-owned revision metadata survives
+empty/nonimage boundaries and reaches filters/templates/compatibility output.
+Historical archives and filename suffixes retain versions even when file URLs
+are identical; current ID zero preserves its normal archive key. Source limits
+drain the selected parent's revisions and prevent later parent requests.
+Python SHA-1 reference vectors cover Unicode, float notation, signed zero and
+large integers; nonfinite overflow is rejected. Requests, bounds, cancellation,
+ordering, uniqueness, identity errors and disabled-mode behavior have local
+coverage. A public revision-enabled native inspection on 2026-10-20 emitted one
+current-version thumbnail job, whose hash matched the Python calculation on a
+separate API response. Successful live historical-version extraction remains
 unverified.
 
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,

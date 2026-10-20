@@ -323,6 +323,24 @@ fn context_parts(
         if let Some(score) = post.score {
             metadata.insert("score".into(), Value::Int(score.into()));
         }
+        if let Some(revision) = &post.revision {
+            let mut fields = BTreeMap::new();
+            for (key, value) in [
+                ("id", revision.id.map(|value| value as i128)),
+                ("index", revision.index.map(|value| value as i128)),
+                ("count", revision.count.map(|value| value as i128)),
+            ] {
+                if let Some(value) = value {
+                    fields.insert(key.into(), Value::Int(value));
+                    metadata.insert(format!("revision_{key}"), Value::Int(value));
+                }
+            }
+            if let Some(hash) = &revision.hash {
+                fields.insert("hash".into(), text(hash.clone()));
+                metadata.insert("revision_hash".into(), text(hash.clone()));
+            }
+            metadata.insert("revision".into(), map(fields));
+        }
         if let Some(frames) = &post.frames {
             let frames = Value::List(
                 frames

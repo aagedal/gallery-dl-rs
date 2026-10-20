@@ -29,6 +29,11 @@ use std::{
 };
 use url::Url;
 
+#[path = "kemono_revisions.rs"]
+mod revisions;
+use revisions::RevisionPost;
+pub use revisions::{RevisionMetadata, RevisionMode, RevisionOrder};
+
 const USER_AGENT: &str = concat!(
     "gallery-dl-rs/",
     env!("CARGO_PKG_VERSION"),
@@ -70,6 +75,13 @@ pub enum Target {
         service: String,
         user: String,
         post: String,
+    },
+    Revisions {
+        host: String,
+        service: String,
+        user: String,
+        post: String,
+        revision: Option<u64>,
     },
     User {
         host: String,
@@ -168,6 +180,44 @@ pub fn target(url: &Url) -> Result<Target> {
                 host,
                 service: (*service).into(),
                 user: (*user).into(),
+            })
+        }
+        [
+            service,
+            "user",
+            user,
+            "post",
+            post,
+            "revision" | "revisions",
+        ] if valid_service(service) && valid_id(user) && valid_id(post) => Ok(Target::Revisions {
+            host,
+            service: (*service).into(),
+            user: (*user).into(),
+            post: (*post).into(),
+            revision: None,
+        }),
+        [
+            service,
+            "user",
+            user,
+            "post",
+            post,
+            "revision" | "revisions",
+            revision,
+        ] if valid_service(service)
+            && valid_id(user)
+            && valid_id(post)
+            && !revision.is_empty()
+            && revision.len() <= 20
+            && revision.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            let revision = revision.parse::<u64>().map_err(|_| unsupported())?;
+            Ok(Target::Revisions {
+                host,
+                service: (*service).into(),
+                user: (*user).into(),
+                post: (*post).into(),
+                revision: Some(revision),
             })
         }
         [service, "user", user, "post", post]
@@ -653,6 +703,9 @@ fn selected_post(
 }
 
 fn json(bytes: &[u8]) -> Result<Value> {
+    if bytes.len() > MAX_RESPONSE {
+        return Err(error("Kemono response exceeds limit"));
+    }
     serde_json::from_slice(bytes).map_err(|_| error("Kemono returned invalid JSON"))
 }
 
@@ -670,10 +723,18 @@ pub fn parse_single(
 }
 
 fn single_post(bytes: &[u8], service: &str, user: &str, id: &str) -> Result<Value> {
+    let body = single_response(bytes, service, user, id)?;
+    Ok(body.get("post").unwrap_or(&body).clone())
+}
+
+fn single_response(bytes: &[u8], service: &str, user: &str, id: &str) -> Result<Value> {
     let body = json(bytes)?;
-    let post = body.get("post").unwrap_or(&body);
-    post_identity(post, Some((service, user)), Some(id))?;
-    Ok(post.clone())
+    post_identity(
+        body.get("post").unwrap_or(&body),
+        Some((service, user)),
+        Some(id),
+    )?;
+    Ok(body)
 }
 
 /// One listing page: per-post files (including empty posts) and raw post count.
@@ -730,6 +791,8 @@ pub struct Kemono {
     expand: bool,
     max_posts: Option<usize>,
     selection: Selection,
+    revisions: RevisionMode,
+    revision_order: RevisionOrder,
 }
 
 struct ListingState {
@@ -741,6 +804,8 @@ struct ListingState {
     emitted: usize,
     done: bool,
     raw: VecDeque<Value>,
+    revisions: VecDeque<RevisionPost>,
+    revision_identity: Option<Identity>,
     seen_pages: HashSet<[u8; 32]>,
     pending: VecDeque<ExtractionEvent>,
 }
@@ -758,7 +823,19 @@ impl Kemono {
             expand: false,
             max_posts: None,
             selection: Selection::default(),
+            revisions: RevisionMode::None,
+            revision_order: RevisionOrder::Newest,
         })
+    }
+
+    pub fn with_revisions(mut self, revisions: RevisionMode) -> Self {
+        self.revisions = revisions;
+        self
+    }
+
+    pub fn with_revision_order(mut self, order: RevisionOrder) -> Self {
+        self.revision_order = order;
+        self
     }
 
     pub fn with_selection(mut self, selection: Selection) -> Self {
@@ -847,6 +924,120 @@ impl Kemono {
         }
     }
 
+    fn finish_revision(
+        &self,
+        host: &str,
+        post: RevisionPost,
+        identity: &Identity,
+    ) -> VecDeque<ExtractionEvent> {
+        let mut events = self.finish(host, &post.post, identity);
+        let Some(revision) = post.metadata else {
+            return events;
+        };
+        for event in &mut events {
+            match event {
+                ExtractionEvent::Post(post) => {
+                    if let Some(metadata) = &mut post.metadata {
+                        metadata.revision = Some(revision.clone());
+                    }
+                }
+                ExtractionEvent::Media(media) => {
+                    if let Some(metadata) = &mut media.metadata {
+                        metadata.revision = Some(revision.clone());
+                    }
+                    if let Some(id) = revision.id.filter(|id| *id > 0)
+                        && let Some((stem, ext)) = media.filename.rsplit_once('.')
+                    {
+                        media.filename = format!("{stem}_r{id}.{ext}");
+                    }
+                }
+                ExtractionEvent::EndPost => {}
+            }
+        }
+        events
+    }
+
+    async fn prepare_revisions(
+        &self,
+        host: &str,
+        body: Value,
+        identity: &Identity,
+        explicit: Option<Option<u64>>,
+    ) -> Result<VecDeque<RevisionPost>> {
+        if self.revisions == RevisionMode::None && explicit.is_none() {
+            let post = body.get("post").unwrap_or(&body).clone();
+            return Ok(VecDeque::from([RevisionPost {
+                post,
+                metadata: None,
+            }]));
+        }
+        let historical = match revisions::embedded(&body)? {
+            Some(revisions) => revisions,
+            None => {
+                let path = format!(
+                    "api/v1/{}/user/{}/post/{}/revisions",
+                    identity.service, identity.user, identity.id
+                );
+                let bytes = self.call(host, &path, &[]).await?;
+                revisions::response(&bytes)?
+            }
+        };
+        let current = body.get("post").unwrap_or(&body).clone();
+        revisions::prepare(
+            current,
+            historical,
+            identity,
+            self.revisions,
+            self.revision_order,
+            explicit,
+        )
+        .map(Into::into)
+    }
+
+    fn single_events(
+        &self,
+        host: String,
+        service: String,
+        user: String,
+        post: String,
+        explicit: Option<Option<u64>>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let path = format!("api/v1/{service}/user/{user}/post/{post}");
+            let body = self.call(&host, &path, &[]).await?;
+            let body = single_response(&body, &service, &user, &post)?;
+            let identity = Identity {
+                service,
+                user,
+                id: post,
+            };
+            let revisions = self
+                .prepare_revisions(&host, body, &identity, explicit)
+                .await?;
+            Ok::<_, crate::Error>(
+                stream::unfold(
+                    (host, identity, revisions, VecDeque::new()),
+                    move |(host, identity, mut revisions, mut pending)| async move {
+                        loop {
+                            if let Some(event) = pending.pop_front() {
+                                return Some((Ok(event), (host, identity, revisions, pending)));
+                            }
+                            pending =
+                                self.finish_revision(&host, revisions.pop_front()?, &identity);
+                        }
+                    },
+                )
+                .boxed(),
+            )
+        })
+        .map(|result| match result {
+            Ok(events) => events,
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
         let path = state.context.as_ref().map_or_else(
             || "api/v1/posts".to_owned(),
@@ -906,23 +1097,14 @@ impl Kemono {
                 service,
                 user,
                 post,
-            } => {
-                return stream::once(async move {
-                    let path = format!("api/v1/{service}/user/{user}/post/{post}");
-                    let body = self.call(&host, &path, &[]).await?;
-                    let raw = single_post(&body, &service, &user, &post)?;
-                    let identity = post_identity(&raw, Some((&service, &user)), Some(&post))?;
-                    Ok::<_, crate::Error>(stream::iter(
-                        self.finish(&host, &raw, &identity).into_iter().map(Ok),
-                    ))
-                })
-                .map(|result| match result {
-                    Ok(events) => events.boxed(),
-                    Err(e) => stream::once(async move { Err(e) }).boxed(),
-                })
-                .flatten()
-                .boxed();
-            }
+            } => return self.single_events(host, service, user, post, None),
+            Target::Revisions {
+                host,
+                service,
+                user,
+                post,
+                revision,
+            } => return self.single_events(host, service, user, post, Some(revision)),
             Target::User {
                 host,
                 service,
@@ -943,6 +1125,8 @@ impl Kemono {
             emitted: 0,
             done: false,
             raw: VecDeque::new(),
+            revisions: VecDeque::new(),
+            revision_identity: None,
             seen_pages: HashSet::new(),
             pending: VecDeque::new(),
         };
@@ -951,6 +1135,14 @@ impl Kemono {
             loop {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), Some(state)));
+                }
+                if let Some(revision) = state.revisions.pop_front() {
+                    let identity = state
+                        .revision_identity
+                        .as_ref()
+                        .expect("prepared source identity");
+                    state.pending = self.finish_revision(&state.host, revision, identity);
+                    continue;
                 }
                 if self.max_posts.is_some_and(|limit| state.emitted >= limit) {
                     return None;
@@ -972,7 +1164,7 @@ impl Kemono {
                         );
                         let result = async {
                             let body = self.call(&state.host, &path, &[]).await?;
-                            single_post(&body, &identity.service, &identity.user, &identity.id)
+                            single_response(&body, &identity.service, &identity.user, &identity.id)
                         }
                         .await;
                         match result {
@@ -980,7 +1172,14 @@ impl Kemono {
                             Err(e) => return Some((Err(e), None)),
                         }
                     }
-                    state.pending = self.finish(&state.host, &post, &identity);
+                    match self
+                        .prepare_revisions(&state.host, post, &identity, None)
+                        .await
+                    {
+                        Ok(revisions) => state.revisions = revisions,
+                        Err(e) => return Some((Err(e), None)),
+                    }
+                    state.revision_identity = Some(identity);
                     continue;
                 }
                 if state.done {
@@ -2225,6 +2424,346 @@ mod tests {
         assert_eq!(post.count, Some(1));
         assert!(matches!(events[1], Ok(ExtractionEvent::EndPost)));
         server.join().unwrap();
+    }
+
+    fn revision(id: u64, title: &str) -> Value {
+        let mut post = post("7");
+        post["revision_id"] = json!(id);
+        post["title"] = json!(title);
+        post
+    }
+
+    fn post_revisions(events: &[Result<ExtractionEvent>]) -> Vec<RevisionMetadata> {
+        events
+            .iter()
+            .filter_map(|event| match event.as_ref().unwrap() {
+                ExtractionEvent::Post(post) => post.metadata.as_ref().unwrap().revision.clone(),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn embedded_revisions_preserve_outer_props_and_normalize_encoded_files() {
+        let mut old = revision(2, "historical");
+        old["file"] = json!(old["file"].to_string());
+        old["attachments"] = Value::Array(
+            old["attachments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|file| json!(file.to_string()))
+                .collect(),
+        );
+        let body = json!({"post": post("7"), "props": {"revisions": [["ignored",old],[0,{"id":"skipped"}]]}});
+        let (root, server) = serve(vec![response("200 OK", body.to_string().as_bytes())]);
+        let events: Vec<_> = kemono(root)
+            .with_revisions(RevisionMode::All)
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 8, "{events:?}");
+        let revisions = post_revisions(&events);
+        assert_eq!(
+            revisions
+                .iter()
+                .map(|revision| (revision.id, revision.index, revision.count))
+                .collect::<Vec<_>>(),
+            [(Some(0), Some(2), Some(2)), (Some(2), Some(1), Some(2))]
+        );
+        assert_eq!(
+            revisions[0].hash.as_ref().unwrap(),
+            &revisions::hash(&post("7")).unwrap()
+        );
+        let media: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event.as_ref().unwrap() {
+                ExtractionEvent::Media(media) => Some(media),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            media
+                .iter()
+                .map(|media| media.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["7_01.jpg", "7_02.mp4", "7_01_r2.jpg", "7_02_r2.mp4"]
+        );
+        assert_eq!(
+            media[0].archive_key(),
+            parse_post(&post("7"), "kemono.cr", "patreon", "42")[0].archive_key()
+        );
+        assert_ne!(media[0].archive_key(), media[2].archive_key());
+        assert_eq!(
+            media[2]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .revision
+                .as_ref()
+                .unwrap()
+                .id,
+            Some(2)
+        );
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn revision_endpoint_fallback_assigns_indices_before_oldest_order() {
+        let (root, server) = serve(vec![
+            response("200 OK", post("7").to_string().as_bytes()),
+            response(
+                "200 OK",
+                json!([revision(2, "older"), revision(1, "oldest")])
+                    .to_string()
+                    .as_bytes(),
+            ),
+        ]);
+        let events: Vec<_> = kemono(root)
+            .with_revisions(RevisionMode::All)
+            .with_revision_order(RevisionOrder::Oldest)
+            .events(&Url::parse("https://coomer.st/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        let revisions = post_revisions(&events);
+        assert_eq!(
+            revisions
+                .iter()
+                .map(|revision| (revision.id, revision.index, revision.count))
+                .collect::<Vec<_>>(),
+            [
+                (Some(1), Some(1), Some(3)),
+                (Some(2), Some(2), Some(3)),
+                (Some(0), Some(3), Some(3))
+            ]
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/post/7/revisions "));
+    }
+
+    #[tokio::test]
+    async fn explicit_revision_routes_ignore_mode_and_select_historical_ids() {
+        for (suffix, mode, expected) in [
+            ("revision", RevisionMode::None, vec![2, 1]),
+            ("revisions", RevisionMode::Unique, vec![2, 1]),
+            ("revision/2", RevisionMode::Unique, vec![2]),
+        ] {
+            let body = json!({"post":post("7"),"props":{"revisions":[[0,revision(2,"Hello")],[0,revision(1,"Hello")]]}});
+            let (root, server) = serve(vec![response("200 OK", body.to_string().as_bytes())]);
+            let events: Vec<_> = kemono(root)
+                .with_revisions(mode)
+                .events(
+                    &Url::parse(&format!(
+                        "https://kemono.cr/patreon/user/42/post/7/{suffix}"
+                    ))
+                    .unwrap(),
+                )
+                .collect()
+                .await;
+            let revisions = post_revisions(&events);
+            assert_eq!(
+                revisions
+                    .iter()
+                    .map(|revision| revision.id.unwrap())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(revisions.iter().all(|revision| revision.count == Some(2)));
+            assert_eq!(revisions[0].index, Some(2));
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+        for suffix in ["revisions/99", "revision/0"] {
+            let body = json!({"post":post("7"),"props":{"revisions":[[0,revision(1,"old")]]}});
+            let (root, server) = serve(vec![response("200 OK", body.to_string().as_bytes())]);
+            let events: Vec<_> = kemono(root)
+                .events(
+                    &Url::parse(&format!(
+                        "https://kemono.cr/patreon/user/42/post/7/{suffix}"
+                    ))
+                    .unwrap(),
+                )
+                .collect()
+                .await;
+            assert_eq!(events.len(), 1);
+            assert_eq!(
+                events[0].as_ref().unwrap_err().to_string(),
+                "Kemono revision not found"
+            );
+            server.join().unwrap();
+        }
+        for suffix in [
+            "revision/secret",
+            "revision/-1",
+            "revisions/9999999999999999999999999",
+        ] {
+            let error = target(
+                &Url::parse(&format!(
+                    "https://kemono.cr/patreon/user/42/post/7/{suffix}"
+                ))
+                .unwrap(),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(!error.contains("secret"));
+        }
+    }
+
+    #[tokio::test]
+    async fn expansion_keeps_embedded_revisions_and_cutoff_drains_empty_history() {
+        let listing: Vec<_> = (1..=50)
+            .map(|index| {
+                if index == 1 {
+                    post("7")
+                } else {
+                    json!({"id":"later-invalid"})
+                }
+            })
+            .collect();
+        let empty = json!({"id":"7","revision_id":1,"title":"empty historical","file":"{}","attachments":[]});
+        let detail = json!({"post":post("7"),"props":{"revisions":[[0,empty]]}});
+        let (root, server) = serve(vec![
+            response("200 OK", json!({"posts":listing}).to_string().as_bytes()),
+            response("200 OK", detail.to_string().as_bytes()),
+        ]);
+        let events: Vec<_> = kemono(root)
+            .with_expand(true)
+            .with_revisions(RevisionMode::All)
+            .with_max_posts(Some(1))
+            .events(&Url::parse("https://kemono.cr/posts").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 6, "{events:?}");
+        let revisions = post_revisions(&events);
+        assert_eq!(
+            revisions
+                .iter()
+                .map(|revision| revision.id)
+                .collect::<Vec<_>>(),
+            [Some(0), Some(1)]
+        );
+        let ExtractionEvent::Post(empty) = events[4].as_ref().unwrap() else {
+            panic!("expected historical boundary")
+        };
+        assert_eq!(empty.count, Some(0));
+        assert_eq!(
+            empty.metadata.as_ref().unwrap().username.as_deref(),
+            Some("42")
+        );
+        assert_eq!(
+            empty
+                .metadata
+                .as_ref()
+                .unwrap()
+                .revision
+                .as_ref()
+                .unwrap()
+                .index,
+            Some(1)
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/post/7 "));
+    }
+
+    #[tokio::test]
+    async fn dropping_revision_events_avoids_later_parent_expansion_and_history_requests() {
+        let (root, server) = serve(vec![
+            response(
+                "200 OK",
+                json!([post("7"), post("8")]).to_string().as_bytes(),
+            ),
+            response("200 OK", post("7").to_string().as_bytes()),
+            response("200 OK", json!([revision(1, "old")]).to_string().as_bytes()),
+        ]);
+        let client = kemono(root)
+            .with_expand(true)
+            .with_revisions(RevisionMode::All);
+        let input = Url::parse("https://kemono.cr/patreon/user/42").unwrap();
+        let mut events = client.events(&input);
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::Post(_)
+        ));
+        drop(events);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[2].starts_with("GET /api/v1/patreon/user/42/post/7/revisions "));
+    }
+
+    #[tokio::test]
+    async fn invalid_historical_identity_fails_before_any_current_or_historical_output() {
+        for field in ["id", "user", "service"] {
+            let mut old = revision(1, "old");
+            old[field] = json!("private-invalid");
+            let body = json!({"post":post("7"),"props":{"revisions":[[0,old]]}});
+            let (root, server) = serve(vec![response("200 OK", body.to_string().as_bytes())]);
+            let events: Vec<_> = kemono(root)
+                .with_revisions(RevisionMode::All)
+                .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+                .collect()
+                .await;
+            assert_eq!(events.len(), 1);
+            let error = events[0].as_ref().unwrap_err().to_string();
+            assert!(!error.contains("private"));
+            assert!(error.contains("identity"));
+            server.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_selection_ignores_malformed_disabled_file_groups() {
+        for files in [vec![], vec![FileKind::Inline]] {
+            let body = json!({"id":"7","file":false,"attachments":{"malformed":"optional"},"content":r#"<img src="/inline/only-inline.jpg">"#});
+            let (root, server) = serve(vec![response("200 OK", body.to_string().as_bytes())]);
+            let expected = usize::from(!files.is_empty());
+            let selection = Selection {
+                files: Some(files),
+                original: true,
+                ..Selection::default()
+            };
+            let events: Vec<_> = kemono(root)
+                .with_selection(selection)
+                .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+                .collect()
+                .await;
+            assert_eq!(events.len(), expected + 2, "{events:?}");
+            let ExtractionEvent::Post(post) = events[0].as_ref().unwrap() else {
+                panic!("expected post")
+            };
+            assert_eq!(post.count, Some(expected));
+            assert!(post.metadata.as_ref().unwrap().revision.is_none());
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn no_history_and_empty_posts_keep_revision_metadata_without_extra_requests() {
+        for explicit in [false, true] {
+            let body = json!({"post":{"id":"7","title":"empty","file":{},"attachments":[]},"props":{"revisions":[]}});
+            let (root, server) = serve(vec![response("200 OK", body.to_string().as_bytes())]);
+            let suffix = if explicit { "/revisions" } else { "" };
+            let events: Vec<_> = kemono(root)
+                .with_revisions(RevisionMode::All)
+                .events(
+                    &Url::parse(&format!("https://coomer.st/patreon/user/42/post/7{suffix}"))
+                        .unwrap(),
+                )
+                .collect()
+                .await;
+            if explicit {
+                assert!(events.is_empty());
+            } else {
+                assert_eq!(events.len(), 2);
+                let revisions = post_revisions(&events);
+                assert_eq!(revisions.len(), 1);
+                assert_eq!(
+                    (revisions[0].id, revisions[0].index, revisions[0].count),
+                    (Some(0), Some(1), Some(1))
+                );
+            }
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
     }
 
     #[tokio::test]

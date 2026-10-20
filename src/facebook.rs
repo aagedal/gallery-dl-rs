@@ -523,6 +523,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 frames: None,
                 rating: None,
                 score: None,
+                revision: None,
                 community: None,
                 community_archive: false,
                 retweet_id: None,

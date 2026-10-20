@@ -65,6 +65,8 @@ pub struct Options {
     pub original: Option<bool>,
     pub files: Option<Vec<crate::kemono::FileKind>>,
     pub duplicates: Option<crate::kemono::DuplicateOptions>,
+    pub revisions: Option<crate::kemono::RevisionMode>,
+    pub order_revisions: Option<crate::kemono::RevisionOrder>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub user_id: Option<String>,
@@ -230,6 +232,8 @@ impl Options {
             original: overrides.original.or(self.original),
             files: overrides.files.clone().or_else(|| self.files.clone()),
             duplicates: overrides.duplicates.or(self.duplicates),
+            revisions: overrides.revisions.or(self.revisions),
+            order_revisions: overrides.order_revisions.or(self.order_revisions),
             username: overrides.username.clone().or_else(|| self.username.clone()),
             password: overrides.password.clone().or_else(|| self.password.clone()),
             user_id: overrides.user_id.clone().or_else(|| self.user_id.clone()),
@@ -349,6 +353,8 @@ struct RawRoot {
     original: Field,
     files: Field,
     duplicates: Field,
+    revisions: Field,
+    order_revisions: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -407,6 +413,8 @@ struct RawExtractor {
     original: Field,
     files: Field,
     duplicates: Field,
+    revisions: Field,
+    order_revisions: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -497,6 +505,8 @@ struct RawOptions {
     original: Field,
     files: Field,
     duplicates: Field,
+    revisions: Field,
+    order_revisions: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -662,6 +672,8 @@ impl Config {
             original: root.original,
             files: root.files,
             duplicates: root.duplicates,
+            revisions: root.revisions,
+            order_revisions: root.order_revisions,
             reposts: root.reposts,
             ugoira: root.ugoira,
             text_posts: root.text_posts,
@@ -726,6 +738,8 @@ impl Config {
             original: extractor.original,
             files: extractor.files,
             duplicates: extractor.duplicates,
+            revisions: extractor.revisions,
+            order_revisions: extractor.order_revisions,
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
             text_posts: extractor.text_posts,
@@ -1001,6 +1015,36 @@ impl RawOptions {
         let original = boolean(self.original, "original")?;
         let files = kemono_files(self.files)?;
         let duplicates = kemono_duplicates(self.duplicates)?;
+        let revisions = match self.revisions.0 {
+            None => None,
+            Some(Value::Bool(false)) => Some(crate::kemono::RevisionMode::None),
+            Some(Value::Bool(true)) => Some(crate::kemono::RevisionMode::All),
+            Some(Value::String(value)) if value == "unique" => {
+                Some(crate::kemono::RevisionMode::Unique)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration revisions must be a boolean or unique",
+                ));
+            }
+        };
+        let order_revisions = match self.order_revisions.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "asc" | "reverse" => crate::kemono::RevisionOrder::Oldest,
+                "desc" => crate::kemono::RevisionOrder::Newest,
+                _ => {
+                    return Err(error(
+                        "native configuration order-revisions must be asc, reverse or desc",
+                    ));
+                }
+            }),
+            Some(_) => {
+                return Err(error(
+                    "native configuration order-revisions must be asc, reverse or desc",
+                ));
+            }
+        };
         let inline = match self.inline.0 {
             None => None,
             Some(Value::Bool(true)) => Some(crate::tumblr::Inline::All),
@@ -1431,6 +1475,8 @@ impl RawOptions {
             original,
             files,
             duplicates,
+            revisions,
+            order_revisions,
             username,
             password,
             user_id,

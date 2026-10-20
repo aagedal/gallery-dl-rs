@@ -888,6 +888,10 @@ fn extract_input<'a>(
                                 native
                                     .with_expand(options.expand.unwrap_or(false))
                                     .with_selection(options.kemono_selection())
+                                    .with_revisions(options.revisions.unwrap_or_default())
+                                    .with_revision_order(
+                                        options.order_revisions.unwrap_or_default(),
+                                    )
                                     .with_max_posts(options.max_posts)
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1219,6 +1223,12 @@ fn extract_input<'a>(
                             duplicates: matches!(category, "kemono" | "coomer")
                                 .then_some(options.duplicates)
                                 .flatten(),
+                            revisions: matches!(category, "kemono" | "coomer")
+                                .then_some(options.revisions)
+                                .flatten(),
+                            order_revisions: matches!(category, "kemono" | "coomer")
+                                .then_some(options.order_revisions)
+                                .flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
                             access_token: (category == "mastodon")
@@ -1373,6 +1383,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         original: None,
         files: None,
         duplicates: None,
+        revisions: None,
+        order_revisions: None,
         username: None,
         password: None,
         user_id: None,

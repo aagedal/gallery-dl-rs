@@ -147,7 +147,21 @@ impl Media {
                 }
                 (
                     category,
-                    serde_json::json!([service, user, post.post_id, post.index]).to_string(),
+                    match &post.revision {
+                        Some(revision) => match revision.id? {
+                            0 => serde_json::json!([service, user, post.post_id, post.index]),
+                            revision_id => serde_json::json!([
+                                service,
+                                user,
+                                post.post_id,
+                                post.index,
+                                "revision",
+                                revision_id
+                            ]),
+                        },
+                        None => serde_json::json!([service, user, post.post_id, post.index]),
+                    }
+                    .to_string(),
                 )
             }
             // Image host file IDs are global per site.
@@ -340,6 +354,8 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision: Option<crate::kemono::RevisionMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<crate::file_metadata::FileMetadata>,
     /// Ordered Pixiv ugoira ZIP member names and millisecond frame delays.
@@ -542,6 +558,8 @@ pub struct BackendOptions {
     pub original: Option<bool>,
     pub files: Option<Vec<crate::kemono::FileKind>>,
     pub duplicates: Option<crate::kemono::DuplicateOptions>,
+    pub revisions: Option<crate::kemono::RevisionMode>,
+    pub order_revisions: Option<crate::kemono::RevisionOrder>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub user_id: Option<String>,
@@ -722,6 +740,23 @@ impl Backend {
                 crate::tumblr::Inline::Original => serde_json::json!("original"),
             };
             command.arg("--option").arg(format!("inline={value}"));
+        }
+        if let Some(revisions) = options.revisions {
+            let value = match revisions {
+                crate::kemono::RevisionMode::None => serde_json::json!(false),
+                crate::kemono::RevisionMode::All => serde_json::json!(true),
+                crate::kemono::RevisionMode::Unique => serde_json::json!("unique"),
+            };
+            command.arg("--option").arg(format!("revisions={value}"));
+        }
+        if let Some(order) = options.order_revisions {
+            let value = match order {
+                crate::kemono::RevisionOrder::Newest => "desc",
+                crate::kemono::RevisionOrder::Oldest => "asc",
+            };
+            command
+                .arg("--option")
+                .arg(format!("order-revisions={}", serde_json::json!(value)));
         }
         if let Some(files) = &options.files {
             let names: Vec<_> = files
@@ -1222,6 +1257,7 @@ fn compatibility_metadata(
         file.get_or_insert_default().media_type = Some(std::sync::Arc::from(kind));
     }
     Some(PostMetadata {
+        revision: compatibility_revision(data, category),
         rating: crate::booru::Site::from_category(category)
             .and_then(|_| string("rating"))
             .filter(|r| r.len() <= 32 && !r.chars().any(char::is_control))
@@ -1311,5 +1347,48 @@ fn compatibility_article(value: Option<&Value>) -> Option<crate::twitter::Articl
             .get("html")
             .and_then(Value::as_str)
             .map(std::sync::Arc::from),
+    })
+}
+
+fn compatibility_revision(
+    data: &serde_json::Map<String, Value>,
+    category: &str,
+) -> Option<crate::kemono::RevisionMetadata> {
+    if !matches!(category, "kemono" | "coomer")
+        || ![
+            "revision_id",
+            "revision_hash",
+            "revision_index",
+            "revision_count",
+        ]
+        .iter()
+        .any(|key| data.contains_key(*key))
+    {
+        return None;
+    }
+    let integer = |key: &str| {
+        data.get(key).and_then(|value| {
+            value.as_u64().or_else(|| {
+                let value = value.as_str()?;
+                (!value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
+                    .then(|| value.parse().ok())
+                    .flatten()
+            })
+        })
+    };
+    let position = |key| {
+        integer(key)
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| *value > 0)
+    };
+    Some(crate::kemono::RevisionMetadata {
+        id: integer("revision_id"),
+        hash: data
+            .get("revision_hash")
+            .and_then(Value::as_str)
+            .filter(|hash| hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+            .map(|hash| std::sync::Arc::from(hash.to_ascii_lowercase())),
+        index: position("revision_index"),
+        count: position("revision_count"),
     })
 }

@@ -380,6 +380,25 @@ files remain distinct. Previous hash-based archive entries and output paths are
 not migrated.
 Plain `/data/` file links stay direct downloads.
 
+`revisions` defaults to false; true includes the current post and historical
+versions, while `"unique"` removes adjacent versions with equal content hashes.
+`order-revisions` accepts `"desc"` (default, newest first), `"asc"` or `"reverse"`.
+Explicit `/post/ID/revision` and `/post/ID/revisions` URLs select historical
+versions only; append `/REVISION_ID` to select one. Explicit URLs bypass the
+configured revision mode and its uniqueness filter. Embedded revision data is
+used when available; otherwise one revision API request is made for each source
+post as it is consumed. `max-posts` counts source posts and retains all revisions
+of each selected post. Up to 1,000 historical versions are accepted per post.
+
+Revision metadata exposes ID, content hash, source revision index and count in
+`metadata.revision`; filters and templates also accept `revision_id`,
+`revision_hash`, `revision_index` and `revision_count`. The current version uses
+ID zero. Hashes follow upstream's compact sorted Unicode JSON and SHA-1 rules,
+excluding revision IDs, import dates, navigation fields and original file names.
+Nonfinite numeric overflows fail explicitly. Historical filenames gain `_rID`
+before the extension, and their archive keys include the revision ID; current
+post keys are unchanged. Compatibility output retains the same typed metadata.
+
 Experimental native image host extraction (`--extractor native`), one category
 per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
 `/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`), including
@@ -1302,7 +1321,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
-`cards-blacklist`, `size`, `fallback`, `max-posts`, `strategy`, `search-pagination`,
+`cards-blacklist`, `size`, `fallback`, `max-posts`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.

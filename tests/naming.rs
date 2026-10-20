@@ -15,6 +15,7 @@ fn media() -> Media {
             frames: None,
             rating: None,
             score: None,
+            revision: None,
             community: None,
             community_archive: false,
             retweet_id: None,

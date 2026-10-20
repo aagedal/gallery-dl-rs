@@ -2327,3 +2327,75 @@ fn kemono_file_selection_rejects_unknown_names_and_types_privately() {
     assert!(parse(&json!({"files":vec!["file";65]}).to_string()).is_err());
     assert!(parse(&json!({"duplicates":vec!["file";65]}).to_string()).is_err());
 }
+
+#[test]
+fn kemono_revision_modes_and_orders_inherit_without_losing_explicit_false() {
+    use gallery_dl_rs::kemono::{RevisionMode, RevisionOrder};
+    let cfg=parse(r#"{"extractor":{"revisions":true,"order-revisions":"reverse","kemono":{"revisions":"unique","order-revisions":"desc"},"coomer":{"revisions":false}}}"#).unwrap();
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert_eq!(
+        (kemono.revisions, kemono.order_revisions),
+        (Some(RevisionMode::Unique), Some(RevisionOrder::Newest))
+    );
+    let coomer = cfg.resolve("coomer").unwrap();
+    assert_eq!(
+        (coomer.revisions, coomer.order_revisions),
+        (Some(RevisionMode::None), Some(RevisionOrder::Oldest))
+    );
+    assert_eq!(
+        kemono
+            .overlay(&Options {
+                revisions: Some(RevisionMode::None),
+                ..Default::default()
+            })
+            .revisions,
+        Some(RevisionMode::None)
+    );
+    let root=parse(r#"{"revisions":false,"order-revisions":"asc","extractor":{"revisions":true,"order-revisions":"desc","kemono":{"revisions":"unique"}}}"#).unwrap().resolve("kemono").unwrap();
+    assert_eq!(
+        (root.revisions, root.order_revisions),
+        (Some(RevisionMode::None), Some(RevisionOrder::Oldest))
+    );
+    let empty = parse("{}").unwrap().resolve("kemono").unwrap();
+    assert_eq!((empty.revisions, empty.order_revisions), (None, None));
+}
+
+#[test]
+fn kemono_revision_settings_reject_unknown_types_and_values_privately() {
+    use serde_json::json;
+    for (field, values) in [
+        (
+            "revisions",
+            vec![
+                json!(null),
+                json!(1),
+                json!([]),
+                json!("true"),
+                json!("PRIVATE_VALUE"),
+            ],
+        ),
+        (
+            "order-revisions",
+            vec![
+                json!(null),
+                json!(true),
+                json!(1),
+                json!([]),
+                json!("PRIVATE_VALUE"),
+            ],
+        ),
+    ] {
+        for value in values {
+            for doc in [
+                json!({field:value}),
+                json!({"extractor":{field:value}}),
+                json!({"extractor":{"kemono":{field:value}}}),
+                json!({"extractor":{"coomer":{field:value}}}),
+            ] {
+                let error = parse(&doc.to_string()).unwrap_err().to_string();
+                assert!(error.contains(field), "{error}");
+                assert!(!error.contains("PRIVATE_VALUE"), "{error}");
+            }
+        }
+    }
+}

@@ -1066,3 +1066,74 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
     assert_eq!(items[0]["metadata"]["index"], 1);
     assert_eq!(items[1]["metadata"]["index"], 2);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn kemono_revision_options_forward_as_typed_scoped_values_and_keep_history() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor":{
+            "revisions":true,"order-revisions":"reverse",
+            "kemono":{"revisions":"unique"},"coomer":{"revisions":false,"order-revisions":"desc"}
+        }}),
+    );
+    for (url, expected, absent) in [
+        (
+            "https://kemono.cr/patreon/user/42/post/7/revisions",
+            vec!["revisions=\"unique\"", "order-revisions=\"asc\""],
+            vec![],
+        ),
+        (
+            "https://coomer.st/onlyfans/user/alice",
+            vec!["revisions=false", "order-revisions=\"desc\""],
+            vec![],
+        ),
+        (
+            "https://x.com/alice/status/42",
+            vec![],
+            vec!["revisions=", "order-revisions="],
+        ),
+        (
+            "https://alice.tumblr.com/",
+            vec![],
+            vec!["revisions=", "order-revisions="],
+        ),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        for value in expected {
+            assert!(log.contains(&format!("--option\n{value}\n")), "{log}");
+        }
+        for value in absent {
+            assert!(!log.contains(value), "{log}");
+        }
+    }
+    let executable = root.path().join("revision-backend");
+    std::fs::write(&executable,br#"#!/bin/sh
+printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42","service":"patreon","hash":"aabb","num":1,"type":"file","filename":"current","extension":"jpg","revision_id":0,"revision_index":2,"revision_count":2}],[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42","service":"patreon","hash":"aabb","num":1,"type":"file","filename":"history","extension":"jpg","revision_id":12,"revision_index":1,"revision_count":2}]]'
+"#).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut command = binary(root.path(), &cfg);
+    command.arg("--extractor-command").arg(&executable).args([
+        "-j",
+        "--filter",
+        "revision_count == 2",
+        "https://kemono.cr/posts",
+    ]);
+    let result = output(&mut command).await;
+    success(&result);
+    let jobs: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(jobs.len(), 2, "{jobs:?}");
+    assert_eq!(jobs[0]["metadata"]["revision"]["id"], 0);
+    assert_eq!(jobs[1]["metadata"]["revision"]["id"], 12);
+}
