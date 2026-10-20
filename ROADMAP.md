@@ -1086,11 +1086,18 @@ copy precedence. ArtStation has per-asset boundaries and source asset positions
 and counts. The keyword engine replays all 204 snapshots in nine genuine source
 job traces; six additional consumed Pixiv emitter cases document overwrites,
 incrementing counters and nested aliases.
+Source counters are now stored independently of the native file index: Pixiv
+artwork and original ugoira frames use zero-based `num`, compatibility input
+preserves the original counter value/type, and filters plus filename/directory
+rendering retain zero. Source Directory counters remain available to post filters.
+Canonical native indices, serialized metadata, and archive keys remain stable.
+Recorded consumed-generator cases verify ordinary/Pixivision counters against
+both native and compatibility inputs.
 Remaining: processor archive
 databases, additional encodings/open modes and formatter dialects, arbitrary
 native filename fields, keyword-driven archive identity and pre-download selection changes, further
 cross-processor hook parity, further producer policies and framing, nested alias
-identity, counter normalization and mutation-driven counters/URLs, remaining temporary-path behavior, and
+identity, additional counter policies and mutation-driven counters/URLs, remaining temporary-path behavior, and
 other processor types.
 
 **Implemented directory step:** native configuration `directory` lists replace

@@ -57,6 +57,7 @@ fn media() -> Media {
             caption: None,
             timestamp: Some(123456),
             index: 2,
+            source_num: None,
         }),
         headers: BTreeMap::new(),
         handoff: BTreeMap::new(),

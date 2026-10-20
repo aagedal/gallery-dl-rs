@@ -1589,7 +1589,9 @@ retain their existing per-file behavior.
 Post expressions use the file-filter expression language and normalized public
 post fields, including available IDs, caption, username, timestamp, community,
 article, and declared `count`. File-specific fields such as `url`, `extension`,
-dimensions, `metadata.file`, `media_id`, and `index`/`num` are absent. Missing keys
+dimensions, `metadata.file`, `media_id`, and `index` are normally absent. Fields
+already supplied on the source Directory event remain available, including
+Pixiv's initial `num: 0` and ArtStation's asset position. Missing keys
 and evaluation errors reject the current post; invalid syntax fails before
 extraction. A declared count is descriptive and never truncates a post.
 
@@ -1734,7 +1736,7 @@ before extraction without echoing the expression.
 
 Available names include `category`, `filename`/`name` (stem), `extension`,
 `url`/`_url`, post/media IDs, `username`, `caption`/`content`, `timestamp`/`date`
-(epoch seconds), `index`/`num`, file properties, `community`, `article`, `profile_asset`, and the
+(epoch seconds), `index` and `num`, file properties, `community`, `article`, `profile_asset`, and the
 nested public `metadata` map. Available dimensions have `image_width` /
 `image_height` aliases; `type` aliases `media_type`. X also supplies `tweet_id`,
 `quote_id`, `retweet_id`, and available `source_user` attribution; Facebook
@@ -1994,11 +1996,17 @@ into prepared files; Instagram lets prepared file fields take precedence.
 ArtStation emits a post boundary per supported asset, retaining source asset
 positions and the project's declared asset count.
 
+`num` preserves the producer's counter separately from the native file `index`.
+Ordinary Pixiv artwork and original ugoira frames start `num` at zero while
+`index` remains one-based. Compatibility input retains the original counter
+value and type. Both filters and filename/directory templates use the source
+counter, including zero; archive identities retain their existing native index.
+
 The native formatter remains a bounded, non-executable subset of upstream's
 formatter. Processor archive databases, other text encodings/open modes,
 extractor-subcategory selectors, keyword-driven changes to native archive
 identities and pre-download selection, additional producer ownership policies, nested object aliases,
-counter normalization, mutation-driven counters and URLs, remaining temporary-path behavior, and
+additional counter policies, mutation-driven counters and URLs, remaining temporary-path behavior, and
 additional processor types remain unfinished. These processors
 operate on metadata supported by the native extractor, which may omit fields
 available from upstream.
@@ -2127,7 +2135,7 @@ available from upstream.
   template under `destination/category/`. Available fields are `{filename}`
   (including extension), `{name}` (without the final extension), `{extension}`
   (without the dot), `{category}`, `{post_id}`, `{media_id}`, `{shortcode}`,
-  `{username}`, `{index}`/`{num}`, `{timestamp}`, `{date}` (a UTC datetime),
+  `{username}`, `{index}`, `{num}`, `{timestamp}`, `{date}` (a UTC datetime),
   `{caption}`/`{content}`, `{description}`, `{community_id}`, `{community_name}`,
   and the nested `{community}`, `{article}`, `{source_user}`, and `{metadata}`
   maps. File properties also support `{width}`, `{height}`, `{width_original}`,

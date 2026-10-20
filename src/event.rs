@@ -270,6 +270,7 @@ impl Post {
             metadata.ugoira_frame_index = None;
             metadata.media_id.clear();
             metadata.index = 0;
+            metadata.source_num = metadata.source_num.as_ref().map(|_| 0.into());
         }
         Self {
             keywords: KeywordPolicy::default(),

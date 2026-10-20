@@ -433,6 +433,10 @@ mod tests {
                         );
                         let metadata = post.metadata.unwrap();
                         assert_eq!(
+                            metadata.source_num.as_ref(),
+                            Some(&source["metadata"]["num"])
+                        );
+                        assert_eq!(
                             metadata.ugoira_original,
                             source["metadata"]["_ugoira_original"].as_bool()
                         );
@@ -458,6 +462,10 @@ mod tests {
                         );
                         assert_eq!(file.filename, source["default_filename"].as_str().unwrap());
                         let metadata = file.metadata.as_ref().unwrap();
+                        assert_eq!(
+                            crate::postprocess::context(&file)["num"],
+                            source["metadata"]["num"]
+                        );
                         assert_eq!(
                             metadata.ugoira_original,
                             source["metadata"]["_ugoira_original"].as_bool()

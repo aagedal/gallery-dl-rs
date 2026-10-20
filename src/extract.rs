@@ -700,6 +700,9 @@ pub struct PostMetadata {
     pub caption: Option<std::sync::Arc<str>>,
     pub timestamp: Option<i64>,
     pub index: usize,
+    /// Producer counter, which can be zero even though the native file index is one-based.
+    #[serde(skip_serializing)]
+    pub source_num: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retweet_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1936,6 +1939,7 @@ fn compatibility_metadata(
         tags_bookmark: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
             .flatten(),
+        source_num: data.get("num").cloned(),
         ugoira_original: (category == "pixiv")
             .then(|| data.get("_ugoira_original").and_then(Value::as_bool))
             .flatten(),

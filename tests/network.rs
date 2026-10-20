@@ -267,6 +267,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
     let mut social = media.clone();
     social.category = "instagram".into();
     social.metadata = Some(PostMetadata {
+        source_num: None,
         tags: None,
         sketch: None,
         sketch_archive: false,

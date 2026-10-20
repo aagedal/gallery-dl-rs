@@ -447,6 +447,7 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     .map(Arc::<str>::from);
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
     PostMetadata {
+        source_num: Some(0.into()),
         post_id: id.to_owned(),
         caption_html: illust.get("caption").and_then(Value::as_str).map(Arc::from),
         ajax: illust.get("_ajax").and_then(Value::as_bool),
@@ -496,6 +497,7 @@ fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
                     }),
                     media_id: format!("{id}_p{page}"),
                     index: page + 1,
+                    source_num: Some(page.into()),
                     ..base.clone()
                 }),
                 url,
@@ -684,6 +686,7 @@ pub fn parse_profile(bytes: &[u8], owner: &str, kind: ProfileKind) -> Result<Vec
             caption: Some(Arc::from(label)),
             timestamp,
             index: 1,
+            source_num: Some(0.into()),
             profile_asset: profile_asset_identity(label, owner, timestamp),
             pixiv_user_detail: UserDetail::parse_compat(&serde_json::Map::from_iter([(
                 "user".to_owned(),

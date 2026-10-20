@@ -741,7 +741,9 @@ fn context_parts(
             metadata.remove("index");
         }
         values.extend(metadata.clone());
-        if media.is_some() && !metadata.contains_key("num") {
+        if let Some(num) = &post.source_num {
+            values.insert("num".into(), json_value(num));
+        } else if media.is_some() && !metadata.contains_key("num") {
             values.insert("num".into(), Value::Int(post.index as i128));
         }
         if category == "twitter" {

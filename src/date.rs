@@ -236,6 +236,7 @@ mod tests {
             category: "direct".into(),
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
+                source_num: None,
                 tags: None,
                 sketch: None,
                 sketch_archive: false,
