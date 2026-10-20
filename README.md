@@ -566,10 +566,10 @@ except for public Pixiv Sketch feeds and the Pixivision article request describe
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
-`illust/detail`) and `users/ID` (one artworks child: illustrations then manga),
-`users/ID/artworks` (the same works as a root job),
-`users/ID/illustrations`, `users/ID/manga` (`user/illusts`, `next_url` paging
-capped at 200 pages per type). Public and private illustration bookmarks support
+`illust/detail`) and `users/ID` (one artworks child),
+`users/ID/artworks`, `users/ID/illustrations`, `users/ID/manga` and legacy
+`member_illust.php?id=ID` (one shared `user/illusts` feed with `next_url` paging
+capped at 200 pages). Public and private illustration bookmarks support
 `users/ID/bookmarks/artworks[/TAG]` and `bookmark.php[?id=ID]` through
 `user/bookmarks/illust` (at most 200 pages). `rest=hide` selects private
 bookmarks; all other values select public bookmarks. Without `id`,
@@ -601,13 +601,15 @@ Ordered `frames` metadata retains each ZIP member filename and millisecond
 `ugoira_original`/`_ugoira_original`, and the file-only zero-based
 `ugoira_frame_index`/`_ugoira_frame_index`. Empty frame lists emit an empty post
 in original mode and one file in ZIP mode. Original mode permits up to 100,000
-frames with a 32 MiB aggregate URL limit. `ugoira: false` skips animations without
-fetching metadata; only the exact string `"original"` selects individual frames,
+frames with a 32 MiB aggregate URL limit. `ugoira: false` skips animation metadata;
+limited works can still request AJAX artwork details first. Only the exact string
+`"original"` selects individual frames,
 while other values follow upstream truthiness for ZIP versus skip.
 Bookmark date selection preserves later newer artworks in source order.
 Animation conversion remains unimplemented. `post_id`/`id` is the illustration
 ID, `media_id` `ID_pN`, `username` the account, caption the title plus HTML-stripped
-caption, with `create_date` timestamp and page-0 width/height. Default filenames
+caption, with `create_date` timestamp and page-0 App API width/height (AJAX recovery
+retains dimensions on every page). Default filenames
 are `{id}_p{N}.{extension}`. Artwork archives include extension in ordinary,
 series, ranking, search, followed-artist, article and bookmark scopes, keeping
 ZIPs distinct from their first image frame. Older entries without an extension
@@ -659,8 +661,23 @@ API errors and invalid JSON leave the original caption unchanged; corrupt gzip
 and transient requests retry within configured limits. Oversized payloads do
 not retry. Truthy successful bodies with malformed caption fields abort before
 that post. Source vectors and local HTTP tests cover these paths; authenticated
-live AJAX extraction remains unverified. Novel embedded-image expansion and
-sanity-limit recovery remain unfinished.
+live AJAX extraction remains unverified. Novel embedded-image expansion remains
+unfinished.
+
+Native Pixiv `sanity` recovery defaults to enabled and follows JSON truthiness.
+Artist artwork, illustration and manga URLs share the upstream untyped App API
+feed. A web profile lookup supplies omitted IDs, which are merged in descending
+order around App API works and recovered lazily within selection limits. Path
+and legacy query tags filter the merged feed before recovery, as upstream does.
+Recognized sanity-limit images use AJAX artwork metadata and original page URLs;
+missing originals can be discovered with ordered JPG, PNG and GIF HEAD probes.
+Limited ugoira uses web animation metadata for ZIP or original-frame output.
+`sanity: false` disables recovery and the profile lookup. Restricted works still
+produce post boundaries, with `ajax`/`_ajax` and `mypixiv`/`_mypixiv` flags available
+to filters and templates. Recovery bounds profile IDs and tags to 100,000 each,
+artwork pages to 10,000, and transformed tags/generated page URLs to 32 MiB.
+Source fixtures and local HTTP tests verify recovery; live authenticated recovery
+remains unverified.
 
 Native Pixiv illustrations also support `comments` and `metadata-bookmark`, both
 disabled by default and using upstream JSON truthiness (explicit null disables
@@ -1812,7 +1829,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `cursor`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `comments`,
-`metadata-bookmark`, `captions`, `endpoint`,
+`metadata-bookmark`, `captions`, `sanity`, `endpoint`,
 `order-posts`, `favorites` (Kemono/Coomer options), category-scoped Bluesky
 `api-server` and likes `endpoint`, `retries` (integer 0–10), and `timeout`
 (positive seconds, including fractions).

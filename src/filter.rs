@@ -434,6 +434,16 @@ fn context_parts(
                 metadata.insert(key.clone(), json_value(value));
             }
         }
+        for (value, keys) in [
+            (post.ajax, ["ajax", "_ajax"]),
+            (post.mypixiv, ["mypixiv", "_mypixiv"]),
+        ] {
+            if let Some(value) = value {
+                for key in keys {
+                    metadata.insert(key.into(), Value::Bool(value));
+                }
+            }
+        }
         if let Some(caption) = &post.caption_html {
             metadata.insert("caption_html".into(), text(caption.as_ref()));
         }

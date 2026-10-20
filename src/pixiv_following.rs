@@ -530,8 +530,8 @@ mod tests {
         }
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 4);
-        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=20&type=illust "));
-        assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=21&type=illust "));
+        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=20 "));
+        assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=21 "));
     }
 
     #[tokio::test]

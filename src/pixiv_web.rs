@@ -21,7 +21,7 @@ fn browser_agent() -> String {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{version}.0) Gecko/20100101 Firefox/{version}.0"
     )
 }
-fn unquote(raw: &str) -> String {
+pub(super) fn unquote(raw: &str) -> String {
     let mut bytes = Vec::with_capacity(raw.len());
     let raw = raw.as_bytes();
     let mut index = 0;

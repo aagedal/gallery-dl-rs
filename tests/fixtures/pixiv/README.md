@@ -257,3 +257,29 @@ responses become `NullResponse`, so their original JSON body is not parsed.
 Recorded final request headers also show `request_json` adding `Origin`,
 `Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`, and
 `Sec-Fetch-Site: same-site` to the saved browser-header map.
+
+`sanity.json` records six ordered merge cases, nine artwork-listing cases,
+and 24 limited-work/AJAX-file cases from gallery-dl 1.32.17. The installed
+source path and SHA-256 match the values above and are repeated in the
+fixture. Actual `PixivArtworksExtractor._init`, `works`, and `_extend_sanity`
+run with synthetic App API/profile-list responses; only the base extractor
+initialization is temporarily disabled to avoid sessions. The actual
+`PixivExtractor._extract_files`, `_extract_ajax`, `_extract_ajax_url`,
+`_extract_ugoira`, and `_request_ajax` helpers run with synthetic JSON and HEAD
+responses. Source `HttpError` represents failed completed probes. Input and
+mutated work dictionaries, file dictionaries, flags, requests, and exception
+classes are retained; lazy fallback iterators are materialized.
+
+The merge cases preserve source order, duplicate IDs, exhausted App API tails,
+repeated App entries, and out-of-order input behavior. Listing cases cover the
+artworks/illustrations/manga aliases sharing a user-ID-only App API request,
+path and legacy query tag filtering after the merge, case-insensitive tags,
+invalid profile-list fallback, disabled sanity, and duplicates across the two
+web ID collections. File cases cover exact raw limit reasons including query
+suffixes, `_ajax`/`_mypixiv` flags with sanity disabled, required AJAX fields,
+page-count mutations, original versus square1200 image URLs, JPG/PNG/GIF HEAD
+selection and exhaustion, last-marker URL partitioning, and limited animation
+detail/ugoira-meta ordering in disabled, ZIP, and original modes. Missing
+required source fields record actual exceptions without prescribing native
+malformed-response policy. All identities, dates, text, URLs, and metadata are
+synthetic. No HTTP, OAuth, sessions, media, or archive downloads ran.

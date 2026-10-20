@@ -50,6 +50,8 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
         sketch_archive: false,
         user_bookmark: None,
         bookmark_archive: false,
+        ajax: None,
+        mypixiv: None,
         caption_html: None,
         pixiv_user_detail: None,
         comments: None,

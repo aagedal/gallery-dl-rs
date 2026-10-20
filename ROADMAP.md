@@ -839,9 +839,17 @@ credentials. Same-origin redirects, request/retry deadlines and encoded/decoded
 32 MiB limits bound traversal; corrupt gzip retries while size excess does not.
 Source-compatible 4xx JSON semantics, soft request/API failures and fatal malformed
 caption bodies are covered by source vectors and HTTP tests, alongside ranges,
-empty posts and cancellation. Live authenticated AJAX, novel embeds and sanity
-recovery remain unfinished. Shared Firefox import now accepts every native
+empty posts and cancellation. Live authenticated AJAX and novel embeds remain
+unfinished. Shared Firefox import now accepts every native
 cookie consumer's domain, fixing Kemono/Coomer/FurAffinity allowlist omissions.
+Native Pixiv sanity recovery now uses browser AJAX metadata for limited artwork,
+including original page discovery and limited ugoira ZIP/frame metadata. Artist
+artwork/illustration/manga routes share one untyped App API feed; web profile IDs
+are merged lazily in source order before tag filtering and selection. Recovery
+flags remain visible on empty posts, filters, sidecars and templates. The `sanity`
+option defaults to true and supports sparse JSON truthiness configuration.
+Source-oracle fixtures and local HTTP tests verify traversal and recovery; live
+authenticated recovery remains unverified.
 Native illustration `comments` and `metadata-bookmark` enrich selected works
 lazily after file discovery. Comment objects retain nested source fields and
 ordered pagination; enabled empty/error cases emit an empty list, discarding

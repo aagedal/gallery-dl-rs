@@ -93,6 +93,8 @@ fn valid(fields: &Map<String, Value>) -> bool {
                 | "username"
                 | "caption"
                 | "caption_html"
+                | "ajax"
+                | "mypixiv"
                 | "timestamp"
                 | "index"
                 | "tags"
@@ -372,7 +374,7 @@ mod tests {
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 4);
         assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
-        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
+        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9 "));
         assert!(requests[3].starts_with("GET /v1/user/detail?user_id=5 "));
     }
     #[tokio::test]
@@ -892,6 +894,8 @@ mod tests {
             "username",
             "caption",
             "caption_html",
+            "ajax",
+            "mypixiv",
             "timestamp",
             "index",
             "tags",

@@ -1,0 +1,5850 @@
+{
+  "source": "PixivArtworksExtractor._init/works/_extend_sanity + PixivExtractor._extract_files/_extract_ajax/_extract_ajax_url/_extract_ugoira/_request_ajax",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py",
+  "source_sha256": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+  "generator": "Actual source functions with synthetic AppAPI/work/AJAX JSON/HEAD stubs; only base _init disabled during real Artworks _init to avoid sessions. Files materialized, fallback iterators normalized, work mutation copied. No HTTP/OAuth/media downloads.",
+  "extend_cases": [
+    {
+      "name": "interleave",
+      "ajax_ids": [
+        1,
+        3,
+        5,
+        7,
+        9
+      ],
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 9,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 9,
+          "type": 9,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 7,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 7,
+          "type": 7,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 3,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 3,
+          "type": 3,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 2,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 1,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 1,
+          "type": 1,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        }
+      ]
+    },
+    {
+      "name": "duplicates",
+      "ajax_ids": [
+        1,
+        3,
+        3,
+        5,
+        7
+      ],
+      "input_works": [
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 7,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 7,
+          "type": 7,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 3,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 3,
+          "type": 3,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 1,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 1,
+          "type": 1,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        }
+      ]
+    },
+    {
+      "name": "empty_app_tail",
+      "ajax_ids": [
+        1,
+        2,
+        3
+      ],
+      "input_works": [],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 3,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 3,
+          "type": 3,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 2,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 2,
+          "type": 2,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 1,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 1,
+          "type": 1,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        }
+      ]
+    },
+    {
+      "name": "empty_ajax",
+      "ajax_ids": [],
+      "input_works": [
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "works": [
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ]
+    },
+    {
+      "name": "repeated_app",
+      "ajax_ids": [
+        3,
+        5
+      ],
+      "input_works": [
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "works": [
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ]
+    },
+    {
+      "name": "app_out_of_order",
+      "ajax_ids": [
+        1,
+        3,
+        5,
+        7
+      ],
+      "input_works": [
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 6,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 7,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 7,
+          "type": 7,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 5,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 5,
+          "type": 5,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 3,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 6,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat"
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 1,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 1,
+          "type": 1,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        }
+      ]
+    }
+  ],
+  "listing_cases": [
+    {
+      "name": "artworks_default",
+      "url": "https://www.pixiv.net/users/5/artworks",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "9": null,
+          "5": null
+        },
+        "manga": {
+          "7": null,
+          "3": null
+        }
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": null,
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 9,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 9,
+          "type": 9,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 7,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 7,
+          "type": 7,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 3,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 3,
+          "type": 3,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 2,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "illustrations_alias",
+      "url": "https://www.pixiv.net/users/5/illustrations",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "9": null
+        },
+        "manga": {
+          "7": null
+        }
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": null,
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 9,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 9,
+          "type": 9,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 7,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 7,
+          "type": 7,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "manga_alias",
+      "url": "https://www.pixiv.net/users/5/manga",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "9": null
+        },
+        "manga": {
+          "7": null
+        }
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": null,
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 9,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 9,
+          "type": 9,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 7,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 7,
+          "type": 7,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "path_tag_after_merge",
+      "url": "https://www.pixiv.net/users/5/artworks/%E7%8C%AB",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "9": null
+        },
+        "manga": {
+          "7": null
+        }
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": "猫",
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "legacy_tag_after_merge",
+      "url": "https://www.pixiv.net/member_illust.php?id=5&tag=%E7%8C%AB",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "9": null
+        },
+        "manga": {
+          "7": null
+        }
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": "猫",
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "legacy_casefold",
+      "url": "https://www.pixiv.net/member_illust.php?id=5&tag=CaT",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "9": null
+        },
+        "manga": {}
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": "CaT",
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "sanity_false_no_ajax",
+      "url": "https://www.pixiv.net/users/5/artworks",
+      "options": {
+        "sanity": false
+      },
+      "profile_body": {
+        "illusts": {
+          "9": null
+        },
+        "manga": {}
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": null,
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        }
+      ],
+      "works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bad_profile_ids_fall_back",
+      "url": "https://www.pixiv.net/users/5/artworks",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "not-ID": null
+        },
+        "manga": {}
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": null,
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "duplicate_across_illust_manga",
+      "url": "https://www.pixiv.net/users/5/artworks",
+      "options": {},
+      "profile_body": {
+        "illusts": {
+          "9": null,
+          "5": null
+        },
+        "manga": {
+          "9": null,
+          "3": null
+        }
+      },
+      "input_works": [
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        }
+      ],
+      "user_id": "5",
+      "tag": null,
+      "calls": [
+        {
+          "method": "user_illusts",
+          "user_id": "5"
+        },
+        {
+          "method": "_request_ajax",
+          "endpoint": "/user/5/profile/all"
+        }
+      ],
+      "works": [
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 9,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 9,
+          "type": 9,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 9,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 9,
+          "type": 9,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        },
+        {
+          "id": 8,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Feed title",
+          "caption": "Feed caption",
+          "type": "illust",
+          "user": {
+            "id": 5,
+            "account": "feed.artist",
+            "name": "Feed name"
+          },
+          "tags": [
+            {
+              "name": "CAT",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "image_urls": {},
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+          }
+        },
+        {
+          "create_date": null,
+          "height": 0,
+          "id": 3,
+          "image_urls": null,
+          "meta_pages": [],
+          "meta_single_page": {
+            "original_image_url": "https://s.pximg.net/common/images/limit_"
+          },
+          "page_count": 1,
+          "sanity_level": 0,
+          "total_comments": 0,
+          "is_bookmarked": false,
+          "tags": [],
+          "title": 3,
+          "type": 3,
+          "user": {
+            "id": 1
+          },
+          "width": 0,
+          "x_restrict": 0
+        }
+      ],
+      "error": null
+    }
+  ],
+  "file_cases": [
+    {
+      "name": "sanity_false_limit_",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_"
+        }
+      },
+      "sanity": false,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_ajax": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "sanity_false_limit_unviewable_360.png",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_unviewable_360.png"
+        }
+      },
+      "sanity": false,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_ajax": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "sanity_false_limit_sanity_level_360.png",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": false,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_ajax": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "sanity_false_limit_mypixiv_360.png",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_mypixiv_360.png"
+        }
+      },
+      "sanity": false,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_mypixiv": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "sanity_false_limit_unknown_360.png",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_unknown_360.png"
+        }
+      },
+      "sanity": false,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_mypixiv": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "sanity_false_limit_other_360.png",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_other_360.png"
+        }
+      },
+      "sanity": false,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_mypixiv": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "sanity_false_limit_sanity_level_360.png_fixture=1",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png?fixture=1"
+        }
+      },
+      "sanity": false,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_mypixiv": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "limited_illustration_recovers_multiple",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "_ajax": true,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "suffix": "_p00"
+        },
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+          "suffix": "_p01"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "limited_illustration_missing_required_errors",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_ajax": true,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        }
+      },
+      "files": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "limited_illustration_no_url_soft_empty",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {},
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_ajax": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "limited_ugoira_disabled_still_detail_first",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "ugoira",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": false,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "ugoira",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_ajax": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "limited_ugoira_zip_web_only",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "ugoira",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42/ugoira_meta",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "ugoira",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "_ajax": true,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2,
+        "_ugoira_frame_data": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ],
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ],
+        "_ugoira_original": false,
+        "_http_adjust_extension": false,
+        "date_url": "2024-01-01 18:04:05"
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "limited_ugoira_original_web_only",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "ugoira",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": "original",
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [
+        "http_error",
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42/ugoira_meta",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "ugoira",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "_ajax": true,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2,
+        "_ugoira_frame_data": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ],
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ],
+        "_ugoira_original": true,
+        "_http_adjust_extension": false,
+        "date_url": "2024-01-01 18:04:05"
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "suffix": "_p00",
+          "_ugoira_frame_index": 0
+        },
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.png",
+          "suffix": "_p01",
+          "_ugoira_frame_index": 1
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "limited_ugoira_missing_detail_soft_empty",
+      "direct_ajax": false,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "ugoira",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {},
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42/ugoira_meta",
+          "kwargs": {
+            "headers": {},
+            "fatal": false
+          }
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "ugoira",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "_ajax": true,
+        "_ugoira_frame_data": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ],
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ],
+        "_ugoira_original": false,
+        "_http_adjust_extension": false,
+        "date_url": "2024-01-01 18:04:05"
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "direct_ajax_original",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "suffix": "_p00"
+        },
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+          "suffix": "_p01"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "direct_ajax_single",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 1,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 1
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "direct_ajax_zero",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 0,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 0
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "direct_ajax_negative",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": -2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": -2
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "direct_ajax_missing_user_field_errors",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0
+      },
+      "files": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "square1200_jpg",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {},
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "suffix": "_p00"
+        },
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+          "suffix": "_p01"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "square1200_png",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {},
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [
+        "http_error",
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.png",
+          "suffix": "_p00"
+        },
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.png",
+          "suffix": "_p01"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "square1200_gif",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {},
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [
+        "http_error",
+        "http_error",
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.gif",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.gif",
+          "suffix": "_p00"
+        },
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.gif",
+          "suffix": "_p01"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "square1200_all_fail",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {},
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [
+        "http_error",
+        "http_error",
+        "http_error"
+      ],
+      "calls": [
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.gif",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        }
+      ],
+      "work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true
+      },
+      "files": [],
+      "error": null
+    },
+    {
+      "name": "raw_page_url_last_marker",
+      "direct_ajax": true,
+      "input_work": {
+        "id": 42,
+        "title": "Feed title",
+        "caption": "Feed caption",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "feed.artist",
+          "name": "Feed name"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 0,
+        "is_bookmarked": false,
+        "image_urls": {},
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        }
+      },
+      "sanity": true,
+      "ugoira": true,
+      "ajax_body": {
+        "id": "42",
+        "illustTitle": "Recovered title",
+        "urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg?v=_p0.png"
+        },
+        "createDate": "2024-01-02T12:04:05+09:00",
+        "width": 640,
+        "height": 480,
+        "sl": 6,
+        "viewCount": 12,
+        "commentCount": 2,
+        "bookmarkCount": 3,
+        "restrict": 0,
+        "xRestrict": 1,
+        "aiType": 0,
+        "bookStyle": 0,
+        "userId": "5",
+        "userAccount": "recovered.artist",
+        "userName": "Recovered name",
+        "bookmarkData": {
+          "id": "fixture"
+        },
+        "tags": {
+          "tags": [
+            {
+              "tag": "猫",
+              "translation": {
+                "en": "cat"
+              }
+            },
+            {
+              "tag": "犬"
+            },
+            {
+              "tag": "empty",
+              "translation": {}
+            }
+          ]
+        },
+        "illustComment": "<p>Recovered &amp; caption</p>",
+        "pageCount": 2,
+        "userIllusts": {
+          "42": {
+            "url": "https://i.pximg.net/c/1200x1200/img-master/img/2024/01/02/03/04/05/42_p0_square1200.jpg"
+          }
+        }
+      },
+      "ugoira_body": {
+        "src": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "originalSrc": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 75
+          }
+        ]
+      },
+      "head_outcomes": [],
+      "calls": [],
+      "work": {
+        "id": 42,
+        "title": "Recovered title",
+        "caption": "<p>Recovered & caption</p>",
+        "type": "illust",
+        "user": {
+          "account": "recovered.artist",
+          "id": 5,
+          "is_followed": false,
+          "name": "Recovered name",
+          "profile_image_urls": {}
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          },
+          {
+            "name": "犬",
+            "translated_name": null
+          },
+          {
+            "name": "empty",
+            "translated_name": null
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 1,
+        "total_comments": 2,
+        "is_bookmarked": false,
+        "image_urls": {
+          "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg?v=_p0.png"
+        },
+        "meta_pages": [],
+        "meta_single_page": {
+          "original_image_url": "https://s.pximg.net/common/images/limit_sanity_level_360.png"
+        },
+        "_ajax": true,
+        "width": 640,
+        "height": 480,
+        "sanity_level": 6,
+        "total_view": 12,
+        "total_bookmarks": 3,
+        "restrict": 0,
+        "illust_ai_type": 0,
+        "illust_book_style": 0,
+        "page_count": 2
+      },
+      "files": [
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg?v=_p0.png",
+          "suffix": "_p00"
+        },
+        {
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg?v=_p1.png",
+          "suffix": "_p01"
+        }
+      ],
+      "error": null
+    }
+  ]
+}

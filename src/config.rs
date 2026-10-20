@@ -132,6 +132,8 @@ pub struct Options {
     pub comments: Option<bool>,
     /// Include Pixiv illustration HTML captions as inline text files.
     pub captions: Option<bool>,
+    /// Enable the Pixiv workaround for App API sanity restrictions.
+    pub sanity: Option<bool>,
     /// Include Pixiv illustration or novel bookmark metadata.
     pub metadata_bookmark: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
@@ -313,6 +315,7 @@ impl Options {
             metadata: overrides.metadata.or(self.metadata),
             comments: overrides.comments.or(self.comments),
             captions: overrides.captions.or(self.captions),
+            sanity: overrides.sanity.or(self.sanity),
             metadata_bookmark: overrides.metadata_bookmark.or(self.metadata_bookmark),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             refresh_token: overrides
@@ -438,6 +441,7 @@ struct RawRoot {
     metadata: Field,
     comments: Field,
     captions: Field,
+    sanity: Field,
     metadata_bookmark: Field,
     directory: Field,
     cookies: Field,
@@ -510,6 +514,7 @@ struct RawExtractor {
     metadata: Field,
     comments: Field,
     captions: Field,
+    sanity: Field,
     metadata_bookmark: Field,
     directory: Field,
     cookies: Field,
@@ -615,6 +620,7 @@ struct RawOptions {
     metadata: Field,
     comments: Field,
     captions: Field,
+    sanity: Field,
     metadata_bookmark: Field,
     api_key: Field,
     username: Field,
@@ -798,6 +804,7 @@ impl Config {
             metadata: root.metadata,
             comments: root.comments,
             captions: root.captions,
+            sanity: root.sanity,
             metadata_bookmark: root.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
@@ -879,6 +886,7 @@ impl Config {
             metadata: extractor.metadata,
             comments: extractor.comments,
             captions: extractor.captions,
+            sanity: extractor.sanity,
             metadata_bookmark: extractor.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
@@ -1498,6 +1506,7 @@ impl RawOptions {
         let metadata = self.metadata.0.as_ref().map(value_truthy);
         let comments = self.comments.0.as_ref().map(value_truthy);
         let captions = self.captions.0.as_ref().map(value_truthy);
+        let sanity = self.sanity.0.as_ref().map(value_truthy);
         let metadata_bookmark = self.metadata_bookmark.0.as_ref().map(value_truthy);
         let max_posts = match self.max_posts.0 {
             None => None,
@@ -1762,6 +1771,7 @@ impl RawOptions {
             metadata,
             comments,
             captions,
+            sanity,
             metadata_bookmark,
             api_key,
             refresh_token,

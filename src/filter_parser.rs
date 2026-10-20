@@ -246,7 +246,12 @@ impl Lexer<'_> {
             name if name.starts_with('_')
                 && !matches!(
                     name,
-                    "_url" | "_ugoira_original" | "_ugoira_frame_index" | "_ugoira_frame_data"
+                    "_url"
+                        | "_ajax"
+                        | "_mypixiv"
+                        | "_ugoira_original"
+                        | "_ugoira_frame_index"
+                        | "_ugoira_frame_data"
                 ) =>
             {
                 return Err(syntax());

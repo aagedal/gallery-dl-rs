@@ -22,6 +22,8 @@ fn item(url: &str) -> Media {
         sketch_archive: false,
         user_bookmark: None,
         bookmark_archive: false,
+        ajax: None,
+        mypixiv: None,
         caption_html: None,
         pixiv_user_detail: None,
         comments: None,

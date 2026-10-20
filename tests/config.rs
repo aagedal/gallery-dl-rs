@@ -3285,3 +3285,77 @@ fn pixiv_captions_obey_hierarchy_null_clearing_and_independent_novel_scopes() {
     assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, None);
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
+
+#[test]
+fn pixiv_sanity_is_sparse_and_matches_source_truthiness_in_all_scopes() {
+    use serde_json::json;
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().sanity, None);
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"sanity":value}),
+            json!({"extractor":{"sanity":value}}),
+            json!({"extractor":{"pixiv":{"sanity":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv")
+                .unwrap();
+            assert_eq!(resolved.sanity, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_sanity_preserves_null_clearing_hierarchy_and_independent_categories() {
+    let cfg = parse(
+        r#"{"extractor":{"sanity":true,"pixiv":{"sanity":null},"pixiv-novel":{"sanity":"false"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().sanity, Some(false));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, Some(true));
+    assert_eq!(cfg.resolve("direct").unwrap().sanity, Some(true));
+    let cfg =
+        parse(r#"{"sanity":null,"extractor":{"sanity":true,"pixiv":{"sanity":true}}}"#).unwrap();
+    let resolved = cfg.resolve("pixiv").unwrap();
+    assert_eq!(resolved.sanity, Some(false));
+    assert_eq!(
+        resolved
+            .overlay(&Options {
+                sanity: Some(true),
+                ..Options::default()
+            })
+            .sanity,
+        Some(true)
+    );
+    assert_eq!(resolved.overlay(&Options::default()).sanity, Some(false));
+    let cfg =
+        parse(r#"{"sanity":true,"extractor":{"sanity":false,"pixiv":{"sanity":null}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().sanity, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv":{"sanity":false,"captions":true,"comments":false,"metadata":null,"metadata-bookmark":true}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.sanity, Some(false));
+    assert_eq!(pixiv.captions, Some(true));
+    assert_eq!(pixiv.comments, Some(false));
+    assert_eq!(pixiv.metadata, Some(false));
+    assert_eq!(pixiv.metadata_bookmark, Some(true));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}

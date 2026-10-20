@@ -97,6 +97,8 @@ pub fn parse_video(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                         sketch_archive: false,
                         user_bookmark: None,
                         bookmark_archive: false,
+                        ajax: None,
+                        mypixiv: None,
                         caption_html: None,
                         pixiv_user_detail: None,
                         comments: None,

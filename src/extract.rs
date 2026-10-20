@@ -597,6 +597,12 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Pixiv artwork marked for browser AJAX recovery, including disabled attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ajax: Option<bool>,
+    /// Pixiv artwork classified by upstream as My Pixiv or an unknown restriction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mypixiv: Option<bool>,
     /// Original Pixiv caption HTML, including source AJAX URL/entity decoding.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caption_html: Option<std::sync::Arc<str>>,
@@ -874,6 +880,7 @@ pub struct BackendOptions {
     pub user_id: Option<String>,
     pub api_key: Option<String>,
     pub reposts: Option<bool>,
+    pub sanity: Option<bool>,
     pub captions: Option<bool>,
     pub comments: Option<bool>,
     pub metadata_bookmark: Option<bool>,
@@ -1051,6 +1058,7 @@ impl Backend {
         }
         for (name, value) in [
             ("metadata", options.metadata),
+            ("sanity", options.sanity),
             ("captions", options.captions),
             ("comments", options.comments),
             ("metadata-bookmark", options.metadata_bookmark),
@@ -1891,6 +1899,12 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        ajax: (category == "pixiv")
+            .then(|| data.get("_ajax").and_then(Value::as_bool))
+            .flatten(),
+        mypixiv: (category == "pixiv")
+            .then(|| data.get("_mypixiv").and_then(Value::as_bool))
+            .flatten(),
         caption_html: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| {
                 data.get("caption")

@@ -156,7 +156,7 @@ impl Pixiv {
         self.ugoira_probe_root = Some(root);
         self
     }
-    async fn ugoira_probe(&self, url: &Url) -> bool {
+    pub(super) async fn ugoira_probe(&self, url: &Url) -> bool {
         let endpoint = if let Some(root) = &self.ugoira_probe_root {
             let mut endpoint = root.clone();
             endpoint.set_path(url.path());
@@ -287,6 +287,7 @@ impl Pixiv {
         if successful
             && self.ugoira == UgoiraMode::Original
             && work.get("type").and_then(Value::as_str) == Some("ugoira")
+            && work.get("__sanity_no_ugoira") != Some(&Value::Bool(true))
         {
             metadata.frames = Some(Arc::from([]));
             metadata.ugoira_original = Some(true);

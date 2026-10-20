@@ -67,6 +67,8 @@ pub mod user_detail;
 pub use user_detail::UserDetail;
 #[path = "pixiv_enrichment.rs"]
 mod enrichment;
+#[path = "pixiv_sanity.rs"]
+mod sanity;
 #[path = "pixiv_web.rs"]
 mod web;
 use enrichment::WorkFailure;
@@ -115,15 +117,6 @@ pub enum Kind {
     Manga,
 }
 
-impl Kind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Illust => "illust",
-            Self::Manga => "manga",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileKind {
     Avatar,
@@ -159,6 +152,7 @@ pub enum Target {
     User {
         id: String,
         kinds: Vec<Kind>,
+        tag: Option<String>,
     },
     Bookmarks {
         id: Option<String>,
@@ -265,10 +259,15 @@ pub fn target(url: &Url) -> Result<Target> {
         Ok(Target::User {
             id: id(raw)?,
             kinds,
+            tag: None,
         })
     };
     let query = |name: &str| {
-        url.query_pairs()
+        url.query()
+            .unwrap_or("")
+            .split('&')
+            .filter(|part| part.contains('='))
+            .filter_map(|part| url::form_urlencoded::parse(part.as_bytes()).next())
             .find(|(key, _)| key == name)
             .map(|(_, value)| value.into_owned())
     };
@@ -303,7 +302,7 @@ pub fn target(url: &Url) -> Result<Target> {
     };
     match rest {
         ["artworks", raw] => Ok(Target::Illust(id(raw)?)),
-        ["member_illust.php"] => {
+        ["member_illust.php"] if query("illust_id").is_some() => {
             let raw = url
                 .query_pairs()
                 .find(|(key, _)| key == "illust_id")
@@ -311,9 +310,25 @@ pub fn target(url: &Url) -> Result<Target> {
                 .ok_or_else(unsupported)?;
             Ok(Target::Illust(id(&raw)?))
         }
-        ["users", raw] | ["users", raw, "artworks"] => user(raw, vec![Kind::Illust, Kind::Manga]),
-        ["users", raw, "illustrations"] => user(raw, vec![Kind::Illust]),
-        ["users", raw, "manga"] => user(raw, vec![Kind::Manga]),
+        ["users", raw]
+        | ["users", raw, "artworks"]
+        | ["users", raw, "illustrations"]
+        | ["users", raw, "manga"] => user(raw, vec![Kind::Illust]),
+        ["users", raw, "artworks" | "illustrations" | "manga", tag] => {
+            let mut target = user(raw, vec![Kind::Illust])?;
+            if let Target::User { tag: selected, .. } = &mut target {
+                *selected = Some(web::unquote(tag));
+            }
+            Ok(target)
+        }
+        ["member_illust.php"] => {
+            let raw = query("id").ok_or_else(unsupported)?;
+            let mut target = user(&raw, vec![Kind::Illust])?;
+            if let Target::User { tag, .. } = &mut target {
+                *tag = query("tag");
+            }
+            Ok(target)
+        }
         ["users", raw, "avatar"] => Ok(Target::Profile {
             id: id(raw)?,
             kind: ProfileKind::Avatar,
@@ -367,9 +382,8 @@ fn extension(url: &Url) -> String {
         .and_then(|name| name.rsplit_once('.'))
         .map(|(_, ext)| ext.to_ascii_lowercase())
         .filter(|ext| {
-            (1..=5).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+            (1..=16).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric())
         })
-        .map(|ext| if ext == "jpeg" { "jpg".into() } else { ext })
         .unwrap_or_else(|| "jpg".into())
 }
 
@@ -383,14 +397,14 @@ pub enum Skip {
 /// Parse one App API illustration object into its page files.
 pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
     let id = id_of(illust).ok_or(Skip::NoMedia)?;
-    if string(illust, "type") == Some("ugoira") {
-        return Err(Skip::Ugoira);
-    }
     let mut urls = Vec::new();
     let pages = illust
         .get("meta_pages")
         .and_then(Value::as_array)
         .filter(|pages| !pages.is_empty());
+    if pages.is_none() && string(illust, "type") == Some("ugoira") {
+        return Err(Skip::Ugoira);
+    }
     match pages {
         Some(pages) => {
             for page in pages {
@@ -432,6 +446,8 @@ fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
     PostMetadata {
         post_id: id.to_owned(),
         caption_html: illust.get("caption").and_then(Value::as_str).map(Arc::from),
+        ajax: illust.get("_ajax").and_then(Value::as_bool),
+        mypixiv: illust.get("_mypixiv").and_then(Value::as_bool),
         pixiv_user_detail: illust
             .as_object()
             .and_then(UserDetail::parse_compat)
@@ -791,6 +807,7 @@ pub struct Pixiv {
     cursor: Option<BookmarkCursor>,
     metadata: bool,
     user_detail_cache: Arc<tokio::sync::Mutex<user_detail::UserDetailCache>>,
+    sanity: bool,
     captions: bool,
     web_root: Url,
     web_cookies: tokio::sync::Mutex<crate::cookies::CookieJar>,
@@ -813,14 +830,14 @@ pub struct Pixiv {
 
 #[derive(Clone)]
 enum Feed {
-    Works(Kind),
+    Works,
     Bookmarks { tag: Option<String>, private: bool },
 }
 
 impl Feed {
     fn endpoint(&self) -> &'static str {
         match self {
-            Self::Works(_) => "v1/user/illusts",
+            Self::Works => "v1/user/illusts",
             Self::Bookmarks { .. } => "v1/user/bookmarks/illust",
         }
     }
@@ -857,6 +874,8 @@ struct ListingState {
     bookmarks: bool,
     bookmark_owner: Option<Arc<FollowedUserMetadata>>,
     owner_loaded: bool,
+    sanity: sanity::SanityListing,
+    tag: Option<String>,
     budget: PostBudget,
     kinds: VecDeque<Feed>,
     active: Option<Feed>,
@@ -883,6 +902,7 @@ impl Pixiv {
             user_detail_cache: Arc::new(tokio::sync::Mutex::new(
                 user_detail::UserDetailCache::default(),
             )),
+            sanity: true,
             captions: false,
             web_root: Url::parse("https://www.pixiv.net/").expect("static web root"),
             web_cookies: tokio::sync::Mutex::new(crate::cookies::CookieJar::default()),
@@ -1146,10 +1166,13 @@ impl Pixiv {
         illust: &mut Value,
         listing: bool,
     ) -> std::result::Result<Vec<Media>, WorkFailure> {
-        let mut media = self
-            .work_files(illust, listing)
-            .await
-            .map_err(WorkFailure::Files)?;
+        let mut media = match self.sanity_files(illust).await? {
+            Some(media) => media,
+            None => self
+                .work_files(illust, listing)
+                .await
+                .map_err(WorkFailure::Files)?,
+        };
         let user_detail = self
             .enrich_user_work(illust)
             .await
@@ -1174,6 +1197,8 @@ impl Pixiv {
         for file in &mut media {
             if let Some(metadata) = &mut file.metadata {
                 metadata.pixiv_user_detail = user_detail.clone();
+                metadata.ajax = enriched.ajax;
+                metadata.mypixiv = enriched.mypixiv;
                 metadata.username = enriched.username.clone();
                 metadata.caption = enriched.caption.clone();
                 metadata.caption_html = enriched.caption_html.clone();
@@ -1197,9 +1222,7 @@ impl Pixiv {
         let mut url = self.api_root.join(feed.endpoint()).expect("static path");
         url.query_pairs_mut().append_pair("user_id", user);
         match feed {
-            Feed::Works(kind) => {
-                url.query_pairs_mut().append_pair("type", kind.as_str());
-            }
+            Feed::Works => {}
             Feed::Bookmarks { tag, private } => {
                 url.query_pairs_mut()
                     .append_pair("restrict", if *private { "private" } else { "public" });
@@ -1288,6 +1311,9 @@ impl Pixiv {
             self.user_detail(user).await?;
             state.owner_loaded = true;
         }
+        if !state.bookmarks && !state.sanity.initialized {
+            state.sanity.initialize(self, user).await;
+        }
         let endpoint = match state.next.take() {
             Some(raw) => self.next_url(&raw, state.active.as_ref().expect("active feed"), user)?,
             None => {
@@ -1359,7 +1385,8 @@ impl Pixiv {
         let target = match view {
             "artworks" => Target::User {
                 id,
-                kinds: vec![Kind::Illust, Kind::Manga],
+                kinds: vec![Kind::Illust],
+                tag: None,
             },
             "favorite" => Target::Bookmarks {
                 id: Some(id),
@@ -1406,6 +1433,13 @@ impl Pixiv {
         if self.refresh_token.is_none() {
             return stream::once(async { Err(missing_token()) }).boxed();
         }
+        let tag = match &target {
+            Target::User { tag, .. } => tag
+                .clone()
+                .filter(|tag| !tag.is_empty())
+                .map(|tag| tag.to_lowercase()),
+            _ => None,
+        };
         let (user, kinds) = match target {
             Target::Sketch(username) => return self.sketch_events(username),
             Target::Novel(target) => return self.novel_events(target),
@@ -1459,7 +1493,7 @@ impl Pixiv {
                         Err(WorkFailure::Files(error)) if animation => (Vec::new(), Some(error)),
                         Err(error) => return Err(error.into_error()),
                     };
-                    if media.is_empty() && animation {
+                    if media.is_empty() {
                         let metadata = self.empty_work_metadata(illust, &id, failure.is_none());
                         let mut events = Vec::new();
                         if let Some(error) = failure {
@@ -1486,10 +1520,7 @@ impl Pixiv {
                 .flatten()
                 .boxed();
             }
-            Target::User { id, kinds } => (
-                Some(id),
-                kinds.into_iter().map(Feed::Works).collect::<Vec<_>>(),
-            ),
+            Target::User { id, .. } => (Some(id), vec![Feed::Works]),
             Target::Bookmarks { id, tag, private } => (id, vec![Feed::Bookmarks { tag, private }]),
         };
         let state = ListingState {
@@ -1498,6 +1529,8 @@ impl Pixiv {
                 .any(|feed| matches!(feed, Feed::Bookmarks { .. })),
             bookmark_owner: None,
             owner_loaded: false,
+            sanity: sanity::SanityListing::default(),
+            tag,
             budget: PostBudget::new(self.max_posts),
             kinds: kinds.into(),
             active: None,
@@ -1517,7 +1550,27 @@ impl Pixiv {
                 if state.budget.exhausted() {
                     return None;
                 }
-                if let Some(mut work) = state.works.pop_front() {
+                let source_done = state.next.is_none() && state.kinds.is_empty();
+                if let Some(mut work) = state.sanity.next(&mut state.works, source_done) {
+                    if let Some(tag) = &state.tag {
+                        let matches =
+                            work.get("tags")
+                                .and_then(Value::as_array)
+                                .is_some_and(|tags| {
+                                    tags.iter().any(|item| {
+                                        item.get("name")
+                                            .and_then(Value::as_str)
+                                            .is_some_and(|name| name.to_lowercase() == *tag)
+                                    })
+                                });
+                        if !matches {
+                            skipped = skipped.wrapping_add(1);
+                            if skipped == 0 {
+                                tokio::task::yield_now().await;
+                            }
+                            continue;
+                        }
+                    }
                     state.budget.consume();
                     skipped = skipped.wrapping_add(1);
                     if skipped == 0 {
@@ -1536,7 +1589,12 @@ impl Pixiv {
                         Err(WorkFailure::Files(error)) => (Vec::new(), Some(error)),
                     };
                     let animation = string(&work, "type") == Some("ugoira");
-                    if media.is_empty() && (state.bookmark_owner.is_some() || animation) {
+                    if media.is_empty()
+                        && (state.bookmark_owner.is_some()
+                            || animation
+                            || work.get("_ajax").is_some_and(value_truthy)
+                            || work.get("_mypixiv").is_some_and(value_truthy))
+                    {
                         let Some(id) = id_of(&work) else {
                             return Some((
                                 Err(error("Pixiv contains an invalid illustration ID")),
@@ -1883,14 +1941,15 @@ mod tests {
         let user = |kinds| Target::User {
             id: "9".into(),
             kinds,
+            tag: None,
         };
         assert_eq!(
             t("https://www.pixiv.net/users/9").unwrap(),
-            user(vec![Kind::Illust, Kind::Manga])
+            user(vec![Kind::Illust])
         );
         assert_eq!(
             t("https://pixiv.net/en/users/9").unwrap(),
-            user(vec![Kind::Illust, Kind::Manga])
+            user(vec![Kind::Illust])
         );
         assert_eq!(
             t("https://www.pixiv.net/users/9/illustrations").unwrap(),
@@ -1898,14 +1957,13 @@ mod tests {
         );
         assert_eq!(
             t("https://www.pixiv.net/users/9/manga").unwrap(),
-            user(vec![Kind::Manga])
+            user(vec![Kind::Illust])
         );
         for raw in [
             "https://www.pixiv.net/",
             "https://www.pixiv.net/artworks/abc",
             "https://www.pixiv.net/artworks/0123",
             "https://www.pixiv.net/users/9/bookmarks/novel-unknown",
-            "https://www.pixiv.net/member_illust.php?id=9",
             "https://i.pximg.net/img-original/img/1_p0.png",
             "https://www.pixiv.net:444/artworks/1",
             "https://www.pixiv.net.evil.example/artworks/1",
@@ -2316,6 +2374,7 @@ mod tests {
     pub(super) fn pixiv(root: Url) -> Pixiv {
         Pixiv::new(Duration::from_secs(5))
             .unwrap()
+            .with_sanity(false)
             .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
             .unwrap()
             .with_api_root(root.clone())
@@ -2382,7 +2441,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn paginates_user_works_by_type() {
+    async fn paginates_one_combined_user_feed_and_scopes_successors() {
         let page = |ids: &[u64], next: Option<String>| {
             response(
                 "200 OK",
@@ -2393,12 +2452,11 @@ mod tests {
             )
         };
         let (root, server) = serve_with(|root| {
-            let next = root.join("v1/user/illusts?user_id=9&type=illust&offset=30");
+            let next = root.join("v1/user/illusts?user_id=9&offset=30");
             vec![
                 token("t"),
                 page(&[1], Some(next.unwrap().to_string())),
-                page(&[2], None),
-                page(&[3], Some("https://evil.example/v1/user/illusts".into())),
+                page(&[2, 3], Some("https://evil.example/v1/user/illusts".into())),
             ]
         });
         let results: Vec<_> = pixiv(root)
@@ -2410,9 +2468,9 @@ mod tests {
         let error = results[3].as_ref().unwrap_err().to_string();
         assert!(error.contains("unexpected next page") && !error.contains("evil"));
         let requests = server.join().unwrap();
-        assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
-        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=illust&offset=30 "));
-        assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=manga "));
+        assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9 "));
+        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&offset=30 "));
+        assert_eq!(requests.len(), 3);
     }
 
     #[tokio::test]
@@ -3015,7 +3073,6 @@ mod tests {
                         .to_string()
                         .as_bytes(),
                 ),
-                response("200 OK", br#"{"illusts":[],"next_url":null}"#),
             ]);
             let native = pixiv(root);
             let url = Url::parse("https://www.pixiv.net/users/9").unwrap();
@@ -3042,9 +3099,8 @@ mod tests {
                 assert_eq!(actual.filename, expected.filename);
             }
             let requests = server.join().unwrap();
-            assert_eq!(requests.len(), 3);
-            assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
-            assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=manga "));
+            assert_eq!(requests.len(), 2);
+            assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9 "));
         }
     }
 
@@ -3066,9 +3122,6 @@ mod tests {
             if view == "bookmarks/artworks" {
                 responses.insert(1, bookmark_owner_reply(9));
             }
-            if view == "artworks" {
-                responses.push(response("200 OK", br#"{"illusts":[],"next_url":null}"#));
-            }
             let (root, server) = serve(responses);
             let native = pixiv(root);
             let url = Url::parse(&format!("https://www.pixiv.net/users/9/{view}")).unwrap();
@@ -3084,11 +3137,7 @@ mod tests {
             assert_eq!(items[0].as_ref().unwrap().filename, "42_p0.jpg");
             assert_eq!(
                 server.join().unwrap().len(),
-                if matches!(view, "artworks" | "bookmarks/artworks") {
-                    3
-                } else {
-                    2
-                }
+                if view == "bookmarks/artworks" { 3 } else { 2 }
             );
         }
     }
@@ -3104,7 +3153,6 @@ mod tests {
                         .to_string()
                         .as_bytes(),
                 ),
-                response("200 OK", br#"{"illusts":[],"next_url":null}"#),
             ]);
             let native = pixiv(root);
             let url = Url::parse(if bare {
@@ -3148,7 +3196,7 @@ mod tests {
                     .count(),
                 2
             );
-            assert_eq!(server.join().unwrap().len(), 3);
+            assert_eq!(server.join().unwrap().len(), 2);
         }
     }
 
@@ -3229,7 +3277,6 @@ mod tests {
             token("access-secret"),
             profile,
             page(41),
-            response("200 OK", br#"{"illusts":[],"next_url":null}"#),
             page(42),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
             response("200 OK", br#"{"novels":[],"next_url":null}"#),
@@ -3270,11 +3317,11 @@ mod tests {
         assert_eq!(results.len(), 4);
         assert!(results.iter().all(|value| !value.contains("secret")));
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 8);
+        assert_eq!(requests.len(), 7);
         assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
-        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
+        assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9 "));
         assert!(
-            requests[4].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public ")
+            requests[3].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public ")
         );
     }
 
@@ -3524,18 +3571,12 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn max_posts_spans_illustration_to_manga_boundary_and_precedes_post_predicates() {
+    async fn max_posts_spans_mixed_illustration_manga_rows_and_precedes_post_predicates() {
         let (root, server) = serve(vec![
             token("t"),
             response(
                 "200 OK",
-                json!({"illusts":[illust(40,1)],"next_url":null})
-                    .to_string()
-                    .as_bytes(),
-            ),
-            response(
-                "200 OK",
-                json!({"illusts":[illust(41,2),animation(42)],"next_url":null})
+                json!({"illusts":[illust(40,1),illust(41,2),animation(42)],"next_url":null})
                     .to_string()
                     .as_bytes(),
             ),
@@ -3556,9 +3597,8 @@ mod tests {
             ["40_p0.jpg", "41_p0.png", "41_p1.png"]
         );
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 3);
-        assert!(requests[1].contains("type=illust"));
-        assert!(requests[2].contains("type=manga"));
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=5 "));
         for missing in [false, true] {
             let mut first = illust(41, 1);
             if missing {
@@ -3843,7 +3883,7 @@ mod tests {
             .with_cursor(Some(BookmarkCursor::parse(&json!("100")).unwrap()));
         assert!(
             !native
-                .first_page("9", &Feed::Works(Kind::Illust))
+                .first_page("9", &Feed::Works)
                 .query_pairs()
                 .any(|(key, _)| key == "max_bookmark_id")
         );
