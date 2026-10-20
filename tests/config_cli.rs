@@ -1565,3 +1565,40 @@ async fn bluesky_server_and_endpoint_forward_only_to_its_compatibility_backend()
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn original_ugoira_and_truthy_fallback_modes_forward_only_to_pixiv() {
+    for (mode, expected) in [
+        (serde_json::json!("original"), "ugoira=\"original\""),
+        (serde_json::json!(["original"]), "ugoira=true"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let cfg = config(
+            root.path(),
+            serde_json::json!({"extractor":{"pixiv":{"ugoira":mode}}}),
+        );
+        for (url, supported) in [
+            ("https://www.pixiv.net/artworks/42", true),
+            ("https://www.pixivision.net/en/a/77", true),
+            ("https://www.pixiv.net/novel/show.php?id=42", false),
+            ("https://instagram.com/p/abc/", false),
+        ] {
+            let log = root.path().join("backend.log");
+            let _ = std::fs::remove_file(&log);
+            let mut command = binary(root.path(), &cfg);
+            command
+                .arg("--extractor-command")
+                .arg(backend(root.path()))
+                .env("CONFIG_TEST_LOG", &log)
+                .args(["-g", url]);
+            success(&output(&mut command).await);
+            let log = std::fs::read_to_string(log).unwrap();
+            if supported {
+                assert!(log.contains(&format!("--option\n{expected}\n")), "{log}");
+            } else {
+                assert!(!log.contains("ugoira="), "{log}");
+            }
+        }
+    }
+}

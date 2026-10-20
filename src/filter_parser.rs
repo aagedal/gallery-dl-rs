@@ -243,7 +243,14 @@ impl Lexer<'_> {
             "lambda" | "for" | "async" | "await" | "yield" | "import" | "from" | "def"
             | "class" | "del" | "global" | "nonlocal" | "pass" | "raise" | "try" | "except"
             | "while" | "with" | "as" | "assert" | "return" => return Err(syntax()),
-            name if name.starts_with('_') && name != "_url" => return Err(syntax()),
+            name if name.starts_with('_')
+                && !matches!(
+                    name,
+                    "_url" | "_ugoira_original" | "_ugoira_frame_index" | "_ugoira_frame_data"
+                ) =>
+            {
+                return Err(syntax());
+            }
             _ => Token::Name(name.into()),
         })
     }

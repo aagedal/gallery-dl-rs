@@ -413,7 +413,7 @@ impl Pixiv {
                                 state,
                             ));
                         };
-                        let mut metadata = self.illustration_metadata(&work, &id);
+                        let mut metadata = self.empty_work_metadata(&work, &id, failure.is_none());
                         metadata.search = Some(state.metadata.clone());
                         metadata.search_archive = true;
                         state.pending = VecDeque::from([

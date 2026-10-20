@@ -16,6 +16,8 @@ fn media() -> Media {
             sketch_archive: false,
             user_bookmark: None,
             bookmark_archive: false,
+            ugoira_original: None,
+            ugoira_frame_index: None,
             pixivision: None,
             pixivision_archive: false,
             user_follow: None,

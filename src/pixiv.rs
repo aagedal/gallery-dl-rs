@@ -59,6 +59,9 @@ pub use sketch::SketchMetadata;
 #[path = "pixiv_cursor.rs"]
 pub mod cursor;
 pub use cursor::BookmarkCursor;
+#[path = "pixiv_ugoira.rs"]
+pub mod ugoira;
+pub use ugoira::UgoiraMode;
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -92,7 +95,7 @@ pub fn valid_media_id(post_id: &str, media_id: &str) -> bool {
             .strip_prefix(post_id)
             .and_then(|rest| rest.strip_prefix("_p"))
             .is_some_and(|page| {
-                (1..=4).contains(&page.len())
+                (1..=5).contains(&page.len())
                     && page.bytes().all(|b| b.is_ascii_digit())
                     && (page == "0" || !page.starts_with('0'))
             })
@@ -469,7 +472,7 @@ fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
 pub(crate) fn parse_frames(value: &Value) -> Option<Arc<[UgoiraFrame]>> {
     let raw_frames = value
         .as_array()
-        .filter(|frames| !frames.is_empty() && frames.len() <= MAX_UGOIRA_FRAMES)?;
+        .filter(|frames| frames.len() <= MAX_UGOIRA_FRAMES)?;
     let frames = raw_frames
         .iter()
         .map(|frame| {
@@ -512,7 +515,9 @@ pub fn parse_ugoira(illust: &Value, bytes: &[u8]) -> Result<Vec<Media>> {
         .and_then(parse_frames)
         .ok_or_else(invalid)?;
     let mut media = parse_files(illust, &id, vec![url]);
-    media[0].metadata.as_mut().expect("Pixiv metadata").frames = Some(frames);
+    let metadata = media[0].metadata.as_mut().expect("Pixiv metadata");
+    metadata.frames = Some(frames);
+    metadata.ugoira_original = Some(false);
     Ok(media)
 }
 
@@ -767,7 +772,8 @@ pub struct Pixiv {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
-    ugoira: bool,
+    ugoira: UgoiraMode,
+    ugoira_probe_root: Option<Url>,
     include: Option<Include>,
     novel_options: NovelOptions,
     novel_extractor: Option<Arc<Pixiv>>,
@@ -848,7 +854,8 @@ impl Pixiv {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
-            ugoira: true,
+            ugoira: UgoiraMode::default(),
+            ugoira_probe_root: None,
             include: None,
             novel_options: NovelOptions::default(),
             novel_extractor: None,
@@ -886,7 +893,11 @@ impl Pixiv {
 
     /// Download animation frame ZIPs (upstream defaults to enabled).
     pub fn with_ugoira(mut self, enabled: bool) -> Self {
-        self.ugoira = enabled;
+        self.ugoira = if enabled {
+            UgoiraMode::Zip
+        } else {
+            UgoiraMode::Skip
+        };
         self
     }
 
@@ -947,6 +958,11 @@ impl Pixiv {
 
     pub fn with_cursor(mut self, cursor: Option<BookmarkCursor>) -> Self {
         self.cursor = cursor;
+        self
+    }
+
+    pub fn with_ugoira_mode(mut self, mode: UgoiraMode) -> Self {
+        self.ugoira = mode;
         self
     }
 
@@ -1054,7 +1070,7 @@ impl Pixiv {
     async fn work(&self, illust: &Value, listing: bool) -> Result<Vec<Media>> {
         let mut media = match parse_illust(illust) {
             Ok(media) => Ok(media),
-            Err(Skip::Ugoira) if !self.ugoira => Ok(Vec::new()),
+            Err(Skip::Ugoira) if !self.ugoira.enabled() => Ok(Vec::new()),
             Err(Skip::Ugoira) => {
                 let id = id_of(illust).ok_or_else(|| error("Pixiv illustration has no ID"))?;
                 let mut endpoint = self
@@ -1062,7 +1078,12 @@ impl Pixiv {
                     .join("v1/ugoira/metadata")
                     .expect("static path");
                 endpoint.query_pairs_mut().append_pair("illust_id", &id);
-                parse_ugoira(illust, &self.get(&endpoint).await?)
+                let bytes = self.get(&endpoint).await?;
+                if self.ugoira == UgoiraMode::Original {
+                    self.original_ugoira(illust, &bytes).await
+                } else {
+                    parse_ugoira(illust, &bytes)
+                }
             }
             Err(Skip::NoMedia) if listing => Ok(Vec::new()),
             Err(Skip::NoMedia) => Err(error("Pixiv illustration contains no supported media")),
@@ -1337,8 +1358,31 @@ impl Pixiv {
                     if id_of(illust).as_deref() != Some(id.as_str()) {
                         return Err(error("Pixiv returned an unexpected illustration"));
                     }
-                    let media = self.work(illust, false).await?;
-                    Ok::<_, crate::Error>(stream::iter(self.finish(media).into_iter().map(Ok)))
+                    let animation = string(illust, "type") == Some("ugoira");
+                    let (media, failure) = match self.work(illust, false).await {
+                        Ok(media) => (media, None),
+                        Err(error) if animation => (Vec::new(), Some(error)),
+                        Err(error) => return Err(error),
+                    };
+                    if media.is_empty() && animation {
+                        let metadata = self.empty_work_metadata(illust, &id, failure.is_none());
+                        let mut events = Vec::new();
+                        if let Some(error) = failure {
+                            events.push(Err(error));
+                        }
+                        events.extend([
+                            Ok(ExtractionEvent::Post(Box::new(crate::event::Post {
+                                category: "pixiv".into(),
+                                metadata: Some(metadata),
+                                count: Some(0),
+                            }))),
+                            Ok(ExtractionEvent::EndPost),
+                        ]);
+                        return Ok::<_, crate::Error>(stream::iter(events));
+                    }
+                    Ok::<_, crate::Error>(stream::iter(
+                        self.finish(media).into_iter().map(Ok).collect::<Vec<_>>(),
+                    ))
                 })
                 .map(|result| match result {
                     Ok(events) => events.boxed(),
@@ -1394,32 +1438,33 @@ impl Pixiv {
                         Ok(media) => (media, None),
                         Err(error) => (Vec::new(), Some(error)),
                     };
-                    if let Some(owner) = &state.bookmark_owner {
-                        if media.is_empty() {
-                            let Some(id) = id_of(&work) else {
-                                return Some((
-                                    Err(error(
-                                        "Pixiv bookmark contains an invalid illustration ID",
-                                    )),
-                                    Some(state),
-                                ));
-                            };
-                            let mut metadata = self.illustration_metadata(&work, &id);
+                    let animation = string(&work, "type") == Some("ugoira");
+                    if media.is_empty() && (state.bookmark_owner.is_some() || animation) {
+                        let Some(id) = id_of(&work) else {
+                            return Some((
+                                Err(error("Pixiv contains an invalid illustration ID")),
+                                Some(state),
+                            ));
+                        };
+                        let mut metadata = self.empty_work_metadata(&work, &id, failure.is_none());
+                        if let Some(owner) = &state.bookmark_owner {
                             metadata.user_bookmark = Some(owner.clone());
                             metadata.bookmark_archive = true;
-                            state.pending.extend([
-                                ExtractionEvent::Post(Box::new(crate::event::Post {
-                                    category: "pixiv".into(),
-                                    metadata: Some(metadata),
-                                    count: Some(0),
-                                })),
-                                ExtractionEvent::EndPost,
-                            ]);
-                            if let Some(error) = failure {
-                                return Some((Err(error), Some(state)));
-                            }
-                            continue;
                         }
+                        state.pending.extend([
+                            ExtractionEvent::Post(Box::new(crate::event::Post {
+                                category: "pixiv".into(),
+                                metadata: Some(metadata),
+                                count: Some(0),
+                            })),
+                            ExtractionEvent::EndPost,
+                        ]);
+                        if let Some(error) = failure {
+                            return Some((Err(error), Some(state)));
+                        }
+                        continue;
+                    }
+                    if let Some(owner) = &state.bookmark_owner {
                         for file in &mut media {
                             let metadata =
                                 file.metadata.as_mut().expect("Pixiv illustration metadata");
@@ -1703,7 +1748,6 @@ mod tests {
             );
         }
         for frames in [
-            json!([]),
             json!([{"file": "../x.jpg", "delay": 10}]),
             json!([{"file": "a\\b.jpg", "delay": 10}]),
             json!([{"file": "", "delay": 10}]),

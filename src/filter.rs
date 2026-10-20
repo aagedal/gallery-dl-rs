@@ -429,6 +429,18 @@ fn context_parts(
                 Value::List(tags.values().iter().map(json_value).collect()),
             );
         }
+        if let Some(original) = post.ugoira_original {
+            for key in ["ugoira_original", "_ugoira_original"] {
+                metadata.insert(key.into(), Value::Bool(original));
+            }
+        }
+        if let Some(index) = post.ugoira_frame_index
+            && media.is_some()
+        {
+            for key in ["ugoira_frame_index", "_ugoira_frame_index"] {
+                metadata.insert(key.into(), Value::Int(index as i128));
+            }
+        }
         if let Some(ranking) = &post.ranking {
             metadata.insert(
                 "ranking".into(),
@@ -651,6 +663,7 @@ fn context_parts(
                     })
                     .collect(),
             );
+            metadata.insert("_ugoira_frame_data".into(), frames.clone());
             metadata.insert("frames".into(), frames);
         }
         for (key, value) in [

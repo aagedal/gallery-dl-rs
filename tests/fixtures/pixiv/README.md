@@ -108,3 +108,31 @@ the source retains the complete owner object. Native tests should compare the
 implemented public owner subset rather than infer full-owner metadata parity.
 All identities, URLs, strings, dates, and private-looking markers are synthetic;
 no captured user data or credentials are included.
+
+`ugoira_original.json` records the actual `PixivWorkExtractor.items`/`works` and
+`PixivExtractor._extract_files`/`_extract_ugoira` implementations from gallery-dl
+1.32.17. The installed source path and SHA-256 match the values recorded above
+and are repeated in the fixture. Only the API's illustration/ugoira responses
+and the extractor's HEAD request were stubbed. The two source `_init` ugoira
+option expressions were evaluated without creating a session. Optional metadata
+and sanity requests were disabled. Every emitted dictionary was deep-copied;
+datetimes are serialized as naive UTC ISO text and expected filenames/archives
+use the real extractor format strings.
+
+Its 19 cases cover direct frame URL construction, preserved query suffixes,
+last-marker partitioning inside a query, JPEG/PNG/GIF HEAD selection, all HTTP
+failures retaining GIF URLs, already-exhausted network errors wrapped in the
+actual `HttpError` class, and empty frame arrays in original and ZIP modes.
+They also record absent/default, false/null/empty, unknown, and case-sensitive
+option behavior. A direct uppercase `.JPEG` source URL verifies that output
+filenames and archive extensions remain `jpeg`, rather than becoming `jpg`.
+Public frame arrays, private ugoira flags/frame indices, post
+counts, URL-derived dates, and probe order are retained exactly from the source.
+The synthetic illustration declares width 640 and height 480; source snapshots
+retain those dimensions on every emitted frame.
+The source request retry loop itself is not simulated by the completed-error
+stub. Recorded HEAD kwargs are explicit source arguments only; an initialized
+source session can additionally inherit authenticated headers. Native public
+probes intentionally exclude OAuth credentials and App API headers.
+All identities, dates, URLs, text, and metadata are synthetic. No HTTP, OAuth,
+session initialization, ZIP downloads, or frame downloads ran.

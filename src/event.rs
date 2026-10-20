@@ -191,6 +191,7 @@ impl Post {
         let mut metadata = media.first().and_then(|media| media.metadata.clone());
         if let Some(metadata) = &mut metadata {
             metadata.file = None;
+            metadata.ugoira_frame_index = None;
             metadata.media_id.clear();
             metadata.index = 0;
         }

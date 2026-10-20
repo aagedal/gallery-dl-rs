@@ -84,8 +84,8 @@ pub struct Options {
     pub user_id: Option<String>,
     /// Include Bluesky reposts in author feeds.
     pub reposts: Option<bool>,
-    /// Include Pixiv ugoira frame ZIPs.
-    pub ugoira: Option<bool>,
+    /// Select Pixiv ugoira ZIPs, individual original frames, or skip animations.
+    pub ugoira: Option<crate::pixiv::UgoiraMode>,
     /// Pixiv tag names: Japanese strings, original objects or translated strings.
     pub tags: Option<crate::pixiv::TagMode>,
     /// Initial Pixiv bookmark cursor; explicit null clears inherited values.
@@ -1264,7 +1264,7 @@ impl RawOptions {
             }
         };
         let reposts = boolean(self.reposts, "reposts")?;
-        let ugoira = boolean(self.ugoira, "ugoira")?;
+        let ugoira = self.ugoira.0.as_ref().map(crate::pixiv::UgoiraMode::parse);
         // Upstream has special behavior for exactly two strings; every other
         // present value uses Japanese names and overrides inherited settings.
         let tags = self

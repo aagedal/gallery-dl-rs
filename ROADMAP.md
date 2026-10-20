@@ -780,7 +780,15 @@ and custom-domain blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
-with ordered frame filenames/delays in metadata (`ugoira: false` skips them).
+and `ugoira: "original"` individual frames with ordered ZIP member names/delays
+in metadata (`ugoira: false` skips them). Original URL derivation, JPG/PNG/GIF
+probes, empty frame lists, file-only frame indices and exact option truthiness
+are covered by upstream vectors. Probes omit OAuth credentials and permit bounded
+same-origin redirects; cross-origin probe redirects remain unsupported. Artwork
+archive keys now include extension across all artwork contexts to separate ZIPs
+from individual frames; older keys without extensions do not suppress downloads
+under these corrected identities. Conversion and live authenticated original-frame
+verification remain unfinished.
 Public/private illustration bookmarks support user/legacy URLs, path/query tag
 filters, and own bookmarks resolved from OAuth, with lazy pagination scoped to
 the selected visibility, owner and tag. Private access still requires an account
@@ -874,7 +882,7 @@ account only after child selection. Anonymous first-photo output from the public
 2026-10-20. Live pagination/profile discovery remains unverified. Configured
 cookies, default directory layout and source `filename` template semantics remain
 unfinished.
-Remaining: ugoira original individual-frame mode and conversion,
+Remaining: ugoira conversion,
 bookmark resume-cursor diagnostics and optional metadata enrichment,
 upstream metadata options
 (`metadata`), and Referer-routed plain `i.pximg.net` links.

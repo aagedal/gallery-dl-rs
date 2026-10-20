@@ -590,17 +590,30 @@ fallbacks. Dated profile filenames use UTC dates; archives use kind, owner and
 asset date, including `none` for undated default images. Media are original `i.pximg.net` files
 (`meta_single_page`/`meta_pages`) downloaded with
 `Referer: https://app-api.pixiv.net/` (same-origin redirects only). Ugoira
-animations fetch `ugoira/metadata` lazily per work and download the frame ZIP
-(upstream's `600x600` ZIP URL is upgraded to `1920x1080`). Ordered `frames`
-metadata contains each ZIP filename and its millisecond `delay`, available in
-JSON inspection, sidecars, and filter/naming context; `ugoira: false` skips
-animations without fetching their metadata. Bookmark date selection preserves
-later newer artworks in source order. Original individual-frame mode
-and animation conversion are not implemented. `post_id`/`id` is
-the illustration ID, `media_id` `ID_pN`, `username` the account, caption the
-title plus HTML-stripped caption, with `create_date` timestamp and page-0
-width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
-is (illustration, page). Plain `i.pximg.net` links stay direct downloads and
+animations fetch `ugoira/metadata` lazily per work and default to the frame ZIP
+(upstream's `600x600` ZIP URL is upgraded to `1920x1080`). Set `ugoira: "original"`
+to download individual original frames instead. Known original URLs are derived
+directly; other forms probe JPG, PNG and GIF in order, falling back to GIF if all
+probes fail. Probes carry the App Referer without OAuth credentials and follow
+bounded same-origin redirects; cross-origin probe redirects are unsupported.
+Ordered `frames` metadata retains each ZIP member filename and millisecond
+`delay` in both modes. Filters and templates also expose `_ugoira_frame_data`,
+`ugoira_original`/`_ugoira_original`, and the file-only zero-based
+`ugoira_frame_index`/`_ugoira_frame_index`. Empty frame lists emit an empty post
+in original mode and one file in ZIP mode. Original mode permits up to 100,000
+frames with a 32 MiB aggregate URL limit. `ugoira: false` skips animations without
+fetching metadata; only the exact string `"original"` selects individual frames,
+while other values follow upstream truthiness for ZIP versus skip.
+Bookmark date selection preserves later newer artworks in source order.
+Animation conversion remains unimplemented. `post_id`/`id` is the illustration
+ID, `media_id` `ID_pN`, `username` the account, caption the title plus HTML-stripped
+caption, with `create_date` timestamp and page-0 width/height. Default filenames
+are `{id}_p{N}.{extension}`. Artwork archives include extension in ordinary,
+series, ranking, search, followed-artist, article and bookmark scopes, keeping
+ZIPs distinct from their first image frame. Older entries without an extension
+will not suppress downloads under the corrected keys; existing archives are not
+rewritten. Sketch, profile-image and novel archive identities are unchanged.
+Plain `i.pximg.net` links stay direct downloads and
 usually fail without the Referer.
 
 Native Pixiv illustrations and novels honor `max-posts` in their respective

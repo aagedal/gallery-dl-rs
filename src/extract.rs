@@ -320,6 +320,11 @@ impl Media {
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
+                let extension = self
+                    .filename
+                    .rsplit_once('.')
+                    .map(|(_, extension)| extension)
+                    .filter(|extension| valid_extension(extension));
                 if post.bookmark_archive || post.user_bookmark.is_some() {
                     let owner = post.user_bookmark.as_ref()?;
                     let extension = self.filename.rsplit_once('.')?.1;
@@ -399,8 +404,14 @@ impl Media {
                     }
                     (
                         "pixiv",
-                        serde_json::json!(["pixivision", article.id, post.post_id, post.media_id])
-                            .to_string(),
+                        serde_json::json!([
+                            "pixivision",
+                            article.id,
+                            post.post_id,
+                            post.media_id,
+                            extension?
+                        ])
+                        .to_string(),
                     )
                 } else if post.followed_archive || post.user_follow.is_some() {
                     let owner = post.user_follow.as_ref()?;
@@ -416,8 +427,14 @@ impl Media {
                     }
                     (
                         "pixiv",
-                        serde_json::json!(["followed", owner.id, post.post_id, post.media_id])
-                            .to_string(),
+                        serde_json::json!([
+                            "followed",
+                            owner.id,
+                            post.post_id,
+                            post.media_id,
+                            extension?
+                        ])
+                        .to_string(),
                     )
                 } else if post.search_archive || post.search.is_some() {
                     let search = post.search.as_ref()?;
@@ -431,8 +448,14 @@ impl Media {
                     }
                     (
                         "pixiv",
-                        serde_json::json!(["search", search.word, post.post_id, post.media_id])
-                            .to_string(),
+                        serde_json::json!([
+                            "search",
+                            search.word,
+                            post.post_id,
+                            post.media_id,
+                            extension?
+                        ])
+                        .to_string(),
                     )
                 } else if post.ranking_archive || post.ranking.is_some() {
                     let ranking = post.ranking.as_ref()?;
@@ -449,7 +472,8 @@ impl Media {
                             ranking.mode,
                             ranking.date,
                             post.post_id,
-                            post.media_id
+                            post.media_id,
+                            extension?
                         ])
                         .to_string(),
                     )
@@ -468,7 +492,7 @@ impl Media {
                     }
                     (
                         "pixiv",
-                        serde_json::json!([post.post_id, post.media_id]).to_string(),
+                        serde_json::json!([post.post_id, post.media_id, extension?]).to_string(),
                     )
                 }
             }
@@ -573,6 +597,12 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Whether ugoira output consists of original frames rather than a ZIP.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ugoira_original: Option<bool>,
+    /// Zero-based original ugoira frame number, absent on post boundaries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ugoira_frame_index: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_bookmark: Option<std::sync::Arc<crate::pixiv::FollowedUserMetadata>>,
     /// Preserve a declared bookmark scope if its owner metadata is invalid.
@@ -832,7 +862,7 @@ pub struct BackendOptions {
     pub user_id: Option<String>,
     pub api_key: Option<String>,
     pub reposts: Option<bool>,
-    pub ugoira: Option<bool>,
+    pub ugoira: Option<crate::pixiv::UgoiraMode>,
     pub tags: Option<crate::pixiv::TagMode>,
     pub cursor: Option<crate::pixiv::BookmarkCursor>,
     pub covers: Option<bool>,
@@ -1010,12 +1040,16 @@ impl Backend {
             ("reblogs", options.reblogs),
             ("original", options.original),
             ("reposts", options.reposts),
-            ("ugoira", options.ugoira),
             ("text-posts", options.text_posts),
         ] {
             if let Some(value) = value {
                 command.arg("--option").arg(format!("{name}={value}"));
             }
+        }
+        if let Some(mode) = options.ugoira {
+            command
+                .arg("--option")
+                .arg(format!("ugoira={}", mode.value()));
         }
         for (name, value) in [
             ("username", &options.username),
@@ -1316,6 +1350,7 @@ pub(crate) fn parse_post_message(message: &Value, category: &str) -> Result<crat
     let mut metadata = compatibility_metadata(data, category);
     if let Some(metadata) = &mut metadata {
         metadata.file = None;
+        metadata.ugoira_frame_index = None;
         metadata.media_id.clear();
         metadata.index = 0;
     }
@@ -1423,6 +1458,28 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
     }
     let mut normalized = compatibility_metadata(metadata, category);
     if category == "pixiv"
+        && metadata
+            .get("_ugoira_original")
+            .and_then(Value::as_bool)
+            .is_some()
+        && let Some(post) = &normalized
+        && crate::pixiv::valid_id(&post.post_id)
+        && let Some(page) = metadata.get("num").and_then(Value::as_u64).filter(|page| {
+            *page
+                < if post.ugoira_original == Some(true) {
+                    100_000
+                } else {
+                    10_000
+                }
+        })
+        && let Some(extension) = metadata
+            .get("extension")
+            .and_then(Value::as_str)
+            .filter(|extension| valid_extension(extension))
+    {
+        filename = format!("{}_p{page}.{extension}", post.post_id);
+    }
+    if category == "pixiv"
         && let Some(post) = &normalized
         && post.sketch.is_some()
         && crate::pixiv::sketch::valid_id(&post.post_id)
@@ -1443,10 +1500,13 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
         && post.series.is_some()
         && let Some(number) = post.num_series
         && crate::pixiv::valid_id(&post.post_id)
-        && let Some(page) = metadata
-            .get("num")
-            .and_then(Value::as_u64)
-            .filter(|n| *n < 10000)
+        && let Some(page) = metadata.get("num").and_then(Value::as_u64).filter(|n| {
+            *n < if metadata.get("_ugoira_original").and_then(Value::as_bool) == Some(true) {
+                100_000
+            } else {
+                10_000
+            }
+        })
         && let Some(extension) = metadata
             .get("extension")
             .and_then(Value::as_str)
@@ -1512,7 +1572,7 @@ fn decimal_id(value: &str) -> bool {
 }
 
 fn valid_extension(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 10 && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    !value.is_empty() && value.len() <= 16 && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
 /// Allowlist the public fields emitted by upstream gallery-dl extractors.
@@ -1631,7 +1691,14 @@ fn compatibility_metadata(
             let media_id = data
                 .get("num")
                 .and_then(Value::as_u64)
-                .filter(|page| *page < 10000)
+                .filter(|page| {
+                    *page
+                        < if data.get("_ugoira_original").and_then(Value::as_bool) == Some(true) {
+                            100_000
+                        } else {
+                            10_000
+                        }
+                })
                 .map(|page| format!("{post_id}_p{page}"))
                 .unwrap_or_default();
             (
@@ -1769,6 +1836,17 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        ugoira_original: (category == "pixiv")
+            .then(|| data.get("_ugoira_original").and_then(Value::as_bool))
+            .flatten(),
+        ugoira_frame_index: (category == "pixiv")
+            .then(|| {
+                data.get("_ugoira_frame_index")
+                    .and_then(Value::as_u64)
+                    .and_then(|index| usize::try_from(index).ok())
+                    .filter(|index| *index < 100_000)
+            })
+            .flatten(),
         user_bookmark: (category == "pixiv")
             .then(|| {
                 data.get("user_bookmark")

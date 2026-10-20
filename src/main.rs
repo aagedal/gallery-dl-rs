@@ -1151,7 +1151,7 @@ fn extract_input<'a>(
                                         native
                                             .with_novel_extractor(Arc::clone(novel))
                                             .with_include(options.include.clone())
-                                            .with_ugoira(options.ugoira.unwrap_or(true))
+                                            .with_ugoira_mode(options.ugoira.unwrap_or_default())
                                             .with_max_posts(options.max_posts)
                                             .with_tags(options.tags.unwrap_or_default())
                                             .with_cursor(options.cursor.clone())

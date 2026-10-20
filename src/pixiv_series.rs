@@ -238,7 +238,7 @@ impl Pixiv {
                                 state,
                             ));
                         };
-                        let mut metadata = self.illustration_metadata(&work, &id);
+                        let mut metadata = self.empty_work_metadata(&work, &id, failure.is_none());
                         metadata.series = Some(series);
                         metadata.num_series = Some(number);
                         state.pending = VecDeque::from([

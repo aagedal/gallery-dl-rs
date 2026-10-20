@@ -2017,28 +2017,27 @@ fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
 }
 
 #[test]
-fn reposts_and_ugoira_are_sparse_strict_scoped_booleans() {
+fn reposts_are_strict_booleans_and_ugoira_defaults_remain_scoped() {
+    use gallery_dl_rs::pixiv::UgoiraMode;
     let cfg = parse(r#"{"extractor":{"reposts":false,"ugoira":false,"bluesky":{"reposts":true},"pixiv":{"ugoira":true}}}"#).unwrap();
     assert_eq!(cfg.resolve("bluesky").unwrap().reposts, Some(true));
-    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(true));
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Zip));
     assert_eq!(cfg.resolve("direct").unwrap().reposts, Some(false));
     let cfg = parse(r#"{"reposts":false,"ugoira":false,"extractor":{"bluesky":{"reposts":true},"pixiv":{"ugoira":true}}}"#).unwrap();
     assert_eq!(cfg.resolve("bluesky").unwrap().reposts, Some(false));
-    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(false));
-    for key in ["reposts", "ugoira"] {
-        for value in [
-            serde_json::json!(null),
-            serde_json::json!(1),
-            serde_json::json!("private-value"),
-            serde_json::json!([]),
-        ] {
-            let error =
-                parse(&serde_json::json!({"extractor":{"bluesky":{key:value}}}).to_string())
-                    .err()
-                    .unwrap()
-                    .to_string();
-            assert!(!error.contains("private-value"));
-        }
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Skip));
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(1),
+        serde_json::json!("private-value"),
+        serde_json::json!([]),
+    ] {
+        let error =
+            parse(&serde_json::json!({"extractor":{"bluesky":{"reposts":value}}}).to_string())
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(!error.contains("private-value"));
     }
 }
 
@@ -2859,7 +2858,7 @@ fn pixiv_tag_modes_use_upstream_fallback_for_every_other_present_value() {
     let cfg = parse(r#"{"extractor":{"pixiv":{"tags":"translated","ugoira":false,"max-posts":3},"pixiv-novel":{"tags":"original","covers":true}}}"#).unwrap();
     let pixiv = cfg.resolve("pixiv").unwrap();
     assert_eq!(pixiv.tags, Some(TagMode::Translated));
-    assert_eq!(pixiv.ugoira, Some(false));
+    assert_eq!(pixiv.ugoira, Some(gallery_dl_rs::pixiv::UgoiraMode::Skip));
     assert_eq!(pixiv.max_posts, Some(3));
     let novels = cfg.resolve("pixiv-novel").unwrap();
     assert_eq!(novels.tags, Some(TagMode::Original));
@@ -2972,4 +2971,96 @@ fn pixiv_bookmark_cursor_invalid_types_and_bounds_fail_privately_in_every_scope(
     for value in ["1e10", "1.0", &"9".repeat(1025)] {
         assert!(parse(&format!(r#"{{"cursor":{value}}}"#)).is_err());
     }
+}
+
+#[test]
+fn pixiv_ugoira_modes_preserve_python_truthiness_and_discard_private_payloads() {
+    use gallery_dl_rs::pixiv::UgoiraMode;
+    use serde_json::json;
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().ugoira, None);
+    for (value, expected) in [
+        (json!(null), UgoiraMode::Skip),
+        (json!(false), UgoiraMode::Skip),
+        (json!(0), UgoiraMode::Skip),
+        (json!(0.0), UgoiraMode::Skip),
+        (json!(""), UgoiraMode::Skip),
+        (json!([]), UgoiraMode::Skip),
+        (json!({}), UgoiraMode::Skip),
+        (json!(true), UgoiraMode::Zip),
+        (json!(1), UgoiraMode::Zip),
+        (json!(-2), UgoiraMode::Zip),
+        (json!(0.5), UgoiraMode::Zip),
+        (json!("original"), UgoiraMode::Original),
+        (json!("ORIGINAL"), UgoiraMode::Zip),
+        (json!("Original"), UgoiraMode::Zip),
+        (json!("false"), UgoiraMode::Zip),
+        (json!(" "), UgoiraMode::Zip),
+        (json!("private-payload"), UgoiraMode::Zip),
+        (json!([false]), UgoiraMode::Zip),
+        (json!({"private":"payload"}), UgoiraMode::Zip),
+    ] {
+        for document in [
+            json!({"ugoira":value}),
+            json!({"extractor":{"ugoira":value}}),
+            json!({"extractor":{"pixiv":{"ugoira":value}}}),
+            json!({"extractor":{"pixiv-novel":{"ugoira":value}}}),
+        ] {
+            let config = parse(&document.to_string()).unwrap();
+            let category = if document["extractor"].get("pixiv-novel").is_some() {
+                "pixiv-novel"
+            } else {
+                "pixiv"
+            };
+            let resolved = config.resolve(category).unwrap();
+            assert_eq!(resolved.ugoira, Some(expected));
+            let debug = format!("{resolved:?}");
+            assert!(!debug.contains("private"));
+            assert!(!debug.contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_ugoira_modes_override_original_with_false_and_null_without_scope_leaks() {
+    use gallery_dl_rs::pixiv::UgoiraMode;
+    let cfg = parse(r#"{"extractor":{"ugoira":"original","pixiv":{"ugoira":false},"pixiv-novel":{"ugoira":null}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Skip));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().ugoira,
+        Some(UgoiraMode::Skip)
+    );
+    assert_eq!(
+        cfg.resolve("direct").unwrap().ugoira,
+        Some(UgoiraMode::Original)
+    );
+    let cfg = parse(r#"{"extractor":{"ugoira":true,"pixiv":{"ugoira":"original"}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.ugoira, Some(UgoiraMode::Original));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().ugoira,
+        Some(UgoiraMode::Zip)
+    );
+    assert_eq!(
+        pixiv
+            .overlay(&Options {
+                ugoira: Some(UgoiraMode::Skip),
+                ..Options::default()
+            })
+            .ugoira,
+        Some(UgoiraMode::Skip)
+    );
+    assert_eq!(
+        pixiv.overlay(&Options::default()).ugoira,
+        Some(UgoiraMode::Original)
+    );
+    let cfg = parse(r#"{"ugoira":null,"extractor":{"ugoira":"original","pixiv":{"ugoira":true}}}"#)
+        .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Skip));
+    let cfg =
+        parse(r#"{"ugoira":"original","extractor":{"ugoira":false,"pixiv":{"ugoira":null}}}"#)
+            .unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv").unwrap().ugoira,
+        Some(UgoiraMode::Original)
+    );
 }
