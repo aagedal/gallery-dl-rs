@@ -5524,3 +5524,131 @@ async fn community_text_timeline_uses_ranked_operation_and_keeps_lazy_empty_post
         }
     }
 }
+
+#[tokio::test]
+async fn bare_user_dispatch_exposes_scope_before_session_initialization() {
+    use crate::event::ExtractionEvent;
+    let native = Twitter::new(None, Duration::from_secs(3)).await.unwrap();
+    for path in [
+        "/fixture",
+        "/fixture/",
+        "/id:42",
+        "/i/user/42",
+        "/intent/user?user_id=42",
+    ] {
+        let url = Url::parse(&format!("https://x.com{path}")).unwrap();
+        let mut events = native.events(&url);
+        let ExtractionEvent::BeginChild(scope) = events.next().await.unwrap().unwrap() else {
+            panic!("bare user must dispatch before checking the session: {path}");
+        };
+        assert_eq!(scope.metadata.category(), "twitter");
+        assert_eq!(scope.metadata.subcategory(), "user");
+        assert!(scope.metadata.fields().is_empty());
+        scope.control.cancel();
+        let ExtractionEvent::EndChild(control) = events.next().await.unwrap().unwrap() else {
+            panic!("canceled dispatcher must close its child");
+        };
+        assert!(scope.control.same_scope(&control));
+        assert!(events.next().await.is_none());
+    }
+    for path in [
+        "/fixture/media",
+        "/fixture/timeline",
+        "/fixture/tweets",
+        "/fixture/likes",
+    ] {
+        let url = Url::parse(&format!("https://x.com{path}")).unwrap();
+        assert!(!timeline::is_user_dispatch(&url));
+    }
+}
+
+#[tokio::test]
+async fn user_dispatch_child_selection_rejects_before_owner_lookup() {
+    use crate::{filter::FilterExpression, job_selection::JobSelection, selection::RangeSelection};
+    let server = Server::new(vec![Response::json(user())]);
+    let native = extractor(Duration::from_secs(3)).await;
+    for selection in [
+        JobSelection {
+            child_range: Some(RangeSelection::parse("0").unwrap()),
+            ..Default::default()
+        },
+        JobSelection {
+            child_filter: Some(FilterExpression::parse("subcategory != 'user'").unwrap()),
+            ..Default::default()
+        },
+    ] {
+        let items: Vec<_> = selection
+            .apply(native.user_events(input("fixture"), server.base.clone()))
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(items.is_empty());
+        assert_eq!(server.count(), 0);
+    }
+}
+
+#[tokio::test]
+async fn user_dispatch_ranges_cancel_timeline_before_later_pages_or_search() {
+    use crate::{
+        filter::FilterExpression, job_selection::JobSelection, post_selection::PostSelection,
+        selection::RangeSelection,
+    };
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100"), tweet("99")], Some("later-page"))),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let selection = JobSelection {
+        child_filter: Some(
+            FilterExpression::parse("category == 'twitter' and subcategory == 'user'").unwrap(),
+        ),
+        child_range: Some(RangeSelection::parse("1").unwrap()),
+        post_selection: Some(PostSelection::new(
+            Some(RangeSelection::parse("1").unwrap()),
+            None,
+        )),
+        ..Default::default()
+    };
+    let items: Vec<_> = selection
+        .apply(native.user_events(input("fixture"), server.base.clone()))
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(server.count(), 2);
+    let direct = parse_response(
+        &serde_json::to_vec(&post_response(tweet("100"))).unwrap(),
+        "100",
+    )
+    .unwrap();
+    assert_eq!(items[0].archive_key(), direct[0].archive_key());
+}
+
+#[tokio::test]
+async fn explicit_timeline_is_root_and_ignores_child_selection() {
+    use crate::{
+        filter::FilterExpression, job_selection::JobSelection, post_selection::PostSelection,
+        selection::RangeSelection,
+    };
+    let server = Server::new(vec![
+        Response::json(user()),
+        Response::json(page(vec![tweet("100")], Some("later-page"))),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let selection = JobSelection {
+        child_filter: Some(FilterExpression::parse("False").unwrap()),
+        child_range: Some(RangeSelection::parse("0").unwrap()),
+        post_selection: Some(PostSelection::new(
+            Some(RangeSelection::parse("1").unwrap()),
+            None,
+        )),
+        ..Default::default()
+    };
+    let items: Vec<_> = selection
+        .apply(native.timeline_events(input("fixture"), server.base.clone()))
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(post_ids(&items), ["100"]);
+    assert_eq!(server.count(), 2);
+}

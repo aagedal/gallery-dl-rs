@@ -257,7 +257,8 @@ blocked/detached/deleted quote views are skipped, and chains stop on cycles or
 fail beyond 32 quotes. Date filters preserve later newer posts after older pins,
 reposts, or quotes. Bare profiles use the posts feed when `quoted` or
 `reposts` is true; explicit `/media` retains its media filter. Media-free posts
-are skipped. `post_id` is the underlying record key, `media_id`/`id` the blob
+are skipped. Bare profiles queue one native child job for that default feed;
+explicit feed URLs are root jobs. `post_id` is the underlying record key, `media_id`/`id` the blob
 CID, `username` the underlying handle, `caption` the post text, `timestamp`
 from `createdAt`; files carry aspect-ratio width/height, alt text and MIME type.
 Default filenames are `{post_id}_{index}.{extension}`; archive identity is
@@ -524,11 +525,12 @@ legacy inline `_1280` rewriting remains enabled. Plain media links stay direct d
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted only in the `pixiv`
-category, never echoed); without it Pixiv URLs fail before any network access.
+category, never echoed); without it selected Pixiv jobs fail before any network access.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
-`illust/detail`) and `users/ID` (illustrations then manga),
+`illust/detail`) and `users/ID` (one artworks child: illustrations then manga),
+`users/ID/artworks` (the same works as a root job),
 `users/ID/illustrations`, `users/ID/manga` (`user/illusts`, `next_url` paging
 capped at 200 pages per type). Public illustration bookmarks support
 `users/ID/bookmarks/artworks[/TAG]` and `bookmark.php[?id=ID]` through
@@ -904,6 +906,9 @@ search has no post results, traversal retries the same boundary without the
 link filter. Empty initial feeds finish without a search. One deadline,
 deduplication set, and cancellation scope cover all stages; reply/text filtering
 does not discard the continuation boundary.
+Bare user profiles queue this timeline as one native child job, matching
+upstream's default dispatcher. An explicit `/USER/timeline` or another tab URL
+is a root job; it is not filtered by child predicates.
 
 Native `/search?q=QUERY` and `/hashtag/TAG` URLs use the same lazy search engine.
 Query parameters decode once, hashtag path plus signs stay literal, duplicate
@@ -1158,7 +1163,8 @@ without echoing contents or paths. Inline `-KEY=VALUE` / `-G` options, configure
 
 `--range '2-5,8,10:20:3'` selects media positions separately for each extractor
 job. Native Kemono/Coomer collections and Discord servers reset counters for
-each child creator, post or channel; other inputs begin with one root job.
+each child creator, post or channel. Bare X, Bluesky and Pixiv profiles queue
+their default feed as one child; explicit feed URLs begin with one root job.
 Positions start at one. Hyphen endpoints are inclusive (`2-5` selects 2 through
 5); slices exclude their stop (`10:20:3` selects 10, 13, 16, 19). Comma groups
 form a union and output retains extraction order. Omitted endpoints default to
@@ -1280,8 +1286,19 @@ retain their text. Strings are limited to 64 KiB, numeric representations to
 and evaluation errors reject the child. Invalid selected identities fail before
 any request; invalid unselected identities can be skipped. Direct Discord channel
 URLs are root jobs, so child predicates do not filter their own messages.
+
+Bare X, Bluesky and Pixiv profiles also expose one child job for their default
+timeline/feed/artworks view. These dispatch queues contain only the private
+extractor marker upstream, so public child fields are empty apart from
+`category` and `subcategory` (`user`). Rejecting that child avoids owner
+resolution, session requests and Pixiv token validation/refresh. Explicit feed
+URLs remain root jobs. One child wraps the whole feed, rather than each post,
+illustration kind or fallback search stage. A reusable `event::child_job` adapter
+provides lazy construction, matching ends and cooperative cancellation of
+visible nested scopes. Media-only callers retain the same files and archive keys.
 Additional extractor queue boundaries, subcategory-specific child settings,
-full queue metadata and authenticated verification remain unfinished.
+configurable profile `include` lists, full queue metadata and authenticated
+verification remain unfinished.
 
 ## Metadata file filters
 

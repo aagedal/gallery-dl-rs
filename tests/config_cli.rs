@@ -1303,3 +1303,46 @@ async fn child_selection_forwards_to_backend_and_cli_overrides_scoped_settings()
         }
     }
 }
+
+#[tokio::test]
+async fn native_profile_child_selection_skips_requests_and_missing_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+    proxy.set_nonblocking(true).unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "proxy": format!("http://{}", proxy.local_addr().unwrap()),
+            "timeout": 1, "retries": 0
+        }}),
+    );
+    for source in [
+        "https://x.com/fixture",
+        "https://bsky.app/profile/alice.bsky.social",
+        "https://www.pixiv.net/users/9",
+    ] {
+        for option in [
+            ["--child-filter", "False"],
+            ["--child-range", "0"],
+            ["--child-range", "2"],
+        ] {
+            let result = output(
+                binary(root.path(), &cfg)
+                    .args(["--extractor", "native", "-g"])
+                    .args(option)
+                    .arg(source),
+            )
+            .await;
+            success(&result);
+            assert!(
+                result.stdout.is_empty(),
+                "{}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+            assert_eq!(
+                proxy.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        }
+    }
+}

@@ -208,6 +208,104 @@ pub enum ExtractionEvent {
     Media(Box<Media>),
     EndPost,
 }
+
+/// Queue one independent child job without starting its extractor until the
+/// consumer has seen its selection metadata. Canceling the scope drops active
+/// work and closes any visible descendant scopes before closing this child.
+pub fn child_job<'a>(
+    metadata: ChildMetadata,
+    build: impl FnOnce() -> BoxStream<'a, Result<ExtractionEvent>> + Send + 'a,
+) -> BoxStream<'a, Result<ExtractionEvent>> {
+    struct State<'a, F> {
+        metadata: Option<ChildMetadata>,
+        control: ChildControl,
+        build: Option<F>,
+        input: Option<BoxStream<'a, Result<ExtractionEvent>>>,
+        descendants: Vec<ChildControl>,
+        ended: bool,
+    }
+    impl<F> Drop for State<'_, F> {
+        fn drop(&mut self) {
+            if !self.ended {
+                self.control.cancel();
+            }
+            for control in &self.descendants {
+                control.cancel();
+            }
+        }
+    }
+    let state = State {
+        metadata: Some(metadata),
+        control: ChildControl::default(),
+        build: Some(build),
+        input: None,
+        descendants: Vec::new(),
+        ended: false,
+    };
+    futures_util::stream::unfold(state, |mut state| async move {
+        if let Some(metadata) = state.metadata.take() {
+            let scope = ChildScope {
+                control: state.control.clone(),
+                metadata,
+            };
+            return Some((Ok(ExtractionEvent::BeginChild(scope)), state));
+        }
+        loop {
+            if state.ended {
+                return None;
+            }
+            if state.control.is_cancelled() {
+                state.input = None;
+                state.build = None;
+                for control in &state.descendants {
+                    control.cancel();
+                }
+                if let Some(control) = state.descendants.pop() {
+                    return Some((Ok(ExtractionEvent::EndChild(control)), state));
+                }
+                state.ended = true;
+                return Some((Ok(ExtractionEvent::EndChild(state.control.clone())), state));
+            }
+            if let Some(build) = state.build.take() {
+                state.input = Some(build());
+            }
+            let event = state.input.as_mut().expect("active child job").next().await;
+            if state.control.is_cancelled() {
+                // A cancellation can arrive while the producer was pending.
+                // A newly returned scope has not been shown to the consumer.
+                if let Some(Ok(ExtractionEvent::BeginChild(scope))) = event {
+                    scope.control.cancel();
+                }
+                continue;
+            }
+            match event {
+                Some(event) => {
+                    match &event {
+                        Ok(ExtractionEvent::BeginChild(scope)) => {
+                            state.descendants.push(scope.control.clone());
+                        }
+                        Ok(ExtractionEvent::EndChild(control))
+                            if state
+                                .descendants
+                                .last()
+                                .is_some_and(|current| current.same_scope(control)) =>
+                        {
+                            state.descendants.pop();
+                        }
+                        _ => {}
+                    }
+                    return Some((event, state));
+                }
+                None => {
+                    state.input = None;
+                    state.ended = true;
+                    return Some((Ok(ExtractionEvent::EndChild(state.control.clone())), state));
+                }
+            }
+        }
+    })
+    .boxed()
+}
 pub fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
     let mut events = VecDeque::with_capacity(media.len() + 2);
     events.push_back(ExtractionEvent::Post(Box::new(Post::from_media(

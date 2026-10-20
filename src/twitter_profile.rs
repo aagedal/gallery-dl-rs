@@ -70,6 +70,9 @@ impl Twitter {
             Ok(None) => {}
         }
         match timeline::profile_input(url) {
+            Ok((input, _)) if timeline::is_user_dispatch(url) => {
+                self.user_events(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
+            }
             Ok((input, ProfileTab::Timeline)) => {
                 self.timeline_events(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
             }
@@ -80,6 +83,17 @@ impl Twitter {
             ),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
+    }
+
+    pub(super) fn user_events(
+        &self,
+        input: ProfileInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        event::child_job(
+            event::ChildMetadata::from_raw("twitter", "user", &serde_json::Map::new()),
+            move || self.timeline_events(input, base),
+        )
     }
 
     pub(super) fn status_events(&self, id: String) -> BoxStream<'_, Result<ExtractionEvent>> {

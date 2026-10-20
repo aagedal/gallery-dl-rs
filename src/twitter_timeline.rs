@@ -26,6 +26,15 @@ pub fn is_profile_timeline_url(url: &Url) -> bool {
     profile_input(url).is_ok()
 }
 
+/// A user dispatcher queues the default timeline; an explicit tab is a root job.
+pub(super) fn is_user_dispatch(url: &Url) -> bool {
+    let parts: Vec<_> = url.path().trim_matches('/').split('/').collect();
+    matches!(
+        parts.as_slice(),
+        [_] | ["i", "user", _] | ["intent", "user"]
+    ) && profile_input(url).is_ok()
+}
+
 #[cfg(test)]
 pub(super) fn input(url: &Url) -> Result<ProfileInput> {
     match profile_input(url)? {

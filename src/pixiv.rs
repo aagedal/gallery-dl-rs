@@ -10,7 +10,7 @@
 //! are served from `i.pximg.net`, which requires the App API `Referer` header.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ChildMetadata, ExtractionEvent, group},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -784,16 +784,30 @@ impl Pixiv {
         crate::event::media_only(self.events(url))
     }
 
-    /// Emit one post boundary per illustration; user works paginate lazily.
+    /// Bare user profiles dispatch the default artworks child; explicit views
+    /// iterate their works directly, without a child boundary per illustration.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
-            Ok(_) if self.refresh_token.is_none() => Err(missing_token()),
-            other => other,
-        };
-        let target = match target {
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
+        let path = segments(url);
+        let bare_user = matches!(path.as_slice(), ["users", _] | ["en", "users", _]);
+        if bare_user {
+            // Upstream Dispatch queues only `_extractor`, with no public
+            // child fields. Authentication belongs to the selected child.
+            return crate::event::child_job(
+                ChildMetadata::from_raw("pixiv", "user", &serde_json::Map::new()),
+                move || self.target_events(target),
+            );
+        }
+        self.target_events(target)
+    }
+
+    fn target_events(&self, target: Target) -> BoxStream<'_, Result<ExtractionEvent>> {
+        if self.refresh_token.is_none() {
+            return stream::once(async { Err(missing_token()) }).boxed();
+        }
         let (user, kinds) = match target {
             Target::Illust(id) => {
                 return stream::once(async move {
@@ -1852,6 +1866,245 @@ mod tests {
             "Pixiv returned an unexpected next page"
         );
         assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn bare_user_dispatch_boundary_precedes_token_validation_and_can_cancel_without_http() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let native = pixiv(root).with_refresh_token(None);
+        let mut events = native.events(&Url::parse("https://www.pixiv.net/en/users/9").unwrap());
+        let scope = match events.next().await.unwrap().unwrap() {
+            ExtractionEvent::BeginChild(scope) => scope,
+            event => panic!("expected dispatcher child before token validation, got {event:?}"),
+        };
+        assert_eq!(scope.metadata.category(), "pixiv");
+        assert_eq!(scope.metadata.subcategory(), "user");
+        assert!(scope.metadata.fields().is_empty());
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+        scope.control.cancel();
+        match events.next().await.unwrap().unwrap() {
+            ExtractionEvent::EndChild(control) => assert!(control.same_scope(&scope.control)),
+            event => panic!("expected cancelled child to close, got {event:?}"),
+        }
+        assert!(events.next().await.is_none());
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+    }
+
+    #[tokio::test]
+    async fn rejected_or_zero_range_bare_user_child_never_validates_token_or_authenticates() {
+        use crate::{
+            filter::FilterExpression, job_selection::JobSelection, selection::RangeSelection,
+        };
+        for token in [None, Some("unused-refresh")] {
+            for range in [false, true] {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                listener.set_nonblocking(true).unwrap();
+                let root =
+                    Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+                let native = pixiv(root).with_refresh_token(token);
+                let selection = if range {
+                    JobSelection {
+                        child_range: Some(RangeSelection::parse("0").unwrap()),
+                        ..Default::default()
+                    }
+                } else {
+                    JobSelection {
+                        child_filter: Some(FilterExpression::parse("False").unwrap()),
+                        ..Default::default()
+                    }
+                };
+                let selected = selection
+                    .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+                    .collect::<Vec<_>>()
+                    .await;
+                assert!(selected.is_empty(), "{selected:?}");
+                assert!(
+                    matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock)
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn selected_and_default_bare_user_dispatch_keep_direct_artwork_archive_ids() {
+        use crate::{
+            filter::FilterExpression, job_selection::JobSelection, selection::RangeSelection,
+        };
+        for selected in [false, true] {
+            let (root, server) = serve(vec![
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illusts": [illust(42, 2)], "next_url": null})
+                        .to_string()
+                        .as_bytes(),
+                ),
+                response("200 OK", br#"{"illusts":[],"next_url":null}"#),
+            ]);
+            let native = pixiv(root);
+            let url = Url::parse("https://www.pixiv.net/users/9").unwrap();
+            let items = if selected {
+                JobSelection {
+                    child_range: Some(RangeSelection::parse("1").unwrap()),
+                    child_filter: Some(
+                        FilterExpression::parse("category == 'pixiv' and subcategory == 'user'")
+                            .unwrap(),
+                    ),
+                    ..Default::default()
+                }
+                .apply(native.events(&url))
+                .collect::<Vec<_>>()
+                .await
+            } else {
+                native.stream(&url).collect::<Vec<_>>().await
+            };
+            let expected = parse_illust(&illust(42, 2)).unwrap();
+            assert_eq!(items.len(), expected.len());
+            for (actual, expected) in items.into_iter().zip(expected) {
+                let actual = actual.unwrap();
+                assert_eq!(actual.archive_key(), expected.archive_key());
+                assert_eq!(actual.filename, expected.filename);
+            }
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
+            assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=manga "));
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_pixiv_views_bypass_dispatch_child_predicates() {
+        use crate::{
+            filter::FilterExpression, job_selection::JobSelection, selection::RangeSelection,
+        };
+        for view in ["artworks", "illustrations", "manga", "bookmarks/artworks"] {
+            let mut responses = vec![
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illusts": [illust(42, 1)], "next_url": null})
+                        .to_string()
+                        .as_bytes(),
+                ),
+            ];
+            if view == "artworks" {
+                responses.push(response("200 OK", br#"{"illusts":[],"next_url":null}"#));
+            }
+            let (root, server) = serve(responses);
+            let native = pixiv(root);
+            let url = Url::parse(&format!("https://www.pixiv.net/users/9/{view}")).unwrap();
+            let items = JobSelection {
+                child_filter: Some(FilterExpression::parse("False").unwrap()),
+                child_range: Some(RangeSelection::parse("0").unwrap()),
+                ..Default::default()
+            }
+            .apply(native.events(&url))
+            .collect::<Vec<_>>()
+            .await;
+            assert_eq!(items.len(), 1, "{view}: {items:?}");
+            assert_eq!(items[0].as_ref().unwrap().filename, "42_p0.jpg");
+            assert_eq!(
+                server.join().unwrap().len(),
+                if view == "artworks" { 3 } else { 2 }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn bare_profile_has_one_child_for_all_works_and_explicit_view_has_none() {
+        for bare in [false, true] {
+            let (root, server) = serve(vec![
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illusts": [illust(42, 1), illust(43, 1)], "next_url": null})
+                        .to_string()
+                        .as_bytes(),
+                ),
+                response("200 OK", br#"{"illusts":[],"next_url":null}"#),
+            ]);
+            let native = pixiv(root);
+            let url = Url::parse(if bare {
+                "https://www.pixiv.net/users/9"
+            } else {
+                "https://www.pixiv.net/users/9/artworks"
+            })
+            .unwrap();
+            let events = native
+                .events(&url)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, ExtractionEvent::BeginChild(_)))
+                    .count(),
+                usize::from(bare)
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, ExtractionEvent::EndChild(_)))
+                    .count(),
+                usize::from(bare)
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, ExtractionEvent::Post(_)))
+                    .count(),
+                2
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, ExtractionEvent::Media(_)))
+                    .count(),
+                2
+            );
+            assert_eq!(server.join().unwrap().len(), 3);
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_bare_profile_validates_token_in_child_and_direct_view_stays_root_error() {
+        let native = Pixiv::new(Duration::from_secs(1)).unwrap();
+        let mut events = native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap());
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::BeginChild(_)
+        ));
+        assert!(
+            events
+                .next()
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("refresh-token")
+        );
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::EndChild(_)
+        ));
+        assert!(events.next().await.is_none());
+        let mut direct =
+            native.events(&Url::parse("https://www.pixiv.net/users/9/artworks").unwrap());
+        assert!(
+            direct
+                .next()
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("refresh-token")
+        );
+        assert!(direct.next().await.is_none());
     }
 
     #[tokio::test]

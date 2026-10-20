@@ -451,7 +451,14 @@ and live authenticated verification remain.
 
 **Implemented native child jobs and selection:** explicit BeginChild/EndChild
 boundaries with shared cancellation controls now wrap Kemono/Coomer collection
-creators/posts/servers and Discord server channels. One selection engine resets
+creators/posts/servers and Discord server channels. Bare X, Bluesky and Pixiv
+profiles now dispatch one default timeline/feed/artworks child, with explicit
+feed URLs remaining roots. A shared lazy child adapter exposes queue metadata
+before constructing the extractor, closes matching ends after errors, and drops
+active work on cooperative cancellation while unwinding visible descendants.
+The default profile queue exposes only category/user labels, matching upstream's
+private extractor marker; rejecting it avoids identity/session requests and
+Pixiv token validation/refresh. One selection engine resets
 post/file/child counters per job, applies child/file predicates before their
 ranges, preserves existing post date/filter ordering, and restores parent state
 after nested children. Finite ranges cancel only the current job and avoid later
@@ -463,8 +470,10 @@ resolved compatibility media still lack child boundary markers for Rust counters
 Tests cover nested state restoration, framing failures, depth/identity guards,
 manual cancellation, empty posts, source indices, selected-only requests,
 metadata privacy, shared server metadata and actual nested HTTP traversal.
+Profile tests also cover request-free rejection, deferred token errors, default
+feed selection, direct-view isolation and unchanged archive identities.
 Additional native queue producers, per-child/subcategory settings, parent metadata
-propagation and authenticated verification remain unfinished.
+propagation, configurable profile include lists and authenticated verification remain unfinished.
 
 **Implemented native file metadata expressions:** repeated `--filter` and scoped
 `file-filter` / `image-filter` string/list settings select normalized public fields
@@ -479,7 +488,8 @@ requests. Filters do not mutate filenames, source indices, or stable identities.
 Scoped replacement/clearing, aliases, selected-only sidecars/archives, streaming
 errors, and cancellation have CLI coverage; recorded CPython reference vectors
 exercise accepted expression semantics. Full Python syntax, integer precision,
-helpers, datetime/regex, arbitrary upstream fields, and child filters remain.
+helpers, datetime/regex and arbitrary upstream fields remain; bounded native
+child filters are described above.
 
 **Implemented file-size selection:** CLI and scoped native `filesize-min` /
 `filesize-max` settings support byte amounts and binary suffixes, inclusive

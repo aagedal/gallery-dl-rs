@@ -5,7 +5,7 @@
 //! `com.atproto.sync.getBlob`, with URLs built from validated DIDs and CIDs only.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ChildMetadata, ExtractionEvent, child_job, group},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -745,47 +745,58 @@ impl Bluesky {
                     .boxed()
             }
             Target::Feed { actor, mut feed } => {
-                if url.path().trim_matches('/').split('/').count() == 2
-                    && (self.selection.quoted || self.selection.reposts)
-                {
+                let bare = url
+                    .path_segments()
+                    .is_some_and(|segments| segments.filter(|part| !part.is_empty()).count() == 2);
+                if bare && (self.selection.quoted || self.selection.reposts) {
                     feed = Feed::Posts;
                 }
-                let state = FeedState {
-                    did: None,
-                    actor,
-                    feed,
-                    cursor: None,
-                    seen_cursors: BTreeSet::new(),
-                    pages: 0,
-                    done: false,
-                    posts: VecDeque::new(),
-                    active: None,
-                };
-                stream::unfold(Some(state), move |state| async move {
-                    let mut state = state?;
-                    loop {
-                        if let Some(active) = &mut state.active {
-                            match self.next_selected(active).await {
-                                Ok(Some(event)) => return Some((Ok(event), Some(state))),
-                                Ok(None) => state.active = None,
-                                Err(e) => return Some((Err(e), None)),
-                            }
-                        }
-                        if let Some(post) = state.posts.pop_front() {
-                            state.active = Some(SelectedState::new(post));
-                            continue;
-                        }
-                        if state.done {
-                            return None;
-                        }
-                        if let Err(e) = self.next_page(&mut state).await {
-                            return Some((Err(e), None));
-                        }
-                    }
-                })
-                .boxed()
+                if bare {
+                    return child_job(
+                        ChildMetadata::from_raw("bluesky", "user", &serde_json::Map::new()),
+                        move || self.feed_events(actor, feed),
+                    );
+                }
+                self.feed_events(actor, feed)
             }
         }
+    }
+
+    fn feed_events(&self, actor: String, feed: Feed) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let state = FeedState {
+            did: None,
+            actor,
+            feed,
+            cursor: None,
+            seen_cursors: BTreeSet::new(),
+            pages: 0,
+            done: false,
+            posts: VecDeque::new(),
+            active: None,
+        };
+        stream::unfold(Some(state), move |state| async move {
+            let mut state = state?;
+            loop {
+                if let Some(active) = &mut state.active {
+                    match self.next_selected(active).await {
+                        Ok(Some(event)) => return Some((Ok(event), Some(state))),
+                        Ok(None) => state.active = None,
+                        Err(e) => return Some((Err(e), None)),
+                    }
+                }
+                if let Some(post) = state.posts.pop_front() {
+                    state.active = Some(SelectedState::new(post));
+                    continue;
+                }
+                if state.done {
+                    return None;
+                }
+                if let Err(e) = self.next_page(&mut state).await {
+                    return Some((Err(e), None));
+                }
+            }
+        })
+        .boxed()
     }
 
     async fn request(&self, endpoint: &Url) -> Result<Vec<u8>> {
@@ -1154,6 +1165,202 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].contains("filter=posts_with_media&limit=100 "));
         assert!(requests[1].contains("&cursor=next "));
+    }
+
+    #[tokio::test]
+    async fn bare_profile_opens_an_empty_child_before_actor_resolution_and_cancels_without_http() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let root = Url::parse(&format!("http://{}/xrpc/", listener.local_addr().unwrap())).unwrap();
+        let client = bluesky(root);
+        let url = Url::parse("https://bsky.app/profile/alice.bsky.social/").unwrap();
+        let mut events = client.events(&url);
+        let ExtractionEvent::BeginChild(scope) = events.next().await.unwrap().unwrap() else {
+            panic!("missing bare-profile dispatcher child");
+        };
+        assert_eq!(scope.metadata.category(), "bluesky");
+        assert_eq!(scope.metadata.subcategory(), "user");
+        assert!(scope.metadata.fields().is_empty());
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        scope.control.cancel();
+        let ExtractionEvent::EndChild(end) = events.next().await.unwrap().unwrap() else {
+            panic!("missing canceled child end");
+        };
+        assert!(scope.control.same_scope(&end));
+        assert!(events.next().await.is_none());
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_or_empty_bare_profile_child_selection_makes_no_requests() {
+        use crate::{
+            filter::FilterExpression, job_selection::JobSelection, selection::RangeSelection,
+        };
+        for selection in [
+            JobSelection {
+                child_filter: Some(FilterExpression::parse("category == 'other'").unwrap()),
+                ..JobSelection::default()
+            },
+            JobSelection {
+                child_range: Some(RangeSelection::parse("2").unwrap()),
+                ..JobSelection::default()
+            },
+            JobSelection {
+                child_range: Some(RangeSelection::parse("").unwrap()),
+                ..JobSelection::default()
+            },
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let root =
+                Url::parse(&format!("http://{}/xrpc/", listener.local_addr().unwrap())).unwrap();
+            let client = bluesky(root).with_request_timeout(Duration::from_millis(50));
+            let url = Url::parse("https://bsky.app/profile/alice.bsky.social").unwrap();
+            let results = selection
+                .apply(client.events(&url))
+                .collect::<Vec<_>>()
+                .await;
+            assert!(results.is_empty(), "{results:?}");
+            assert_eq!(
+                listener.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_bare_profile_child_uses_upstream_default_and_keeps_direct_media_identity() {
+        use crate::{
+            filter::FilterExpression, job_selection::JobSelection, selection::RangeSelection,
+        };
+        let image_embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]});
+        let body = json!({"feed": [{"post": post("same", image_embed)}]}).to_string();
+        let resolved = json!({"did": DID}).to_string();
+        let expected = parse_post_view(&post(
+            "same",
+            json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]}),
+        ))
+        .unwrap()
+        .remove(0);
+        for (selection, suffix, filter) in [
+            (Selection::default(), "media", "posts_with_media"),
+            (
+                Selection {
+                    quoted: true,
+                    ..Selection::default()
+                },
+                "posts",
+                "posts_and_author_threads",
+            ),
+            (
+                Selection {
+                    reposts: true,
+                    ..Selection::default()
+                },
+                "posts",
+                "posts_and_author_threads",
+            ),
+        ] {
+            for input in ["".to_owned(), format!("/{suffix}")] {
+                let (root, server) = serve(vec![
+                    response("200 OK", "", resolved.as_bytes()),
+                    response("200 OK", "", body.as_bytes()),
+                ]);
+                let client = bluesky(root).with_selection(selection);
+                let url = Url::parse(&format!(
+                    "https://bsky.app/profile/alice.bsky.social{input}"
+                ))
+                .unwrap();
+                let jobs = JobSelection {
+                    child_range: Some(RangeSelection::parse("1").unwrap()),
+                    child_filter: Some(
+                        FilterExpression::parse("category == 'bluesky' and subcategory == 'user'")
+                            .unwrap(),
+                    ),
+                    ..JobSelection::default()
+                };
+                let result = jobs.apply(client.events(&url)).collect::<Vec<_>>().await;
+                assert_eq!(result.len(), 1, "{result:?}");
+                let actual = result[0].as_ref().unwrap();
+                assert_eq!(actual.archive_key(), expected.archive_key());
+                assert_eq!(actual.filename, expected.filename);
+                assert_eq!(actual.url, expected.url);
+                let requests = server.join().unwrap();
+                assert_eq!(requests.len(), 2);
+                assert!(requests[0].contains("resolveHandle?handle=alice.bsky.social "));
+                assert!(requests[1].contains(&format!("filter={filter}&limit=100 ")));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_bluesky_views_remain_roots_despite_rejected_or_empty_child_predicates() {
+        use crate::{
+            filter::FilterExpression, job_selection::JobSelection, selection::RangeSelection,
+        };
+        let embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]});
+        for suffix in ["media", "posts", "feed/chosen", "lists/chosen", "post/root"] {
+            let body = if suffix.starts_with("post/") {
+                thread("root", embed.clone())
+            } else {
+                json!({"feed": [{"post": post("root", embed.clone())}]})
+                    .to_string()
+                    .into_bytes()
+            };
+            let (root, server) = serve(vec![response("200 OK", "", &body)]);
+            let client = bluesky(root);
+            let url = Url::parse(&format!("https://bsky.app/profile/{DID}/{suffix}")).unwrap();
+            let jobs = JobSelection {
+                child_range: Some(RangeSelection::parse("").unwrap()),
+                child_filter: Some(FilterExpression::parse("category == 'other'").unwrap()),
+                ..JobSelection::default()
+            };
+            let result = jobs.apply(client.events(&url)).collect::<Vec<_>>().await;
+            assert_eq!(result.len(), 1, "{suffix}: {result:?}");
+            assert!(result[0].is_ok());
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn bare_profile_dispatches_one_job_for_all_posts_in_the_selected_feed() {
+        let body = json!({"feed": [
+            {"post": post("first", json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]}))},
+            {"post": post("second", json!({"$type": "app.bsky.embed.images", "images": [image(CID2, "")]}))}
+        ]}).to_string();
+        let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+        let client = bluesky(root);
+        let url = Url::parse(&format!("https://bsky.app/profile/{DID}")).unwrap();
+        let events = client.events(&url).collect::<Vec<_>>().await;
+        assert_eq!(events.len(), 8, "{events:?}");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Ok(ExtractionEvent::BeginChild(_))))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Ok(ExtractionEvent::EndChild(_))))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Ok(ExtractionEvent::Post(_))))
+                .count(),
+            2
+        );
+        assert_eq!(server.join().unwrap().len(), 1);
     }
 
     #[test]
