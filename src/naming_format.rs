@@ -181,13 +181,23 @@ impl Field {
 
     /// Preserve the source value for a single unformatted replacement field.
     pub(crate) fn render_value(&self, lookup: impl Fn(&str) -> Option<Value>) -> Result<Value> {
-        if self.conversion.is_none() && self.ops.is_empty() && self.spec.is_empty() {
-            Ok(self.select(lookup))
-        } else {
-            self.render_content(lookup)
-                .map(|value| value.map_or(Value::None, Value::Str))
+        // Python's outer formatter parser treats these as field delimiters
+        // even inside its single-quoted literal shorthand. Keep the existing
+        // content parser permissiveness separate from metadata identity values.
+        if self
+            .alternatives
+            .iter()
+            .any(|source| matches!(source,Source::Literal(value) if value.contains([':', '!'])))
+        {
+            return Err(error("unsupported identity literal field syntax"));
         }
+        let mut value = self.select(lookup);
+        if let Some(conversion) = self.conversion {
+            value = convert_identity(value, conversion)?;
+        }
+        apply_identity(&self.ops, &self.spec, value)
     }
+
     fn select(&self, lookup: impl Fn(&str) -> Option<Value>) -> Value {
         let mut selected = Value::None;
         for source in &self.alternatives {
@@ -329,6 +339,384 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
         },
     };
     apply(rest, spec, value)
+}
+
+/// Identity formatting uses typed operations until a specifier actually formats
+/// text. Filename/content formatting above deliberately retains its own policy.
+fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
+    let Some((op, rest)) = ops.split_first() else {
+        return if spec.is_empty() {
+            Ok(value)
+        } else {
+            format_value(&value, spec).and_then(bounded).map(Value::Str)
+        };
+    };
+    let value = match op {
+        Op::Optional { before, after } => {
+            if !value.truthy() {
+                return Ok(Value::Str(String::new()));
+            }
+            let value = apply_identity(rest, spec, value)?;
+            return bounded(format!("{before}{}{after}", identity_text(&value))).map(Value::Str);
+        }
+        Op::Limit { max, replacement } => {
+            let value = apply_identity(rest, spec, value)?;
+            let length = match &value {
+                Value::Str(v) => v.chars().count(),
+                Value::List(v) => v.len(),
+                Value::Map(v) => v.len(),
+                _ => return Err(error("template length limit requires a sized value")),
+            };
+            return Ok(if length <= *max {
+                value
+            } else {
+                Value::Str(replacement.clone())
+            });
+        }
+        Op::Join(separator) => match value {
+            Value::Str(value) => Value::Str(value),
+            Value::List(values) => {
+                let mut output = String::new();
+                for (index, value) in values.into_iter().enumerate() {
+                    let Value::Str(value) = value else {
+                        return Err(error("template join requires string elements"));
+                    };
+                    let extra = value
+                        .len()
+                        .checked_add(if index == 0 { 0 } else { separator.len() })
+                        .ok_or_else(|| error("template join exceeds supported limits"))?;
+                    if extra > MAX_TEXT - output.len() {
+                        return Err(error("template join exceeds supported limits"));
+                    }
+                    if index != 0 {
+                        output.push_str(separator);
+                    }
+                    output.push_str(&value);
+                }
+                Value::Str(output)
+            }
+            Value::Map(values) => {
+                let values = values.into_iter().map(|(key, _)| Value::Str(key)).collect();
+                return apply_identity(ops, spec, Value::List(values));
+            }
+            _ => return Err(error("template join requires an iterable value")),
+        },
+        Op::Replace { old, new } => {
+            let Value::Str(value) = value else {
+                return Err(error("template replacement requires text"));
+            };
+            let count = if old.is_empty() {
+                value.chars().count() + 1
+            } else {
+                value.matches(old.as_str()).count()
+            };
+            let length = value
+                .len()
+                .checked_sub(count.saturating_mul(old.len()))
+                .and_then(|n| n.checked_add(count.checked_mul(new.len())?))
+                .filter(|n| *n <= MAX_TEXT)
+                .ok_or_else(|| error("template replacement exceeds supported limits"))?;
+            let output = value.replace(old.as_str(), new);
+            debug_assert_eq!(length, output.len());
+            Value::Str(output)
+        }
+        Op::Arithmetic(operation, operand) => {
+            let value = if let Value::Bool(value) = value {
+                Value::Int(value.into())
+            } else {
+                value
+            };
+            match value {
+                Value::Int(value) => Value::Int(
+                    match operation {
+                        Arithmetic::Add => value.checked_add(*operand),
+                        Arithmetic::Sub => value.checked_sub(*operand),
+                        Arithmetic::Mul => value.checked_mul(*operand),
+                    }
+                    .ok_or_else(|| error("template arithmetic overflowed"))?,
+                ),
+                Value::Float(value) => {
+                    let output = match operation {
+                        Arithmetic::Add => value + *operand as f64,
+                        Arithmetic::Sub => value - *operand as f64,
+                        Arithmetic::Mul => value * *operand as f64,
+                    };
+                    if !output.is_finite() {
+                        return Err(error("template arithmetic exceeds supported limits"));
+                    }
+                    Value::Float(output)
+                }
+                Value::Str(value) if matches!(operation, Arithmetic::Mul) => {
+                    let count = usize::try_from((*operand).max(0))
+                        .map_err(|_| error("template repetition exceeds supported limits"))?;
+                    if value.len().checked_mul(count).is_none_or(|n| n > MAX_TEXT) {
+                        return Err(error("template repetition exceeds supported limits"));
+                    }
+                    Value::Str(value.repeat(count))
+                }
+                Value::List(values) if matches!(operation, Arithmetic::Mul) => {
+                    if values.is_empty() {
+                        return apply_identity(rest, spec, Value::List(values));
+                    }
+                    let count = usize::try_from((*operand).max(0))
+                        .map_err(|_| error("template repetition exceeds supported limits"))?;
+                    let bytes = values
+                        .iter()
+                        .try_fold(0usize, |total, value| {
+                            identity_size(value).and_then(|size| total.checked_add(size))
+                        })
+                        .ok_or_else(|| error("template repetition exceeds supported limits"))?;
+                    if bytes
+                        .checked_mul(count)
+                        .is_none_or(|n| n > 16 * 1024 * 1024)
+                        || values.len().checked_mul(count).is_none_or(|n| n > 100_000)
+                    {
+                        return Err(error("template repetition exceeds supported limits"));
+                    }
+                    Value::List((0..count).flat_map(|_| values.iter().cloned()).collect())
+                }
+                _ => return Err(error("template arithmetic requires compatible values")),
+            }
+        }
+        Op::Convert(conversions) => {
+            let mut value = value;
+            for conversion in conversions {
+                value = convert_identity(value, *conversion)?;
+            }
+            value
+        }
+        Op::Sort { reverse } => {
+            let mut values = match value {
+                Value::List(values) => values,
+                Value::Str(value) => value.chars().map(|c| Value::Str(c.to_string())).collect(),
+                Value::Map(values) => values.into_iter().map(|(key, _)| Value::Str(key)).collect(),
+                _ => return Err(error("template sorting requires an iterable value")),
+            };
+            if let Some(first) = values.first()
+                && values
+                    .iter()
+                    .skip(1)
+                    .any(|value| identity_cmp(first, value).is_none())
+            {
+                return Err(error("template sorting requires comparable values"));
+            }
+            values.sort_by(|a, b| {
+                let order = identity_cmp(a, b).expect("validated comparable values");
+                if *reverse { order.reverse() } else { order }
+            });
+            Value::List(values)
+        }
+        Op::Offset(offset) => {
+            let Value::Date(value) = value else {
+                return Err(error("template offsets require a date"));
+            };
+            Value::Date(
+                value
+                    .checked_add(time::Duration::seconds(offset.whole_seconds().into()))
+                    .ok_or_else(|| error("template date offset overflowed"))?,
+            )
+        }
+    };
+    apply_identity(rest, spec, value)
+}
+fn identity_size(value: &Value) -> Option<usize> {
+    match value {
+        Value::Str(value) => Some(value.len() + 1),
+        Value::List(values) => values.iter().try_fold(1usize, |total, value| {
+            total.checked_add(identity_size(value)?)
+        }),
+        Value::Map(values) => values.iter().try_fold(1usize, |total, (key, value)| {
+            total
+                .checked_add(key.len())?
+                .checked_add(identity_size(value)?)
+        }),
+        _ => Some(32),
+    }
+}
+fn identity_cmp(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
+    match (a, b) {
+        (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
+        (Value::Bool(a), b) => identity_cmp(&Value::Int((*a).into()), b),
+        (a, Value::Bool(b)) => identity_cmp(a, &Value::Int((*b).into())),
+        (Value::Int(integer), Value::Float(float)) => identity_int_float_cmp(*integer, *float),
+        (Value::Float(float), Value::Int(integer)) => {
+            identity_int_float_cmp(*integer, *float).map(std::cmp::Ordering::reverse)
+        }
+        _ => a.partial_cmp_value(b),
+    }
+}
+fn identity_int_float_cmp(integer: i128, float: f64) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+    if !float.is_finite() {
+        return None;
+    }
+    if float >= -(i128::MIN as f64) {
+        return Some(Ordering::Less);
+    }
+    if float < i128::MIN as f64 {
+        return Some(Ordering::Greater);
+    }
+    Some(match integer.cmp(&(float.trunc() as i128)) {
+        Ordering::Equal if float.fract() > 0.0 => Ordering::Less,
+        Ordering::Equal if float.fract() < 0.0 => Ordering::Greater,
+        order => order,
+    })
+}
+
+fn identity_repr(value: &Value) -> String {
+    match value {
+        Value::Date(value) => format!(
+            "datetime.datetime({}, {}, {}, {}, {}, {})",
+            value.year(),
+            u8::from(value.month()),
+            value.day(),
+            value.hour(),
+            value.minute(),
+            value.second()
+        ),
+        Value::List(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(identity_repr)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Map(values) => format!(
+            "{{{}}}",
+            values
+                .iter()
+                .map(|(key, value)| format!(
+                    "{}: {}",
+                    repr(&Value::Str(key.clone())),
+                    identity_repr(value)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        value => repr(value),
+    }
+}
+fn identity_text(value: &Value) -> String {
+    match value {
+        Value::List(_) | Value::Map(_) => identity_repr(value),
+        value => value.text(),
+    }
+}
+fn identity_json(value: &Value) -> serde_json::Value {
+    match value {
+        Value::Date(_) => serde_json::Value::String(identity_text(value)),
+        Value::List(values) => values.iter().map(identity_json).collect(),
+        Value::Map(values) => values
+            .iter()
+            .map(|(key, value)| (key.clone(), identity_json(value)))
+            .collect(),
+        value => json(value),
+    }
+}
+impl Value {
+    pub(crate) fn identity_text(&self) -> Result<String> {
+        bounded(identity_text(self))
+    }
+}
+fn parse_identity_int(text: &str) -> Option<i128> {
+    let text = text.trim();
+    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+    if digits.is_empty()
+        || digits.starts_with('_')
+        || digits.ends_with('_')
+        || digits.contains("__")
+        || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
+    {
+        return None;
+    }
+    text.replace('_', "").parse().ok()
+}
+fn identity_int(value: &Value) -> Option<i128> {
+    match value {
+        Value::Int(value) => Some(*value),
+        Value::Bool(value) => Some((*value).into()),
+        Value::Float(value)
+            if value.is_finite() && *value >= i128::MIN as f64 && *value < i128::MAX as f64 =>
+        {
+            Some(value.trunc() as i128)
+        }
+        Value::Str(value) => parse_identity_int(value),
+        _ => None,
+    }
+}
+fn convert_identity(value: Value, conversion: char) -> Result<Value> {
+    let invalid = || error("template conversion does not support this value");
+    Ok(match conversion {
+        'i' => Value::Int(identity_int(&value).ok_or_else(invalid)?),
+        'f' => {
+            let number = match value {
+                Value::Int(value) => Some(value as f64),
+                Value::Float(value) => Some(value),
+                Value::Bool(value) => Some(f64::from(value)),
+                Value::Str(value) => value.trim().parse().ok(),
+                _ => None,
+            };
+            Value::Float(number.filter(|n| n.is_finite()).ok_or_else(invalid)?)
+        }
+        's' => Value::Str(bounded(identity_text(&value))?),
+        'r' => Value::Str(bounded(identity_repr(&value))?),
+        'S' => {
+            let text = if !value.truthy() {
+                String::new()
+            } else if let Value::List(values) = value {
+                values
+                    .iter()
+                    .map(identity_text)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                identity_text(&value)
+            };
+            Value::Str(bounded(text)?)
+        }
+        'j' => {
+            let raw = serde_json::to_string(&identity_json(&value))?;
+            let mut output = String::new();
+            for c in raw.chars() {
+                if c as u32 > 0x7e {
+                    for code in c.encode_utf16(&mut [0; 2]) {
+                        output.push_str(&format!("\\u{code:04x}"));
+                    }
+                } else {
+                    output.push(c);
+                }
+                if output.len() > MAX_TEXT {
+                    return Err(error("template JSON exceeds supported limits"));
+                }
+            }
+            Value::Str(output)
+        }
+        'd' => identity_int(&value).map_or(Value::None, timestamp),
+        'D' => {
+            if !value.truthy() {
+                Value::None
+            } else {
+                match value {
+                    Value::Date(value) => Value::Date(value),
+                    Value::Str(value) => crate::date::parse_date(&value)
+                        .map_or(Value::None, |seconds| timestamp(seconds.into())),
+                    value => identity_int(&value).map_or(Value::None, timestamp),
+                }
+            }
+        }
+        'T' => Value::Str(match value {
+            Value::Date(value) => value.unix_timestamp().to_string(),
+            _ => String::new(),
+        }),
+        'l' | 'u' | 'c' | 'C' | 't' | 'g' | 'U' | 'H' | 'W' => {
+            if !matches!(value, Value::Str(_)) {
+                return Err(invalid());
+            }
+            convert(value, conversion)?
+        }
+        _ => convert(value, conversion)?,
+    })
 }
 
 impl Value {

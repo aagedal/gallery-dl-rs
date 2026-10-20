@@ -1,0 +1,1688 @@
+{
+  "version": "1.32.17",
+  "source": "Actual gallery_dl.formatter.parse(template, None, util.identity).format_map(context); only bounded safe StringFormatter conversions/specifiers.",
+  "source_sha256": "c14d011952fe7502a5af97676c629c2b5258222a0e3486ca517b2b20f231b1e3",
+  "generator": "generate_formatter_identity.py",
+  "context": {
+    "num": 7,
+    "negative": -3,
+    "fraction": 2.75,
+    "flag": true,
+    "false": false,
+    "text": " 12 ",
+    "decimal": "-2.5",
+    "bad": "bad",
+    "empty": "",
+    "none": null,
+    "word": "Cat",
+    "words": [
+      "b",
+      "a",
+      "b"
+    ],
+    "numbers": [
+      3,
+      1,
+      2
+    ],
+    "mapping": {
+      "b": 2,
+      "a": 1
+    },
+    "mixed": [
+      1,
+      "a"
+    ],
+    "unicode": "猫",
+    "date": {
+      "$datetime": "2024-01-02 03:04:05"
+    },
+    "ties": [
+      1,
+      true,
+      1.0,
+      2
+    ],
+    "large_numbers": [
+      9007199254740993,
+      9007199254740992.0,
+      9007199254740992,
+      9007199254740994.0
+    ]
+  },
+  "cases": [
+    {
+      "template": "",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "x{bad!S}y",
+      "type": "str",
+      "value": "xbady"
+    },
+    {
+      "template": "x{bad!f}y",
+      "error": "ValueError"
+    },
+    {
+      "template": "x{bad!i}y",
+      "error": "ValueError"
+    },
+    {
+      "template": "x{bad!r}y",
+      "type": "str",
+      "value": "x'bad'y"
+    },
+    {
+      "template": "x{bad!s}y",
+      "type": "str",
+      "value": "xbady"
+    },
+    {
+      "template": "x{bad}y",
+      "type": "str",
+      "value": "xbady"
+    },
+    {
+      "template": "x{date!S}y",
+      "type": "str",
+      "value": "x2024-01-02 03:04:05y"
+    },
+    {
+      "template": "x{date!f}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{date!i}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{date!j}y",
+      "type": "str",
+      "value": "x\"2024-01-02 03:04:05\"y"
+    },
+    {
+      "template": "x{date!r}y",
+      "type": "str",
+      "value": "xdatetime.datetime(2024, 1, 2, 3, 4, 5)y"
+    },
+    {
+      "template": "x{date!s}y",
+      "type": "str",
+      "value": "x2024-01-02 03:04:05y"
+    },
+    {
+      "template": "x{date}y",
+      "type": "str",
+      "value": "x2024-01-02 03:04:05y"
+    },
+    {
+      "template": "x{decimal!S}y",
+      "type": "str",
+      "value": "x-2.5y"
+    },
+    {
+      "template": "x{decimal!f}y",
+      "type": "str",
+      "value": "x-2.5y"
+    },
+    {
+      "template": "x{decimal!i}y",
+      "error": "ValueError"
+    },
+    {
+      "template": "x{decimal!r}y",
+      "type": "str",
+      "value": "x'-2.5'y"
+    },
+    {
+      "template": "x{decimal!s}y",
+      "type": "str",
+      "value": "x-2.5y"
+    },
+    {
+      "template": "x{decimal}y",
+      "type": "str",
+      "value": "x-2.5y"
+    },
+    {
+      "template": "x{empty!S}y",
+      "type": "str",
+      "value": "xy"
+    },
+    {
+      "template": "x{empty!f}y",
+      "error": "ValueError"
+    },
+    {
+      "template": "x{empty!i}y",
+      "error": "ValueError"
+    },
+    {
+      "template": "x{empty!r}y",
+      "type": "str",
+      "value": "x''y"
+    },
+    {
+      "template": "x{empty!s}y",
+      "type": "str",
+      "value": "xy"
+    },
+    {
+      "template": "x{empty}y",
+      "type": "str",
+      "value": "xy"
+    },
+    {
+      "template": "x{false!S}y",
+      "type": "str",
+      "value": "xy"
+    },
+    {
+      "template": "x{false!f}y",
+      "type": "str",
+      "value": "x0.0y"
+    },
+    {
+      "template": "x{false!i}y",
+      "type": "str",
+      "value": "x0y"
+    },
+    {
+      "template": "x{false!r}y",
+      "type": "str",
+      "value": "xFalsey"
+    },
+    {
+      "template": "x{false!s}y",
+      "type": "str",
+      "value": "xFalsey"
+    },
+    {
+      "template": "x{false}y",
+      "type": "str",
+      "value": "xFalsey"
+    },
+    {
+      "template": "x{flag!S}y",
+      "type": "str",
+      "value": "xTruey"
+    },
+    {
+      "template": "x{flag!f}y",
+      "type": "str",
+      "value": "x1.0y"
+    },
+    {
+      "template": "x{flag!i}y",
+      "type": "str",
+      "value": "x1y"
+    },
+    {
+      "template": "x{flag!r}y",
+      "type": "str",
+      "value": "xTruey"
+    },
+    {
+      "template": "x{flag!s}y",
+      "type": "str",
+      "value": "xTruey"
+    },
+    {
+      "template": "x{flag:A*2/}y",
+      "type": "str",
+      "value": "x2y"
+    },
+    {
+      "template": "x{flag:A+3/}y",
+      "type": "str",
+      "value": "x4y"
+    },
+    {
+      "template": "x{flag:A-2/}y",
+      "type": "str",
+      "value": "x-1y"
+    },
+    {
+      "template": "x{flag}y",
+      "type": "str",
+      "value": "xTruey"
+    },
+    {
+      "template": "x{fraction!S}y",
+      "type": "str",
+      "value": "x2.75y"
+    },
+    {
+      "template": "x{fraction!f}y",
+      "type": "str",
+      "value": "x2.75y"
+    },
+    {
+      "template": "x{fraction!i}y",
+      "type": "str",
+      "value": "x2y"
+    },
+    {
+      "template": "x{fraction!r}y",
+      "type": "str",
+      "value": "x2.75y"
+    },
+    {
+      "template": "x{fraction!s}y",
+      "type": "str",
+      "value": "x2.75y"
+    },
+    {
+      "template": "x{fraction:A*2/}y",
+      "type": "str",
+      "value": "x5.5y"
+    },
+    {
+      "template": "x{fraction:A+3/}y",
+      "type": "str",
+      "value": "x5.75y"
+    },
+    {
+      "template": "x{fraction:A-2/}y",
+      "type": "str",
+      "value": "x0.75y"
+    },
+    {
+      "template": "x{fraction}y",
+      "type": "str",
+      "value": "x2.75y"
+    },
+    {
+      "template": "x{large_numbers}y",
+      "type": "str",
+      "value": "x[9007199254740993, 9007199254740992.0, 9007199254740992, 9007199254740994.0]y"
+    },
+    {
+      "template": "x{mapping}y",
+      "type": "str",
+      "value": "x{'b': 2, 'a': 1}y"
+    },
+    {
+      "template": "x{missing!S}y",
+      "type": "str",
+      "value": "xy"
+    },
+    {
+      "template": "x{missing!f}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{missing!i}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{missing!r}y",
+      "type": "str",
+      "value": "xNoney"
+    },
+    {
+      "template": "x{missing!s}y",
+      "type": "str",
+      "value": "xNoney"
+    },
+    {
+      "template": "x{missing:A*2/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{missing:A+3/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{missing:A-2/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{missing}y",
+      "type": "str",
+      "value": "xNoney"
+    },
+    {
+      "template": "x{mixed}y",
+      "type": "str",
+      "value": "x[1, 'a']y"
+    },
+    {
+      "template": "x{negative}y",
+      "type": "str",
+      "value": "x-3y"
+    },
+    {
+      "template": "x{none!S}y",
+      "type": "str",
+      "value": "xy"
+    },
+    {
+      "template": "x{none!f}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{none!i}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{none!r}y",
+      "type": "str",
+      "value": "xNoney"
+    },
+    {
+      "template": "x{none!s}y",
+      "type": "str",
+      "value": "xNoney"
+    },
+    {
+      "template": "x{none:A*2/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{none:A+3/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{none:A-2/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{none}y",
+      "type": "str",
+      "value": "xNoney"
+    },
+    {
+      "template": "x{num!S}y",
+      "type": "str",
+      "value": "x7y"
+    },
+    {
+      "template": "x{num!f}y",
+      "type": "str",
+      "value": "x7.0y"
+    },
+    {
+      "template": "x{num!i}y",
+      "type": "str",
+      "value": "x7y"
+    },
+    {
+      "template": "x{num!r}y",
+      "type": "str",
+      "value": "x7y"
+    },
+    {
+      "template": "x{num!s}y",
+      "type": "str",
+      "value": "x7y"
+    },
+    {
+      "template": "x{num:A*2/}y",
+      "type": "str",
+      "value": "x14y"
+    },
+    {
+      "template": "x{num:A+3/}y",
+      "type": "str",
+      "value": "x10y"
+    },
+    {
+      "template": "x{num:A-2/}y",
+      "type": "str",
+      "value": "x5y"
+    },
+    {
+      "template": "x{numbers!S}y",
+      "type": "str",
+      "value": "x3, 1, 2y"
+    },
+    {
+      "template": "x{numbers!f}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{numbers!i}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{numbers!r}y",
+      "type": "str",
+      "value": "x[3, 1, 2]y"
+    },
+    {
+      "template": "x{numbers!s}y",
+      "type": "str",
+      "value": "x[3, 1, 2]y"
+    },
+    {
+      "template": "x{numbers:A*2/}y",
+      "type": "str",
+      "value": "x[3, 1, 2, 3, 1, 2]y"
+    },
+    {
+      "template": "x{numbers:A+3/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{numbers:A-2/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{numbers}y",
+      "type": "str",
+      "value": "x[3, 1, 2]y"
+    },
+    {
+      "template": "x{num}y",
+      "type": "str",
+      "value": "x7y"
+    },
+    {
+      "template": "x{text!S}y",
+      "type": "str",
+      "value": "x 12 y"
+    },
+    {
+      "template": "x{text!f}y",
+      "type": "str",
+      "value": "x12.0y"
+    },
+    {
+      "template": "x{text!i}y",
+      "type": "str",
+      "value": "x12y"
+    },
+    {
+      "template": "x{text!r}y",
+      "type": "str",
+      "value": "x' 12 'y"
+    },
+    {
+      "template": "x{text!s}y",
+      "type": "str",
+      "value": "x 12 y"
+    },
+    {
+      "template": "x{text:A*2/}y",
+      "type": "str",
+      "value": "x 12  12 y"
+    },
+    {
+      "template": "x{text:A+3/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{text:A-2/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{text}y",
+      "type": "str",
+      "value": "x 12 y"
+    },
+    {
+      "template": "x{ties}y",
+      "type": "str",
+      "value": "x[1, True, 1.0, 2]y"
+    },
+    {
+      "template": "x{unicode}y",
+      "type": "str",
+      "value": "x猫y"
+    },
+    {
+      "template": "x{word:A*2/}y",
+      "type": "str",
+      "value": "xCatCaty"
+    },
+    {
+      "template": "x{word:A+3/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{word:A-2/}y",
+      "error": "TypeError"
+    },
+    {
+      "template": "x{words}y",
+      "type": "str",
+      "value": "x['b', 'a', 'b']y"
+    },
+    {
+      "template": "x{word}y",
+      "type": "str",
+      "value": "xCaty"
+    },
+    {
+      "template": "{'2024-01-02T03:04:05Z'!D}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{bad!S}",
+      "type": "str",
+      "value": "bad"
+    },
+    {
+      "template": "{bad!d}",
+      "type": "NullDatetime",
+      "value": {
+        "$datetime": "[Invalid DateTime]"
+      }
+    },
+    {
+      "template": "{bad!f}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{bad!i}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{bad!r}",
+      "type": "str",
+      "value": "'bad'"
+    },
+    {
+      "template": "{bad!s}",
+      "type": "str",
+      "value": "bad"
+    },
+    {
+      "template": "{bad}",
+      "type": "str",
+      "value": "bad"
+    },
+    {
+      "template": "{date!D}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "2024-01-02 03:04:05"
+      }
+    },
+    {
+      "template": "{date!S}",
+      "type": "str",
+      "value": "2024-01-02 03:04:05"
+    },
+    {
+      "template": "{date!T}",
+      "type": "str",
+      "value": "1704164645"
+    },
+    {
+      "template": "{date!f}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{date!i}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{date!j}",
+      "type": "str",
+      "value": "\"2024-01-02 03:04:05\""
+    },
+    {
+      "template": "{date!r}",
+      "type": "str",
+      "value": "datetime.datetime(2024, 1, 2, 3, 4, 5)"
+    },
+    {
+      "template": "{date!s}",
+      "type": "str",
+      "value": "2024-01-02 03:04:05"
+    },
+    {
+      "template": "{date:%Y-%m-%d}",
+      "type": "str",
+      "value": "2024-01-02"
+    },
+    {
+      "template": "{date:O+02:00/%H:%M}",
+      "type": "str",
+      "value": "05:04"
+    },
+    {
+      "template": "{date:O+02:00/}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "2024-01-02 05:04:05"
+      }
+    },
+    {
+      "template": "{date:O-01:30/}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "2024-01-02 01:34:05"
+      }
+    },
+    {
+      "template": "{date}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "2024-01-02 03:04:05"
+      }
+    },
+    {
+      "template": "{decimal!S}",
+      "type": "str",
+      "value": "-2.5"
+    },
+    {
+      "template": "{decimal!f}",
+      "type": "float",
+      "value": -2.5
+    },
+    {
+      "template": "{decimal!i}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{decimal!r}",
+      "type": "str",
+      "value": "'-2.5'"
+    },
+    {
+      "template": "{decimal!s}",
+      "type": "str",
+      "value": "-2.5"
+    },
+    {
+      "template": "{decimal}",
+      "type": "str",
+      "value": "-2.5"
+    },
+    {
+      "template": "{empty!S}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{empty!f}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{empty!i}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{empty!r}",
+      "type": "str",
+      "value": "''"
+    },
+    {
+      "template": "{empty!s}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{empty:?before/after/}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{empty:Cf/}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{empty:Ci/}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{empty:Cs/}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{empty:R/x/}",
+      "type": "str",
+      "value": "x"
+    },
+    {
+      "template": "{empty:Ra/x/}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{empty}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{false!S}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{false!f}",
+      "type": "float",
+      "value": 0.0
+    },
+    {
+      "template": "{false!i}",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "template": "{false!r}",
+      "type": "str",
+      "value": "False"
+    },
+    {
+      "template": "{false!s}",
+      "type": "str",
+      "value": "False"
+    },
+    {
+      "template": "{false:S/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{false}",
+      "type": "bool",
+      "value": false
+    },
+    {
+      "template": "{flag!S}",
+      "type": "str",
+      "value": "True"
+    },
+    {
+      "template": "{flag!f}",
+      "type": "float",
+      "value": 1.0
+    },
+    {
+      "template": "{flag!i}",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "template": "{flag!r}",
+      "type": "str",
+      "value": "True"
+    },
+    {
+      "template": "{flag!s}",
+      "type": "str",
+      "value": "True"
+    },
+    {
+      "template": "{flag:A*2/}",
+      "type": "int",
+      "value": 2
+    },
+    {
+      "template": "{flag:A+3/}",
+      "type": "int",
+      "value": 4
+    },
+    {
+      "template": "{flag:A-2/}",
+      "type": "int",
+      "value": -1
+    },
+    {
+      "template": "{flag}",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "template": "{fraction!S}",
+      "type": "str",
+      "value": "2.75"
+    },
+    {
+      "template": "{fraction!d}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "1970-01-01 00:00:02"
+      }
+    },
+    {
+      "template": "{fraction!f}",
+      "type": "float",
+      "value": 2.75
+    },
+    {
+      "template": "{fraction!i}",
+      "type": "int",
+      "value": 2
+    },
+    {
+      "template": "{fraction!r}",
+      "type": "str",
+      "value": "2.75"
+    },
+    {
+      "template": "{fraction!s}",
+      "type": "str",
+      "value": "2.75"
+    },
+    {
+      "template": "{fraction:.1f}",
+      "type": "str",
+      "value": "2.8"
+    },
+    {
+      "template": "{fraction:A*2/}",
+      "type": "float",
+      "value": 5.5
+    },
+    {
+      "template": "{fraction:A+3/}",
+      "type": "float",
+      "value": 5.75
+    },
+    {
+      "template": "{fraction:A-2/}",
+      "type": "float",
+      "value": 0.75
+    },
+    {
+      "template": "{fraction}",
+      "type": "float",
+      "value": 2.75
+    },
+    {
+      "template": "{large_numbers:J,/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{large_numbers:L3/long/}",
+      "type": "str",
+      "value": "long"
+    },
+    {
+      "template": "{large_numbers:S/}",
+      "type": "list",
+      "value": [
+        9007199254740992.0,
+        9007199254740992,
+        9007199254740993,
+        9007199254740994.0
+      ]
+    },
+    {
+      "template": "{large_numbers:Sr/}",
+      "type": "list",
+      "value": [
+        9007199254740994.0,
+        9007199254740993,
+        9007199254740992.0,
+        9007199254740992
+      ]
+    },
+    {
+      "template": "{large_numbers}",
+      "type": "list",
+      "value": [
+        9007199254740993,
+        9007199254740992.0,
+        9007199254740992,
+        9007199254740994.0
+      ]
+    },
+    {
+      "template": "{mapping!j}",
+      "type": "str",
+      "value": "{\"b\":2,\"a\":1}"
+    },
+    {
+      "template": "{mapping:J,/}",
+      "type": "str",
+      "value": "b,a"
+    },
+    {
+      "template": "{mapping:L3/long/}",
+      "type": "dict",
+      "value": {
+        "b": 2,
+        "a": 1
+      }
+    },
+    {
+      "template": "{mapping:S/}",
+      "type": "list",
+      "value": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "template": "{mapping:Sr/}",
+      "type": "list",
+      "value": [
+        "b",
+        "a"
+      ]
+    },
+    {
+      "template": "{mapping}",
+      "type": "dict",
+      "value": {
+        "b": 2,
+        "a": 1
+      }
+    },
+    {
+      "template": "{missing!S}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{missing!f}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing!i}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing!l}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing!r}",
+      "type": "str",
+      "value": "None"
+    },
+    {
+      "template": "{missing!s}",
+      "type": "str",
+      "value": "None"
+    },
+    {
+      "template": "{missing!t}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing!u}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:03}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:A*2/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:A+3/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:A-2/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:J,/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:L3/long/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:S/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing:Sr/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{missing}",
+      "type": "NoneType",
+      "value": null
+    },
+    {
+      "template": "{mixed:J,/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{mixed:L3/long/}",
+      "type": "list",
+      "value": [
+        1,
+        "a"
+      ]
+    },
+    {
+      "template": "{mixed:S/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{mixed:Sr/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{mixed}",
+      "type": "list",
+      "value": [
+        1,
+        "a"
+      ]
+    },
+    {
+      "template": "{negative!d}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "1969-12-31 23:59:57"
+      }
+    },
+    {
+      "template": "{negative}",
+      "type": "int",
+      "value": -3
+    },
+    {
+      "template": "{none!S}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{none!d}",
+      "type": "NullDatetime",
+      "value": {
+        "$datetime": "[Invalid DateTime]"
+      }
+    },
+    {
+      "template": "{none!f}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none!i}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none!j}",
+      "type": "str",
+      "value": "null"
+    },
+    {
+      "template": "{none!l}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none!r}",
+      "type": "str",
+      "value": "None"
+    },
+    {
+      "template": "{none!s:?before/after/}",
+      "type": "str",
+      "value": "beforeNoneafter"
+    },
+    {
+      "template": "{none!s}",
+      "type": "str",
+      "value": "None"
+    },
+    {
+      "template": "{none!t}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none!u}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:03}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:?before/after/}",
+      "type": "str",
+      "value": ""
+    },
+    {
+      "template": "{none:A*2/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:A+3/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:A-2/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:Cf/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:Ci/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:Cs/}",
+      "type": "str",
+      "value": "None"
+    },
+    {
+      "template": "{none:J,/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:L3/long/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:R/x/}",
+      "error": "AttributeError"
+    },
+    {
+      "template": "{none:Ra/x/}",
+      "error": "AttributeError"
+    },
+    {
+      "template": "{none:S/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none:Sr/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{none}",
+      "type": "NoneType",
+      "value": null
+    },
+    {
+      "template": "{num!S}",
+      "type": "str",
+      "value": "7"
+    },
+    {
+      "template": "{num!d}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "1970-01-01 00:00:07"
+      }
+    },
+    {
+      "template": "{num!f}",
+      "type": "float",
+      "value": 7.0
+    },
+    {
+      "template": "{num!i:03}",
+      "type": "str",
+      "value": "007"
+    },
+    {
+      "template": "{num!i}",
+      "type": "int",
+      "value": 7
+    },
+    {
+      "template": "{num!l}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{num!r}",
+      "type": "str",
+      "value": "7"
+    },
+    {
+      "template": "{num!s}",
+      "type": "str",
+      "value": "7"
+    },
+    {
+      "template": "{num!t}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{num!u}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{num:03}",
+      "type": "str",
+      "value": "007"
+    },
+    {
+      "template": "{num:?before/after/}",
+      "type": "str",
+      "value": "before7after"
+    },
+    {
+      "template": "{num:A*2/Cf/}",
+      "type": "float",
+      "value": 14.0
+    },
+    {
+      "template": "{num:A*2/}",
+      "type": "int",
+      "value": 14
+    },
+    {
+      "template": "{num:A+3/04}",
+      "type": "str",
+      "value": "0010"
+    },
+    {
+      "template": "{num:A+3/}",
+      "type": "int",
+      "value": 10
+    },
+    {
+      "template": "{num:A-2/}",
+      "type": "int",
+      "value": 5
+    },
+    {
+      "template": "{num:Cf/}",
+      "type": "float",
+      "value": 7.0
+    },
+    {
+      "template": "{num:Ci/}",
+      "type": "int",
+      "value": 7
+    },
+    {
+      "template": "{num:Cs/}",
+      "type": "str",
+      "value": "7"
+    },
+    {
+      "template": "{num:R/x/}",
+      "error": "AttributeError"
+    },
+    {
+      "template": "{num:Ra/x/}",
+      "error": "AttributeError"
+    },
+    {
+      "template": "{numbers!S}",
+      "type": "str",
+      "value": "3, 1, 2"
+    },
+    {
+      "template": "{numbers!f}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{numbers!i}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{numbers!j}",
+      "type": "str",
+      "value": "[3,1,2]"
+    },
+    {
+      "template": "{numbers!r}",
+      "type": "str",
+      "value": "[3, 1, 2]"
+    },
+    {
+      "template": "{numbers!s}",
+      "type": "str",
+      "value": "[3, 1, 2]"
+    },
+    {
+      "template": "{numbers:A*2/}",
+      "type": "list",
+      "value": [
+        3,
+        1,
+        2,
+        3,
+        1,
+        2
+      ]
+    },
+    {
+      "template": "{numbers:A+3/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{numbers:A-2/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{numbers:J,/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{numbers:L3/long/}",
+      "type": "list",
+      "value": [
+        3,
+        1,
+        2
+      ]
+    },
+    {
+      "template": "{numbers:L5/long/}",
+      "type": "list",
+      "value": [
+        3,
+        1,
+        2
+      ]
+    },
+    {
+      "template": "{numbers:S/}",
+      "type": "list",
+      "value": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "template": "{numbers:Sr/}",
+      "type": "list",
+      "value": [
+        3,
+        2,
+        1
+      ]
+    },
+    {
+      "template": "{numbers}",
+      "type": "list",
+      "value": [
+        3,
+        1,
+        2
+      ]
+    },
+    {
+      "template": "{num}",
+      "type": "int",
+      "value": 7
+    },
+    {
+      "template": "{text!S}",
+      "type": "str",
+      "value": " 12 "
+    },
+    {
+      "template": "{text!d}",
+      "type": "datetime",
+      "value": {
+        "$datetime": "1970-01-01 00:00:12"
+      }
+    },
+    {
+      "template": "{text!f}",
+      "type": "float",
+      "value": 12.0
+    },
+    {
+      "template": "{text!i:A+1/}",
+      "type": "int",
+      "value": 13
+    },
+    {
+      "template": "{text!i}",
+      "type": "int",
+      "value": 12
+    },
+    {
+      "template": "{text!r}",
+      "type": "str",
+      "value": "' 12 '"
+    },
+    {
+      "template": "{text!s}",
+      "type": "str",
+      "value": " 12 "
+    },
+    {
+      "template": "{text:A*2/}",
+      "type": "str",
+      "value": " 12  12 "
+    },
+    {
+      "template": "{text:A+3/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{text:A-2/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{text}",
+      "type": "str",
+      "value": " 12 "
+    },
+    {
+      "template": "{ties:J,/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{ties:L3/long/}",
+      "type": "str",
+      "value": "long"
+    },
+    {
+      "template": "{ties:S/}",
+      "type": "list",
+      "value": [
+        1,
+        true,
+        1.0,
+        2
+      ]
+    },
+    {
+      "template": "{ties:Sr/}",
+      "type": "list",
+      "value": [
+        2,
+        1,
+        true,
+        1.0
+      ]
+    },
+    {
+      "template": "{ties}",
+      "type": "list",
+      "value": [
+        1,
+        true,
+        1.0,
+        2
+      ]
+    },
+    {
+      "template": "{unicode!j}",
+      "type": "str",
+      "value": "\"\\u732b\""
+    },
+    {
+      "template": "{unicode}",
+      "type": "str",
+      "value": "猫"
+    },
+    {
+      "template": "{word!l}",
+      "type": "str",
+      "value": "cat"
+    },
+    {
+      "template": "{word!t}",
+      "type": "str",
+      "value": "Cat"
+    },
+    {
+      "template": "{word!u}",
+      "type": "str",
+      "value": "CAT"
+    },
+    {
+      "template": "{word:>8}",
+      "type": "str",
+      "value": "     Cat"
+    },
+    {
+      "template": "{word:?before/after/}",
+      "type": "str",
+      "value": "beforeCatafter"
+    },
+    {
+      "template": "{word:A*2/}",
+      "type": "str",
+      "value": "CatCat"
+    },
+    {
+      "template": "{word:A+3/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{word:A-2/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{word:Cf/}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{word:Ci/}",
+      "error": "ValueError"
+    },
+    {
+      "template": "{word:Cs/}",
+      "type": "str",
+      "value": "Cat"
+    },
+    {
+      "template": "{word:J,/}",
+      "type": "str",
+      "value": "Cat"
+    },
+    {
+      "template": "{word:L3/long/}",
+      "type": "str",
+      "value": "Cat"
+    },
+    {
+      "template": "{word:R/x/}",
+      "type": "str",
+      "value": "xCxaxtx"
+    },
+    {
+      "template": "{word:Ra/x/}",
+      "type": "str",
+      "value": "Cxt"
+    },
+    {
+      "template": "{word:S/}",
+      "type": "list",
+      "value": [
+        "C",
+        "a",
+        "t"
+      ]
+    },
+    {
+      "template": "{word:Sr/}",
+      "type": "list",
+      "value": [
+        "t",
+        "a",
+        "C"
+      ]
+    },
+    {
+      "template": "{words!j}",
+      "type": "str",
+      "value": "[\"b\",\"a\",\"b\"]"
+    },
+    {
+      "template": "{words:?before/after/}",
+      "type": "str",
+      "value": "before['b', 'a', 'b']after"
+    },
+    {
+      "template": "{words:Cf/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{words:Ci/}",
+      "error": "TypeError"
+    },
+    {
+      "template": "{words:Cs/}",
+      "type": "str",
+      "value": "['b', 'a', 'b']"
+    },
+    {
+      "template": "{words:J,/}",
+      "type": "str",
+      "value": "b,a,b"
+    },
+    {
+      "template": "{words:L3/long/}",
+      "type": "list",
+      "value": [
+        "b",
+        "a",
+        "b"
+      ]
+    },
+    {
+      "template": "{words:R/x/}",
+      "error": "AttributeError"
+    },
+    {
+      "template": "{words:Ra/x/}",
+      "error": "AttributeError"
+    },
+    {
+      "template": "{words:S/J-/}",
+      "type": "str",
+      "value": "a-b-b"
+    },
+    {
+      "template": "{words:S/}",
+      "type": "list",
+      "value": [
+        "a",
+        "b",
+        "b"
+      ]
+    },
+    {
+      "template": "{words:Sr/}",
+      "type": "list",
+      "value": [
+        "b",
+        "b",
+        "a"
+      ]
+    },
+    {
+      "template": "{words}",
+      "type": "list",
+      "value": [
+        "b",
+        "a",
+        "b"
+      ]
+    },
+    {
+      "template": "{word}",
+      "type": "str",
+      "value": "Cat"
+    },
+    {
+      "template": "{{escaped}}",
+      "type": "str",
+      "value": "{escaped}"
+    }
+  ]
+}

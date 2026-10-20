@@ -1960,6 +1960,13 @@ text overwrite/append/exclusive open modes. UTF-8 and ASCII encodings are
 supported. Ordinary sidecars are atomic; append records are serialized across
 concurrent downloads. Metadata processors export the native keyword context,
 including the media URL; `--write-metadata` retains its separate versioned schema.
+For `modify`, a single replacement field retains its value type after supported
+conversions and operators: `{value!i}` produces an integer, `{num:A+10/}`
+performs numeric arithmetic, and `{items:S/}` produces a sorted list. An
+explicit format such as `{num:03}`
+produces text; mixed literal/field templates stringify their field results.
+Invalid field assignments leave the previous keyword value in place. Numeric
+results can feed later producer increments and processor filters.
 
 `mtime` uses `key: "date"` by default, or a `value` template. File mode updates
 the completed file's modification time. `target: "directory"` (also `dir`)

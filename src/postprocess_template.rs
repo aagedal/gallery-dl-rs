@@ -109,7 +109,23 @@ impl Template {
             let context = convert_context(context)?;
             json_value(field.render_value(|name| context.get(name).cloned())?)
         } else {
-            self.render(context).map(Value::String)
+            let context = convert_context(context)?;
+            let mut output = String::new();
+            for part in &self.parts {
+                let text = match part {
+                    Part::Text(text) => text.clone(),
+                    Part::Field(field) => field
+                        .render_value(|name| context.get(name).cloned())?
+                        .identity_text()?,
+                };
+                if text.len() > MAX_OUTPUT - output.len() {
+                    return Err(error(
+                        "postprocessor template output exceeds the size limit",
+                    ));
+                }
+                output.push_str(&text);
+            }
+            Ok(Value::String(output))
         }
     }
 }
@@ -228,6 +244,83 @@ fn json_value(value: FormatValue) -> Result<Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn genuine_source_identity_matrix_preserves_types_and_field_error_semantics() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/postprocessors/formatter_identity.json"
+        ))
+        .unwrap();
+        let mut context = fixture["context"].as_object().unwrap().clone();
+        for value in context.values_mut() {
+            if let Some(date) = value.get("$datetime").and_then(Value::as_str) {
+                *value = Value::String(date.into());
+            }
+        }
+        let mut differences = Vec::new();
+        for case in fixture["cases"].as_array().unwrap() {
+            let source = case["template"].as_str().unwrap();
+            let result =
+                Template::parse(source).and_then(|template| template.render_value(&context));
+            let correct = if case.get("error").is_some() {
+                result.is_err()
+            } else {
+                match case["type"].as_str().unwrap() {
+                    // JSON contexts have no runtime datetime/sentinel type.
+                    // A valid date retains an ISO representation and timestamp;
+                    // upstream's false NullDatetime sentinel maps to null.
+                    "datetime" => {
+                        let expected = parse_date(case["value"]["$datetime"].as_str().unwrap())
+                            .unwrap()
+                            .unix_timestamp();
+                        result
+                            .as_ref()
+                            .ok()
+                            .and_then(Value::as_str)
+                            .and_then(|value| parse_date(value).ok())
+                            .map(|date| date.unix_timestamp())
+                            == Some(expected)
+                            && Template::parse(source)
+                                .ok()
+                                .and_then(|template| template.timestamp(&context))
+                                == Some(expected)
+                    }
+                    "NullDatetime" => result.as_ref().ok() == Some(&Value::Null),
+                    _ => result.as_ref().ok() == Some(&case["value"]),
+                }
+            };
+            if !correct {
+                differences.push(format!("{source:?}: expected {case}, got {result:?}"));
+            }
+        }
+        assert!(differences.is_empty(), "{}", differences.join("\n"));
+    }
+    #[test]
+    fn identity_repeat_and_conversion_bounds_fail_without_unbounded_allocations() {
+        let context = json!({"items":[],"num":7,"word":"a","numbers":[1,2]});
+        let context = context.as_object().unwrap();
+        assert_eq!(
+            Template::parse("{items:A*1000000000000/}")
+                .unwrap()
+                .render_value(context)
+                .unwrap(),
+            json!([])
+        );
+        for source in [
+            "{word:A*1000000000000/}",
+            "{numbers:A*1000000000000/}",
+            "{num:A*170141183460469231731687303715884105727/}",
+            "{'1e999'!f}",
+        ] {
+            assert!(
+                Template::parse(source)
+                    .unwrap()
+                    .render_value(context)
+                    .is_err(),
+                "{source}"
+            );
+        }
+    }
     #[test]
     fn source_identity_mixed_missing_and_arbitrary_fields() {
         let context = json!({"x":[1,2],"custom":{"n":7},"empty":false});

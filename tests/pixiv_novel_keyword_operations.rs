@@ -119,8 +119,8 @@ fn native(root: &Url, token: &str) -> Pixiv {
 }
 fn processors(root: &Path) -> Arc<Postprocessors> {
     let mut options = vec![
-        json!({"name":"metadata","mode":"modify","event":"post","fields":{"num":"{counter}","suffix":"post-suffix","caption":"post-caption"}}),
-        json!({"name":"metadata","mode":"modify","event":"file","filter":"extension == 'txt'","fields":{"num":"{counter_after}","suffix":"file-suffix"}}),
+        json!({"name":"metadata","mode":"modify","event":"post","fields":{"num":"{counter!i}","suffix":"post-suffix","caption":"post-caption"}}),
+        json!({"name":"metadata","mode":"modify","event":"file","filter":"extension == 'txt'","fields":{"num":"{num:A+10/}","suffix":"file-suffix"}}),
         json!({"name":"metadata","mode":"delete","event":"file","filter":"extension == 'txt'","fields":["caption"]}),
     ];
     for hook in ["prepare", "after", "child", "child-after", "post-after"] {
@@ -128,10 +128,10 @@ fn processors(root: &Path) -> Arc<Postprocessors> {
             .push(json!({"name":"metadata","mode":"modify","event":hook,"fields":{"phase":hook}}));
         options.push(json!({"name":"metadata","mode":"jsonl","event":hook,"base-directory":root,"directory":[],"filename":"trace.jsonl","extension":"jsonl","include":["phase","num","suffix","extension","date_url","caption"]}));
         if hook == "child" {
-            options.push(json!({"name":"metadata","mode":"modify","event":"child","fields":{"num":"{counter_child}","suffix":"child-suffix","date_url":"child-hook"}}));
+            options.push(json!({"name":"metadata","mode":"modify","event":"child","fields":{"num":"{counter_child!i}","suffix":"child-suffix","date_url":"child-hook"}}));
         }
         if hook == "child-after" {
-            options.push(json!({"name":"metadata","mode":"modify","event":"child-after","fields":{"num":"{counter_after_child}","suffix":"after-child","date_url":"after-child-date"}}));
+            options.push(json!({"name":"metadata","mode":"modify","event":"child-after","fields":{"num":"{num:A+10/}","suffix":"after-child","date_url":"after-child-date"}}));
         }
     }
     Arc::new(Postprocessors::new(

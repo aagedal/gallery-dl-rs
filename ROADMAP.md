@@ -1102,15 +1102,40 @@ Raw native indices and archive identities remain separate from these live writes
 Child-after failures now retain partial keyword mutations through post-after and
 error finalization, including premature child stream completion. A recorded
 DownloadJob/MetadataPP ASCII-write failure verifies the retained keywords.
+Metadata modify formatting now preserves typed results after supported
+conversions/operators, stringifies mixed templates, and retains values on field
+errors. A generated 321-case source matrix covers numeric arithmetic, lists, sorting,
+format specs, dates and errors; native dates retain JSON representations rather
+than Python runtime datetime/sentinel objects. Novel runtime fixtures exercise
+conversion/arithmetic results through later file and child counter increments.
 Keyword-driven pre-download selection and request/text-fetch changes remain open.
 Remaining: processor archive
-databases, additional encodings/open modes and formatter dialects (including
-typed numeric conversion/operator expressions), arbitrary
-native filename fields, keyword-driven archive identity and pre-download selection changes, further
+databases, additional encodings/open modes and formatter dialects, Unicode
+decimal/underscore-float parsing, nested-container sorting, runtime Python
+datetime/sentinel object identity, arbitrary native filename fields,
+keyword-driven archive identity and pre-download selection changes, further
 cross-processor hook parity, further producer policies and framing, nested alias
 identity, additional counter policies and mutation-driven request URLs/text
 fetches, remaining temporary-path behavior, and
 other processor types.
+
+**Next processor archive step (source audit, gallery-dl 1.32.17):** implement
+SQLite metadata archives separately from the native download archive schema.
+Writing modes JSON/tags/custom/JSONL need source `archive(entry)` tables,
+producer category/extractor archive-format descriptors, and per-job sessions
+created before init hooks. Defaults use category + `_MD_` + extractor format;
+explicit table/prefix/format values have distinct default and empty semantics.
+Resolve path-list/table templates against initial Directory keywords. Check
+before destination/path/skip/render side effects and preserve `_archive_metadata`
+for add; existing-file skips add nothing, while empty completed output adds.
+Modify/delete/stdout initialize and close sessions but bypass checks/additions;
+hash/mtime/ugoira have no such generic archive. Preserve connection reuse/pragma
+semantics, immediate row commits through later failures, and unconditional close
+after active work drains. Source fixtures must cover outcomes, key/path defaults,
+instance isolation, cancellation/concurrency, and Python SQLite interoperability.
+PostgreSQL remains a separate missing backend. See upstream
+`postprocessor/common.py:24`, `postprocessor/metadata.py:111`, `archive.py:19`,
+and `job.py:817` for initialization and lifecycle order.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the
