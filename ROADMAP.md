@@ -321,6 +321,16 @@ private diagnostics, scope/CLI precedence, environment disabling, and resume
 separation after user-agent changes. SOCKS, proxy bypass rules, and TLS/browser
 impersonation remain.
 
+**Implemented shared input budgets:** every CLI extraction now has one cumulative
+active deadline spanning initialization, all pages/children, token lookups,
+retries, and events later discarded by filters. Downloader/consumer pauses do
+not consume it. Exhaustion drops the input and active HTTP request futures;
+owned compatibility processes terminate. Firefox imports check cancellation
+before starting and interrupt active SQLite scans, including nonmatching-row
+scans beyond output limits. Virtual-clock tests cover accounting and filtered
+errors; local HTTP tests cover later-page cancellation/connection closure, and
+browser tests cover queued, active and idle-interrupt-race cleanup.
+
 ## 3. Large collections and reliable archives
 
 Stream extraction into a bounded work queue; add pagination, stable site/post/media
@@ -520,9 +530,12 @@ to true; false preserves animated GIFs while leaving native video unchanged.
 Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
-Safebooru posts and tag searches, plus Danbooru/e621 pools. Remaining: API
-key/login credentials, favorites/popular/artist views, Gelbooru pools, notes,
-`tags`/`metadata` options, and file-size/rating metadata.
+Safebooru posts and tag searches, plus Danbooru/e621 pools. Danbooru/e621 support
+API-only username/password Basic authentication and Gelbooru supports API-only
+user-id/api-key credentials, with same-origin redirects and no credentials in
+media metadata. API-reported file size, rating and signed score are exposed.
+Remaining: favorites/popular/artist views, Gelbooru pools, notes,
+`tags`/`metadata` options, per-category tags and authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
@@ -558,11 +571,14 @@ JS-paginated gallery pages beyond the server-rendered listing.
 **Implemented experimental native Tumblr:** blog listings, single posts and
 tagged listings via API v2 with an overridable `api-key`, original-image token
 resolution for capped photos and modern inline images, legacy inline `_1280`
-rewriting, and GIFV download fallbacks. Failed token lookups fall back to the
+rewriting, GIFV download fallbacks, and `reblogs` (boolean/`same-blog`), `posts`
+(legacy type selection), `inline` (boolean/`reblog`/`original`) and `original`
+settings. Single-post URLs bypass the `posts` filter, matching upstream.
+Failed token lookups fall back to the
 API rendition; upstream's delayed token refresh retries remain unimplemented.
 Remaining: OAuth and private/dashboard blogs, likes/search/day views, NPF posts,
-external audio/video, `reblogs`/`posts`/`inline`/`external`/`original`/
-`fallback-delay` options, and custom-domain blogs.
+external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
+and custom-domain blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
@@ -762,9 +778,21 @@ format selection, completed-path publication, and the segmented-download/merge
 fixture suite. Direct HTTP fallback URLs now execute through the shared downloader;
 opaque `_ytdl_*` options still await the companion adapter.
 
-The inspected local yt-dlp-rs prototype exposes `YoutubeDl`, `VideoInfo`,
-`VideoFormat`, and an `Extractor` interface for direct media and limited HTML5
-pages. It does not yet implement HLS/DASH, cookies, or FFmpeg postprocessing.
-Those are prerequisites for the corresponding video handoffs, not functionality
-that gallery-dl-rs can currently advertise. No companion dependency or runtime
-delegation is enabled yet.
+**Companion audit, 2026-10-20:** the old main checkout was stale. Published
+[yt-dlp-rs main at `10223c019ef6ec5552627b90251d8e967404e440`](https://github.com/aagedal/yt-dlp-rs/tree/10223c019ef6ec5552627b90251d8e967404e440)
+already implements HLS VOD, static single-period DASH, AES-128 HLS, scoped
+cookies, FFmpeg merging, progress/cooperative transfer cancellation, and
+completed-path results. Its public APIs and fixture coverage were inspected;
+that revision has not been independently compiled as a gallery dependency.
+No tags or GitHub releases existed at audit time. The immutable commit is a
+reproducible preview candidate, not a stable released adapter contract.
+
+Remaining public API requirements: inline manifest data plus its base URL;
+configurable request/connect timeouts (published defaults are hard-coded);
+cancellation during extraction; scope-preserving session cookie sharing; and
+request-specific sensitive headers that do not follow unrelated segment/key
+origins. Manifest parsers are private, and the companion's cookie jar is a
+different concrete type. Global default headers cannot replace the required
+scoped request boundary. Do not discard inline manifests or flatten cookies
+to make a preview adapter appear complete. No companion dependency or runtime
+delegation is enabled yet; gallery-owned integration/publication tests remain.

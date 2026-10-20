@@ -59,6 +59,13 @@ pub struct Options {
     pub mp4: Option<bool>,
     /// Include Mastodon reblogs and their original attachments.
     pub reblogs: Option<bool>,
+    pub tumblr_reblogs: Option<crate::tumblr::Reblogs>,
+    pub posts: Option<Vec<String>>,
+    pub inline: Option<crate::tumblr::Inline>,
+    pub original: Option<bool>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub user_id: Option<String>,
     /// Include Bluesky reposts in author feeds.
     pub reposts: Option<bool>,
     /// Include Pixiv ugoira frame ZIPs.
@@ -130,8 +137,27 @@ impl std::fmt::Debug for Options {
 }
 
 impl Options {
+    pub fn tumblr_selection(&self) -> crate::tumblr::Selection {
+        crate::tumblr::Selection {
+            reblogs: self.tumblr_reblogs.unwrap_or_else(|| {
+                if self.reblogs == Some(false) {
+                    crate::tumblr::Reblogs::OriginalOnly
+                } else {
+                    crate::tumblr::Reblogs::All
+                }
+            }),
+            posts: self.posts.as_ref().and_then(|types| {
+                (types.as_slice() != ["all"]).then(|| types.iter().cloned().collect())
+            }),
+            inline: self.inline.unwrap_or_default(),
+            original: self.original.unwrap_or(true),
+        }
+    }
+
     /// Return a copy with every present field in `overrides` taking precedence.
     /// This can apply explicit CLI values after configuration resolution.
+    /// Reblog fields are one setting; an explicit Tumblr mode takes precedence
+    /// when a programmatic override supplies both representations.
     pub fn overlay(&self, overrides: &Self) -> Self {
         Self {
             base_directory: overrides
@@ -175,7 +201,24 @@ impl Options {
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
             mp4: overrides.mp4.or(self.mp4),
-            reblogs: overrides.reblogs.or(self.reblogs),
+            reblogs: if overrides.tumblr_reblogs.is_some() {
+                None
+            } else {
+                overrides.reblogs.or(self.reblogs)
+            },
+            tumblr_reblogs: if overrides.tumblr_reblogs.is_some() {
+                overrides.tumblr_reblogs
+            } else if overrides.reblogs.is_some() {
+                None
+            } else {
+                self.tumblr_reblogs
+            },
+            posts: overrides.posts.clone().or_else(|| self.posts.clone()),
+            inline: overrides.inline.or(self.inline),
+            original: overrides.original.or(self.original),
+            username: overrides.username.clone().or_else(|| self.username.clone()),
+            password: overrides.password.clone().or_else(|| self.password.clone()),
+            user_id: overrides.user_id.clone().or_else(|| self.user_id.clone()),
             reposts: overrides.reposts.or(self.reposts),
             ugoira: overrides.ugoira.or(self.ugoira),
             access_token: overrides
@@ -286,6 +329,9 @@ struct RawRoot {
     previews: Field,
     mp4: Field,
     reblogs: Field,
+    posts: Field,
+    inline: Field,
+    original: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -338,6 +384,9 @@ struct RawExtractor {
     previews: Field,
     mp4: Field,
     reblogs: Field,
+    posts: Field,
+    inline: Field,
+    original: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -422,6 +471,9 @@ struct RawOptions {
     previews: Field,
     mp4: Field,
     reblogs: Field,
+    posts: Field,
+    inline: Field,
+    original: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -443,6 +495,9 @@ struct RawOptions {
     search_limit: Field,
     search_stop: Field,
     api_key: Field,
+    username: Field,
+    password: Field,
+    user_id: Field,
     access_token: Field,
     refresh_token: Field,
     client_id: Field,
@@ -578,6 +633,9 @@ impl Config {
             previews: root.previews,
             mp4: root.mp4,
             reblogs: root.reblogs,
+            posts: root.posts,
+            inline: root.inline,
+            original: root.original,
             reposts: root.reposts,
             ugoira: root.ugoira,
             text_posts: root.text_posts,
@@ -599,6 +657,9 @@ impl Config {
             search_limit: root.search_limit,
             search_stop: root.search_stop,
             api_key: Field::default(),
+            username: Field::default(),
+            password: Field::default(),
+            user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
             client_id: Field::default(),
@@ -633,6 +694,9 @@ impl Config {
             previews: extractor.previews,
             mp4: extractor.mp4,
             reblogs: extractor.reblogs,
+            posts: extractor.posts,
+            inline: extractor.inline,
+            original: extractor.original,
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
             text_posts: extractor.text_posts,
@@ -654,6 +718,9 @@ impl Config {
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
             api_key: Field::default(),
+            username: Field::default(),
+            password: Field::default(),
+            user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
             client_id: Field::default(),
@@ -706,13 +773,42 @@ impl Config {
         ] {
             if !matches!(
                 name,
-                "tumblr" | "flickr" | "wallhaven" | "weasyl" | "pixeldrain"
+                "tumblr" | "flickr" | "wallhaven" | "weasyl" | "pixeldrain" | "gelbooru"
             ) && settings.api_key.0.is_some()
             {
                 return Err(error(
-                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl and pixeldrain",
+                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain and gelbooru",
                 ));
             }
+            if !matches!(name, "danbooru" | "e621")
+                && (settings.username.0.is_some() || settings.password.0.is_some())
+            {
+                return Err(error(
+                    "native configuration username/password are only supported for danbooru and e621",
+                ));
+            }
+            if name != "gelbooru" && settings.user_id.0.is_some() {
+                return Err(error(
+                    "native configuration user-id is only supported for gelbooru",
+                ));
+            }
+            let tumblr_reblogs = if name == "tumblr" {
+                match settings.reblogs.0.take() {
+                    None => None,
+                    Some(Value::Bool(true)) => Some(crate::tumblr::Reblogs::All),
+                    Some(Value::Bool(false)) => Some(crate::tumblr::Reblogs::OriginalOnly),
+                    Some(Value::String(value)) if value == "same-blog" => {
+                        Some(crate::tumblr::Reblogs::SameBlog)
+                    }
+                    Some(_) => {
+                        return Err(error(
+                            "native configuration Tumblr reblogs must be a boolean or same-blog",
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
             if !matches!(name, "mastodon.social" | "pawoo" | "baraag")
                 && settings.access_token.0.is_some()
             {
@@ -732,7 +828,7 @@ impl Config {
                     "native configuration client-id and client-secret are only supported for deviantart",
                 ));
             }
-            let pixeldrain_key = if name == "pixeldrain" {
+            let opaque_key = if matches!(name, "pixeldrain" | "gelbooru") {
                 match settings.api_key.0.take() {
                     None => None,
                     Some(Value::String(key))
@@ -742,7 +838,7 @@ impl Config {
                     }
                     Some(_) => {
                         return Err(error(
-                            "native configuration Pixeldrain api-key must contain at most 4096 printable ASCII characters without spaces",
+                            "native configuration api-key must contain at most 4096 printable ASCII characters without spaces",
                         ));
                     }
                 }
@@ -751,9 +847,10 @@ impl Config {
             };
             // Boxed: unoptimized builds overflow the stack with inline settings.
             let mut resolved = (*settings).resolve(directory)?;
-            if name == "pixeldrain" {
-                resolved.api_key = pixeldrain_key;
+            if matches!(name, "pixeldrain" | "gelbooru") {
+                resolved.api_key = opaque_key;
             }
+            resolved.tumblr_reblogs = tumblr_reblogs;
             categories.insert(name.into(), resolved);
         }
         Ok(Self {
@@ -870,6 +967,43 @@ impl RawOptions {
         };
         let mp4 = boolean(self.mp4, "mp4")?;
         let reblogs = boolean(self.reblogs, "reblogs")?;
+        let posts = tumblr_posts(self.posts)?;
+        let original = boolean(self.original, "original")?;
+        let inline = match self.inline.0 {
+            None => None,
+            Some(Value::Bool(true)) => Some(crate::tumblr::Inline::All),
+            Some(Value::Bool(false)) => Some(crate::tumblr::Inline::Disabled),
+            Some(Value::String(value)) if value == "reblog" => Some(crate::tumblr::Inline::Reblog),
+            Some(Value::String(value)) if value == "original" => {
+                Some(crate::tumblr::Inline::Original)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration inline must be a boolean, reblog or original",
+                ));
+            }
+        };
+        let username = private_string(self.username, "username", 256, true)?;
+        let password = private_string(self.password, "password", 4096, false)?;
+        let user_id = match self.user_id.0 {
+            None => None,
+            Some(Value::String(value))
+                if value.is_empty()
+                    || (value.len() <= 20
+                        && value.bytes().all(|b| b.is_ascii_digit())
+                        && value.bytes().any(|b| b != b'0')) =>
+            {
+                Some(value)
+            }
+            Some(Value::Number(value)) if value.as_u64().is_some_and(|n| n > 0) => {
+                Some(value.to_string())
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration user-id must be a positive decimal ID or empty string",
+                ));
+            }
+        };
         let reposts = boolean(self.reposts, "reposts")?;
         let ugoira = boolean(self.ugoira, "ugoira")?;
         let access_token = match self.access_token.0 {
@@ -1243,6 +1377,13 @@ impl RawOptions {
             previews,
             mp4,
             reblogs,
+            tumblr_reblogs: None,
+            posts,
+            inline,
+            original,
+            username,
+            password,
+            user_id,
             reposts,
             ugoira,
             access_token,
@@ -1515,4 +1656,46 @@ fn boolean(field: Field, name: &str) -> Result<Option<bool>> {
             "native configuration {name} must be a boolean"
         ))),
     }
+}
+
+fn private_string(field: Field, name: &str, max: usize, username: bool) -> Result<Option<String>> {
+    match field.0 {
+        None => Ok(None),
+        Some(Value::String(value))
+            if value.len() <= max
+                && !value.chars().any(char::is_control)
+                && !(username && value.contains(':')) =>
+        {
+            Ok(Some(value))
+        }
+        Some(_) => Err(error(format!(
+            "native configuration {name} must be a bounded string without control characters"
+        ))),
+    }
+}
+
+fn tumblr_posts(field: Field) -> Result<Option<Vec<String>>> {
+    let invalid =
+        || error("native configuration posts must be all, false, or supported Tumblr post types");
+    let types = match field.0 {
+        None => return Ok(None),
+        Some(Value::String(value)) if value == "all" => return Ok(Some(vec![value])),
+        Some(Value::Bool(false)) => Vec::new(),
+        Some(Value::String(value)) if value.len() <= 1024 => {
+            if value.is_empty() {
+                Vec::new()
+            } else {
+                value.split(',').map(|s| s.trim().to_owned()).collect()
+            }
+        }
+        Some(Value::Array(values)) if values.len() <= 64 => values
+            .into_iter()
+            .map(|value| value.as_str().map(str::to_owned).ok_or_else(invalid))
+            .collect::<Result<Vec<_>>>()?,
+        _ => return Err(invalid()),
+    };
+    crate::tumblr::Selection::default()
+        .with_posts(types.clone())
+        .map_err(|_| invalid())?;
+    Ok(Some(types))
 }

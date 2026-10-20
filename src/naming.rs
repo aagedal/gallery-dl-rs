@@ -53,6 +53,9 @@ const FIELDS: &[&str] = &[
     "id",
     "metadata",
     "frames",
+    "rating",
+    "score",
+    "filesize",
 ];
 
 #[derive(Clone, Debug)]

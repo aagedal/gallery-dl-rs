@@ -317,6 +317,12 @@ fn context_parts(
                     .map_or(Value::None, |value| Value::Int(value.into())),
             ),
         ]);
+        if let Some(rating) = &post.rating {
+            metadata.insert("rating".into(), text(rating.clone()));
+        }
+        if let Some(score) = post.score {
+            metadata.insert("score".into(), Value::Int(score.into()));
+        }
         if let Some(frames) = &post.frames {
             let frames = Value::List(
                 frames
@@ -436,6 +442,7 @@ fn context_parts(
                 ("width_original", file.width_original),
                 ("height_original", file.height_original),
                 ("bitrate", file.bitrate),
+                ("filesize", file.filesize),
             ] {
                 if let Some(value) = value {
                     fields.insert(key.into(), Value::Int(value.into()));

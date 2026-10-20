@@ -238,6 +238,8 @@ mod tests {
             metadata: Some(PostMetadata {
                 file: None,
                 frames: None,
+                rating: None,
+                score: None,
                 community: None,
                 community_archive: false,
                 retweet_id: None,

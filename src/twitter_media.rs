@@ -269,6 +269,7 @@ fn entity_metadata(item: &Value, preview: bool, bitrate: Option<u64>) -> FileMet
             })
             .flatten(),
         bitrate: if preview { None } else { bitrate },
+        filesize: None,
         media_type: Some(Arc::from(if preview {
             "preview"
         } else {

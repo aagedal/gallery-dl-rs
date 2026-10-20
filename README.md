@@ -287,9 +287,15 @@ restricted) are skipped, and files are accepted only from the site's own HTTPS
 CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
 space-separated tag string, `username` the uploader name when the API provides
 one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{extension}`;
-archive identity is (category, post ID). File size, rating, score and per-category
-tags are not exposed. No API keys or logins are sent, so Gelbooru may refuse
-unauthenticated API requests and restricted content stays hidden. Plain CDN file
+archive identity is (category, post ID). API-reported file size is exposed as
+`filesize`; `rating` and signed `score` are available to post filters and filename
+templates (e621 uses `score.total`). Per-category tags are not yet exposed.
+Danbooru/e621 accept category-scoped `username` and `password` (the account's API
+key) for HTTP Basic authentication. Gelbooru accepts category-scoped `user-id` and
+`api-key`; both must be nonempty to authenticate. Credentials are sent only to the
+API origin, never attached to media requests or public JSON, and redirects to
+another origin are refused. Authentication can expose posts hidden from public
+API requests; posts without usable file URLs are still skipped. Plain CDN file
 links stay direct downloads.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
@@ -380,7 +386,14 @@ Tumblr's `s99999x99999` HTML token page. Legacy inline image sizes become
 configured network settings and timeouts without API credentials. Failed
 token lookups retain the API rendition as a download fallback; upstream's
 delayed token refresh retries are not implemented. Archive identities remain
-stable across refreshed tokens. Plain media links stay direct downloads.
+stable across refreshed tokens. Selection options include `reblogs` (boolean or
+`"same-blog"`, requiring the reblog root to belong to the current blog), `posts`
+(`"all"`, a comma-separated string or list of legacy post types, or false/empty
+selection to disable listings), `inline`
+(boolean or `"reblog"` for the comment, `"original"` for the original tree with
+comment fallback), and `original` (boolean, default true). Single-post URLs
+ignore `posts`, matching upstream. Disabling `original` avoids token lookups;
+legacy inline `_1280` rewriting remains enabled. Plain media links stay direct downloads.
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted only in the `pixiv`
@@ -432,7 +445,7 @@ the title, with `published_time` and width/height. Default filenames are
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
 uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`, never
+`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`, never
 echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
 `photos.getSizes`: "Original" or the largest photo; videos pick the best
 stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
@@ -1255,13 +1268,15 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `file-filter`, `image-filter`, `post-range`, `post-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
-`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `text-posts`,
+`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
-Site-specific media options affect their respective extractors. API credentials
+Site-specific media options affect their respective extractors. Booru
+`username`/`password` and Gelbooru `user-id` are category-scoped credentials;
+API keys also forward to the selected compatibility extractor. API credentials
 are accepted only in the documented category scopes. Mastodon instance scopes
 inherit `extractor.mastodon` before applying their own overrides. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
@@ -1318,7 +1333,10 @@ unimplemented.
   stderr drains concurrently while retaining only its final 8 KiB for diagnostics.
   Compatibility `--extraction-timeout` counts cumulative active reading/parsing
   and process-wait time; pauses caused by full download capacity do not count.
-  Native extraction retains its overall per-input deadline.
+  Native extraction uses the same cumulative per-input budget across initialization,
+  pages, token/quote lookups, retries and discarded events. Consumer pauses are
+  excluded. Exhaustion drops active request futures and owned compatibility
+  processes; Firefox cookie import scans are interrupted as well.
 - Media bodies stream to disk with bounded download concurrency. Each completed
   file is published from a temporary file without overwriting an existing file.
 - `--resume` retains partial direct HTTP media in a hidden `.gallery-dl-rs`

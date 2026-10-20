@@ -18,6 +18,9 @@ pub struct FileMetadata {
     pub duration: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bitrate: Option<u64>,
+    /// Declared file size in bytes; actual download limits use received bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filesize: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<Arc<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,6 +73,11 @@ pub(crate) fn compatibility(data: &Map<String, Value>) -> Option<FileMetadata> {
             .and_then(Value::as_f64)
             .filter(|value| value.is_finite() && *value >= 0.0),
         bitrate: data.get("bitrate").and_then(Value::as_u64),
+        filesize: data
+            .get("file_size")
+            .or_else(|| data.get("filesize"))
+            .or_else(|| data.get("file").and_then(|file| file.get("size")))
+            .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok())),
         media_type,
         description: data
             .get("description")

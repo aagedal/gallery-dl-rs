@@ -812,3 +812,97 @@ printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","au
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn tumblr_selections_and_booru_credentials_forward_with_exact_types_and_scopes() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "tumblr":{"reblogs":"same-blog","posts":["photo","video"],"inline":"original","original":false,"api-key":"tumblrkey"},
+            "danbooru":{"username":"alice","password":"key:one?&="},
+            "e621":{"username":"bob","password":""},
+            "gelbooru":{"user-id":42,"api-key":"key:&=!?"},
+            "pixeldrain":{"api-key":"pixel:key"}
+        }}),
+    );
+    for (url, expected, absent) in [
+        (
+            "https://alice.tumblr.com/",
+            vec![
+                "reblogs=\"same-blog\"",
+                "posts=[\"photo\",\"video\"]",
+                "inline=\"original\"",
+                "original=false",
+                "api-key=\"tumblrkey\"",
+            ],
+            vec!["username=", "password=", "user-id="],
+        ),
+        (
+            "https://danbooru.donmai.us/posts/42",
+            vec!["username=\"alice\"", "password=\"key:one?&=\""],
+            vec![
+                "posts=",
+                "inline=",
+                "original=",
+                "user-id=",
+                "api-key=",
+                "reblogs=",
+            ],
+        ),
+        (
+            "https://e621.net/posts/42",
+            vec!["username=\"bob\"", "password=\"\""],
+            vec!["api-key=", "user-id=", "posts=", "reblogs="],
+        ),
+        (
+            "https://gelbooru.com/index.php?page=post&s=view&id=42",
+            vec!["user-id=\"42\"", "api-key=\"key:&=!?\""],
+            vec!["username=", "password=", "posts=", "reblogs="],
+        ),
+        (
+            "https://pixeldrain.com/u/file",
+            vec!["api-key=\"pixel:key\""],
+            vec!["username=", "password=", "user-id=", "reblogs="],
+        ),
+        (
+            "https://instagram.com/p/abc/",
+            vec![],
+            vec![
+                "username=",
+                "password=",
+                "user-id=",
+                "api-key=",
+                "posts=",
+                "inline=",
+                "original=",
+                "reblogs=",
+            ],
+        ),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        let result = output(&mut command).await;
+        success(&result);
+        let log = std::fs::read_to_string(log).unwrap();
+        for value in expected {
+            assert!(log.contains(&format!("--option\n{value}\n")), "{log}");
+        }
+        for value in absent {
+            assert!(!log.contains(value), "{log}");
+        }
+        let stdout = String::from_utf8(result.stdout).unwrap();
+        assert!(
+            !stdout.contains("key:one")
+                && !stdout.contains("pixel:key")
+                && !stdout.contains("tumblrkey")
+        );
+    }
+}

@@ -1,6 +1,14 @@
 //! Explicit, read-only Firefox cookie imports. Browser discovery is intentionally absent.
 
-use std::{fmt, path::PathBuf, time::Duration};
+use std::{
+    fmt,
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use rusqlite::{Connection, OpenFlags, params};
 
@@ -10,6 +18,54 @@ const MAX_COOKIES: usize = 4096;
 const MAX_VALUE_BYTES: usize = 4096;
 const MAX_ROW_BYTES: usize = 16 * 1024;
 const MAX_EXPORT_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Default)]
+struct ImportCancellation {
+    cancelled: AtomicBool,
+    interrupt: Mutex<Option<rusqlite::InterruptHandle>>,
+}
+
+impl ImportCancellation {
+    fn check(&self) -> Result<()> {
+        if self.cancelled.load(Ordering::Acquire) {
+            Err(error("Firefox cookie import cancelled"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn attach(self: &Arc<Self>, connection: &Connection) -> Result<()> {
+        *self.interrupt.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(connection.get_interrupt_handle());
+        let cancellation = self.clone();
+        // An interrupt sent while SQLite is idle does not affect its next
+        // statement. The progress handler also catches that cancellation race.
+        connection
+            .progress_handler(
+                1000,
+                Some(move || cancellation.cancelled.load(Ordering::Acquire)),
+            )
+            .map_err(|_| error("could not initialize Firefox cookie import"))?;
+        self.check()
+    }
+}
+
+struct CancelImport(Arc<ImportCancellation>);
+
+impl Drop for CancelImport {
+    fn drop(&mut self) {
+        self.0.cancelled.store(true, Ordering::Release);
+        if let Some(interrupt) = self
+            .0
+            .interrupt
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            interrupt.interrupt();
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct FirefoxProfile {
@@ -46,13 +102,26 @@ impl FirefoxProfile {
         }
         let path = self.path.clone();
         let site = site.to_owned();
-        tokio::task::spawn_blocking(move || load(path, &site))
-            .await
-            .map_err(|_| error("Firefox cookie import task failed"))?
+        let cancellation = Arc::new(ImportCancellation::default());
+        import(path, site, cancellation).await
     }
 }
 
-fn load(path: PathBuf, site: &str) -> Result<CookieJar> {
+async fn import(
+    path: PathBuf,
+    site: String,
+    cancellation: Arc<ImportCancellation>,
+) -> Result<CookieJar> {
+    // This guard belongs to the async caller, not the blocking task.
+    // Dropping the load future interrupts scans and cancels queued imports.
+    let _cancel = CancelImport(cancellation.clone());
+    tokio::task::spawn_blocking(move || load(path, &site, &cancellation))
+        .await
+        .map_err(|_| error("Firefox cookie import task failed"))?
+}
+
+fn load(path: PathBuf, site: &str, cancellation: &Arc<ImportCancellation>) -> Result<CookieJar> {
+    cancellation.check()?;
     let invalid = || error("could not read Firefox cookies; check the profile and cookie database");
     let metadata = std::fs::metadata(&path).map_err(|_| invalid())?;
     let database = if metadata.is_dir() {
@@ -67,6 +136,7 @@ fn load(path: PathBuf, site: &str) -> Result<CookieJar> {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|_| invalid())?;
+    cancellation.attach(&connection)?;
     connection
         .busy_timeout(Duration::from_secs(2))
         .map_err(|_| invalid())?;
@@ -94,6 +164,7 @@ fn load(path: PathBuf, site: &str) -> Result<CookieJar> {
     let mut export = String::new();
     let mut count = 0;
     while let Some(row) = rows.next().map_err(|_| invalid())? {
+        cancellation.check()?;
         count += 1;
         if count > MAX_COOKIES {
             return Err(error(
@@ -155,6 +226,122 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use url::Url;
+
+    async fn worker_finished(cancellation: &Arc<ImportCancellation>) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            // The worker owns one reference, and its connection's progress
+            // handler owns another. Both disappear when SQLite is closed.
+            while Arc::strong_count(cancellation) != 1 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("cancelled Firefox import did not release its connection");
+    }
+
+    #[tokio::test]
+    async fn dropping_import_interrupts_nonmatching_sqlite_scan_and_closes_connection() {
+        let (directory, connection) = database();
+        // Cookie count limits cannot bound a query scanning nonmatching rows.
+        // A recursive view makes the expensive scan deterministic and compact.
+        connection
+            .execute_batch(
+                "DROP TABLE moz_cookies;
+             CREATE VIEW moz_cookies AS
+             WITH RECURSIVE sequence(n) AS (
+                 SELECT 1 UNION ALL SELECT n + 1 FROM sequence WHERE n < 1000000000
+             )
+             SELECT 'name' AS name, 'private-value' AS value,
+                    printf('other%d.test', n) AS host, '/' AS path, 0 AS isSecure,
+                    0 AS expiry, '' AS originAttributes FROM sequence;",
+            )
+            .unwrap();
+        let cancellation = Arc::new(ImportCancellation::default());
+        let mut pending = Box::pin(import(
+            directory.path().to_path_buf(),
+            "instagram.com".into(),
+            cancellation.clone(),
+        ));
+        assert!(futures_util::poll!(pending.as_mut()).is_pending());
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if cancellation.interrupt.lock().unwrap().is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(futures_util::poll!(pending.as_mut()).is_pending());
+        drop(pending);
+        assert!(cancellation.cancelled.load(Ordering::Acquire));
+        worker_finished(&cancellation).await;
+        connection.busy_timeout(Duration::ZERO).unwrap();
+        connection
+            .execute_batch("BEGIN EXCLUSIVE; ROLLBACK;")
+            .unwrap();
+    }
+
+    #[test]
+    fn cancelled_queued_import_does_not_open_profile() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (release, wait) = std::sync::mpsc::channel();
+            let (ready, started) = tokio::sync::oneshot::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                ready.send(()).unwrap();
+                wait.recv().unwrap();
+            });
+            started.await.unwrap();
+            let cancellation = Arc::new(ImportCancellation::default());
+            let mut pending = Box::pin(import(
+                PathBuf::from("private-missing-profile"),
+                "instagram.com".into(),
+                cancellation.clone(),
+            ));
+            assert!(futures_util::poll!(pending.as_mut()).is_pending());
+            drop(pending);
+            assert!(cancellation.cancelled.load(Ordering::Acquire));
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+            worker_finished(&cancellation).await;
+            assert!(cancellation.interrupt.lock().unwrap().is_none());
+            // Cancellation wins before even inspecting this nonexistent path.
+            let failure = load(
+                PathBuf::from("private-missing-profile"),
+                "instagram.com",
+                &cancellation,
+            )
+            .unwrap_err()
+            .to_string();
+            assert_eq!(failure, "Firefox cookie import cancelled");
+        });
+    }
+
+    #[test]
+    fn cancellation_while_sqlite_is_idle_interrupts_next_statement() {
+        let connection = Connection::open_in_memory().unwrap();
+        let cancellation = Arc::new(ImportCancellation::default());
+        cancellation.attach(&connection).unwrap();
+        drop(CancelImport(cancellation));
+        let result = connection.query_row(
+            "WITH RECURSIVE sequence(n) AS (
+                 SELECT 1 UNION ALL SELECT n + 1 FROM sequence WHERE n < 1000000000
+             ) SELECT sum(n) FROM sequence",
+            [],
+            |row| row.get::<_, i64>(0),
+        );
+        assert!(
+            matches!(result, Err(rusqlite::Error::SqliteFailure(error, _))
+            if error.code == rusqlite::ErrorCode::OperationInterrupted)
+        );
+    }
 
     fn database() -> (TempDir, Connection) {
         let directory = tempfile::tempdir().unwrap();

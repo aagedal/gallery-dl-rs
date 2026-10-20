@@ -205,7 +205,7 @@ fn number(value: Option<&Value>) -> Option<u64> {
         .filter(|v| *v > 0)
 }
 
-fn valid_md5(md5: &str) -> bool {
+pub(crate) fn valid_md5(md5: &str) -> bool {
     md5.len() == 32 && md5.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
@@ -356,7 +356,6 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
         "mp4" | "webm" => Some(format!("video/{ext}")),
         _ => None,
     };
-    let _ = size; // FileMetadata has no byte-size field; see README.
     Some(Media {
         url,
         job: MediaJob::DirectHttp,
@@ -366,9 +365,21 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             file: Some(FileMetadata {
                 width,
                 height,
+                filesize: size,
                 media_type: media_type.map(Arc::from),
                 ..FileMetadata::default()
             }),
+            rating: string(post, "rating").map(Arc::from),
+            score: {
+                let score = post.get("score").and_then(|score| {
+                    if site == Site::E621 {
+                        score.get("total")
+                    } else {
+                        Some(score)
+                    }
+                });
+                score.and_then(|score| score.as_i64().or_else(|| score.as_str()?.parse().ok()))
+            },
             post_id: id,
             media_id,
             username,
@@ -433,6 +444,8 @@ pub struct Booru {
     client: Client,
     network: NetworkOptions,
     api_root: Option<Url>,
+    credentials: Option<(String, String)>,
+    api_credentials: Option<(String, String)>,
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
@@ -464,6 +477,8 @@ impl Booru {
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
             api_root: None,
+            credentials: None,
+            api_credentials: None,
             timeout,
             request_timeout: timeout,
             retries: 0,
@@ -475,6 +490,57 @@ impl Booru {
     pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
         self.client = network.client(USER_AGENT, self.timeout)?;
         self.network = network.clone();
+        Ok(self)
+    }
+
+    /// Danbooru/e621 use HTTP Basic authentication with a username and API key.
+    /// Credentials are API-only and never become media headers or metadata.
+    pub fn with_credentials(
+        mut self,
+        username: Option<&str>,
+        password: Option<&str>,
+    ) -> Result<Self> {
+        if username.is_some_and(|value| {
+            value.len() > 256 || value.contains(':') || value.chars().any(char::is_control)
+        }) || password
+            .is_some_and(|value| value.len() > 4096 || value.chars().any(char::is_control))
+        {
+            return Err(error("invalid booru username or password"));
+        }
+        self.credentials = if self.site.danbooru_dialect() {
+            username
+                .filter(|value| !value.is_empty())
+                .map(|username| (username.to_owned(), password.unwrap_or_default().to_owned()))
+        } else {
+            None
+        };
+        Ok(self)
+    }
+
+    /// Gelbooru uses the configured `user-id` and `api-key` query parameters.
+    pub fn with_api_credentials(
+        mut self,
+        user_id: Option<&str>,
+        api_key: Option<&str>,
+    ) -> Result<Self> {
+        if user_id.is_some_and(|value| {
+            !value.is_empty()
+                && (value.len() > 20
+                    || !value.bytes().all(|byte| byte.is_ascii_digit())
+                    || !value.bytes().any(|byte| byte != b'0'))
+        }) || api_key.is_some_and(|value| {
+            value.len() > 4096 || !value.bytes().all(|byte| byte.is_ascii_graphic())
+        }) {
+            return Err(error("invalid booru user-id or api-key"));
+        }
+        self.api_credentials = if self.site == Site::Gelbooru {
+            user_id
+                .filter(|value| !value.is_empty())
+                .zip(api_key.filter(|value| !value.is_empty()))
+                .map(|(user, key)| (user.to_owned(), key.to_owned()))
+        } else {
+            None
+        };
         Ok(self)
     }
 
@@ -722,17 +788,33 @@ impl Booru {
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let response = self
+            // Keep the canonical URL free of secrets. Redirects are restricted
+            // to this origin, and credentials are added only to each API request.
+            let mut request_url = target.clone();
+            if let Some((user_id, api_key)) = &self.api_credentials {
+                let query: Vec<_> = request_url
+                    .query_pairs()
+                    .filter(|(key, _)| !matches!(key.as_ref(), "user_id" | "api_key"))
+                    .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                    .collect();
+                request_url.set_query(None);
+                request_url.query_pairs_mut().extend_pairs(query);
+                request_url
+                    .query_pairs_mut()
+                    .extend_pairs([("user_id", user_id.as_str()), ("api_key", api_key.as_str())]);
+            }
+            let mut request = self
                 .client
-                .get(target.clone())
+                .get(request_url)
                 .timeout(self.request_timeout)
-                .header(header::ACCEPT, "application/json")
-                .send()
-                .await
-                .map_err(|_| {
-                    Failure::transient(format!("{name} request failed; check network access"))
-                })?;
-            match redirects.next(response.url(), response.status(), response.headers())? {
+                .header(header::ACCEPT, "application/json");
+            if let Some((username, password)) = &self.credentials {
+                request = request.basic_auth(username, Some(password));
+            }
+            let response = request.send().await.map_err(|_| {
+                Failure::transient(format!("{name} request failed; check network access"))
+            })?;
+            match redirects.next(&target, response.status(), response.headers())? {
                 Some(next) => target = next,
                 None => break response,
             }
@@ -1090,6 +1172,282 @@ mod tests {
         assert!(requests[0].starts_with(
             "GET /index.php?page=dapi&s=post&q=index&json=1&tags=cat&limit=100&pid=0 "
         ));
+    }
+
+    #[test]
+    fn invalid_credentials_are_private_and_builders_can_clear_them() {
+        let new = |site| Booru::new(site, Duration::from_secs(5)).unwrap();
+        for (username, password) in [
+            ("secret:name", "key"),
+            ("secret\n", "key"),
+            ("user", "secret\0"),
+        ] {
+            let error = new(Site::Danbooru)
+                .with_credentials(Some(username), Some(password))
+                .err()
+                .unwrap();
+            assert_eq!(error.to_string(), "invalid booru username or password");
+        }
+        let long = "s".repeat(4097);
+        assert!(
+            new(Site::E621)
+                .with_credentials(Some("user"), Some(&long))
+                .is_err()
+        );
+        for (user, key) in [
+            ("secret-id", "key"),
+            ("0", "key"),
+            ("123456789012345678901", "key"),
+            ("1", "secret key"),
+        ] {
+            let error = new(Site::Gelbooru)
+                .with_api_credentials(Some(user), Some(key))
+                .err()
+                .unwrap();
+            assert_eq!(error.to_string(), "invalid booru user-id or api-key");
+        }
+        let client = new(Site::Danbooru)
+            .with_credentials(Some("user"), Some("key"))
+            .unwrap()
+            .with_credentials(None, None)
+            .unwrap();
+        assert!(client.credentials.is_none());
+        let client = new(Site::Gelbooru)
+            .with_api_credentials(Some("1"), Some("key"))
+            .unwrap()
+            .with_api_credentials(Some(""), Some(""))
+            .unwrap();
+        assert!(client.api_credentials.is_none());
+        let client = new(Site::Safebooru)
+            .with_credentials(Some("user"), Some("key"))
+            .unwrap()
+            .with_api_credentials(Some("1"), Some("key"))
+            .unwrap();
+        assert!(client.credentials.is_none());
+        assert!(client.api_credentials.is_none());
+    }
+
+    #[test]
+    fn descriptive_properties_keep_signed_scores_and_archive_identity() {
+        let mut post = danbooru_post(123);
+        let before = parse_post(Site::Danbooru, &post).unwrap();
+        post["rating"] = json!("q");
+        post["score"] = json!(-7);
+        let media = parse_post(Site::Danbooru, &post).unwrap();
+        let file = media.metadata.as_ref().unwrap().file.as_ref().unwrap();
+        assert_eq!(file.filesize, Some(1234));
+        assert_eq!(
+            media.metadata.as_ref().unwrap().rating.as_deref(),
+            Some("q")
+        );
+        assert_eq!(media.metadata.as_ref().unwrap().score, Some(-7));
+        assert_eq!(media.archive_key(), before.archive_key());
+        assert_eq!(media.filename, before.filename);
+        let events = group(vec![media], "danbooru");
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("missing post boundary")
+        };
+        let metadata = post.metadata.as_ref().unwrap();
+        assert_eq!(metadata.rating.as_deref(), Some("q"));
+        assert_eq!(metadata.score, Some(-7));
+        assert!(metadata.file.is_none());
+
+        let mut post = e621_post(5);
+        post["score"] = json!({"up": 2, "down": -8, "total": -6});
+        post["rating"] = json!("e");
+        let media = parse_post(Site::E621, &post).unwrap();
+        let file = media.metadata.as_ref().unwrap().file.as_ref().unwrap();
+        assert_eq!(file.filesize, Some(9));
+        assert_eq!(media.metadata.as_ref().unwrap().score, Some(-6));
+        assert_eq!(
+            media.metadata.as_ref().unwrap().rating.as_deref(),
+            Some("e")
+        );
+
+        post["score"]["total"] = json!("0");
+        post["file"]["size"] = json!("broken");
+        let media = parse_post(Site::E621, &post).unwrap();
+        let file = media.metadata.as_ref().unwrap().file.as_ref().unwrap();
+        assert_eq!(file.filesize, None);
+        assert_eq!(media.metadata.as_ref().unwrap().score, Some(0));
+    }
+
+    #[tokio::test]
+    async fn basic_auth_is_api_only_and_survives_retries() {
+        use base64::Engine;
+        for site in [Site::Danbooru, Site::E621] {
+            let post = if site == Site::Danbooru {
+                danbooru_post(5)
+            } else {
+                json!({"post": e621_post(5)})
+            };
+            let (root, server) = serve(vec![
+                response("503 Service Unavailable", "Retry-After: 0\r\n", b""),
+                response("200 OK", "", post.to_string().as_bytes()),
+            ]);
+            let client = booru(site, root)
+                .with_credentials(Some("secret-user"), Some("secret-key"))
+                .unwrap()
+                .with_retries(1);
+            let input = Url::parse(&format!(
+                "https://{}/posts/5",
+                if site == Site::Danbooru {
+                    "danbooru.donmai.us"
+                } else {
+                    "e621.net"
+                }
+            ))
+            .unwrap();
+            let media = client.stream(&input).next().await.unwrap().unwrap();
+            let serialized = serde_json::to_string(&media).unwrap();
+            assert!(!serialized.contains("secret-"));
+            assert!(media.headers.is_empty());
+            assert!(media.handoff.is_empty());
+            assert!(!media.url.as_str().contains("secret-"));
+            let expected = format!(
+                "authorization: Basic {}",
+                base64::engine::general_purpose::STANDARD.encode("secret-user:secret-key")
+            );
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 2);
+            for request in requests {
+                assert!(request.lines().any(|line| line == expected));
+                assert!(request.starts_with("GET /posts/5.json HTTP/1.1"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn basic_auth_is_reattached_on_same_origin_redirects_only_to_api() {
+        use base64::Engine;
+        for site in [Site::Danbooru, Site::E621] {
+            let post = if site == Site::Danbooru {
+                danbooru_post(5)
+            } else {
+                json!({"post": e621_post(5)})
+            };
+            let (root, server) = serve(vec![
+                response(
+                    "307 Temporary Redirect",
+                    "Location: /redirected/posts/5.json\r\n",
+                    b"",
+                ),
+                response("200 OK", "", post.to_string().as_bytes()),
+            ]);
+            let client = booru(site, root)
+                .with_credentials(Some("redirect-user"), Some("redirect-key"))
+                .unwrap();
+            let input = Url::parse(if site == Site::Danbooru {
+                "https://danbooru.donmai.us/posts/5"
+            } else {
+                "https://e621.net/posts/5"
+            })
+            .unwrap();
+            let media = client.stream(&input).next().await.unwrap().unwrap();
+            assert!(media.headers.is_empty());
+            assert!(media.handoff.is_empty());
+            assert!(!media.url.as_str().contains("redirect-"));
+            let serialized = serde_json::to_string(&media).unwrap();
+            assert!(!serialized.contains("redirect-user"));
+            assert!(!serialized.contains("redirect-key"));
+            let expected = format!(
+                "authorization: Basic {}",
+                base64::engine::general_purpose::STANDARD.encode("redirect-user:redirect-key")
+            );
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert!(requests[0].starts_with("GET /posts/5.json HTTP/1.1"));
+            assert!(requests[1].starts_with("GET /redirected/posts/5.json HTTP/1.1"));
+            for request in requests {
+                assert!(request.lines().any(|line| line == expected));
+                assert_eq!(request.matches("authorization:").count(), 1);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn gelbooru_query_credentials_are_encoded_and_not_emitted() {
+        let post = json!({"post": [{"id": 1, "md5": MD5, "score": "-5", "rating": "safe",
+            "file_url": format!("https://img3.gelbooru.com/images/{MD5}.png")} ]});
+        let (root, server) = serve(vec![response("200 OK", "", post.to_string().as_bytes())]);
+        let client = booru(Site::Gelbooru, root)
+            .with_credentials(Some("unused-user"), Some("unused-password"))
+            .unwrap()
+            .with_api_credentials(Some("456"), Some("secret-key+&"))
+            .unwrap();
+        let input = Url::parse("https://gelbooru.com/index.php?page=post&s=view&id=1").unwrap();
+        let media = client.stream(&input).next().await.unwrap().unwrap();
+        let serialized = serde_json::to_string(&media).unwrap();
+        assert!(!serialized.contains("secret-key"));
+        assert!(!serialized.contains("api_key"));
+        assert!(media.headers.is_empty());
+        assert_eq!(media.metadata.unwrap().score, Some(-5));
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("&user_id=456&api_key=secret-key%2B%26 "));
+        assert!(!requests[0].contains("authorization:"));
+        assert!(!requests[0].contains("unused-"));
+    }
+
+    #[tokio::test]
+    async fn credentials_never_cross_api_origin_redirects_or_error_messages() {
+        for site in [Site::Danbooru, Site::Gelbooru] {
+            let (root, server) = serve(vec![response(
+                "302 Found",
+                "Location: https://cdn.donmai.us/stolen\r\n",
+                b"",
+            )]);
+            let client = booru(site, root)
+                .with_credentials(Some("secret-user"), Some("secret-password"))
+                .unwrap()
+                .with_api_credentials(Some("456"), Some("secret-key"))
+                .unwrap();
+            let input = Url::parse(if site == Site::Danbooru {
+                "https://danbooru.donmai.us/posts/1"
+            } else {
+                "https://gelbooru.com/index.php?page=post&s=view&id=1"
+            })
+            .unwrap();
+            let error = client
+                .stream(&input)
+                .next()
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("same origin"), "{error}");
+            assert!(!error.contains("secret-"));
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn gelbooru_auth_redirects_have_one_credentials_pair_and_stay_lazy() {
+        let post = json!({"post": [{"id": 1, "md5": MD5,
+            "file_url": format!("https://img3.gelbooru.com/images/{MD5}.png")} ]});
+        let (root, server) = serve(vec![
+            response(
+                "302 Found",
+                "Location: /redirected?tags=cat&api_key=stale-key&user_id=1\r\n",
+                b"",
+            ),
+            response("200 OK", "", post.to_string().as_bytes()),
+        ]);
+        let client = booru(Site::Gelbooru, root)
+            .with_api_credentials(Some("456"), Some("secret-key"))
+            .unwrap();
+        let input = Url::parse("https://gelbooru.com/index.php?page=post&s=list&tags=cat").unwrap();
+        let media = client.stream(&input).take(1).collect::<Vec<_>>().await;
+        assert_eq!(media.len(), 1);
+        assert!(media[0].is_ok());
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1].starts_with("GET /redirected?tags=cat&user_id=456&api_key=secret-key ")
+        );
+        for request in requests {
+            assert_eq!(request.matches("api_key=").count(), 1);
+            assert_eq!(request.matches("user_id=").count(), 1);
+        }
     }
 
     #[tokio::test]

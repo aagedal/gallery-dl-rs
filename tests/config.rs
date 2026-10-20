@@ -2067,3 +2067,112 @@ fn mastodon_instance_credentials_are_separate_and_inherit_shared_settings() {
     }
     assert!(!format!("{social:?}").contains("social-token"));
 }
+
+#[test]
+fn tumblr_selections_replace_inherited_modes_and_preserve_global_precedence() {
+    use gallery_dl_rs::tumblr::{Inline, Reblogs};
+    let cfg = parse(r#"{"extractor":{"reblogs":false,"posts":"photo,video","inline":false,"original":false,"tumblr":{"reblogs":"same-blog","posts":["audio"],"inline":"reblog"}}}"#).unwrap();
+    let selection = cfg.resolve("tumblr").unwrap().tumblr_selection();
+    assert_eq!(selection.reblogs, Reblogs::SameBlog);
+    assert_eq!(selection.inline, Inline::Reblog);
+    assert!(!selection.original);
+    assert_eq!(
+        selection.posts.unwrap().into_iter().collect::<Vec<_>>(),
+        vec!["audio"]
+    );
+    assert_eq!(cfg.resolve("mastodon").unwrap().reblogs, Some(false));
+    let cfg = parse(r#"{"reblogs":false,"posts":"all","inline":"original","original":true,"extractor":{"tumblr":{"reblogs":"same-blog","posts":["photo"],"inline":false,"original":false}}}"#).unwrap();
+    let options = cfg.resolve("tumblr").unwrap();
+    let selection = options.tumblr_selection();
+    assert_eq!(selection.reblogs, Reblogs::OriginalOnly);
+    assert_eq!(selection.inline, Inline::Original);
+    assert!(selection.original);
+    assert!(selection.posts.is_none());
+    let explicit = options.overlay(&Options {
+        reblogs: Some(true),
+        tumblr_reblogs: Some(Reblogs::SameBlog),
+        ..Default::default()
+    });
+    assert_eq!(explicit.reblogs, None);
+    assert_eq!(explicit.tumblr_selection().reblogs, Reblogs::SameBlog);
+    let explicit = explicit.overlay(&Options {
+        reblogs: Some(false),
+        posts: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(explicit.tumblr_selection().reblogs, Reblogs::OriginalOnly);
+    assert!(explicit.tumblr_selection().posts.unwrap().is_empty());
+}
+
+#[test]
+fn tumblr_invalid_modes_and_types_fail_without_echoing_values() {
+    for (key, value) in [
+        ("reblogs", serde_json::json!("PRIVATE_VALUE")),
+        ("posts", serde_json::json!("PRIVATE_VALUE")),
+        ("posts", serde_json::json!(["all"])),
+        ("posts", serde_json::json!(true)),
+        ("posts", serde_json::json!(null)),
+        ("inline", serde_json::json!("PRIVATE_VALUE")),
+        ("inline", serde_json::json!(1)),
+        ("original", serde_json::json!("PRIVATE_VALUE")),
+    ] {
+        let error = parse(&serde_json::json!({"extractor":{"tumblr":{key:value}}}).to_string())
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!error.contains("PRIVATE_VALUE"));
+    }
+    for value in [
+        serde_json::json!(false),
+        serde_json::json!([]),
+        serde_json::json!(""),
+    ] {
+        let options =
+            parse(&serde_json::json!({"extractor":{"tumblr":{"posts":value}}}).to_string())
+                .unwrap()
+                .resolve("tumblr")
+                .unwrap();
+        assert!(options.tumblr_selection().posts.unwrap().is_empty());
+    }
+}
+
+#[test]
+fn booru_credentials_stay_in_their_category_and_are_private() {
+    let cfg = parse(r#"{"extractor":{"danbooru":{"username":"alice","password":"key:one"},"e621":{"username":"bob","password":"key-two"},"gelbooru":{"user-id":42,"api-key":"key:&=!?"}}}"#).unwrap();
+    let danbooru = cfg.resolve("danbooru").unwrap();
+    assert_eq!(danbooru.username.as_deref(), Some("alice"));
+    assert_eq!(danbooru.password.as_deref(), Some("key:one"));
+    assert_eq!(
+        cfg.resolve("e621").unwrap().username.as_deref(),
+        Some("bob")
+    );
+    assert_eq!(
+        cfg.resolve("gelbooru").unwrap().user_id.as_deref(),
+        Some("42")
+    );
+    assert_eq!(
+        cfg.resolve("gelbooru").unwrap().api_key.as_deref(),
+        Some("key:&=!?")
+    );
+    for category in ["safebooru", "twitter", "direct", "tumblr"] {
+        let options = cfg.resolve(category).unwrap();
+        assert!(
+            options.username.is_none() && options.password.is_none() && options.user_id.is_none()
+        );
+    }
+    assert!(!format!("{danbooru:?}").contains("key:one"));
+    for body in [
+        serde_json::json!({"username":"PRIVATE_VALUE"}),
+        serde_json::json!({"extractor":{"password":"PRIVATE_VALUE"}}),
+        serde_json::json!({"extractor":{"twitter":{"username":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"gelbooru":{"password":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"safebooru":{"user-id":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"danbooru":{"username":"PRIVATE:VALUE"}}}),
+        serde_json::json!({"extractor":{"e621":{"password":"PRIVATE\nVALUE"}}}),
+        serde_json::json!({"extractor":{"gelbooru":{"api-key":"PRIVATE VALUE"}}}),
+        serde_json::json!({"extractor":{"gelbooru":{"user-id":0}}}),
+    ] {
+        let error = parse(&body.to_string()).err().unwrap().to_string();
+        assert!(!error.contains("PRIVATE"), "{error}");
+    }
+}

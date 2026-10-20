@@ -324,6 +324,11 @@ pub struct PostMetadata {
     /// Ordered Pixiv ugoira ZIP member names and millisecond frame delays.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frames: Option<std::sync::Arc<[crate::pixiv::UgoiraFrame]>>,
+    /// Site-declared post rating and score (currently native boorus).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<std::sync::Arc<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<crate::twitter::CommunityMetadata>,
     /// Community feeds use their own archive namespace; ordinary posts do not.
@@ -510,6 +515,14 @@ pub struct BackendOptions {
     pub previews: Option<bool>,
     pub mp4: Option<bool>,
     pub reblogs: Option<bool>,
+    pub tumblr_reblogs: Option<crate::tumblr::Reblogs>,
+    pub posts: Option<Vec<String>>,
+    pub inline: Option<crate::tumblr::Inline>,
+    pub original: Option<bool>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub user_id: Option<String>,
+    pub api_key: Option<String>,
     pub reposts: Option<bool>,
     pub ugoira: Option<bool>,
     pub access_token: Option<String>,
@@ -648,6 +661,7 @@ impl Backend {
         for (name, value) in [
             ("mp4", options.mp4),
             ("reblogs", options.reblogs),
+            ("original", options.original),
             ("reposts", options.reposts),
             ("ugoira", options.ugoira),
             ("text-posts", options.text_posts),
@@ -655,6 +669,43 @@ impl Backend {
             if let Some(value) = value {
                 command.arg("--option").arg(format!("{name}={value}"));
             }
+        }
+        for (name, value) in [
+            ("username", &options.username),
+            ("password", &options.password),
+            ("user-id", &options.user_id),
+            ("api-key", &options.api_key),
+        ] {
+            if let Some(value) = value {
+                command
+                    .arg("--option")
+                    .arg(format!("{name}={}", serde_json::json!(value)));
+            }
+        }
+        if let Some(reblogs) = options.tumblr_reblogs {
+            let value = match reblogs {
+                crate::tumblr::Reblogs::All => serde_json::json!(true),
+                crate::tumblr::Reblogs::OriginalOnly => serde_json::json!(false),
+                crate::tumblr::Reblogs::SameBlog => serde_json::json!("same-blog"),
+            };
+            command.arg("--option").arg(format!("reblogs={value}"));
+        }
+        if let Some(inline) = options.inline {
+            let value = match inline {
+                crate::tumblr::Inline::All => serde_json::json!(true),
+                crate::tumblr::Inline::Disabled => serde_json::json!(false),
+                crate::tumblr::Inline::Reblog => serde_json::json!("reblog"),
+                crate::tumblr::Inline::Original => serde_json::json!("original"),
+            };
+            command.arg("--option").arg(format!("inline={value}"));
+        }
+        if let Some(posts) = &options.posts {
+            let value = if posts.as_slice() == ["all"] {
+                serde_json::json!("all")
+            } else {
+                serde_json::json!(posts)
+            };
+            command.arg("--option").arg(format!("posts={value}"));
         }
         if let Some(token) = &options.access_token {
             command
@@ -978,7 +1029,9 @@ fn compatibility_metadata(
         .and_then(Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
         .unwrap_or(0);
-    let index = if category == "pixiv" {
+    let index = if crate::booru::Site::from_category(category).is_some() {
+        1
+    } else if category == "pixiv" {
         data.get("num")
             .and_then(Value::as_u64)
             .and_then(|n| usize::try_from(n).ok()?.checked_add(1))
@@ -1070,6 +1123,20 @@ fn compatibility_metadata(
                     .or_else(|| string("caption").map(|s| crate::mastodon::strip_html(&s))),
             )
         }
+        "danbooru" | "e621" | "gelbooru" | "safebooru" => {
+            let post_id = id("id");
+            (
+                post_id.clone(),
+                string("md5")
+                    .or_else(|| string("hash"))
+                    .filter(|md5| crate::booru::valid_md5(md5))
+                    .map(|md5| md5.to_ascii_lowercase())
+                    .unwrap_or(post_id),
+                String::new(),
+                string("uploader_name").or_else(|| string("owner")),
+                string("tag_string").or_else(|| string("tags")),
+            )
+        }
         _ => return None,
     };
     let context_id = |key: &str| {
@@ -1081,6 +1148,19 @@ fn compatibility_metadata(
         .then_some(value)
     };
     Some(PostMetadata {
+        rating: crate::booru::Site::from_category(category)
+            .and_then(|_| string("rating"))
+            .filter(|r| r.len() <= 32 && !r.chars().any(char::is_control))
+            .map(std::sync::Arc::from),
+        score: crate::booru::Site::from_category(category)
+            .and_then(|_| data.get("score"))
+            .and_then(|score| {
+                score
+                    .as_object()
+                    .and_then(|s| s.get("total"))
+                    .or(Some(score))
+            })
+            .and_then(|score| score.as_i64().or_else(|| score.as_str()?.parse().ok())),
         file: crate::file_metadata::compatibility(data),
         frames: (category == "pixiv")
             .then(|| data.get("frames").and_then(crate::pixiv::parse_frames))

@@ -14,7 +14,7 @@ httpdate = "1"
 psl = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 roxmltree = "0.21.1"
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled", "hooks"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"

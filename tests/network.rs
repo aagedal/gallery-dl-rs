@@ -269,6 +269,8 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
     social.metadata = Some(PostMetadata {
         file: None,
         frames: None,
+        rating: None,
+        score: None,
         community: None,
         community_archive: false,
         retweet_id: None,

@@ -217,6 +217,8 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
     item.metadata = Some(PostMetadata {
         file: None,
         frames: None,
+        rating: None,
+        score: None,
         community: None,
         community_archive: false,
         retweet_id: None,

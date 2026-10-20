@@ -357,11 +357,110 @@ fn inline_image(mut url: Url) -> Url {
     url
 }
 
+/// Which reblogs to include, matching upstream's `reblogs` option.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reblogs {
+    #[default]
+    All,
+    OriginalOnly,
+    SameBlog,
+}
+
+/// Inline media scope, matching upstream's boolean and string modes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Inline {
+    #[default]
+    All,
+    Disabled,
+    Reblog,
+    Original,
+}
+
+/// Native Tumblr post and image selection settings.
+#[derive(Clone, Debug)]
+pub struct Selection {
+    pub reblogs: Reblogs,
+    pub posts: Option<HashSet<String>>,
+    pub inline: Inline,
+    pub original: bool,
+}
+
+impl Default for Selection {
+    fn default() -> Self {
+        Self {
+            reblogs: Reblogs::All,
+            posts: None,
+            inline: Inline::All,
+            original: true,
+        }
+    }
+}
+
+impl Selection {
+    /// Restrict extraction to the upstream legacy post types. An empty list
+    /// selects no posts; unknown names are rejected rather than ignored.
+    pub fn with_posts(mut self, types: impl IntoIterator<Item = String>) -> Result<Self> {
+        let types: HashSet<_> = types.into_iter().collect();
+        for kind in &types {
+            if !matches!(
+                kind.as_str(),
+                "text"
+                    | "quote"
+                    | "link"
+                    | "answer"
+                    | "video"
+                    | "audio"
+                    | "photo"
+                    | "chat"
+                    | "search"
+            ) {
+                return Err(error(format!("unsupported Tumblr post type: {kind}")));
+            }
+        }
+        self.posts = Some(types);
+        Ok(self)
+    }
+
+    fn includes(&self, post: &Value, blog: &str) -> bool {
+        if let Some(types) = &self.posts
+            && !string(post, "type").is_some_and(|kind| types.contains(kind))
+        {
+            return false;
+        }
+        if post.get("reblogged_from_id").is_none() {
+            return true;
+        }
+        match self.reblogs {
+            Reblogs::All => true,
+            Reblogs::OriginalOnly => false,
+            Reblogs::SameBlog => {
+                let fallback_blog = post
+                    .get("blog")
+                    .and_then(|blog| string(blog, "name"))
+                    .unwrap_or(blog);
+                let fallback = format!("{fallback_blog}.tumblr.com");
+                let own_uuid = post
+                    .get("blog")
+                    .and_then(|blog| string(blog, "uuid"))
+                    .unwrap_or(&fallback);
+                string(post, "reblogged_root_uuid") == Some(own_uuid)
+            }
+        }
+    }
+}
+
 /// URL, media type, width, height, fallback extension and inline origin.
 type File<'a> = (Url, &'a str, Option<u64>, Option<u64>, &'a str, bool);
 
 /// Parse one legacy-format post into its deduplicated media files.
 pub fn parse_post(post: &Value, blog: &str) -> Vec<Media> {
+    parse_post_selected(post, blog, &Selection::default())
+}
+
+fn parse_post_selected(post: &Value, blog: &str, selection: &Selection) -> Vec<Media> {
+    if !selection.includes(post, blog) {
+        return Vec::new();
+    }
     let Some(id) = id_of(post) else {
         return Vec::new();
     };
@@ -393,8 +492,39 @@ pub fn parse_post(post: &Value, blog: &str) -> Vec<Media> {
     if let Some(url) = string(post, "audio_url").and_then(|raw| media_url(raw, true)) {
         files.push((url, "audio", None, None, "mp3", false));
     }
-    for key in ["body", "caption", "answer", "text", "description"] {
-        for src in string(post, key).map(inline_images).unwrap_or_default() {
+    let mut inline_html = Vec::new();
+    match selection.inline {
+        Inline::Disabled => {}
+        Inline::All => {
+            for key in [
+                "body",
+                "caption",
+                "answer",
+                "text",
+                "description",
+                "question",
+            ] {
+                inline_html.extend(string(post, key));
+            }
+            if let Some(reblog) = post.get("reblog") {
+                inline_html.extend(string(reblog, "comment"));
+                inline_html.extend(string(reblog, "tree_html"));
+            }
+        }
+        Inline::Reblog | Inline::Original => {
+            inline_html.extend(string(post, "answer"));
+            inline_html.extend(string(post, "question"));
+            if let Some(reblog) = post.get("reblog") {
+                inline_html.extend(if selection.inline == Inline::Reblog {
+                    string(reblog, "comment")
+                } else {
+                    string(reblog, "tree_html").or_else(|| string(reblog, "comment"))
+                });
+            }
+        }
+    }
+    for html in inline_html {
+        for src in inline_images(html) {
             if let Some(url) = media_url(src, false) {
                 files.push((inline_image(url), "photo", None, None, "jpg", true));
             }
@@ -409,7 +539,8 @@ pub fn parse_post(post: &Value, blog: &str) -> Vec<Media> {
         let index = media.len() + 1;
         let ext = extension(&url, fallback);
         let mut handoff = BTreeMap::new();
-        if kind == "photo"
+        if selection.original
+            && kind == "photo"
             && let Some(original) = original_image(&url, width, height, inline)
         {
             handoff.insert("_tumblr_original".into(), Value::String(original.into()));
@@ -449,6 +580,10 @@ pub struct Page {
 }
 
 pub fn parse_page(bytes: &[u8], blog: &str) -> Result<Page> {
+    parse_page_selected(bytes, blog, &Selection::default())
+}
+
+fn parse_page_selected(bytes: &[u8], blog: &str, selection: &Selection) -> Result<Page> {
     let body: Value =
         serde_json::from_slice(bytes).map_err(|_| error("Tumblr returned invalid JSON"))?;
     let response = body.get("response").unwrap_or(&body);
@@ -459,7 +594,7 @@ pub fn parse_page(bytes: &[u8], blog: &str) -> Result<Page> {
     Ok(Page {
         posts: entries
             .iter()
-            .map(|post| parse_post(post, blog))
+            .map(|post| parse_post_selected(post, blog, selection))
             .filter(|media| !media.is_empty())
             .collect(),
         count: entries.len(),
@@ -490,6 +625,7 @@ pub struct Tumblr {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    selection: Selection,
 }
 
 struct ListingState {
@@ -512,6 +648,7 @@ impl Tumblr {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            selection: Selection::default(),
         })
     }
 
@@ -527,6 +664,12 @@ impl Tumblr {
         if let Some(key) = key {
             self.api_key = key.into();
         }
+        self
+    }
+
+    /// Select post types, reblogs, inline scope and original image resolution.
+    pub fn with_selection(mut self, selection: Selection) -> Self {
+        self.selection = selection;
         self
     }
 
@@ -636,7 +779,7 @@ impl Tumblr {
             query.insert(0, ("tag", tag.as_str()));
         }
         let body = self.call(&state.blog, &query).await?;
-        let page = parse_page(&body, &state.blog)?;
+        let page = parse_page_selected(&body, &state.blog, &self.selection)?;
         state.pages += 1;
         state.offset += page.count;
         // The API may cap `limit` below 50, so stop on an empty page or the total.
@@ -663,7 +806,30 @@ impl Tumblr {
             Target::Post { blog, id } => {
                 return stream::once(async move {
                     let body = self.call(&blog, &[("id", &id)]).await?;
-                    let media = parse_single(&body, &blog, &id)?;
+                    // Validate the requested post before applying selection; a
+                    // deliberately filtered post is a successful empty result.
+                    let value: Value = serde_json::from_slice(&body)
+                        .map_err(|_| error("Tumblr returned invalid JSON"))?;
+                    let entries = value
+                        .get("response")
+                        .unwrap_or(&value)
+                        .get("posts")
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| error("Tumblr response contains no post list"))?;
+                    let post = entries
+                        .iter()
+                        .find(|post| id_of(post).as_deref() == Some(&id))
+                        .ok_or_else(|| error("Tumblr post not found"))?;
+                    let mut selection = self.selection.clone();
+                    // Upstream single-post extraction ignores the posts filter.
+                    selection.posts = None;
+                    let media = parse_post_selected(post, &blog, &selection);
+                    if media.is_empty()
+                        && selection.includes(post, &blog)
+                        && selection.inline == Inline::All
+                    {
+                        return Err(error("Tumblr post contains no supported media"));
+                    }
                     Ok::<_, crate::Error>(
                         stream::iter(group(media, "tumblr"))
                             .then(move |event| async move { Ok(self.finish_event(event).await) }),
@@ -1137,6 +1303,168 @@ mod tests {
         assert!(!gif.handoff.contains_key("_tumblr_original"));
     }
 
+    #[test]
+    fn selection_scopes_reblogs_post_types_and_inline_images() {
+        let value = json!({"id":1,"type":"photo","blog":{"uuid":"t:alice"},
+            "reblogged_from_id":2,"reblogged_root_uuid":"t:alice",
+            "photos":[{"original_size":{"url":PHOTO,"width":2048,"height":3072}}],
+            "body":"<img src=\"https://64.media.tumblr.com/body.jpg\">",
+            "question":"<img src=\"https://64.media.tumblr.com/question.jpg\">",
+            "reblog":{"comment":"<img src=\"https://64.media.tumblr.com/comment.jpg\">",
+                      "tree_html":"<img src=\"https://64.media.tumblr.com/tree.jpg\">"}});
+        let selection = Selection {
+            reblogs: Reblogs::OriginalOnly,
+            ..Selection::default()
+        };
+        assert!(parse_post_selected(&value, "alice", &selection).is_empty());
+        let selection = Selection {
+            reblogs: Reblogs::SameBlog,
+            inline: Inline::Reblog,
+            ..Selection::default()
+        };
+        let media = parse_post_selected(&value, "alice", &selection);
+        assert_eq!(
+            media.iter().map(|m| m.url.path()).collect::<Vec<_>>(),
+            [
+                Url::parse(PHOTO).unwrap().path(),
+                "/question.jpg",
+                "/comment.jpg"
+            ]
+        );
+        let mut other = value.clone();
+        other["reblogged_root_uuid"] = json!("t:other");
+        assert!(parse_post_selected(&other, "alice", &selection).is_empty());
+        let mut fallback = value.clone();
+        fallback["blog"] = json!({"name":"renamed"});
+        fallback["reblogged_root_uuid"] = json!("renamed.tumblr.com");
+        assert!(!parse_post_selected(&fallback, "alice", &selection).is_empty());
+        fallback["reblogged_root_uuid"] = json!("alice.tumblr.com");
+        assert!(parse_post_selected(&fallback, "alice", &selection).is_empty());
+        let selection = Selection {
+            inline: Inline::Original,
+            ..Selection::default()
+        };
+        let media = parse_post_selected(&value, "alice", &selection);
+        assert!(media.last().unwrap().url.path().ends_with("/tree.jpg"));
+        other["reblog"]["tree_html"] = json!("");
+        assert!(
+            parse_post_selected(&other, "alice", &selection)
+                .last()
+                .unwrap()
+                .url
+                .path()
+                .ends_with("/comment.jpg")
+        );
+        let selection = Selection {
+            inline: Inline::Disabled,
+            original: false,
+            ..Selection::default()
+        };
+        let media = parse_post_selected(&value, "alice", &selection);
+        assert_eq!(media.len(), 1);
+        assert!(!media[0].handoff.contains_key("_tumblr_original"));
+        assert_eq!(
+            media[0].metadata.as_ref().unwrap().media_id,
+            parse_post(&value, "alice")[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .media_id
+        );
+        let selection = Selection::default().with_posts(["video".into()]).unwrap();
+        assert!(parse_post_selected(&value, "alice", &selection).is_empty());
+        assert!(Selection::default().with_posts(["unknown".into()]).is_err());
+        for invalid in [Value::Null, json!(42), json!("unsupported")] {
+            let mut malformed = value.clone();
+            malformed["type"] = invalid;
+            assert!(parse_post_selected(&malformed, "alice", &selection).is_empty());
+        }
+        assert!(
+            parse_post_selected(
+                &value,
+                "alice",
+                &Selection::default().with_posts([]).unwrap()
+            )
+            .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn filtered_pages_keep_offsets_and_single_posts_ignore_type_filter() {
+        let photo = |id| json!({"id":id,"type":"photo","photos":[{"original_size":{"url":PHOTO}}]});
+        let video =
+            json!({"id":2,"type":"video","video_url":"https://64.media.tumblr.com/video.mp4"});
+        let pages = [
+            json!({"response":{"posts":[photo(1)],"total_posts":2}}),
+            json!({"response":{"posts":[video],"total_posts":2}}),
+        ];
+        let (root, server) = serve(
+            pages
+                .iter()
+                .map(|p| response("200 OK", p.to_string().as_bytes()))
+                .collect(),
+        );
+        let native =
+            tumblr(root).with_selection(Selection::default().with_posts(["video".into()]).unwrap());
+        let files: Vec<_> = native
+            .stream(&Url::parse("https://alice.tumblr.com/").unwrap())
+            .collect()
+            .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "2"
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("&offset=1&limit=50 "));
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            json!({"response":{"posts":[photo(1)]}})
+                .to_string()
+                .as_bytes(),
+        )]);
+        let native = tumblr(root).with_selection(Selection::default().with_posts([]).unwrap());
+        assert_eq!(
+            native
+                .stream(&Url::parse("https://alice.tumblr.com/post/1").unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .len(),
+            1
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn original_disabled_emits_capped_images_without_token_requests() {
+        let body = json!({"response":{"posts":[{"id":1,"photos":[{"original_size":{
+            "url":"https://64.media.tumblr.com/abc/def/s2048x3072/one.jpg", "width":2048,"height":1536
+        }}]}],"total_posts":1}}).to_string();
+        // With no proxy and the localhost API fixture, a mistaken token lookup
+        // would contact the CDN; the short timeout bounds this regression.
+        let (root, server) = serve(vec![response("200 OK", body.as_bytes())]);
+        let native = tumblr(root).with_selection(Selection {
+            original: false,
+            ..Selection::default()
+        });
+        let mut files = native.stream(&Url::parse("https://alice.tumblr.com/").unwrap());
+        let first = tokio::time::timeout(Duration::from_secs(1), files.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(files);
+        assert_eq!(first.url.path(), "/abc/def/s2048x3072/one.jpg");
+        assert!(!first.handoff.contains_key("_tumblr_original"));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn fetches_post_with_retries_and_api_key() {
         let body = json!({"response": {"posts": [post(123)]}}).to_string();
@@ -1194,9 +1522,10 @@ mod tests {
             Arc,
             atomic::{AtomicBool, Ordering},
         };
-        for input in [
-            "https://alice.tumblr.com/",
-            "https://alice.tumblr.com/post/1",
+        for (input, skip_reblogs) in [
+            ("https://alice.tumblr.com/", false),
+            ("https://alice.tumblr.com/post/1", false),
+            ("https://alice.tumblr.com/", true),
         ] {
             let photo = |name: &str| {
                 json!({"original_size":{
@@ -1204,11 +1533,20 @@ mod tests {
                     "width":2048,"height":1536
                 }})
             };
-            let body = json!({"response":{"total_posts":2,"posts":[
+            let mut body = json!({"response":{"total_posts":2,"posts":[
                 {"id":1,"photos":[photo("one"),photo("two")]},
                 {"id":2,"photos":[photo("three")]}
-            ]}})
-            .to_string();
+            ]}});
+            if skip_reblogs {
+                body["response"]["posts"].as_array_mut().unwrap().insert(
+                    0,
+                    json!({
+                        "id":0,"reblogged_from_id":99,"photos":[photo("skipped")]
+                    }),
+                );
+                body["response"]["total_posts"] = json!(3);
+            }
+            let body = body.to_string();
             // A local HTTP proxy records every attempted CDN token request as
             // CONNECT, without contacting Tumblr or needing a TLS fixture.
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1250,6 +1588,14 @@ mod tests {
                 requests
             });
             let native = tumblr(root.clone())
+                .with_selection(Selection {
+                    reblogs: if skip_reblogs {
+                        Reblogs::OriginalOnly
+                    } else {
+                        Reblogs::All
+                    },
+                    ..Selection::default()
+                })
                 .with_network(&NetworkOptions::new(Some(root.to_string()), None).unwrap())
                 .unwrap();
             let mut files = native.stream(&Url::parse(input).unwrap());

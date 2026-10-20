@@ -652,7 +652,7 @@ fn extract_input<'a>(
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
 ) -> BoxStream<'a, Result<ExtractionEvent>> {
-    stream::once(async move {
+    let input = stream::once(async move {
         let url = extract::http_url(&source)?;
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
@@ -900,6 +900,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::tumblr::Tumblr::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_selection(options.tumblr_selection())
                                     .with_api_key(options.api_key.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1137,6 +1138,14 @@ fn extract_input<'a>(
                             gallery_dl_rs::booru::Booru::new(site, backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_credentials(
+                                            options.username.as_deref(),
+                                            options.password.as_deref(),
+                                        )?
+                                        .with_api_credentials(
+                                            options.user_id.as_deref(),
+                                            options.api_key.as_deref(),
+                                        )?
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1180,6 +1189,18 @@ fn extract_input<'a>(
                                 .then(|| options.size.clone())
                                 .flatten(),
                             mp4: (category == "imgur").then_some(options.mp4).flatten(),
+                            api_key: options.api_key.clone(),
+                            username: options.username.clone(),
+                            password: options.password.clone(),
+                            user_id: options.user_id.clone(),
+                            tumblr_reblogs: (category == "tumblr"
+                                && (options.tumblr_reblogs.is_some() || options.reblogs.is_some()))
+                            .then(|| options.tumblr_selection().reblogs),
+                            posts: (category == "tumblr")
+                                .then(|| options.posts.clone())
+                                .flatten(),
+                            inline: (category == "tumblr").then_some(options.inline).flatten(),
+                            original: (category == "tumblr").then_some(options.original).flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
                             access_token: (category == "mastodon")
@@ -1264,7 +1285,8 @@ fn extract_input<'a>(
         Ok(input)
     })
     .try_flatten()
-    .boxed()
+    .boxed();
+    event::with_extraction_budget(input, backend.timeout)
 }
 
 struct Settings {
@@ -1327,6 +1349,13 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         previews: None,
         mp4: None,
         reblogs: None,
+        tumblr_reblogs: None,
+        posts: None,
+        inline: None,
+        original: None,
+        username: None,
+        password: None,
+        user_id: None,
         reposts: None,
         ugoira: None,
         access_token: None,
