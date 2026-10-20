@@ -2667,3 +2667,71 @@ fn include_configuration_is_sparse_ordered_and_explicitly_clearable() {
         assert!(error.contains("include"));
     }
 }
+
+#[test]
+fn bluesky_likes_endpoint_and_api_server_are_scoped_sparse_and_private() {
+    use gallery_dl_rs::bluesky::LikesEndpoint;
+    use serde_json::json;
+    let cfg=parse(&json!({"extractor":{"endpoint":"posts+","bluesky":{"endpoint":"getActorLikes","api-server":"https://appview.example/base/"}}}).to_string()).unwrap();
+    let blue = cfg.resolve("bluesky").unwrap();
+    assert_eq!(blue.bluesky_endpoint, Some(LikesEndpoint::ActorLikes));
+    assert_eq!(
+        blue.api_server.as_deref(),
+        Some("https://appview.example/base/")
+    );
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert!(kemono.bluesky_endpoint.is_none());
+    assert!(kemono.api_server.is_none());
+    assert_eq!(
+        kemono.endpoint,
+        Some(gallery_dl_rs::kemono::Endpoint::Expanded)
+    );
+    let cleared = blue.overlay(&Options {
+        api_server: Some(String::new()),
+        bluesky_endpoint: Some(LikesEndpoint::Records),
+        ..Default::default()
+    });
+    assert_eq!(cleared.api_server.as_deref(), Some(""));
+    assert_eq!(cleared.bluesky_endpoint, Some(LikesEndpoint::Records));
+    for value in [json!(""), json!(false), json!(null)] {
+        let cfg = parse(
+            &json!({"extractor":{"bluesky":{"api-server":value,"endpoint":null}}}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.resolve("bluesky").unwrap().api_server.as_deref(),
+            Some("")
+        );
+        assert_eq!(
+            cfg.resolve("bluesky").unwrap().bluesky_endpoint,
+            Some(LikesEndpoint::Records)
+        );
+    }
+    let cfg = parse(r#"{"extractor":{"bluesky":{"endpoint":"other"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("bluesky").unwrap().bluesky_endpoint,
+        Some(LikesEndpoint::Records)
+    );
+    for value in [
+        json!(true),
+        json!(7),
+        json!("https://private:secret@appview.example/"),
+        json!("https://appview.example/?token=secret"),
+        json!("https://appview.example/#secret"),
+        json!("file:///private/secret"),
+        json!("https://appview.example/\nsecret"),
+    ] {
+        let error = parse(&json!({"extractor":{"bluesky":{"api-server":value}}}).to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("secret"));
+        assert!(error.contains("api-server"));
+    }
+    for document in [
+        json!({"api-server":"https://private.example/"}),
+        json!({"extractor":{"api-server":"https://private.example/"}}),
+        json!({"extractor":{"twitter":{"api-server":"https://private.example/"}}}),
+    ] {
+        assert!(parse(&document.to_string()).is_err());
+    }
+}

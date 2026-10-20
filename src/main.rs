@@ -787,6 +787,10 @@ fn extract_input<'a>(
                                         ));
                                     }
                                     native
+                                        .with_api_server(options.api_server.as_deref())?
+                                        .with_likes_endpoint(
+                                            options.bluesky_endpoint.unwrap_or_default(),
+                                        )
                                         .with_include(options.include.clone())
                                         .with_selection(gallery_dl_rs::bluesky::Selection {
                                             reposts: options.reposts.unwrap_or(false),
@@ -1199,6 +1203,12 @@ fn extract_input<'a>(
                             endpoint: matches!(category, "kemono" | "coomer")
                                 .then_some(options.endpoint)
                                 .flatten(),
+                            bluesky_endpoint: (category == "bluesky")
+                                .then_some(options.bluesky_endpoint)
+                                .flatten(),
+                            api_server: (category == "bluesky")
+                                .then(|| options.api_server.clone())
+                                .flatten(),
                             favorites: matches!(category, "kemono" | "coomer")
                                 .then_some(options.favorites)
                                 .flatten(),
@@ -1408,6 +1418,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         revisions: None,
         order_revisions: None,
         endpoint: None,
+        bluesky_endpoint: None,
+        api_server: None,
         order_posts: None,
         favorites: None,
         username: None,

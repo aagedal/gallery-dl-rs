@@ -26,6 +26,10 @@ use std::{
 };
 use url::Url;
 
+#[path = "bluesky_likes.rs"]
+mod likes;
+pub use likes::LikesEndpoint;
+
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const API_ROOT: &str = "https://public.api.bsky.app/xrpc/";
 const BLOB_ROOT: &str = "https://bsky.social/xrpc/com.atproto.sync.getBlob";
@@ -60,6 +64,7 @@ pub enum Feed {
     Posts,
     Replies,
     Video,
+    ActorLikes,
     Custom(String),
     List(String),
 }
@@ -71,7 +76,7 @@ impl Feed {
             Self::Posts => Some("posts_and_author_threads"),
             Self::Replies => Some("posts_with_replies"),
             Self::Video => Some("posts_with_video"),
-            Self::Custom(_) | Self::List(_) => None,
+            Self::Custom(_) | Self::List(_) | Self::ActorLikes => None,
         }
     }
 }
@@ -571,6 +576,9 @@ pub struct Bluesky {
     rate_limits: RateLimits,
     selection: Selection,
     include: Option<Include>,
+    likes_endpoint: LikesEndpoint,
+    discovery_root: Option<Url>,
+    pds_fallback: Url,
 }
 
 struct FeedState {
@@ -588,6 +596,7 @@ struct FeedState {
 struct SelectedState {
     post: Option<Value>,
     quote: Option<Quote>,
+    quote_parent: Option<Value>,
     pending: VecDeque<ExtractionEvent>,
     seen: BTreeSet<String>,
     depth: usize,
@@ -599,6 +608,7 @@ impl SelectedState {
         Self {
             post: Some(post),
             quote: None,
+            quote_parent: None,
             pending: VecDeque::new(),
             seen: BTreeSet::new(),
             depth: 0,
@@ -619,6 +629,9 @@ impl Bluesky {
             rate_limits: RateLimits::default(),
             selection: Selection::default(),
             include: None,
+            likes_endpoint: LikesEndpoint::default(),
+            discovery_root: None,
+            pds_fallback: Url::parse("https://bsky.social/").unwrap(),
         })
     }
 
@@ -703,6 +716,11 @@ impl Bluesky {
             if let Some(event) = state.pending.pop_front() {
                 return Ok(Some(event));
             }
+            // Upstream emits a post's own files before attempting its quote.
+            // Invalid quote metadata must not erase an already-valid group.
+            if let Some(parent) = state.quote_parent.take() {
+                state.quote = quoted_post(&parent)?;
+            }
             let post = match state.post.take() {
                 Some(post) => post,
                 None => match state.quote.take() {
@@ -745,7 +763,7 @@ impl Bluesky {
             }
             let mut media = parse_post_view_selected(&post, self.selection)?;
             if self.selection.quoted {
-                state.quote = quoted_post(&post)?;
+                state.quote_parent = Some(post);
             }
             state.emitted |= !media.is_empty();
             for item in &mut media {
@@ -770,6 +788,7 @@ impl Bluesky {
             Feed::Media | Feed::Posts | Feed::Replies | Feed::Video => {
                 ("app.bsky.feed.getAuthorFeed", "actor", did.clone())
             }
+            Feed::ActorLikes => ("app.bsky.feed.getActorLikes", "actor", did.clone()),
             Feed::Custom(rkey) => (
                 "app.bsky.feed.getFeed",
                 "feed",
@@ -801,7 +820,8 @@ impl Bluesky {
         state.done = cursor
             .as_ref()
             .is_none_or(|cursor| !state.seen_cursors.insert(cursor.clone()))
-            || state.pages >= MAX_PAGES;
+            || state.pages >= MAX_PAGES
+            || state.feed == Feed::ActorLikes && items.is_empty();
         state.cursor = cursor;
         // Collection owners identify the feed/list record, not the returned post
         // authors. Upstream's reposts author restriction applies only to author feeds.
@@ -905,40 +925,52 @@ impl Bluesky {
         view: ProfileView,
     ) -> BoxStream<'_, Result<ExtractionEvent>> {
         match view {
-            ProfileView::Likes => stream::once(async move {
-                Err(error("native Bluesky likes extraction is not implemented; use --extractor compatibility"))
-            }).boxed(),
-            ProfileView::Info | ProfileView::Avatar | ProfileView::Background => stream::once(async move {
-                let did = self.resolve(&actor).await?;
-                let body = self.call("app.bsky.actor.getProfile", &[("actor", &did)]).await?;
-                let profile: Value = serde_json::from_slice(&body).map_err(|_| error("Bluesky returned invalid JSON"))?;
-                if profile.get("did").and_then(Value::as_str) != Some(did.as_str()) {
-                    return Err(error("Bluesky profile does not match the requested DID"));
-                }
-                let events = if view == ProfileView::Info {
-                    // Normalized public subset; full upstream profile metadata has
-                    // fields outside the native PostMetadata schema.
-                    VecDeque::from([
-                        ExtractionEvent::Post(Box::new(Post {
-                            category: "bluesky".into(), count: Some(0),
-                            metadata: Some(PostMetadata { post_id: did,
-                                username: string(&profile, "handle").map(Arc::from),
-                                caption: string(&profile, "description").map(Arc::from),
-                                ..PostMetadata::default() }),
-                        })),
-                        ExtractionEvent::EndPost,
-                    ])
-                } else {
-                    match profile_asset(&profile, &did, view)? {
-                        Some(mut media) => { self.network.apply_media(&mut media); group(vec![media], "bluesky") },
-                        None => VecDeque::new(),
+            ProfileView::Likes => self.likes_events(actor),
+            ProfileView::Info | ProfileView::Avatar | ProfileView::Background => {
+                stream::once(async move {
+                    let did = self.resolve(&actor).await?;
+                    let body = self
+                        .call("app.bsky.actor.getProfile", &[("actor", &did)])
+                        .await?;
+                    let profile: Value = serde_json::from_slice(&body)
+                        .map_err(|_| error("Bluesky returned invalid JSON"))?;
+                    if profile.get("did").and_then(Value::as_str) != Some(did.as_str()) {
+                        return Err(error("Bluesky profile does not match the requested DID"));
                     }
-                };
-                Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)).boxed())
-            }).map(|result| match result {
-                Ok(events) => events,
-                Err(error) => stream::once(async move { Err(error) }).boxed(),
-            }).flatten().boxed(),
+                    let events = if view == ProfileView::Info {
+                        // Normalized public subset; full upstream profile metadata has
+                        // fields outside the native PostMetadata schema.
+                        VecDeque::from([
+                            ExtractionEvent::Post(Box::new(Post {
+                                category: "bluesky".into(),
+                                count: Some(0),
+                                metadata: Some(PostMetadata {
+                                    post_id: did,
+                                    username: string(&profile, "handle").map(Arc::from),
+                                    caption: string(&profile, "description").map(Arc::from),
+                                    ..PostMetadata::default()
+                                }),
+                            })),
+                            ExtractionEvent::EndPost,
+                        ])
+                    } else {
+                        match profile_asset(&profile, &did, view)? {
+                            Some(mut media) => {
+                                self.network.apply_media(&mut media);
+                                group(vec![media], "bluesky")
+                            }
+                            None => VecDeque::new(),
+                        }
+                    };
+                    Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)).boxed())
+                })
+                .map(|result| match result {
+                    Ok(events) => events,
+                    Err(error) => stream::once(async move { Err(error) }).boxed(),
+                })
+                .flatten()
+                .boxed()
+            }
         }
     }
 
@@ -1346,6 +1378,397 @@ mod tests {
         assert!(requests[1].contains("&cursor=next "));
     }
 
+    fn like_record(owner: &str, key: &str, liked: &Value) -> Value {
+        json!({"uri": format!("at://{owner}/app.bsky.feed.like/{key}"), "cid": CID3,
+            "value": {"$type": "app.bsky.feed.like", "subject": {"uri": liked["uri"], "cid": liked["cid"]}}})
+    }
+
+    fn did_document(owner: &str, service: &Url) -> Vec<u8> {
+        json!({"id":owner,"service":[{"id":"#atproto_pds","type":"AtprotoPersonalDataServer","serviceEndpoint":service}]}).to_string().into_bytes()
+    }
+
+    #[tokio::test]
+    async fn record_likes_discover_owner_pds_and_preserve_mixed_post_identity_and_opaque_cursors() {
+        let owner = "did:web:owner.example";
+        let first = post(
+            "first",
+            json!({"$type":"app.bsky.embed.images","images":[image(CID1, "")]}),
+        );
+        let mut second = post(
+            "second",
+            json!({"$type":"app.bsky.embed.images","images":[image(CID2, "")]}),
+        );
+        second["uri"] = json!("at://did:web:bob.example/app.bsky.feed.post/second");
+        second["author"]["did"] = json!("did:web:bob.example");
+        second["author"]["handle"] = json!("bob.example");
+        let (pds, pds_server) = serve(vec![
+            response(
+                "200 OK",
+                "",
+                br#"{"records":[],"cursor":" page+1?x=y&z=1 "}"#,
+            ),
+            response(
+                "200 OK",
+                "",
+                json!({"records":[like_record(owner,"a",&first),like_record(owner,"b",&second)]})
+                    .to_string()
+                    .as_bytes(),
+            ),
+        ]);
+        let pds_base = pds.join("../pds/").unwrap();
+        let (discovery, discovery_server) = serve(vec![response(
+            "200 OK",
+            "",
+            &did_document(owner, &pds_base),
+        )]);
+        let (api, api_server) = serve(vec![
+            response("200 OK", "", json!({"did":owner}).to_string().as_bytes()),
+            response("200 OK", "", &thread_view(first.clone())),
+            response("200 OK", "", &thread_view(second.clone())),
+        ]);
+        let client = bluesky(api)
+            .with_likes_test_roots(discovery.join("../").unwrap(), pds.join("../").unwrap());
+        let result = client
+            .stream(&Url::parse("https://bsky.app/profile/owner.example/likes").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 2, "{result:?}");
+        for (actual, expected) in result.iter().zip([&first, &second]) {
+            assert_eq!(
+                actual.as_ref().unwrap().archive_key(),
+                parse_post_view(expected).unwrap()[0].archive_key()
+            );
+        }
+        let requests = pds_server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("GET /pds/xrpc/com.atproto.repo.listRecords?repo=did%3Aweb%3Aowner.example&collection=app.bsky.feed.like&limit=100 "));
+        let second_url = Url::parse(&format!(
+            "http://test{}",
+            requests[1]
+                .lines()
+                .next()
+                .unwrap()
+                .split_whitespace()
+                .nth(1)
+                .unwrap()
+        ))
+        .unwrap();
+        assert_eq!(
+            second_url
+                .query_pairs()
+                .find(|(key, _)| key == "cursor")
+                .unwrap()
+                .1,
+            " page+1?x=y&z=1 "
+        );
+        let discovery_requests = discovery_server.join().unwrap();
+        assert!(discovery_requests[0].starts_with("GET /.well-known/did.json "));
+        let api_requests = api_server.join().unwrap();
+        assert_eq!(api_requests.len(), 3);
+        assert!(api_requests[0].contains("resolveHandle"));
+        assert!(
+            api_requests[1..]
+                .iter()
+                .all(|request| request.contains("getPostThread"))
+        );
+        for request in requests
+            .iter()
+            .chain(&discovery_requests)
+            .chain(&api_requests)
+        {
+            let request = request.to_ascii_lowercase();
+            assert!(!request.contains("authorization:"));
+            assert!(!request.contains("cookie:"));
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_deleted_inaccessible_and_contradictory_likes_do_not_poison_later_records() {
+        let image_embed = json!({"$type":"app.bsky.embed.images","images":[image(CID1, "")]});
+        let valid = post("valid", image_embed.clone());
+        let missing = post("missing", image_embed.clone());
+        let forbidden = post("forbidden", image_embed.clone());
+        let mismatched = post("mismatch", image_embed.clone());
+        let bad_author = post("author", image_embed);
+        let mut wrong_owner = like_record(DID, "owner", &valid);
+        wrong_owner["uri"] = json!("at://did:web:wrong.example/app.bsky.feed.like/a");
+        let mut wrong_collection = like_record(DID, "collection", &valid);
+        wrong_collection["uri"] = json!(format!("at://{DID}/app.bsky.feed.post/a"));
+        let mut wrong_uri = like_record(DID, "uri", &valid);
+        wrong_uri["value"]["subject"]["uri"] = json!("https://private.example/secret");
+        let mut wrong_cid = like_record(DID, "cid", &valid);
+        wrong_cid["value"]["subject"]["cid"] = json!("private/secret");
+        let records = vec![
+            wrong_owner,
+            wrong_collection,
+            wrong_uri,
+            wrong_cid,
+            like_record(DID, "missing", &missing),
+            like_record(DID, "forbidden", &forbidden),
+            like_record(DID, "mismatch", &mismatched),
+            like_record(DID, "author", &bad_author),
+            like_record(DID, "good", &valid),
+        ];
+        let (pds, pds_server) = serve(vec![response(
+            "200 OK",
+            "",
+            json!({"records":records}).to_string().as_bytes(),
+        )]);
+        let (discovery, discovery_server) = serve(vec![response(
+            "200 OK",
+            "",
+            &did_document(DID, &pds.join("../").unwrap()),
+        )]);
+        let mut mismatched = mismatched;
+        mismatched["cid"] = json!(CID2);
+        let mut bad_author = bad_author;
+        bad_author["author"]["did"] = json!("did:web:forged.example");
+        let (api, api_server) = serve(vec![
+            response("400 Bad Request", "", b"{}"),
+            response("403 Forbidden", "", b"{}"),
+            response("200 OK", "", &thread_view(mismatched)),
+            response("200 OK", "", &thread_view(bad_author)),
+            response("200 OK", "", &thread_view(valid)),
+        ]);
+        let client = bluesky(api)
+            .with_likes_test_roots(discovery.join("../").unwrap(), pds.join("../").unwrap());
+        let results = client
+            .stream(&Url::parse(&format!("https://bsky.app/profile/{DID}/likes")).unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(results.len(), 1, "{results:?}");
+        assert_eq!(
+            results[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "valid"
+        );
+        assert_eq!(api_server.join().unwrap().len(), 5);
+        assert_eq!(pds_server.join().unwrap().len(), 1);
+        assert!(discovery_server.join().unwrap()[0].starts_with(&format!("GET /{DID} ")));
+    }
+
+    #[tokio::test]
+    async fn liked_own_media_survives_bad_quotes_and_later_likes_remain_balanced() {
+        let mut first = post(
+            "first",
+            json!({"$type":"app.bsky.embed.recordWithMedia",
+            "media":{"$type":"app.bsky.embed.images","images":[image(CID1, "")]},
+            "record":{"$type":"app.bsky.embed.record","record":{"uri":"https://private.example/secret","cid":CID3}}}),
+        );
+        first["embed"] = json!(null);
+        let second = post(
+            "second",
+            json!({"$type":"app.bsky.embed.images","images":[image(CID2, "")]}),
+        );
+        let (pds, pds_server) = serve(vec![response(
+            "200 OK",
+            "",
+            json!({"records":[like_record(DID,"a",&first),like_record(DID,"b",&second)]})
+                .to_string()
+                .as_bytes(),
+        )]);
+        let (discovery, discovery_server) = serve(vec![response(
+            "200 OK",
+            "",
+            &did_document(DID, &pds.join("../").unwrap()),
+        )]);
+        let (api, api_server) = serve(vec![
+            response("200 OK", "", &thread_view(first)),
+            response("200 OK", "", &thread_view(second)),
+        ]);
+        let client = bluesky(api)
+            .with_selection(Selection {
+                quoted: true,
+                ..Selection::default()
+            })
+            .with_likes_test_roots(discovery.join("../").unwrap(), pds.join("../").unwrap());
+        let results = crate::job_selection::JobSelection::default()
+            .apply(
+                client
+                    .events(&Url::parse(&format!("https://bsky.app/profile/{DID}/likes")).unwrap()),
+            )
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(results.len(), 2, "{results:?}");
+        assert_eq!(
+            results[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "first"
+        );
+        assert_eq!(
+            results[1]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "second"
+        );
+        assert_eq!(api_server.join().unwrap().len(), 2);
+        assert_eq!(pds_server.join().unwrap().len(), 1);
+        assert_eq!(discovery_server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn invalid_or_failed_discovery_falls_back_without_disclosing_or_fetching_unsafe_endpoints()
+     {
+        for document in [
+            br#"invalid"#.to_vec(),
+            json!({"id":"did:web:wrong.example","service":[]})
+                .to_string()
+                .into_bytes(),
+            did_document(
+                DID,
+                &Url::parse("https://user:secret@private.example/").unwrap(),
+            ),
+            did_document(
+                DID,
+                &Url::parse("https://private.example/?secret=value").unwrap(),
+            ),
+            did_document(DID, &Url::parse("file:///private/secret").unwrap()),
+        ] {
+            let (pds, pds_server) = serve(vec![response("200 OK", "", br#"{"records":[]}"#)]);
+            let (discovery, discovery_server) = serve(vec![response("200 OK", "", &document)]);
+            let client = bluesky(Url::parse("http://127.0.0.1:9/xrpc/").unwrap())
+                .with_likes_test_roots(discovery.join("../").unwrap(), pds.join("../").unwrap());
+            let results = client
+                .stream(&Url::parse(&format!("https://bsky.app/profile/{DID}/likes")).unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert!(results.is_empty(), "{results:?}");
+            assert_eq!(pds_server.join().unwrap().len(), 1);
+            assert_eq!(discovery_server.join().unwrap().len(), 1);
+        }
+        let (pds, pds_server) = serve(vec![response("200 OK", "", br#"{"records":[]}"#)]);
+        let (discovery, discovery_server) = serve(vec![response(
+            "503 Service Unavailable",
+            "",
+            b"private body",
+        )]);
+        let client = bluesky(Url::parse("http://127.0.0.1:9/xrpc/").unwrap())
+            .with_likes_test_roots(discovery.join("../").unwrap(), pds.join("../").unwrap());
+        assert!(
+            client
+                .stream(&Url::parse(&format!("https://bsky.app/profile/{DID}/likes")).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .is_empty()
+        );
+        assert_eq!(pds_server.join().unwrap().len(), 1);
+        assert_eq!(discovery_server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn liked_post_hydration_and_later_pages_are_cancelled_before_siblings_resume() {
+        use crate::{job_selection::JobSelection, selection::RangeSelection};
+        let liked = post(
+            "liked",
+            json!({"$type":"app.bsky.embed.images","images":[image(CID1, "")]}),
+        );
+        let later = post(
+            "later",
+            json!({"$type":"app.bsky.embed.images","images":[image(CID2, "")]}),
+        );
+        let (pds,pds_server)=serve(vec![response("200 OK","",json!({"cursor":"next","records":[like_record(DID,"a",&liked),like_record(DID,"b",&later)]}).to_string().as_bytes())]);
+        let (discovery, discovery_server) = serve(vec![response(
+            "200 OK",
+            "",
+            &did_document(DID, &pds.join("../").unwrap()),
+        )]);
+        let (api, api_server) = serve(vec![
+            response("200 OK", "", &thread_view(liked)),
+            response("200 OK", "", feed_body("sibling", CID3).as_bytes()),
+        ]);
+        let client = bluesky(api)
+            .with_likes_test_roots(discovery.join("../").unwrap(), pds.join("../").unwrap())
+            .with_include(Some(Include::Views(vec!["likes".into(), "media".into()])));
+        let jobs = JobSelection {
+            file_range: Some(RangeSelection::parse("1").unwrap()),
+            ..JobSelection::default()
+        };
+        let results = jobs
+            .apply(client.events(&Url::parse(&format!("https://bsky.app/profile/{DID}")).unwrap()))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(results.len(), 2, "{results:?}");
+        assert_eq!(
+            results[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "liked"
+        );
+        assert_eq!(
+            results[1]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "sibling"
+        );
+        assert_eq!(api_server.join().unwrap().len(), 2);
+        assert_eq!(pds_server.join().unwrap().len(), 1);
+        assert_eq!(discovery_server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn record_likes_cursor_cycles_stop_and_actor_likes_empty_pages_stop_without_pds_discovery()
+     {
+        let (pds, pds_server) = serve(vec![
+            response("200 OK", "", br#"{"records":[],"cursor":"a"}"#),
+            response("200 OK", "", br#"{"records":[],"cursor":"b"}"#),
+            response("200 OK", "", br#"{"records":[],"cursor":"a"}"#),
+        ]);
+        let (discovery, discovery_server) = serve(vec![response(
+            "200 OK",
+            "",
+            &did_document(DID, &pds.join("../").unwrap()),
+        )]);
+        let client = bluesky(Url::parse("http://127.0.0.1:9/xrpc/").unwrap())
+            .with_likes_test_roots(discovery.join("../").unwrap(), pds.join("../").unwrap());
+        assert!(
+            client
+                .stream(&Url::parse(&format!("https://bsky.app/profile/{DID}/likes")).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .is_empty()
+        );
+        assert_eq!(pds_server.join().unwrap().len(), 3);
+        assert_eq!(discovery_server.join().unwrap().len(), 1);
+        let (api, api_server) = serve(vec![response(
+            "200 OK",
+            "",
+            br#"{"feed":[],"cursor":"next"}"#,
+        )]);
+        let client = bluesky(api)
+            .with_likes_endpoint(LikesEndpoint::ActorLikes)
+            .with_include(Some(Include::Views(vec![])));
+        assert!(
+            client
+                .stream(&Url::parse(&format!("https://bsky.app/profile/{DID}/likes")).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .is_empty()
+        );
+        assert!(api_server.join().unwrap()[0].contains("app.bsky.feed.getActorLikes?actor="));
+    }
+
     fn profile() -> Value {
         json!({"did": DID, "handle": "alice.bsky.social", "description": "About Alice",
             "avatar": format!("https://cdn.bsky.app/img/avatar/plain/{DID}/{CID1}@jpeg"),
@@ -1402,7 +1825,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn include_all_preserves_complete_catalog_order_and_scoped_likes_error() {
+    async fn include_all_preserves_complete_catalog_order_including_actor_likes() {
         let profile = profile().to_string();
         let mut responses = vec![response("200 OK", "", profile.as_bytes()); 3];
         for (rkey, cid) in [
@@ -1413,8 +1836,11 @@ mod tests {
         ] {
             responses.push(response("200 OK", "", feed_body(rkey, cid).as_bytes()));
         }
+        responses.push(response("200 OK", "", br#"{"feed":[]}"#));
         let (root, server) = serve(responses);
-        let client = bluesky(root).with_include(Some(Include::All));
+        let client = bluesky(root)
+            .with_include(Some(Include::All))
+            .with_likes_endpoint(LikesEndpoint::ActorLikes);
         let url = Url::parse(&format!("https://bsky.app/profile/{DID}")).unwrap();
         let events = client.events(&url).collect::<Vec<_>>().await;
         assert_eq!(
@@ -1451,17 +1877,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![DID, CID1, CID2, "posts", "replies", "media", "video"]
         );
-        assert_eq!(events.iter().filter(|e| e.is_err()).count(), 1);
-        assert!(
-            events
-                .iter()
-                .find_map(|e| e.as_ref().err())
-                .unwrap()
-                .to_string()
-                .contains("likes extraction")
-        );
+        assert_eq!(events.iter().filter(|e| e.is_err()).count(), 0);
         let requests = server.join().unwrap();
-        assert_eq!(requests.len(), 7);
+        assert_eq!(requests.len(), 8);
+        assert!(requests[7].contains("app.bsky.feed.getActorLikes?actor="));
         for request in &requests[..3] {
             assert!(request.contains("app.bsky.actor.getProfile?actor="));
         }
@@ -1583,15 +2002,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scoped_likes_error_and_cancelled_asset_do_not_block_later_include_siblings() {
+    async fn scoped_likes_request_error_and_cancelled_asset_do_not_block_later_include_siblings() {
         use crate::job_selection::JobSelection;
-        let (root, server) = serve(vec![response(
-            "200 OK",
-            "",
-            feed_body("later", CID1).as_bytes(),
-        )]);
-        let client =
-            bluesky(root).with_include(Some(Include::Views(vec!["likes".into(), "media".into()])));
+        let (root, server) = serve(vec![
+            response("401 Unauthorized", "", b"{}"),
+            response("200 OK", "", feed_body("later", CID1).as_bytes()),
+        ]);
+        let client = bluesky(root)
+            .with_likes_endpoint(LikesEndpoint::ActorLikes)
+            .with_include(Some(Include::Views(vec!["likes".into(), "media".into()])));
         let url = Url::parse(&format!("https://bsky.app/profile/{DID}")).unwrap();
         let result = JobSelection::default()
             .apply(client.events(&url))
@@ -1609,7 +2028,7 @@ mod tests {
                 .post_id,
             "later"
         );
-        assert_eq!(server.join().unwrap().len(), 1);
+        assert_eq!(server.join().unwrap().len(), 2);
         let (root, server) = serve(vec![response(
             "200 OK",
             "",

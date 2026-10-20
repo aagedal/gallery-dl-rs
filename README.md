@@ -263,13 +263,36 @@ are skipped. Bare profiles queue one native child job for that default feed;
 jobs. `/avatar` and `/banner` (also `/background`) resolve the profile's blob CID
 and emit original blob jobs, with upstream's synthetic JPEG/1000×1000 metadata.
 `/info` exposes normalized handle/description in fileless post events; full
-profile metadata dumping remains unfinished. `/likes` still requires the
-compatibility backend. `post_id` is the underlying record key, `media_id`/`id` the blob
+profile metadata dumping remains unfinished. `/likes` reads public repository
+like records as described below. `post_id` is the underlying record key, `media_id`/`id` the blob
 CID, `username` the underlying handle, `caption` the post text, `timestamp`
 from `createdAt`; files carry aspect-ratio width/height, alt text and MIME type.
 Default filenames are `{post_id}_{index}.{extension}`; archive identity is
 (DID, CID), including quoted and reposted media. Compatibility mode sends
 Bluesky URLs to the backend.
+
+Native Bluesky likes resolve the actor's DID, discover its personal data server
+from `plc.directory` or a `did:web` document, then read
+`com.atproto.repo.listRecords` for `app.bsky.feed.like`. Discovery requires a
+matching document ID and a credential-free HTTPS PDS endpoint; failures fall
+back to `https://bsky.social`, matching upstream's default. Subject post URIs,
+CIDs and authors are checked, and posts hydrate through AppView only as consumed.
+Liked posts retain their original author/blob archive identity; the author-feed
+`reposts` restriction does not remove other authors. Malformed, deleted and
+inaccessible record subjects are skipped; repository-page errors fail the current
+job. Source record cursors are opaque and bounded, empty pages can advance, and
+repeated cursors or 1,000 pages stop traversal. Finite post/file ranges avoid
+later hydration and pages while leaving sibling include views available.
+
+`extractor.bluesky.endpoint: "getActorLikes"` selects the alternative AppView
+feed endpoint; other bounded strings, `false` or `null` select repository records.
+The alternative stops on an empty feed even with a cursor. No native Bluesky
+login is implemented; restricted endpoints/content still report access errors.
+Category-scoped `api-server` overrides the AppView base URL (HTTP(S), optional
+path, no credentials/query/fragment), appending `/xrpc/`; it does not redirect
+DID discovery or repository reads. An empty string, `false` or `null` restores
+the public AppView. Both settings forward to compatibility mode. Blob jobs still
+use `bsky.social`; full PDS-specific blob routing remains unfinished.
 
 Experimental native Reddit extraction (`--extractor native`, category `reddit`)
 accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),
@@ -1339,7 +1362,7 @@ default. At most 128 entries of 128 bytes are accepted. Unknown names are omitte
 child positions; downstream deduplication/archive selection still applies.
 X accepts `replies` as an alias for `with-replies`. Pixiv's illustration bookmarks
 are `favorite`; `bookmark` and `user` select novels, also available as
-`novel-bookmark` and `novel-user`. Native Pixiv novels/Sketch and Bluesky likes
+`novel-bookmark` and `novel-user`. Native Pixiv novels/Sketch
 report errors inside their selected scopes and leave later children available.
 `"all"` includes those entries; child ranges/filters can reject them without
 requests. Include settings forward to compatibility mode as typed options.
@@ -1514,7 +1537,10 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
-`search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`, `order-posts`, `favorites` (Kemono/Coomer options), `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`,
+`order-posts`, `favorites` (Kemono/Coomer options), category-scoped Bluesky
+`api-server` and likes `endpoint`, `retries` (integer 0–10), and `timeout`
+(positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
 Site-specific media options affect their respective extractors. Booru

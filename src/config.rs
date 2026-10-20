@@ -73,6 +73,10 @@ pub struct Options {
     pub revisions: Option<crate::kemono::RevisionMode>,
     pub order_revisions: Option<crate::kemono::RevisionOrder>,
     pub endpoint: Option<crate::kemono::Endpoint>,
+    /// Bluesky's category-scoped endpoint selects the likes API.
+    pub bluesky_endpoint: Option<crate::bluesky::LikesEndpoint>,
+    /// Explicit Bluesky AppView server; empty restores the default.
+    pub api_server: Option<String>,
     pub order_posts: Option<crate::kemono::PostOrder>,
     pub favorites: Option<crate::kemono::Favorites>,
     pub username: Option<String>,
@@ -254,6 +258,11 @@ impl Options {
             revisions: overrides.revisions.or(self.revisions),
             order_revisions: overrides.order_revisions.or(self.order_revisions),
             endpoint: overrides.endpoint.or(self.endpoint),
+            bluesky_endpoint: overrides.bluesky_endpoint.or(self.bluesky_endpoint),
+            api_server: overrides
+                .api_server
+                .clone()
+                .or_else(|| self.api_server.clone()),
             order_posts: overrides.order_posts.or(self.order_posts),
             favorites: overrides.favorites.or(self.favorites),
             username: overrides.username.clone().or_else(|| self.username.clone()),
@@ -578,6 +587,7 @@ struct RawOptions {
     user_id: Field,
     access_token: Field,
     refresh_token: Field,
+    api_server: Field,
     client_id: Field,
     client_secret: Field,
     directory: Field,
@@ -752,6 +762,7 @@ impl Config {
             user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
+            api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
             directory: root.directory,
@@ -825,6 +836,7 @@ impl Config {
             user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
+            api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
             directory: extractor.directory,
@@ -894,6 +906,33 @@ impl Config {
                     "native configuration user-id is only supported for gelbooru",
                 ));
             }
+            if name != "bluesky" && settings.api_server.0.is_some() {
+                return Err(error(
+                    "native configuration api-server is only supported for bluesky",
+                ));
+            }
+            let bluesky_endpoint = if name == "bluesky" {
+                match settings.endpoint.0.take() {
+                    None => None,
+                    Some(Value::String(value)) if value.len() <= 128 && !value.contains('\0') => {
+                        Some(if value == "getActorLikes" {
+                            crate::bluesky::LikesEndpoint::ActorLikes
+                        } else {
+                            crate::bluesky::LikesEndpoint::Records
+                        })
+                    }
+                    Some(Value::Null | Value::Bool(false)) => {
+                        Some(crate::bluesky::LikesEndpoint::Records)
+                    }
+                    Some(_) => {
+                        return Err(error(
+                            "native configuration Bluesky endpoint must be a bounded string, false or null",
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
             let tumblr_reblogs = if name == "tumblr" {
                 match settings.reblogs.0.take() {
                     None => None,
@@ -949,6 +988,7 @@ impl Config {
             };
             // Boxed: unoptimized builds overflow the stack with inline settings.
             let mut resolved = (*settings).resolve(directory)?;
+            resolved.bluesky_endpoint = bluesky_endpoint;
             if matches!(name, "pixeldrain" | "gelbooru") {
                 resolved.api_key = opaque_key;
             }
@@ -1550,10 +1590,36 @@ impl RawOptions {
             }
         };
         let proxy = network_string(self.proxy)?;
+        let api_server = match self.api_server.0 {
+            None => None,
+            Some(Value::Null | Value::Bool(false)) => Some(String::new()),
+            Some(Value::String(value)) if value.is_empty() => Some(value),
+            Some(Value::String(value))
+                if value.len() <= 4096
+                    && value.trim() == value
+                    && !value.chars().any(char::is_control) =>
+            {
+                let url = url::Url::parse(&value)
+                    .map_err(|_| error("invalid native configuration api-server"))?;
+                if !matches!(url.scheme(), "http" | "https")
+                    || url.host_str().is_none()
+                    || !url.username().is_empty()
+                    || url.password().is_some()
+                    || url.query().is_some()
+                    || url.fragment().is_some()
+                {
+                    return Err(error("invalid native configuration api-server"));
+                }
+                Some(value)
+            }
+            Some(_) => return Err(error("invalid native configuration api-server")),
+        };
         let user_agent = network_string(self.user_agent)?;
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
+            api_server,
+            bluesky_endpoint: None,
             proxy,
             user_agent,
             base_directory: path(self.base_directory, directory, "base-directory")?,

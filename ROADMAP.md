@@ -485,8 +485,8 @@ upstream Dispatch reference vectors cover string/list distinctions and unknown
 entries. Native mode currently omits unknown include names without upstream's
 warning. All X profile views have native paths; Bluesky adds replies/video,
 avatar/banner blobs and normalized fileless info; Pixiv adds original
-avatar/background images and extension fallbacks. Native Pixiv novels/Sketch and
-Bluesky likes still produce scoped unsupported errors, including in `all`,
+avatar/background images and extension fallbacks. Native Pixiv novels/Sketch
+still produce scoped unsupported errors, including in `all`,
 without suppressing later selected children. Profile info retains only the
 normalized public subset; full metadata-only JSON dumping remains unfinished.
 X/Pixiv typed profile image identity isolates owner/kind/version archives from
@@ -497,6 +497,28 @@ default preservation and native/compatibility archive stability. Successful live
 public Bluesky avatar inspection on 2026-10-20 emitted one original blob job
 under `include`/child/file limits, with no errors or media download. Live
 authenticated X/Pixiv profile asset/include traversal remains unverified.
+
+**Implemented native Bluesky likes:** explicit likes URLs and profile include
+views now read public like records from the owner's discovered PDS, lazily
+hydrating referenced posts through AppView. DID documents bind to the owner;
+validated HTTPS service endpoints fall back to bsky.social on discovery failure.
+Record URI, subject CID and hydrated author/record identities are checked.
+Malformed/deleted/inaccessible subjects do not poison later likes; repository
+errors fail the current job. Independent bounded opaque cursors follow empty
+record pages, stop cycles and cap traversal; cooperative skip checkpoints and
+moving record arrays preserve cancellation without duplicating page payloads.
+The optional `getActorLikes` endpoint handles mixed-author feeds and stops on
+empty responses. Scoped api-server overrides only AppView, while endpoint values
+remain separate from Kemono's namesake setting; both forward to compatibility.
+Empty server overrides restore defaults, and errors never echo private values.
+HTTP/CLI fixtures cover discovery/fallback, order, identity, no credential
+forwarding, malformed/deleted references, independent ranges and sibling views.
+Valid own media now emit before quote validation, so a malformed quote cannot
+erase those files or poison later likes. On 2026-10-20 bounded public native
+likes inspection emitted one media job with no errors; an upstream resolved-JSON
+inspection selected the same original post, author DID and blob CID. Neither
+inspection downloaded media. Native login/restricted likes, PDS-specific blob
+routing and successful blob transfers remain unfinished.
 
 **Implemented native file metadata expressions:** repeated `--filter` and scoped
 `file-filter` / `image-filter` string/list settings select normalized public fields
@@ -813,7 +835,7 @@ quoted records retain their own media identity, validate reference/view
 identities, use hydrated data and fetch missing records lazily with cycle and
 depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
 requested; own pinned posts are retained. Ordered include, replies/video and
-profile-image views are described above. Not yet: likes, searches,
+profile-image and public likes views are described above. Not yet: searches,
 authentication, PDS-specific blob hosts (blobs always use `bsky.social`), thread `depth`,
 metadata facets/user expansion, and newer multi-item media embeds.
 

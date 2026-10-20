@@ -673,6 +673,8 @@ pub struct BackendOptions {
     pub max_posts: Option<usize>,
     pub metadata: Option<bool>,
     pub endpoint: Option<crate::kemono::Endpoint>,
+    pub bluesky_endpoint: Option<crate::bluesky::LikesEndpoint>,
+    pub api_server: Option<String>,
     pub order_posts: Option<crate::kemono::PostOrder>,
     pub favorites: Option<crate::kemono::Favorites>,
 }
@@ -901,6 +903,20 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("endpoint={}", serde_json::json!(endpoint)));
+        }
+        if let Some(endpoint) = options.bluesky_endpoint {
+            let value = match endpoint {
+                crate::bluesky::LikesEndpoint::Records => "listRecords",
+                crate::bluesky::LikesEndpoint::ActorLikes => "getActorLikes",
+            };
+            command
+                .arg("--option")
+                .arg(format!("endpoint={}", serde_json::json!(value)));
+        }
+        if let Some(server) = &options.api_server {
+            command
+                .arg("--option")
+                .arg(format!("api-server={}", serde_json::json!(server)));
         }
         if let Some(favorites) = options.favorites {
             let value = match favorites {

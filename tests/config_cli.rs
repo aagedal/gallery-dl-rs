@@ -1413,3 +1413,61 @@ async fn disabled_native_profile_include_starts_no_children_or_requests() {
         );
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn bluesky_server_and_endpoint_forward_only_to_its_compatibility_backend() {
+    let root = tempfile::tempdir().unwrap();
+    for (endpoint, server) in [
+        (
+            serde_json::json!("getActorLikes"),
+            serde_json::json!("https://appview.example/base/"),
+        ),
+        (serde_json::json!("other"), serde_json::json!(false)),
+    ] {
+        let cfg = config(
+            root.path(),
+            serde_json::json!({"extractor":{"bluesky":{"endpoint":endpoint,"api-server":server},"kemono":{"endpoint":"posts+"}}}),
+        );
+        for source in [
+            "https://bsky.app/profile/alice.bsky.social/likes",
+            "https://kemono.cr/patreon/user/9",
+        ] {
+            let log = root.path().join("backend.log");
+            let _ = std::fs::remove_file(&log);
+            let result = output(
+                binary(root.path(), &cfg)
+                    .arg("--extractor-command")
+                    .arg(backend(root.path()))
+                    .env("CONFIG_TEST_LOG", &log)
+                    .args(["-g", source]),
+            )
+            .await;
+            success(&result);
+            let log = std::fs::read_to_string(log).unwrap();
+            if source.contains("bsky.app") {
+                let endpoint = if endpoint == "getActorLikes" {
+                    "getActorLikes"
+                } else {
+                    "listRecords"
+                };
+                assert!(
+                    log.contains(&format!("--option\nendpoint=\"{endpoint}\"\n")),
+                    "{log}"
+                );
+                let server = server.as_str().unwrap_or("");
+                assert!(
+                    log.contains(&format!(
+                        "--option\napi-server={}\n",
+                        serde_json::json!(server)
+                    )),
+                    "{log}"
+                );
+                assert!(!log.contains("posts+"));
+            } else {
+                assert!(log.contains("endpoint=\"posts+\""));
+                assert!(!log.contains("api-server="));
+            }
+        }
+    }
+}
