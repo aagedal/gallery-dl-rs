@@ -555,11 +555,24 @@ Remaining: OAuth/cache discovery, arbitrary/additional instances, followed views
 account-search fallback/moved handling, and fuller metadata/default
 naming. Authenticated live verification and real captures remain required.
 
-**Implemented experimental native Kemono/Coomer:** posts and creator post
-listings with deduplicated files. Remaining: creator names, favorites,
-Discord servers, search/tag/popular views, revisions, comments/DMs, inline
-content images, archive/link extraction from post text, cookies/login, and
-upstream options (`duplicates`, `revisions`, `max-posts`, `endpoint`).
+**Implemented experimental native Kemono/Coomer:** posts, creator post listings
+and global `/posts` feeds with deduplicated files. Creator/global listings accept
+query/tag/initial offset parameters and paginate lazily in batches of 50.
+Global posts validate their own service/creator identities; present conflicting
+detail identities are rejected. Scoped `expand` fetches full details on demand,
+and `max-posts` counts raw posts including file-less ones, cutting off later
+detail/page requests. Empty post boundaries retain metadata for post ranges and
+filters. Publication dates use non-terminating filtering. Configuration and
+compatibility forwarding, metadata/archive equivalence, parser identity checks,
+and local HTTP pagination/cancellation tests cover these paths. Reduced sanitized
+public listing/detail captures are included. On 2026-10-20 native Kemono global
+inspection and a separate one-post detail expansion each emitted two media jobs;
+no files were downloaded. Coomer returned non-JSON data, so live Coomer traversal,
+authenticated verification, wider service captures and CDN downloads remain.
+Remaining: creator names, favorites, Discord servers, popular views, revisions,
+comments/DMs, inline content images, archive/link extraction from post text,
+cookies/login, and upstream file selection/order, thumbnail defaults and options
+(`files`, `original`, `duplicates`, `revisions`, `endpoint`).
 
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
 lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries

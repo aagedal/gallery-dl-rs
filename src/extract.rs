@@ -116,7 +116,16 @@ impl Media {
                 let post = self.metadata.as_ref()?;
                 let service = post.instance.as_deref()?;
                 let user = post.username.as_deref()?;
-                if crate::kemono::category(self.url.host_str()?) != Some(category)
+                let host = self.url.host_str()?;
+                let thumbnail = host.strip_prefix("img.").is_some_and(|domain| {
+                    crate::kemono::HOSTS.contains(&(domain, category))
+                        && self.url.scheme() == "https"
+                        && self.url.port().is_none()
+                        && self.url.username().is_empty()
+                        && self.url.password().is_none()
+                        && self.url.path().starts_with("/thumbnail/data/")
+                });
+                if (crate::kemono::category(host) != Some(category) && !thumbnail)
                     || !crate::kemono::valid_service(service)
                     || !crate::kemono::valid_id(user)
                     || !crate::kemono::valid_id(&post.post_id)
@@ -544,6 +553,7 @@ pub struct BackendOptions {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
+    pub max_posts: Option<usize>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -822,6 +832,9 @@ impl Backend {
         }
         if let Some(limit) = options.limit {
             command.arg("--option").arg(format!("limit={limit}"));
+        }
+        if let Some(limit) = options.max_posts {
+            command.arg("--option").arg(format!("max-posts={limit}"));
         }
         if let Some(limit) = options.search_limit {
             command.arg("--option").arg(format!("search-limit={limit}"));
@@ -1137,6 +1150,15 @@ fn compatibility_metadata(
                 string("tag_string").or_else(|| string("tags")),
             )
         }
+        "kemono" | "coomer" => (
+            id("id"),
+            string("hash")
+                .filter(|hash| crate::kemono::valid_hash(hash))
+                .unwrap_or_default(),
+            String::new(),
+            Some(id("user")).filter(|user| crate::kemono::valid_id(user)),
+            string("title"),
+        ),
         _ => return None,
     };
     let context_id = |key: &str| {
@@ -1147,6 +1169,12 @@ fn compatibility_metadata(
                 .is_ok_and(|n| n > 0 && n.to_string() == value))
         .then_some(value)
     };
+    let mut file = crate::file_metadata::compatibility(data);
+    if matches!(category, "kemono" | "coomer")
+        && let Some(name) = string("name")
+    {
+        file.get_or_insert_default().description = Some(std::sync::Arc::from(name));
+    }
     Some(PostMetadata {
         rating: crate::booru::Site::from_category(category)
             .and_then(|_| string("rating"))
@@ -1161,7 +1189,7 @@ fn compatibility_metadata(
                     .or(Some(score))
             })
             .and_then(|score| score.as_i64().or_else(|| score.as_str()?.parse().ok())),
-        file: crate::file_metadata::compatibility(data),
+        file,
         frames: (category == "pixiv")
             .then(|| data.get("frames").and_then(crate::pixiv::parse_frames))
             .flatten(),
@@ -1187,7 +1215,12 @@ fn compatibility_metadata(
         .then(|| {
             string("instance").filter(|host| crate::mastodon::INSTANCES.contains(&host.as_str()))
         })
-        .flatten(),
+        .flatten()
+        .or_else(|| {
+            matches!(category, "kemono" | "coomer")
+                .then(|| string("service").filter(|service| crate::kemono::valid_service(service)))
+                .flatten()
+        }),
         post_id,
         media_id,
         shortcode,

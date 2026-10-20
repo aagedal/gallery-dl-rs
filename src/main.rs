@@ -322,7 +322,10 @@ async fn run(args: Args) -> Result<()> {
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || gallery_dl_rs::twitter::is_search_url(&url)
                             || gallery_dl_rs::twitter::is_collection_url(&url)
-                            || extract::social_site(&url) == Some("bluesky")
+                            || matches!(
+                                extract::social_site(&url),
+                                Some("bluesky" | "kemono" | "coomer")
+                            )
                             || matches!(
                                 gallery_dl_rs::pixiv::target(&url),
                                 Ok(gallery_dl_rs::pixiv::Target::Bookmarks { .. })
@@ -618,7 +621,7 @@ struct Extractors {
     reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
     mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 3],
-    kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
+    kemono: [OnceCell<Result<gallery_dl_rs::kemono::Kemono>>; 2],
     imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
     pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
@@ -879,11 +882,12 @@ fn extract_input<'a>(
                     native.events(&url)
                 }
                 Extractor::Native if matches!(category, "kemono" | "coomer") => {
-                    let native = extractors
-                        .kemono
+                    let native = extractors.kemono[usize::from(category == "coomer")]
                         .get_or_init(|| async {
                             gallery_dl_rs::kemono::Kemono::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_expand(options.expand.unwrap_or(false))
+                                    .with_max_posts(options.max_posts)
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1177,7 +1181,12 @@ fn extract_input<'a>(
                             quoted: matches!(category, "twitter" | "bluesky")
                                 .then_some(options.quoted)
                                 .flatten(),
-                            expand: (category == "twitter").then_some(options.expand).flatten(),
+                            expand: matches!(category, "twitter" | "kemono" | "coomer")
+                                .then_some(options.expand)
+                                .flatten(),
+                            max_posts: matches!(category, "kemono" | "coomer")
+                                .then_some(options.max_posts)
+                                .flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
                             text_tweets: (category == "twitter")
                                 .then_some(options.text_tweets)
@@ -1383,6 +1392,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         limit: None,
         search_limit: None,
         search_stop: None,
+        max_posts: None,
         api_key: None,
         refresh_token: None,
         client_id: None,

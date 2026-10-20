@@ -906,3 +906,90 @@ async fn tumblr_selections_and_booru_credentials_forward_with_exact_types_and_sc
         );
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn kemono_expansion_and_post_limits_forward_only_to_supported_categories() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "expand":true,"max-posts":10,
+            "kemono":{"expand":false,"max-posts":2},
+            "coomer":{"max-posts":0}
+        }}),
+    );
+    for (url, expected, absent) in [
+        (
+            "https://kemono.cr/posts?q=cat",
+            vec!["expand=false", "max-posts=2"],
+            vec![],
+        ),
+        (
+            "https://coomer.st/onlyfans/user/alice?tag=cat",
+            vec!["expand=true", "max-posts=0"],
+            vec![],
+        ),
+        (
+            "https://x.com/alice/status/42",
+            vec!["expand=true"],
+            vec!["max-posts="],
+        ),
+        (
+            "https://instagram.com/p/abc/",
+            vec![],
+            vec!["expand=", "max-posts="],
+        ),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        for value in expected {
+            assert!(log.contains(&format!("--option\n{value}\n")), "{log}");
+        }
+        for value in absent {
+            assert!(!log.contains(value), "{log}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn kemono_dates_do_not_terminate_before_later_newer_posts() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path(), serde_json::json!({}));
+    let executable = root.path().join("kemono-backend");
+    std::fs::write(&executable, br#"#!/bin/sh
+printf '%s\n' '[[2,"",{"id":"1","user":"42","service":"patreon","date":"2020-01-01T00:00:00Z"}],[3,"https://kemono.cr/data/aa/bb/hash1.jpg",{"filename":"old","extension":"jpg","id":"1","user":"42","service":"patreon","hash":"hash1","num":1,"date":"2020-01-01T00:00:00Z"}],[2,"",{"id":"2","user":"43","service":"fanbox","date":"2025-01-01T00:00:00Z"}],[3,"https://kemono.cr/data/aa/bb/hash2.jpg",{"filename":"new","extension":"jpg","id":"2","user":"43","service":"fanbox","hash":"hash2","num":1,"date":"2025-01-01T00:00:00Z"}]]'
+"#).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for url in [
+        "https://kemono.cr/posts",
+        "https://coomer.st/onlyfans/user/alice",
+    ] {
+        for selection in [vec![], vec!["--post-range", "1"]] {
+            let mut command = binary(root.path(), &cfg);
+            command
+                .arg("--extractor-command")
+                .arg(&executable)
+                .args(["-j", "--date-after", "2024-01-01"])
+                .args(selection)
+                .arg(url);
+            let result = output(&mut command).await;
+            success(&result);
+            let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(items.len(), 1, "{items:?}");
+            assert_eq!(items[0]["metadata"]["post_id"], "2");
+            assert_eq!(items[0]["metadata"]["username"], "43");
+            assert_eq!(items[0]["metadata"]["instance"], "fanbox");
+        }
+    }
+}

@@ -47,7 +47,7 @@ pub struct Options {
     pub retweets: Option<crate::twitter::RetweetMode>,
     /// Include media from quoted posts.
     pub quoted: Option<bool>,
-    /// Expand each source post's conversation once per input.
+    /// Expand Twitter conversations or fetch full Kemono/Coomer post details.
     pub expand: Option<bool>,
     /// Suppress duplicate Twitter posts.
     pub unique: Option<bool>,
@@ -104,6 +104,8 @@ pub struct Options {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
+    /// Limit Kemono/Coomer source posts; zero clears an inherited limit.
+    pub max_posts: Option<usize>,
     /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
     /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
@@ -246,6 +248,7 @@ impl Options {
             limit: overrides.limit.or(self.limit),
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
+            max_posts: overrides.max_posts.or(self.max_posts),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             refresh_token: overrides
                 .refresh_token
@@ -352,6 +355,7 @@ struct RawRoot {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    max_posts: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -407,6 +411,7 @@ struct RawExtractor {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    max_posts: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -494,6 +499,7 @@ struct RawOptions {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    max_posts: Field,
     api_key: Field,
     username: Field,
     password: Field,
@@ -656,6 +662,7 @@ impl Config {
             limit: root.limit,
             search_limit: root.search_limit,
             search_stop: root.search_stop,
+            max_posts: root.max_posts,
             api_key: Field::default(),
             username: Field::default(),
             password: Field::default(),
@@ -717,6 +724,7 @@ impl Config {
             limit: extractor.limit,
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
+            max_posts: extractor.max_posts,
             api_key: Field::default(),
             username: Field::default(),
             password: Field::default(),
@@ -1202,6 +1210,22 @@ impl RawOptions {
             Some(Value::String(value)) if value == "auto" => Some(3),
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
+        let max_posts = match self.max_posts.0 {
+            None => None,
+            Some(Value::Number(value)) => Some(
+                value
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .ok_or_else(|| {
+                        error("native configuration max-posts must be a nonnegative integer")
+                    })?,
+            ),
+            Some(_) => {
+                return Err(error(
+                    "native configuration max-posts must be a nonnegative integer",
+                ));
+            }
+        };
         let api_key = match self.api_key.0 {
             None => None,
             Some(Value::String(key))
@@ -1405,6 +1429,7 @@ impl RawOptions {
             limit,
             search_limit,
             search_stop,
+            max_posts,
             api_key,
             refresh_token,
             client_id,

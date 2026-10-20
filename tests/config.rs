@@ -2176,3 +2176,58 @@ fn booru_credentials_stay_in_their_category_and_are_private() {
         assert!(!error.contains("PRIVATE"), "{error}");
     }
 }
+
+#[test]
+fn kemono_post_limits_inherit_and_zero_explicitly_clears_limits() {
+    let config = parse(r#"{"extractor":{"max-posts":20,"expand":true,"kemono":{"max-posts":2,"expand":false},"coomer":{"max-posts":0}}}"#).unwrap();
+    let kemono = config.resolve("kemono").unwrap();
+    assert_eq!((kemono.max_posts, kemono.expand), (Some(2), Some(false)));
+    let coomer = config.resolve("coomer").unwrap();
+    assert_eq!((coomer.max_posts, coomer.expand), (Some(0), Some(true)));
+    let generic = config.resolve("instagram").unwrap();
+    assert_eq!(generic.max_posts, Some(20));
+    assert_eq!(
+        generic
+            .overlay(&Options {
+                max_posts: Some(0),
+                ..Default::default()
+            })
+            .max_posts,
+        Some(0)
+    );
+    assert_eq!(kemono.overlay(&Options::default()), kemono);
+    let root =
+        parse(r#"{"max-posts":3,"extractor":{"max-posts":20,"kemono":{"max-posts":2}}}"#).unwrap();
+    assert_eq!(root.resolve("kemono").unwrap().max_posts, Some(3));
+    assert_eq!(
+        parse("{}").unwrap().resolve("kemono").unwrap().max_posts,
+        None
+    );
+}
+
+#[test]
+fn kemono_post_limits_reject_invalid_types_privately_in_all_scopes() {
+    use serde_json::json;
+    for value in [
+        json!(null),
+        json!(true),
+        json!(false),
+        json!(-1),
+        json!(1.5),
+        json!("PRIVATE_VALUE"),
+        json!([]),
+        json!({"PRIVATE_VALUE": 1}),
+    ] {
+        for document in [
+            json!({"max-posts":value}),
+            json!({"extractor":{"max-posts":value}}),
+            json!({"extractor":{"kemono":{"max-posts":value}}}),
+            json!({"extractor":{"coomer":{"max-posts":value}}}),
+        ] {
+            let failure = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(failure.contains("max-posts"), "{failure}");
+            assert!(!failure.contains("PRIVATE_VALUE"), "{failure}");
+        }
+    }
+    assert!(parse(r#"{"max-posts":1,"max-posts":2}"#).is_err());
+}

@@ -337,16 +337,28 @@ remains (instance, attachment ID), including for older `mastodon` archive entrie
 
 Experimental native Kemono/Coomer extraction (`--extractor native`) covers
 kemono.cr/.su/.party (`kemono` category) and coomer.st/.su/.party (`coomer`).
-Supported: posts (`/SERVICE/user/USER/post/ID`) and creator listings
-(`/SERVICE/user/USER`, offset paging 50 per page, capped at 200 pages) via the
-`/api/v1` API with `Accept: text/css`. The post `file` and `attachments` are
+Supported: posts (`/SERVICE/user/USER/post/ID`), creator listings
+(`/SERVICE/user/USER`) and global post listings (`/posts`) via the `/api/v1` API
+with `Accept: text/css`. Listings accept search (`q`), tag (`tag`) and initial
+offset (`o`) query parameters; offsets round down to multiples of 50, with
+50 posts per page and a 200-page cap. Global feeds preserve each post's creator
+and service. Scoped `expand: true` fetches full post details lazily;
+`max-posts` limits source posts, including file-less posts (zero removes the
+limit). Both options forward to the compatibility backend when explicit.
+Post limits and consumer cancellation prevent later detail/page requests.
+Dates filter without stopping at an older post, since publication dates need
+not follow listing order. The post `file` and `attachments` are
 downloaded from `https://HOST/data/PATH` (redirects to `nN.HOST` CDN subdomains
 are allowed for these categories only), with identical paths deduplicated.
 `post_id` is the post ID, `media_id` the file hash, `username` the creator ID,
 `service` the service, caption the title, date from `published`/`added`, and the
-file description is the original name. Default filenames are
+file description is the original name. These fields are also normalized from
+compatibility output; `service` and `user` are available in filename templates.
+Default filenames are
 `{post_id}_{index:02}.{extension}`; archive identity is (service, creator, post,
 hash). Plain `/data/` file links stay direct downloads.
+Native selection currently downloads originals in file-then-attachment order;
+Kemono/Coomer `files`, `original` and `duplicates` options remain unsupported.
 
 Experimental native image host extraction (`--extractor native`), one category
 per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
@@ -1270,7 +1282,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
-`cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,
+`cards-blacklist`, `size`, `fallback`, `max-posts`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
