@@ -1,0 +1,95 @@
+{
+  "source": "PixivFollowedExtractor.metadata/works + PixivAppAPI.illust_follow/_pagination",
+  "version": "1.32.17",
+  "url": "https://www.pixiv.net/bookmark_new_illust.php?rest=hide&type=user&page=99",
+  "owner": {
+    "id": 17,
+    "name": "Follower",
+    "account": "follower",
+    "mail_address": "PRIVATE_MAIL",
+    "profile_image_urls": {
+      "medium": "https://cdn.example/PRIVATE_AVATAR.jpg"
+    }
+  },
+  "responses": [
+    {
+      "illusts": [
+        {
+          "id": 42,
+          "user": {
+            "id": 5,
+            "account": "first-artist"
+          }
+        }
+      ],
+      "next_url": "https://app-api.pixiv.net/v2/illust/follow?restrict=all&max_illust_id=42"
+    },
+    {
+      "illusts": [
+        {
+          "id": 43,
+          "user": {
+            "id": 9,
+            "account": "second-artist"
+          }
+        }
+      ],
+      "next_url": null
+    }
+  ],
+  "calls": [
+    {
+      "endpoint": "/v2/illust/follow",
+      "params": {
+        "restrict": "all"
+      }
+    },
+    {
+      "endpoint": "/v2/illust/follow",
+      "params": {
+        "restrict": "all",
+        "max_illust_id": "42"
+      }
+    }
+  ],
+  "login_count": 1,
+  "final_api_user": {
+    "id": 99,
+    "name": "Changed",
+    "account": "changed"
+  },
+  "works": [
+    {
+      "id": 42,
+      "user": {
+        "id": 5,
+        "account": "first-artist"
+      },
+      "user_follow": {
+        "id": 17,
+        "name": "Follower",
+        "account": "follower",
+        "mail_address": "PRIVATE_MAIL",
+        "profile_image_urls": {
+          "medium": "https://cdn.example/PRIVATE_AVATAR.jpg"
+        }
+      }
+    },
+    {
+      "id": 43,
+      "user": {
+        "id": 9,
+        "account": "second-artist"
+      },
+      "user_follow": {
+        "id": 17,
+        "name": "Follower",
+        "account": "follower",
+        "mail_address": "PRIVATE_MAIL",
+        "profile_image_urls": {
+          "medium": "https://cdn.example/PRIVATE_AVATAR.jpg"
+        }
+      }
+    }
+  ]
+}

@@ -609,6 +609,20 @@ at 200 pages. Stopping a selected child leaves later followed users available;
 dropping the input stops later users and pages. Authenticated live following
 extraction remains unverified.
 
+Native Pixiv's followed-artists feed supports `/bookmark_new_illust.php` in
+the `pixiv` category, using `extractor.pixiv.refresh-token`. URL query options
+are ignored; the App API request always uses `restrict=all`. The initial OAuth
+user is captured before the first feed request and remains fixed in
+`user_follow.id`, `user_follow.name` and `user_follow.account` across token
+refreshes. Artwork artist metadata stays separate. Only those public owner
+fields are retained; additional upstream user metadata remains unfinished.
+Feed archives include the authenticated owner ID and artwork/page identity,
+separately from ordinary artworks, searches and rankings. Display-name changes
+do not change archive keys. Pagination pins the endpoint and restriction,
+detects cycles and stops at 200 pages. Empty/failed animation entries retain
+post positions, with native metadata failures reported as errors where upstream
+warns. Live authenticated feed extraction remains unverified.
+
 Native Pixiv rankings support `/ranking.php?mode=daily&date=YYYYMMDD` in the
 `pixiv` category. The default mode is `daily`; omitted or malformed dates use
 yesterday in UTC. Supported mode names are `daily`, `daily_r18`, `daily_ai`,

@@ -44,6 +44,9 @@ pub use search::{SearchMetadata, SearchOptions};
 #[path = "pixiv_series.rs"]
 pub mod series;
 pub use series::SeriesMetadata;
+#[path = "pixiv_followed.rs"]
+pub mod followed;
+pub use followed::FollowedUserMetadata;
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -115,6 +118,7 @@ impl ProfileKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
+    Followed,
     Novel(novel::Target),
     Ranking(RankingOptions),
     Search(SearchOptions),
@@ -195,6 +199,9 @@ pub fn target(url: &Url) -> Result<Target> {
         || !matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net"))
     {
         return Err(unsupported());
+    }
+    if url.path() == "/bookmark_new_illust.php" {
+        return Ok(Target::Followed);
     }
     if let ["user", owner, "series", id] = segments(url).as_slice() {
         if valid_id(owner) && valid_id(id) {
@@ -724,6 +731,7 @@ pub struct Pixiv {
     refresh_token: Option<String>,
     access_token: tokio::sync::Mutex<Option<String>>,
     authenticated_user: tokio::sync::Mutex<Option<String>>,
+    authenticated_profile: tokio::sync::Mutex<Option<Arc<FollowedUserMetadata>>>,
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
@@ -769,6 +777,7 @@ impl Pixiv {
             refresh_token: None,
             access_token: tokio::sync::Mutex::new(None),
             authenticated_user: tokio::sync::Mutex::new(None),
+            authenticated_profile: tokio::sync::Mutex::new(None),
             timeout,
             request_timeout: timeout,
             retries: 0,
@@ -885,6 +894,10 @@ impl Pixiv {
                     })
                     .ok_or_else(|| error("Pixiv OAuth response contains no access token"))?;
                 *self.authenticated_user.lock().await = data.get("user").and_then(id_of);
+                *self.authenticated_profile.lock().await = data
+                    .get("user")
+                    .and_then(FollowedUserMetadata::parse_compat)
+                    .map(Arc::new);
                 Ok(access.to_owned())
             }
             Reply::Status(status, _) if status.is_client_error() => Err(error(
@@ -1110,6 +1123,7 @@ impl Pixiv {
         }
         let (user, kinds) = match target {
             Target::Novel(target) => return self.novel_events(target),
+            Target::Followed => return self.followed_events(),
             Target::Following { id, private } => return self.following_events(id, private),
             Target::Ranking(options) => return self.ranking_events(options),
             Target::Search(options) => return self.search_events(options),

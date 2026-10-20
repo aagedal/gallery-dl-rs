@@ -25,3 +25,10 @@ pagination helper and synthetic responses. It covers an empty first page,
 immutable first-page detail, numbering before user/media filtering, mixed artists,
 and zero/negative numbering when the reported total differs from the page count.
 No API requests were made.
+
+`followed.json` records `PixivFollowedExtractor.metadata/works` and the actual
+App API feed pagination helper with synthetic data. It captures the initial
+OAuth owner, mixed artists, `restrict=all`, ignored URL query options and owner
+metadata that stays fixed after the API user object is replaced. Private-looking
+owner fields are synthetic sentinels used to verify native metadata allowlisting.
+No API requests were made.

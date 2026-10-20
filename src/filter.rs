@@ -426,6 +426,25 @@ fn context_parts(
                 ])),
             );
         }
+        if let Some(owner) = &post.user_follow {
+            metadata.insert(
+                "user_follow".into(),
+                map(BTreeMap::from([
+                    ("id".into(), identifier(&owner.id)),
+                    (
+                        "name".into(),
+                        owner.name.as_ref().map_or(Value::None, |s| text(s.clone())),
+                    ),
+                    (
+                        "account".into(),
+                        owner
+                            .account
+                            .as_ref()
+                            .map_or(Value::None, |s| text(s.clone())),
+                    ),
+                ])),
+            );
+        }
         if let Some(index) = post.num_series {
             metadata.insert("num_series".into(), Value::Int(index.into()));
         }

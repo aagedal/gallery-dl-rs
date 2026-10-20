@@ -320,7 +320,24 @@ impl Media {
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
-                if post.search_archive || post.search.is_some() {
+                if post.followed_archive || post.user_follow.is_some() {
+                    let owner = post.user_follow.as_ref()?;
+                    if !owner.valid()
+                        || post.search_archive
+                        || post.search.is_some()
+                        || post.ranking_archive
+                        || post.ranking.is_some()
+                        || post.profile_asset.is_some()
+                        || !crate::pixiv::valid_media_id(&post.post_id, &post.media_id)
+                    {
+                        return None;
+                    }
+                    (
+                        "pixiv",
+                        serde_json::json!(["followed", owner.id, post.post_id, post.media_id])
+                            .to_string(),
+                    )
+                } else if post.search_archive || post.search.is_some() {
                     let search = post.search.as_ref()?;
                     if !search.valid()
                         || post.ranking_archive
@@ -474,6 +491,12 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Initial OAuth owner for Pixiv's followed-artists feed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_follow: Option<std::sync::Arc<crate::pixiv::FollowedUserMetadata>>,
+    /// Preserve declared feed scope if its public owner metadata is invalid.
+    #[serde(skip_serializing)]
+    pub followed_archive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub series: Option<std::sync::Arc<crate::pixiv::SeriesMetadata>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1479,6 +1502,7 @@ fn compatibility_metadata(
                     || data.contains_key("ranking")
                     || data.contains_key("search")
                     || data.contains_key("num_series")
+                    || data.contains_key("user_follow")
                 {
                     let caption = string("caption")
                         .map(|s| crate::mastodon::strip_html(&s))
@@ -1599,6 +1623,14 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        user_follow: (category == "pixiv")
+            .then(|| {
+                data.get("user_follow")
+                    .and_then(crate::pixiv::FollowedUserMetadata::parse_compat)
+                    .map(std::sync::Arc::new)
+            })
+            .flatten(),
+        followed_archive: category == "pixiv" && data.contains_key("user_follow"),
         series: (category == "pixiv")
             .then(|| {
                 data.get("series")

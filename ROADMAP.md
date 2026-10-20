@@ -823,6 +823,12 @@ Recorded source pagination vectors cover empty first pages, immutable detail,
 mixed artists and numbering gaps; HTTP fixtures cover selection and recovery.
 Extended series-detail metadata and live authenticated verification remain
 unfinished.
+The followed-artists illustration feed now supports `bookmark_new_illust.php`,
+scoped lazy pagination and an immutable public OAuth owner snapshot. Feed archive
+identity includes owner/artwork/page and excludes display fields. Source vectors
+and HTTP fixtures cover mixed artists, token refresh, private-field omission,
+selection and recovery. Extended OAuth user metadata and live authenticated
+verification remain unfinished.
 Remaining: ugoira original individual-frame mode and conversion,
 bookmark cursor/metadata options,
 sketch,

@@ -665,6 +665,11 @@ async fn bluesky_and_pixiv_selection_forward_only_to_matching_backends() {
             vec!["reposts=", "quoted=", "videos=", "covers=", "full-series="],
         ),
         (
+            "https://www.pixiv.net/bookmark_new_illust.php?rest=hide",
+            vec!["ugoira=false"],
+            vec!["reposts=", "quoted=", "videos=", "covers=", "full-series="],
+        ),
+        (
             "https://www.pixiv.net/novel/show.php?id=42",
             vec!["covers=true", "full-series=false"],
             vec!["ugoira=", "reposts=", "quoted=", "videos="],

@@ -61,6 +61,7 @@ const FIELDS: &[&str] = &[
     "search",
     "series",
     "num_series",
+    "user_follow",
     "rating",
     "score",
     "filesize",
