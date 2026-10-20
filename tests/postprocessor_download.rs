@@ -922,3 +922,114 @@ async fn hash_filename_rebuilding_preserves_typed_date_formats() {
     );
     assert!(path.is_file());
 }
+
+#[tokio::test]
+async fn file_mtime_is_applied_at_finalization_and_after_only_updates_metadata() {
+    for event in ["prepare", "file", "after"] {
+        let root = tempfile::tempdir().unwrap();
+        let (url, server) = serve_with_header(
+            source_zip(),
+            "Last-Modified: Sun, 06 Nov 1994 08:49:37 GMT\r\n",
+        );
+        let media = media(&url);
+        let processors = Postprocessors::new(
+            [
+                json!({"name":"mtime","event":event}),
+                json!({"name":"metadata","event":"after","mtime":true}),
+            ]
+            .iter()
+            .map(|v| Specification::parse(v, root.path()).unwrap())
+            .collect(),
+        );
+        let result = download::download_with_options(
+            &client(),
+            root.path(),
+            &media,
+            DownloadOptions {
+                postprocessors: Some(&processors),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        server.join().unwrap();
+        let file = result.saved_path().unwrap();
+        let seconds = |path: &Path| {
+            fs::metadata(path)
+                .unwrap()
+                .modified()
+                .unwrap()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        };
+        assert_eq!(
+            seconds(file),
+            if event == "after" {
+                784_111_777
+            } else {
+                1_704_164_646
+            },
+            "{event}"
+        );
+        assert_eq!(
+            seconds(&PathBuf::from(format!("{}.json", file.display()))),
+            1_704_164_646,
+            "{event}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn skip_mtime_updates_sidecar_metadata_and_preserves_existing_file_time() {
+    let root = tempfile::tempdir().unwrap();
+    let media = media("https://fixture.invalid/ugoira.zip");
+    let file = path(root.path(), &media);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, b"existing").unwrap();
+    fs::File::open(&file)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(946_684_800))
+        .unwrap();
+    let processors = Postprocessors::new(
+        [
+            json!({"name":"mtime","event":"skip"}),
+            json!({"name":"metadata","event":"skip","mtime":true}),
+        ]
+        .iter()
+        .map(|v| Specification::parse(v, root.path()).unwrap())
+        .collect(),
+    );
+    let outcome = download::download_with_options(
+        &client(),
+        root.path(),
+        &media,
+        DownloadOptions {
+            postprocessors: Some(&processors),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, Outcome::Skipped(_)));
+    assert_eq!(
+        fs::metadata(&file)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        946_684_800
+    );
+    assert_eq!(
+        fs::metadata(PathBuf::from(format!("{}.json", file.display())))
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        1_704_164_646
+    );
+}

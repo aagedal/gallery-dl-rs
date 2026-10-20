@@ -1962,7 +1962,9 @@ including the media URL; `--write-metadata` retains its separate versioned schem
 `mtime` uses `key: "date"` by default, or a `value` template. File mode updates
 the completed file's modification time. `target: "directory"` (also `dir`)
 updates its containing directory after the post completes. Missing or zero values
-retain the normal timestamp. Metadata sidecars with `mtime: true` use preceding
+retain the normal timestamp. File mtime hooks record a timestamp for download
+finalization; `after` and `skip` hooks update metadata without changing the saved
+media file's time. Metadata sidecars with `mtime: true` use preceding
 mtime processor values or the HTTP Last-Modified timestamp.
 
 Processors default to the `file` event, except directory mtime, which defaults

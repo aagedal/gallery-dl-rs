@@ -181,16 +181,12 @@ async fn run_hook(
                 }
                 Processor::Mtime(config) => {
                     if config.is_file() {
-                        if postprocess::regular_file(input)? {
-                            config.apply(&mut prepared.keywords, input)?;
-                        } else {
-                            prepared.keywords.insert(
-                                "_mtime_meta".into(),
-                                config
-                                    .getter(&prepared.keywords)
-                                    .map_or(Value::Null, Value::from),
-                            );
-                        }
+                        prepared.keywords.insert(
+                            "_mtime_meta".into(),
+                            config
+                                .getter(&prepared.keywords)
+                                .map_or(Value::Null, Value::from),
+                        );
                     } else {
                         config.apply(
                             &mut prepared.keywords,
@@ -430,7 +426,7 @@ pub(crate) async fn download(
             .map_err(|_| error("postprocessor hook timed out"))??;
         }
     }
-    // File-target mtime hooks may have run during prepare before the input existed.
+    // Source file-target hooks only record metadata; finalization applies it once.
     if let Some(timestamp) = prepared
         .keywords
         .get("_mtime_meta")
@@ -530,15 +526,22 @@ async fn run_single_file(
                 .await?
         }
         Processor::Mtime(config) => {
-            let path = if config.is_file() {
-                input
+            if config.is_file() {
+                prepared.keywords.insert(
+                    "_mtime_meta".into(),
+                    config
+                        .getter(&prepared.keywords)
+                        .map_or(Value::Null, Value::from),
+                );
             } else {
-                prepared
-                    .path
-                    .parent()
-                    .ok_or_else(|| error("invalid postprocessor directory"))?
-            };
-            config.apply(&mut prepared.keywords, path)?;
+                config.apply(
+                    &mut prepared.keywords,
+                    prepared
+                        .path
+                        .parent()
+                        .ok_or_else(|| error("invalid postprocessor directory"))?,
+                )?;
+            }
         }
         Processor::Hash(config) => {
             if config.run(&mut prepared.keywords, input).await? {
