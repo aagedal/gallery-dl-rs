@@ -1168,3 +1168,46 @@ async fn kemono_metadata_setting_forwards_only_to_kemono_and_coomer() {
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn kemono_endpoint_and_discord_order_forward_only_to_their_categories() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor":{"endpoint":"legacy+","order-posts":"reverse","coomer":{"endpoint":"posts","order-posts":"asc"}}}),
+    );
+    for (url, expected) in [
+        (
+            "https://kemono.cr/discord/server/1/2",
+            Some(["endpoint=\"posts+\"", "order-posts=\"desc\""]),
+        ),
+        (
+            "https://coomer.st/onlyfans/user/alice",
+            Some(["endpoint=\"posts\"", "order-posts=\"asc\""]),
+        ),
+        ("https://x.com/alice/status/42", None),
+        ("https://alice.tumblr.com/", None),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        if let Some(expected) = expected {
+            for value in expected {
+                assert!(log.contains(&format!("--option\n{value}\n")), "{log}");
+            }
+        } else {
+            assert!(
+                !log.contains("endpoint=") && !log.contains("order-posts="),
+                "{log}"
+            );
+        }
+    }
+}

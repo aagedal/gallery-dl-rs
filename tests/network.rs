@@ -272,6 +272,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
         rating: None,
         score: None,
         revision: None,
+        discord: None,
         creator: None,
         community: None,
         community_archive: false,

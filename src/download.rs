@@ -940,7 +940,11 @@ fn kemono_public_redirects(media: &Media, headers: &HeaderMap) -> bool {
             || referer.host_str().and_then(crate::kemono::category) != Some(category)
             || !matches!(
                 crate::kemono::target(&referer),
-                Ok(crate::kemono::Target::Post { .. })
+                Ok(crate::kemono::Target::Post { .. }
+                    | crate::kemono::Target::Discord {
+                        channel: Some(_),
+                        ..
+                    })
             )
         {
             return false;
@@ -1320,6 +1324,43 @@ mod kemono_redirect_tests {
                     .next(&media.url, StatusCode::FOUND, &location)
                     .is_err()
             );
+        }
+    }
+    #[test]
+    fn discord_public_referers_allow_site_cdn_redirects_without_cookies() {
+        let media = media();
+        for referer in [
+            "https://kemono.cr/discord/server/100/200",
+            "https://kemono.cr/discord/server/100/channel/200",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(REFERER, HeaderValue::from_str(referer).unwrap());
+            let mut location = HeaderMap::new();
+            location.insert(
+                LOCATION,
+                HeaderValue::from_static("https://n1.kemono.cr/data/aa/bb/file.jpg"),
+            );
+            let mut redirects = Redirects::new(&media.url)
+                .allow_subdomains(kemono_public_redirects(&media, &headers));
+            assert!(
+                redirects
+                    .next(&media.url, StatusCode::FOUND, &location)
+                    .unwrap()
+                    .is_some()
+            );
+            headers.insert(COOKIE, HeaderValue::from_static("PRIVATE_SESSION"));
+            assert!(!kemono_public_redirects(&media, &headers));
+        }
+        for referer in [
+            "https://kemono.cr/discord/server/100",
+            "https://kemono.cr/discord/server/100/200?private=token",
+            "https://kemono.cr/discord/server/100#200",
+            "https://coomer.st/discord/server/100/200",
+            "https://kemono.cr/discord/server/100/not-a-channel",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(REFERER, HeaderValue::from_str(referer).unwrap());
+            assert!(!kemono_public_redirects(&media, &headers));
         }
     }
     #[test]

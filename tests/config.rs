@@ -2445,3 +2445,57 @@ fn kemono_metadata_option_is_sparse_and_scoped_with_explicit_false_overlays() {
         }
     }
 }
+
+#[test]
+fn kemono_endpoint_and_discord_post_order_are_scoped_sparse_and_strict() {
+    use gallery_dl_rs::kemono::{Endpoint, PostOrder};
+    let cfg = parse(r#"{"extractor":{"endpoint":"legacy+","order-posts":"reverse","kemono":{"endpoint":"posts","order-posts":"asc"}}}"#).unwrap();
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert_eq!(
+        (kemono.endpoint, kemono.order_posts),
+        (Some(Endpoint::Posts), Some(PostOrder::Forward))
+    );
+    let coomer = cfg.resolve("coomer").unwrap();
+    assert_eq!(
+        (coomer.endpoint, coomer.order_posts),
+        (Some(Endpoint::Expanded), Some(PostOrder::Reverse))
+    );
+    let overlaid = coomer.overlay(&Options {
+        endpoint: Some(Endpoint::Posts),
+        order_posts: Some(PostOrder::Forward),
+        ..Default::default()
+    });
+    assert_eq!(
+        (overlaid.endpoint, overlaid.order_posts),
+        (kemono.endpoint, kemono.order_posts)
+    );
+    let cfg = parse(r#"{"endpoint":"posts+","order-posts":"desc","extractor":{"kemono":{"endpoint":"legacy","order-posts":"asc"}}}"#).unwrap();
+    let resolved = cfg.resolve("kemono").unwrap();
+    assert_eq!(
+        (resolved.endpoint, resolved.order_posts),
+        (Some(Endpoint::Expanded), Some(PostOrder::Reverse))
+    );
+    let empty = parse("{}").unwrap().resolve("kemono").unwrap();
+    assert_eq!((empty.endpoint, empty.order_posts), (None, None));
+    for field in ["endpoint", "order-posts"] {
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(true),
+            serde_json::json!(1),
+            serde_json::json!([]),
+            serde_json::json!("PRIVATE_VALUE"),
+        ] {
+            for doc in [
+                serde_json::json!({field:value}),
+                serde_json::json!({"extractor":{field:value}}),
+                serde_json::json!({"extractor":{"kemono":{field:value}}}),
+            ] {
+                let error = parse(&doc.to_string()).unwrap_err().to_string();
+                assert!(
+                    error.contains(field) && !error.contains("PRIVATE_VALUE"),
+                    "{error}"
+                );
+            }
+        }
+    }
+}

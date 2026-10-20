@@ -884,7 +884,14 @@ fn extract_input<'a>(
                 Extractor::Native if matches!(category, "kemono" | "coomer") => {
                     let native = extractors.kemono[usize::from(category == "coomer")]
                         .get_or_init(|| async {
+                            let site = if category == "coomer" {
+                                "coomer.st"
+                            } else {
+                                "kemono.cr"
+                            };
+                            let jar = extractors.cookie_jar(configured, site).await?;
                             gallery_dl_rs::kemono::Kemono::new(backend.timeout).and_then(|native| {
+                                let native = native.with_cookies(jar);
                                 native
                                     .with_expand(options.expand.unwrap_or(false))
                                     .with_selection(options.kemono_selection())
@@ -892,6 +899,8 @@ fn extract_input<'a>(
                                     .with_revision_order(
                                         options.order_revisions.unwrap_or_default(),
                                     )
+                                    .with_endpoint(options.endpoint.unwrap_or_default())
+                                    .with_post_order(options.order_posts.unwrap_or_default())
                                     .with_max_posts(options.max_posts)
                                     .with_metadata(options.metadata.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
@@ -1193,6 +1202,12 @@ fn extract_input<'a>(
                             max_posts: matches!(category, "kemono" | "coomer")
                                 .then_some(options.max_posts)
                                 .flatten(),
+                            endpoint: matches!(category, "kemono" | "coomer")
+                                .then_some(options.endpoint)
+                                .flatten(),
+                            order_posts: matches!(category, "kemono" | "coomer")
+                                .then_some(options.order_posts)
+                                .flatten(),
                             metadata: matches!(category, "kemono" | "coomer")
                                 .then_some(options.metadata)
                                 .flatten(),
@@ -1389,6 +1404,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         duplicates: None,
         revisions: None,
         order_revisions: None,
+        endpoint: None,
+        order_posts: None,
         username: None,
         password: None,
         user_id: None,

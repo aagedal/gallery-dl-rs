@@ -343,8 +343,10 @@ with `Accept: text/css`. Listings accept search (`q`), tag (`tag`) and initial
 offset (`o`) query parameters; offsets round down to multiples of 50, with
 50 posts per page and a 200-page cap. Global feeds preserve each post's creator
 and service. Scoped `expand: true` fetches full post details lazily;
+`endpoint: "posts+"` or `"legacy+"` does the same for creator listings only
+(`"posts"`/`"legacy"` retain ordinary listings).
 `max-posts` limits source posts, including file-less posts (zero removes the
-limit). Both options forward to the compatibility backend when explicit.
+limit). These settings forward to the compatibility backend when explicit.
 Post limits and consumer cancellation prevent later detail/page requests.
 Dates filter without stopping at an older post, since publication dates need
 not follow listing order. Default selection is attachments, primary file, then
@@ -416,6 +418,38 @@ excluding revision IDs, import dates, navigation fields and original file names.
 Nonfinite numeric overflows fail explicitly. Historical filenames gain `_rID`
 before the extension, and their archive keys include the revision ID; current
 post keys are unchanged. Compatibility output retains the same typed metadata.
+
+Native Discord extraction supports `/discord/server/SERVER/CHANNEL`,
+`/discord/server/SERVER/channel/CHANNEL`, `#CHANNEL`/`#channel/CHANNEL` channel
+selectors, and `/discord/server/SERVER` for all channels in server order.
+Server, channel and message IDs validate against the API response before output.
+Channel messages paginate lazily in batches of 150, up to 200 pages per channel;
+`order-posts` accepts `"asc"` (default), `"desc"` or `"reverse"`. Reverse order
+uses the channel's post count and reverses each page. `max-posts` applies per
+channel, including messages with no files. Dropping the stream stops later
+channel/page requests. A failed channel reports an error while whole-server
+traversal continues with later channels. Attachments precede inline Discord CDN links, with
+repeated files retained; `files` and `duplicates` apply to creator/global posts.
+The existing `original` setting selects site attachment thumbnails or original
+files. Inline image links use validated direct Discord CDN URLs and their actual
+extensions even in thumbnail mode; nonimages require `original: true`.
+
+Discord metadata exposes immutable `server_id`/`channel_id`, optional server and
+channel names, topic, NSFW/type and parent ID in `metadata.discord`. Filters and
+templates accept `discord` and these fields directly. Message content supplies
+`caption`/`content`; dates come from `published`. Archive keys use server,
+message and source file position, preserving duplicate files and name changes.
+This follows the gallery-dl 1.32.17 thumbnail baseline used by existing native
+Kemono extraction; newer upstream master has removed thumbnail selection.
+Further author/embed/revision/archive metadata and authenticated verification
+remain unfinished.
+
+Kemono/Coomer API requests now accept scoped Netscape or imported Firefox
+cookies, recomputed for each request URL and rotated from responses. Cookies
+respect domain, path, expiry and Secure attributes, and stay out of media jobs
+and inspection output. API redirects remain confined to the original origin;
+public site media may follow CDN redirects with validated post/channel Referers.
+Username/password login is not implemented.
 
 Experimental native image host extraction (`--extractor native`), one category
 per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
@@ -1340,7 +1374,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
-`search-results`, `limit`, `search-limit`, `search-stop`, `metadata` (Kemono/Coomer), `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`, `order-posts` (the last three for Kemono/Coomer), `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
 Site-specific media options affect their respective extractors. Booru

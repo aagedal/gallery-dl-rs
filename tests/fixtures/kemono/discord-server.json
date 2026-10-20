@@ -1,0 +1,47 @@
+{
+  "id": "100",
+  "name": "Fixture Server",
+  "indexed": "2024-01-02T03:04:05.000000",
+  "updated": "2024-01-03T04:05:06.000000",
+  "channels": [
+    {
+      "id": "200",
+      "server_id": "100",
+      "name": "fixture-images",
+      "parent_channel_id": "300",
+      "topic": null,
+      "theme_color": null,
+      "is_nsfw": false,
+      "position": 1,
+      "icon_emoji": "◇",
+      "type": 0,
+      "post_count": 3
+    },
+    {
+      "id": "201",
+      "server_id": "100",
+      "name": "fixture-updates",
+      "parent_channel_id": null,
+      "topic": null,
+      "theme_color": null,
+      "is_nsfw": false,
+      "position": 2,
+      "icon_emoji": null,
+      "type": 0,
+      "post_count": 0
+    },
+    {
+      "id": "300",
+      "server_id": "100",
+      "name": "fixture-category",
+      "parent_channel_id": null,
+      "topic": null,
+      "theme_color": null,
+      "is_nsfw": false,
+      "position": 0,
+      "icon_emoji": null,
+      "type": 4,
+      "post_count": 0
+    }
+  ]
+}

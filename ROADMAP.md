@@ -571,9 +571,9 @@ no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
 thumbnail job and a Coomer MP4 original job with creator display names; no media
 was downloaded in those inspections. Authenticated verification, wider service
 captures and successful original transfers remain required.
-Remaining: favorites, Discord servers, popular views, comments/DMs, archive/link
-extraction from post text, cookies/login, endpoint options and full upstream
-metadata/default naming.
+Remaining: favorites, artist discovery, popular views, comments/DMs, archive/link
+extraction from post text, username/password login, additional endpoint behavior
+and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
 lookups attach typed immutable IDs and optional display names, public IDs, dates,
@@ -589,6 +589,26 @@ and output cancellation checkpoints. Local tests cover profile caching,
 concurrent lookup/cancellation, identity rejection, scoped configuration,
 compatibility parity, gzip limits/checksums and cancellation across empty gzip
 members. A sanitized public profile schema fixture accompanies these tests.
+
+**Implemented Kemono/Coomer Discord:** explicit channel paths/hash selectors
+and whole-server traversal validate enclosing server/channel/message identities.
+Forward and reverse 150-message pagination, retained duplicate attachments and
+inline CDN links, source indices/counts, empty boundaries and per-channel raw
+post limits share native range/date/filter/cancellation behavior. Typed Discord
+metadata reaches compatibility output, filters and templates; positional server
+archives do not depend on display names. Public Referers permit media CDN
+redirects without exposing API cookies. Scoped cookies rotate on API responses,
+respect URL attributes and never enter emitted jobs; API redirects remain
+same-origin. Creator `endpoint` aliases now select ordinary or lazily expanded
+listings, independently of Discord ordering. Sanitized public server/message
+captures accompany synthetic and local HTTP tests. A native one-post public
+channel inspection on 2026-10-20 emitted one original media job with typed Discord
+metadata and no errors; no media was downloaded. The existing 1.32.17
+thumbnail baseline is retained; direct inline CDN images preserve their real
+extensions rather than forming upstream's malformed thumbnail path. Newer
+upstream master removes thumbnail selection, so version alignment remains open.
+Discord author/embed/revision/archive metadata, authenticated verification,
+full downloads and broader service coverage remain unfinished.
 
 **Implemented Kemono/Coomer file selection:** ordered `files`, per-kind
 `duplicates`, and `original` settings now match upstream category order and

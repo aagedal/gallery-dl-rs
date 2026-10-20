@@ -484,3 +484,265 @@ async fn gzip_post_and_profile_responses_decode_without_changing_media_encoding(
             .contains("accept-encoding: gzip")
     }));
 }
+
+#[test]
+fn discord_metadata_survives_compatibility_filters_templates_and_server_archives() {
+    for (host, category) in [("kemono.cr", "kemono"), ("coomer.st", "coomer")] {
+        let discord = kemono::DiscordMetadata {
+            server_id: "100".into(),
+            channel_id: "200".into(),
+            server: Some("Example Server".into()),
+            channel: Some("pictures".into()),
+            channel_topic: Some("Images".into()),
+            channel_nsfw: Some(false),
+            channel_type: Some(0),
+            parent_id: Some("300".into()),
+        };
+        let post = json!({"id":"400","server":"100","channel":"200","content":"A caption","published":"2024-01-02T03:04:05","attachments":[{"name":"cover.jpg","path":"/aa/bb/aabb.jpg"}]});
+        let native =
+            kemono::parse_discord_post(&post, host, &discord, &kemono::Selection::default())
+                .unwrap()
+                .remove(0);
+        let data = json!({"subcategory":"discord","id":"400","server_id":"100","channel_id":"200","server":"Example Server","channel":"pictures","channel_topic":"Images","channel_nsfw":false,"channel_type":0,"parent_id":"300","content":"A caption","date":"2024-01-02T03:04:05","hash":"aabb","name":"cover.jpg","type":"attachment","filename":"cover","extension":"jpg","num":1,"private":"PRIVATE_VALUE"});
+        let compatible = extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, native.url, data]])).unwrap(),
+            category,
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(native.archive_key(), compatible.archive_key());
+        assert_eq!(
+            serde_json::to_value(&native.metadata).unwrap(),
+            serde_json::to_value(&compatible.metadata).unwrap()
+        );
+        assert!(FilterExpression::parse("server_id == '100' and channel_id == '200' and discord['channel_nsfw'] == False and content == 'A caption'").unwrap().matches(&compatible).unwrap());
+        assert!(
+            FilterExpression::parse(
+                "server_id == '100' and channel_id == '200' and content == 'A caption'"
+            )
+            .unwrap()
+            .matches_post(&gallery_dl_rs::event::Post::from_media(
+                std::slice::from_ref(&compatible),
+                category
+            ))
+            .unwrap()
+        );
+        assert_eq!(
+            FilenameTemplate::parse("{server_id}_{channel}_{post_id}_{index:02}.{extension}")
+                .unwrap()
+                .render(&compatible)
+                .unwrap(),
+            "100_pictures_400_01.jpg"
+        );
+        let mut renamed = compatible.clone();
+        let fields = renamed.metadata.as_mut().unwrap().discord.as_mut().unwrap();
+        fields.server = Some("Renamed".into());
+        fields.channel = Some("renamed".into());
+        assert_eq!(compatible.archive_key(), renamed.archive_key());
+        renamed
+            .metadata
+            .as_mut()
+            .unwrap()
+            .discord
+            .as_mut()
+            .unwrap()
+            .server_id = "101".into();
+        assert_ne!(compatible.archive_key(), renamed.archive_key());
+        assert!(
+            !serde_json::to_string(&compatible)
+                .unwrap()
+                .contains("PRIVATE_VALUE")
+        );
+    }
+}
+
+#[test]
+fn invalid_discord_identity_never_falls_back_to_creator_or_display_names() {
+    for (key, value) in [
+        ("server_id", json!(null)),
+        ("server_id", json!("Example Server")),
+        ("channel_id", json!("../200")),
+        ("id", json!("message")),
+        ("server_id", json!("0")),
+    ] {
+        let mut data = json!({"subcategory":"discord","id":"400","server_id":"100","channel_id":"200","server":"100","channel":"200","service":"patreon","user":"42","hash":"aabb","filename":"cover","extension":"jpg","num":1});
+        data[key] = value;
+        let compatible = extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, "https://kemono.cr/data/aa/bb/aabb.jpg", data]]))
+                .unwrap(),
+            "kemono",
+        )
+        .unwrap()
+        .remove(0);
+        assert!(compatible.metadata.as_ref().unwrap().discord.is_some());
+        assert!(compatible.metadata.as_ref().unwrap().creator.is_none());
+        assert_eq!(compatible.archive_key(), None, "{key}");
+    }
+}
+
+#[tokio::test]
+async fn kemono_api_cookies_rotate_on_redirects_and_never_enter_media_jobs() {
+    use futures_util::StreamExt;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::Duration,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let root: url::Url = format!("http://{}/", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let server = thread::spawn(move || {
+        let post=json!({"post":{"id":"7","user":"42","service":"patreon","file":{"name":"cover.jpg","path":"/aa/bb/aabb.jpg"}}}).to_string();
+        let replies=[
+            "HTTP/1.1 302 Found\r\nLocation: /api/v1/redirect\r\nSet-Cookie: session=PRIVATE_ROTATED; Path=/api\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
+            format!("HTTP/1.1 200 OK\r\nSet-Cookie: session=PRIVATE_LATEST; Path=/api\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{post}",post.len()),
+            { let body=include_str!("fixtures/kemono/profile.json");format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()) },
+        ];
+        let mut requests = Vec::new();
+        for reply in replies {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).unwrap();
+                assert_ne!(count, 0);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            requests.push(String::from_utf8(request).unwrap());
+            socket.write_all(reply.as_bytes()).unwrap();
+        }
+        requests
+    });
+    let jar = gallery_dl_rs::cookies::CookieJar::parse(
+        "127.0.0.1\tFALSE\t/api\tFALSE\t0\tsession\tPRIVATE_INITIAL\n",
+    )
+    .unwrap();
+    let extractor = kemono::Kemono::new(Duration::from_secs(4))
+        .unwrap()
+        .with_api_root(root)
+        .with_cookies(jar)
+        .with_network(
+            &gallery_dl_rs::network::NetworkOptions::new(Some(String::new()), None).unwrap(),
+        )
+        .unwrap();
+    let mut items = extractor.stream(&"https://kemono.cr/patreon/user/42/post/7".parse().unwrap());
+    let media = items.next().await.unwrap().unwrap();
+    assert!(items.next().await.is_none());
+    assert!(
+        !media
+            .headers
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case("cookie"))
+    );
+    assert!(!serde_json::to_string(&media).unwrap().contains("PRIVATE_"));
+    let requests = server.join().unwrap();
+    for (request, expected) in
+        requests
+            .iter()
+            .zip(["PRIVATE_INITIAL", "PRIVATE_ROTATED", "PRIVATE_LATEST"])
+    {
+        assert!(
+            request.contains(&format!("session={expected}")),
+            "{request}"
+        );
+    }
+    assert!(requests[1].starts_with("GET /api/v1/redirect "));
+    assert!(requests[2].starts_with("GET /api/v1/patreon/user/42/profile "));
+}
+
+#[test]
+fn sanitized_public_discord_messages_preserve_observed_schema_and_media_order() {
+    let server: serde_json::Value =
+        serde_json::from_slice(include_bytes!("fixtures/kemono/discord-server.json")).unwrap();
+    let channel = &server["channels"][0];
+    let discord = kemono::DiscordMetadata {
+        server_id: server["id"].as_str().unwrap().into(),
+        channel_id: channel["id"].as_str().unwrap().into(),
+        server: Some(server["name"].as_str().unwrap().into()),
+        channel: Some(channel["name"].as_str().unwrap().into()),
+        channel_nsfw: Some(false),
+        channel_type: Some(0),
+        parent_id: Some("300".into()),
+        ..Default::default()
+    };
+    let messages: Vec<serde_json::Value> =
+        serde_json::from_slice(include_bytes!("fixtures/kemono/discord-channel.json")).unwrap();
+    let parsed = messages
+        .iter()
+        .map(|message| {
+            kemono::parse_discord_post(
+                message,
+                "kemono.cr",
+                &discord,
+                &kemono::Selection::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(parsed.iter().map(Vec::len).collect::<Vec<_>>(), [1, 0, 1]);
+    assert_eq!(parsed[0][0].metadata.as_ref().unwrap().post_id, "400");
+    assert_eq!(parsed[2][0].metadata.as_ref().unwrap().post_id, "402");
+    assert!(
+        parsed[0][0]
+            .url
+            .path()
+            .ends_with(&format!("{}.png", "a".repeat(64)))
+    );
+    assert_eq!(
+        parsed[0][0].metadata.as_ref().unwrap().timestamp,
+        Some(1704164645)
+    );
+    assert_ne!(parsed[0][0].archive_key(), parsed[2][0].archive_key());
+    let compatible=extract::parse_messages(&serde_json::to_vec(&json!([[3,parsed[2][0].url,{"subcategory":"discord","id":"402","server_id":"100","channel_id":"200","server":"Fixture Server","channel":"fixture-images","channel_nsfw":false,"channel_type":0,"parent_id":"300","content":"","date":"2024-01-02T03:06:05.000000","hash":"b".repeat(64),"name":"fixture-second.jpg","type":"attachment","filename":"fixture-second","extension":"jpg","num":1}]] )).unwrap(),"kemono").unwrap().remove(0);
+    assert_eq!(
+        serde_json::to_value(&compatible.metadata).unwrap(),
+        serde_json::to_value(&parsed[2][0].metadata).unwrap()
+    );
+}
+
+#[test]
+fn discord_signed_inline_queries_stay_out_of_file_descriptions_and_templates() {
+    let discord = kemono::DiscordMetadata {
+        server_id: "100".into(),
+        channel_id: "200".into(),
+        ..Default::default()
+    };
+    let post = json!({"id":"400","server":"100","channel":"200","content":"https://cdn.discordapp.com/attachments/10/20/image.png?ex=PRIVATE_TOKEN&hm=PRIVATE_SIG","attachments":[]});
+    let native =
+        kemono::parse_discord_post(&post, "kemono.cr", &discord, &kemono::Selection::default())
+            .unwrap()
+            .remove(0);
+    assert_eq!(native.filename, "400_01.png");
+    assert!(native.url.query().unwrap().contains("PRIVATE_TOKEN"));
+    for kind in ["inline", "archive"] {
+        let compatible=extract::parse_messages(&serde_json::to_vec(&json!([[3,native.url,{"subcategory":"discord","id":"400","server_id":"100","channel_id":"200","name":"/attachments/10/20/image.png?ex=PRIVATE_TOKEN&hm=PRIVATE_SIG","type":kind,"hash":"","filename":"image","extension":"png","num":1}]] )).unwrap(),"kemono").unwrap().remove(0);
+        for media in [&native, &compatible] {
+            let description = media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .description
+                .as_deref()
+                .unwrap();
+            assert_eq!(description, "/attachments/10/20/image.png");
+            assert!(
+                !FilenameTemplate::parse("{description}.{extension}")
+                    .unwrap()
+                    .render(media)
+                    .unwrap()
+                    .contains("PRIVATE")
+            );
+            assert!(media.url.query().unwrap().contains("PRIVATE_TOKEN"));
+            assert!(media.archive_key().is_some());
+        }
+        assert_eq!(native.archive_key(), compatible.archive_key());
+    }
+}

@@ -1,4 +1,4 @@
-//! Experimental native Kemono/Coomer single-post, creator and global extraction.
+//! Experimental native Kemono/Coomer post, creator, global and Discord extraction.
 //!
 //! Mirrors gallery_dl/extractor/kemono.py for single posts, creator listings
 //! and global feeds using the public `/api/v1` JSON API (which requires
@@ -29,6 +29,12 @@ use std::{
 };
 use url::Url;
 
+#[path = "kemono_discord.rs"]
+mod discord;
+pub use discord::{DiscordMetadata, parse_discord_post, valid_discord_id};
+#[path = "kemono_session.rs"]
+mod session;
+pub use session::CookieSession;
 #[path = "kemono_profile.rs"]
 mod profile;
 pub(crate) use profile::parse_profile_value;
@@ -74,6 +80,11 @@ pub enum Target {
     Posts {
         host: String,
     },
+    Discord {
+        host: String,
+        server: String,
+        channel: Option<String>,
+    },
     Post {
         host: String,
         service: String,
@@ -92,6 +103,19 @@ pub enum Target {
         service: String,
         user: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PostOrder {
+    #[default]
+    Forward,
+    Reverse,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Endpoint {
+    #[default]
+    Posts,
+    Expanded,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,7 +180,7 @@ pub fn valid_hash(hash: &str) -> bool {
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Kemono/Coomer URL; expected /posts or /SERVICE/user/USER_ID[/post/POST_ID] on kemono.cr, kemono.su, coomer.st or coomer.su",
+            "unsupported Kemono/Coomer URL; expected /posts, /SERVICE/user/USER_ID[/post/POST_ID] or /discord/server/SERVER_ID[/CHANNEL_ID] on kemono.cr, kemono.su, coomer.st or coomer.su",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -174,6 +198,34 @@ pub fn target(url: &Url) -> Result<Target> {
         .unwrap_or_default();
     let host = host.to_owned();
     match segments.as_slice() {
+        ["discord", "server", server] if valid_discord_id(server) => {
+            let channel = match url.fragment().filter(|fragment| !fragment.is_empty()) {
+                Some(fragment) => {
+                    let fragment = fragment.strip_prefix('/').unwrap_or(fragment);
+                    let channel = fragment.strip_prefix("channel/").unwrap_or(fragment);
+                    if !valid_discord_id(channel) {
+                        return Err(unsupported());
+                    }
+                    Some(channel.into())
+                }
+                None => None,
+            };
+            Ok(Target::Discord {
+                host,
+                server: (*server).into(),
+                channel,
+            })
+        }
+        ["discord", "server", server, channel]
+        | ["discord", "server", server, "channel", channel]
+            if valid_discord_id(server) && valid_discord_id(channel) =>
+        {
+            Ok(Target::Discord {
+                host,
+                server: (*server).into(),
+                channel: Some((*channel).into()),
+            })
+        }
         ["posts"] => {
             listing_query(url)?;
             Ok(Target::Posts { host })
@@ -800,6 +852,9 @@ pub struct Kemono {
     revision_order: RevisionOrder,
     metadata: bool,
     profiles: tokio::sync::Mutex<profile::Cache>,
+    session: CookieSession,
+    post_order: PostOrder,
+    endpoint: Endpoint,
 }
 
 struct ListingState {
@@ -835,7 +890,24 @@ impl Kemono {
             revision_order: RevisionOrder::Newest,
             metadata: true,
             profiles: tokio::sync::Mutex::new(profile::Cache::default()),
+            session: CookieSession::default(),
+            post_order: PostOrder::Forward,
+            endpoint: Endpoint::Posts,
         })
+    }
+
+    pub fn with_post_order(mut self, order: PostOrder) -> Self {
+        self.post_order = order;
+        self
+    }
+    pub fn with_endpoint(mut self, endpoint: Endpoint) -> Self {
+        self.endpoint = endpoint;
+        self
+    }
+
+    pub fn with_cookies(mut self, cookies: crate::cookies::CookieJar) -> Self {
+        self.session = CookieSession::from_cookie_jar(cookies);
+        self
     }
 
     /// Enable optional descriptive creator profiles; immutable creator IDs are always retained.
@@ -1153,6 +1225,11 @@ impl Kemono {
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
         let (host, context) = match target {
+            Target::Discord {
+                host,
+                server,
+                channel,
+            } => return discord::events(self, host, server, channel),
             Target::Post {
                 host,
                 service,
@@ -1224,7 +1301,8 @@ impl Kemono {
                         Ok(identity) => identity,
                         Err(e) => return Some((Err(e), None)),
                     };
-                    if self.expand {
+                    if self.expand || self.endpoint == Endpoint::Expanded && state.context.is_some()
+                    {
                         let path = format!(
                             "api/v1/{}/user/{}/post/{}",
                             identity.service, identity.user, identity.id
@@ -1286,6 +1364,7 @@ impl Kemono {
             let response = self
                 .client
                 .get(target.clone())
+                .headers(self.session.request_headers(&target)?)
                 .timeout(self.request_timeout)
                 // The Kemono API only answers with JSON for this Accept value.
                 .header(header::ACCEPT, "text/css")
@@ -1293,6 +1372,8 @@ impl Kemono {
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Kemono request failed; check network access"))?;
+            self.session
+                .store_response(response.url(), response.headers());
             match redirects.next(response.url(), response.status(), response.headers())? {
                 Some(next) => target = next,
                 None => break response,

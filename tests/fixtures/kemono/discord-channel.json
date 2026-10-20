@@ -1,0 +1,85 @@
+[
+  {
+    "id": "400",
+    "author": {
+      "id": "500",
+      "avatar": "cccccccccccccccccccccccccccccccc",
+      "username": "fixture-author",
+      "public_flags": 0,
+      "discriminator": "1234"
+    },
+    "server": "100",
+    "channel": "200",
+    "content": "Fixture message with an image.",
+    "added": "2024-01-03T04:05:06.000000",
+    "published": "2024-01-02T03:04:05.000000",
+    "edited": null,
+    "embeds": [],
+    "mentions": [],
+    "attachments": [
+      {
+        "name": "fixture-image.png",
+        "path": "/aa/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+        "isImage": true
+      }
+    ],
+    "seq": 1,
+    "revisions": []
+  },
+  {
+    "id": "401",
+    "author": {
+      "id": "500",
+      "avatar": "cccccccccccccccccccccccccccccccc",
+      "username": "fixture-author",
+      "public_flags": 0,
+      "discriminator": "1234"
+    },
+    "server": "100",
+    "channel": "200",
+    "content": "Fixture message mentioning <@501>.",
+    "added": "2024-01-03T04:05:06.000000",
+    "published": "2024-01-02T03:05:05.000000",
+    "edited": null,
+    "embeds": [],
+    "mentions": [
+      {
+        "id": "501",
+        "avatar": null,
+        "username": "fixture-mentioned",
+        "public_flags": 0,
+        "discriminator": "5678"
+      }
+    ],
+    "attachments": [],
+    "seq": 2,
+    "revisions": []
+  },
+  {
+    "id": "402",
+    "author": {
+      "id": "500",
+      "avatar": "cccccccccccccccccccccccccccccccc",
+      "username": "fixture-author",
+      "public_flags": 0,
+      "discriminator": "1234"
+    },
+    "server": "100",
+    "channel": "200",
+    "content": "",
+    "added": "2024-01-03T04:05:06.000000",
+    "published": "2024-01-02T03:06:05.000000",
+    "edited": null,
+    "embeds": [],
+    "mentions": [],
+    "attachments": [
+      {
+        "name": "fixture-second.jpg",
+        "path": "/bb/bb/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
+        "isImage": true
+      }
+    ],
+    "seq": 3,
+    "revisions": []
+  }
+]

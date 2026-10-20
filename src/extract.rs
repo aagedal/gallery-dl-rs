@@ -111,6 +111,51 @@ impl Media {
                     serde_json::json!([instance, post.media_id]).to_string(),
                 )
             }
+            // Discord message IDs are scoped to a server, while source numbering
+            // preserves attachment/inline order even when thumbnails skip files.
+            category @ ("kemono" | "coomer")
+                if self
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|post| post.discord.is_some()) =>
+            {
+                let post = self.metadata.as_ref()?;
+                let discord = post.discord.as_ref()?;
+                let host = self.url.host_str()?;
+                let site_host = crate::kemono::category(host) == Some(category)
+                    && self.url.path().starts_with("/data/");
+                let thumbnail = host.strip_prefix("img.").is_some_and(|host| {
+                    crate::kemono::HOSTS.contains(&(host, category))
+                        && self.url.path().starts_with("/thumbnail/data/")
+                });
+                let inline = matches!(
+                    post.file
+                        .as_ref()
+                        .and_then(|file| file.media_type.as_deref()),
+                    Some("inline" | "archive")
+                ) && post.media_id.is_empty();
+                let discord_host =
+                    inline && matches!(host, "cdn.discordapp.com" | "media.discordapp.net");
+                if self.url.scheme() != "https"
+                    || self.url.port().is_some()
+                    || !self.url.username().is_empty()
+                    || self.url.password().is_some()
+                    || !(site_host || thumbnail || discord_host)
+                    || !crate::kemono::valid_discord_id(&discord.server_id)
+                    || !crate::kemono::valid_discord_id(&discord.channel_id)
+                    || !crate::kemono::valid_discord_id(&post.post_id)
+                    || post.index == 0
+                    || !(crate::kemono::valid_hash(&post.media_id)
+                        || inline && post.media_id.is_empty())
+                {
+                    return None;
+                }
+                (
+                    category,
+                    serde_json::json!(["discord", discord.server_id, post.post_id, post.index])
+                        .to_string(),
+                )
+            }
             // Kemono/Coomer source positions preserve explicitly retained
             // duplicates and hashless inline files, as upstream does.
             category @ ("kemono" | "coomer") => {
@@ -359,6 +404,8 @@ impl Media {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub discord: Option<crate::kemono::DiscordMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<crate::kemono::CreatorMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<crate::kemono::RevisionMetadata>,
@@ -593,6 +640,8 @@ pub struct BackendOptions {
     pub search_stop: Option<u8>,
     pub max_posts: Option<usize>,
     pub metadata: Option<bool>,
+    pub endpoint: Option<crate::kemono::Endpoint>,
+    pub order_posts: Option<crate::kemono::PostOrder>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -791,6 +840,24 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("duplicates={}", serde_json::json!(names)));
+        }
+        if let Some(endpoint) = options.endpoint {
+            let endpoint = match endpoint {
+                crate::kemono::Endpoint::Posts => "posts",
+                crate::kemono::Endpoint::Expanded => "posts+",
+            };
+            command
+                .arg("--option")
+                .arg(format!("endpoint={}", serde_json::json!(endpoint)));
+        }
+        if let Some(order) = options.order_posts {
+            let order = match order {
+                crate::kemono::PostOrder::Forward => "asc",
+                crate::kemono::PostOrder::Reverse => "desc",
+            };
+            command
+                .arg("--option")
+                .arg(format!("order-posts={}", serde_json::json!(order)));
         }
         if let Some(posts) = &options.posts {
             let value = if posts.as_slice() == ["all"] {
@@ -1252,10 +1319,23 @@ fn compatibility_metadata(
                 .is_ok_and(|n| n > 0 && n.to_string() == value))
         .then_some(value)
     };
+    let discord = compatibility_discord(data, category);
     let mut file = crate::file_metadata::compatibility(data);
     if matches!(category, "kemono" | "coomer")
         && let Some(name) = string("name")
     {
+        let kind = data.get("type").and_then(Value::as_str);
+        let name = if discord.is_some()
+            && (kind == Some("inline")
+                || kind == Some("archive")
+                    && (name.starts_with('/')
+                        || name.starts_with("https://cdn.discordapp.com/")
+                        || name.starts_with("https://media.discordapp.net/")))
+        {
+            name.split(['?', '#']).next().unwrap_or_default().to_owned()
+        } else {
+            name
+        };
         file.get_or_insert_default().description = Some(std::sync::Arc::from(name));
     }
     if matches!(category, "kemono" | "coomer")
@@ -1264,7 +1344,11 @@ fn compatibility_metadata(
     {
         file.get_or_insert_default().media_type = Some(std::sync::Arc::from(kind));
     }
-    let creator = compatibility_creator(data, category);
+    let creator = if discord.is_some() {
+        None
+    } else {
+        compatibility_creator(data, category)
+    };
     let username = if matches!(category, "kemono" | "coomer") {
         creator
             .as_ref()
@@ -1274,6 +1358,7 @@ fn compatibility_metadata(
         username
     };
     Some(PostMetadata {
+        discord: discord.clone(),
         creator,
         revision: compatibility_revision(data, category),
         rating: crate::booru::Site::from_category(category)
@@ -1316,6 +1401,7 @@ fn compatibility_metadata(
             string("instance").filter(|host| crate::mastodon::INSTANCES.contains(&host.as_str()))
         })
         .flatten()
+        .or_else(|| discord.as_ref().map(|_| "discord".to_owned()))
         .or_else(|| {
             matches!(category, "kemono" | "coomer")
                 .then(|| string("service").filter(|service| crate::kemono::valid_service(service)))
@@ -1325,7 +1411,14 @@ fn compatibility_metadata(
         media_id,
         shortcode,
         username: username.map(std::sync::Arc::from),
-        caption: caption.map(std::sync::Arc::from),
+        caption: if discord.is_some() {
+            data.get("content")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        } else {
+            caption
+        }
+        .map(std::sync::Arc::from),
         timestamp: data.get("date").and_then(|date| match date {
             Value::String(value) => crate::date::parse_date(value).ok(),
             value => value.as_i64(),
@@ -1455,4 +1548,44 @@ fn compatibility_creator(
             .map(std::sync::Arc::from);
     }
     Some(creator)
+}
+
+// Recognized Discord output always retains its own scope, even if malformed
+// identity prevents an archive key. Descriptive fields never supply IDs.
+fn compatibility_discord(
+    data: &serde_json::Map<String, Value>,
+    category: &str,
+) -> Option<crate::kemono::DiscordMetadata> {
+    if !matches!(category, "kemono" | "coomer")
+        || !(data.get("subcategory").and_then(Value::as_str) == Some("discord")
+            || data.contains_key("server_id")
+            || data.contains_key("channel_id"))
+    {
+        return None;
+    }
+    let id = |key| {
+        data.get(key)
+            .and_then(|value| match value {
+                Value::String(value) => Some(value.clone()),
+                Value::Number(value) if value.is_u64() => Some(value.to_string()),
+                _ => None,
+            })
+            .filter(|id| crate::kemono::valid_discord_id(id))
+    };
+    let text = |key| {
+        data.get(key)
+            .and_then(Value::as_str)
+            .filter(|text| text.len() <= 64 * 1024 && !text.contains('\0'))
+            .map(std::sync::Arc::from)
+    };
+    Some(crate::kemono::DiscordMetadata {
+        server_id: id("server_id").unwrap_or_default(),
+        channel_id: id("channel_id").unwrap_or_default(),
+        server: text("server"),
+        channel: text("channel"),
+        channel_topic: text("channel_topic"),
+        channel_nsfw: data.get("channel_nsfw").and_then(Value::as_bool),
+        channel_type: data.get("channel_type").and_then(Value::as_u64),
+        parent_id: id("parent_id"),
+    })
 }

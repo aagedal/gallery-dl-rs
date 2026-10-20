@@ -21,6 +21,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         rating: None,
         score: None,
         revision: None,
+        discord: None,
         creator: None,
         community: None,
         community_archive: false,

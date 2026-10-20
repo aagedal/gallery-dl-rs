@@ -323,6 +323,32 @@ fn context_parts(
         if let Some(score) = post.score {
             metadata.insert("score".into(), Value::Int(score.into()));
         }
+        if let Some(discord) = &post.discord {
+            let mut fields = BTreeMap::from([
+                ("server_id".into(), text(discord.server_id.as_str())),
+                ("channel_id".into(), text(discord.channel_id.as_str())),
+            ]);
+            for (key, value) in [
+                ("server", &discord.server),
+                ("channel", &discord.channel),
+                ("channel_topic", &discord.channel_topic),
+            ] {
+                if let Some(value) = value {
+                    fields.insert(key.into(), text(value.clone()));
+                }
+            }
+            if let Some(value) = discord.channel_nsfw {
+                fields.insert("channel_nsfw".into(), Value::Bool(value));
+            }
+            if let Some(value) = discord.channel_type {
+                fields.insert("channel_type".into(), Value::Int(value.into()));
+            }
+            if let Some(value) = &discord.parent_id {
+                fields.insert("parent_id".into(), text(value.as_str()));
+            }
+            metadata.extend(fields.clone());
+            metadata.insert("discord".into(), map(fields));
+        }
         if let Some(creator) = &post.creator {
             let mut fields = BTreeMap::from([
                 ("id".into(), text(creator.id.as_str())),

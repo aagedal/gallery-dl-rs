@@ -67,6 +67,8 @@ pub struct Options {
     pub duplicates: Option<crate::kemono::DuplicateOptions>,
     pub revisions: Option<crate::kemono::RevisionMode>,
     pub order_revisions: Option<crate::kemono::RevisionOrder>,
+    pub endpoint: Option<crate::kemono::Endpoint>,
+    pub order_posts: Option<crate::kemono::PostOrder>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub user_id: Option<String>,
@@ -236,6 +238,8 @@ impl Options {
             duplicates: overrides.duplicates.or(self.duplicates),
             revisions: overrides.revisions.or(self.revisions),
             order_revisions: overrides.order_revisions.or(self.order_revisions),
+            endpoint: overrides.endpoint.or(self.endpoint),
+            order_posts: overrides.order_posts.or(self.order_posts),
             username: overrides.username.clone().or_else(|| self.username.clone()),
             password: overrides.password.clone().or_else(|| self.password.clone()),
             user_id: overrides.user_id.clone().or_else(|| self.user_id.clone()),
@@ -358,6 +362,8 @@ struct RawRoot {
     duplicates: Field,
     revisions: Field,
     order_revisions: Field,
+    endpoint: Field,
+    order_posts: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -419,6 +425,8 @@ struct RawExtractor {
     duplicates: Field,
     revisions: Field,
     order_revisions: Field,
+    endpoint: Field,
+    order_posts: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -512,6 +520,8 @@ struct RawOptions {
     duplicates: Field,
     revisions: Field,
     order_revisions: Field,
+    endpoint: Field,
+    order_posts: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -680,6 +690,8 @@ impl Config {
             duplicates: root.duplicates,
             revisions: root.revisions,
             order_revisions: root.order_revisions,
+            endpoint: root.endpoint,
+            order_posts: root.order_posts,
             reposts: root.reposts,
             ugoira: root.ugoira,
             text_posts: root.text_posts,
@@ -747,6 +759,8 @@ impl Config {
             duplicates: extractor.duplicates,
             revisions: extractor.revisions,
             order_revisions: extractor.order_revisions,
+            endpoint: extractor.endpoint,
+            order_posts: extractor.order_posts,
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
             text_posts: extractor.text_posts,
@@ -1052,6 +1066,32 @@ impl RawOptions {
                     "native configuration order-revisions must be asc, reverse or desc",
                 ));
             }
+        };
+        let endpoint = match self.endpoint.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "posts" | "legacy" => crate::kemono::Endpoint::Posts,
+                "posts+" | "legacy+" => crate::kemono::Endpoint::Expanded,
+                _ => {
+                    return Err(error(
+                        "native configuration endpoint must be posts, legacy, posts+ or legacy+",
+                    ));
+                }
+            }),
+            Some(_) => return Err(error("native configuration endpoint must be a string")),
+        };
+        let order_posts = match self.order_posts.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "asc" => crate::kemono::PostOrder::Forward,
+                "desc" | "reverse" => crate::kemono::PostOrder::Reverse,
+                _ => {
+                    return Err(error(
+                        "native configuration order-posts must be asc, desc or reverse",
+                    ));
+                }
+            }),
+            Some(_) => return Err(error("native configuration order-posts must be a string")),
         };
         let inline = match self.inline.0 {
             None => None,
@@ -1486,6 +1526,8 @@ impl RawOptions {
             duplicates,
             revisions,
             order_revisions,
+            endpoint,
+            order_posts,
             username,
             password,
             user_id,

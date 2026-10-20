@@ -68,6 +68,15 @@ const FIELDS: &[&str] = &[
     "creator_id",
     "creator_name",
     "user_profile",
+    "discord",
+    "server",
+    "server_id",
+    "channel",
+    "channel_id",
+    "channel_topic",
+    "channel_nsfw",
+    "channel_type",
+    "parent_id",
 ];
 
 #[derive(Clone, Debug)]
