@@ -26,6 +26,12 @@ immutable first-page detail, numbering before user/media filtering, mixed artist
 and zero/negative numbering when the reported total differs from the page count.
 No API requests were made.
 
+`pixivision.json` records `PixivPixivisionExtractor.metadata/works` with synthetic
+HTML, plus Python `html.unescape` vectors for all HTML5 named entities and numeric
+edge cases. It captures canonical article URL/headers, exact literal anchors,
+adjacent raw-link deduplication before query removal, and title decoding.
+No article or API requests were made.
+
 `followed.json` records `PixivFollowedExtractor.metadata/works` and the actual
 App API feed pagination helper with synthetic data. It captures the initial
 OAuth owner, mixed artists, `restrict=all`, ignored URL query options and owner

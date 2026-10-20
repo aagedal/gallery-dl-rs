@@ -236,6 +236,8 @@ mod tests {
             category: "direct".into(),
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
+                pixivision: None,
+                pixivision_archive: false,
                 user_follow: None,
                 followed_archive: false,
                 series: None,

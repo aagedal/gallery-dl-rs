@@ -445,6 +445,15 @@ fn context_parts(
                 ])),
             );
         }
+        if let Some(article) = &post.pixivision {
+            let fields = BTreeMap::from([
+                ("id".into(), identifier(&article.id)),
+                ("title".into(), text(article.title.clone())),
+            ]);
+            metadata.insert("pixivision_id".into(), identifier(&article.id));
+            metadata.insert("pixivision_title".into(), text(article.title.clone()));
+            metadata.insert("pixivision".into(), map(fields));
+        }
         if let Some(index) = post.num_series {
             metadata.insert("num_series".into(), Value::Int(index.into()));
         }

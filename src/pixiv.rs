@@ -47,6 +47,9 @@ pub use series::SeriesMetadata;
 #[path = "pixiv_followed.rs"]
 pub mod followed;
 pub use followed::FollowedUserMetadata;
+#[path = "pixivision.rs"]
+pub mod pixivision;
+pub use pixivision::PixivisionMetadata;
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -119,6 +122,7 @@ impl ProfileKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Followed,
+    Pixivision(String),
     Novel(novel::Target),
     Ranking(RankingOptions),
     Search(SearchOptions),
@@ -192,6 +196,12 @@ pub fn target(url: &Url) -> Result<Target> {
             "unsupported Pixiv URL; expected https://www.pixiv.net/artworks/ID or https://www.pixiv.net/users/ID[/illustrations|/manga|/bookmarks/artworks]",
         )
     };
+    if matches!(
+        url.host_str(),
+        Some("pixivision.net" | "www.pixivision.net")
+    ) {
+        return pixivision::target(url).map(Target::Pixivision);
+    }
     if !matches!(url.scheme(), "http" | "https")
         || url.port().is_some()
         || !url.username().is_empty()
@@ -728,6 +738,7 @@ pub struct Pixiv {
     network: NetworkOptions,
     api_root: Url,
     oauth_root: Url,
+    pixivision_root: Url,
     refresh_token: Option<String>,
     access_token: tokio::sync::Mutex<Option<String>>,
     authenticated_user: tokio::sync::Mutex<Option<String>>,
@@ -774,6 +785,7 @@ impl Pixiv {
             network: NetworkOptions::default(),
             api_root: Url::parse("https://app-api.pixiv.net/").expect("static URL"),
             oauth_root: Url::parse("https://oauth.secure.pixiv.net/").expect("static URL"),
+            pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
             refresh_token: None,
             access_token: tokio::sync::Mutex::new(None),
             authenticated_user: tokio::sync::Mutex::new(None),
@@ -845,6 +857,12 @@ impl Pixiv {
     /// Override the OAuth origin; intended for local tests.
     pub fn with_oauth_root(mut self, root: Url) -> Self {
         self.oauth_root = root;
+        self
+    }
+
+    /// Override the public article origin for bounded local fixtures.
+    pub fn with_pixivision_root(mut self, root: Url) -> Self {
+        self.pixivision_root = root;
         self
     }
 
@@ -1118,12 +1136,16 @@ impl Pixiv {
         if let Target::Novel(target) = target {
             return self.novel_events(target);
         }
+        if let Target::Pixivision(id) = target {
+            return self.pixivision_events(id);
+        }
         if self.refresh_token.is_none() {
             return stream::once(async { Err(missing_token()) }).boxed();
         }
         let (user, kinds) = match target {
             Target::Novel(target) => return self.novel_events(target),
             Target::Followed => return self.followed_events(),
+            Target::Pixivision(id) => return self.pixivision_events(id),
             Target::Following { id, private } => return self.following_events(id, private),
             Target::Ranking(options) => return self.ranking_events(options),
             Target::Search(options) => return self.search_events(options),

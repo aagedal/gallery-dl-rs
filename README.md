@@ -561,7 +561,8 @@ legacy inline `_1280` rewriting remains enabled. Plain media links stay direct d
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
-category, never echoed); without it selected Pixiv jobs fail before any network access.
+category, never echoed); without it selected Pixiv jobs fail before any network access,
+except for the public Pixivision article request described below.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
@@ -676,6 +677,23 @@ assuming publication-date order. Empty/failed animation entries retain post
 positions; native metadata failures remain errors where upstream warns.
 Additional series-detail fields and live authenticated verification remain
 unfinished.
+
+Native Pixivision articles support `pixivision.net/[en/]a/ID` in the `pixiv`
+category. They first load the canonical public `/en/a/ID` page anonymously;
+an article with no artwork links succeeds without a refresh token. Linked
+artworks then load lazily through authenticated App API detail requests.
+Titles preserve whitespace and use full HTML5 entity decoding. Exact English
+artwork anchors are scanned in source order, deduplicating only adjacent
+identical links before removing query strings, matching upstream.
+Inspection, sidecars, predicates and templates expose `pixivision.id` and
+`pixivision.title`, with flat aliases `pixivision_id` and `pixivision_title`.
+Archives include article ID and artwork/page identity; changing the title does
+not change archive keys. Files use ordinary artwork filenames. Artwork detail
+failures abort the article; failed animation metadata retains an empty post
+position and reports a native error where upstream warns. Date selection scans
+later artworks without assuming publication order. Live authenticated article
+extraction remains unverified; upstream's default article directory layout
+remains unfinished.
 
 Native Pixiv novels use the separate `pixiv-novel` category and
 `extractor.pixiv-novel.refresh-token`. Supported URLs are `/novel/show.php?id=ID`,

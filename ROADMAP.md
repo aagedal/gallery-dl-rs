@@ -829,10 +829,18 @@ identity includes owner/artwork/page and excludes display fields. Source vectors
 and HTTP fixtures cover mixed artists, token refresh, private-field omission,
 selection and recovery. Extended OAuth user metadata and live authenticated
 verification remain unfinished.
+Native Pixivision articles load their canonical public page before OAuth,
+then lazily resolve artwork details in source order. Exact anchor matching,
+adjacent raw-link deduplication and full HTML5 title decoding follow recorded
+upstream vectors. Article metadata is available in inspection, sidecars,
+predicates and templates; article-scoped archives exclude title changes.
+HTTP fixtures cover authentication order, empty articles, selection, failures
+and animation positions. Live authenticated extraction and upstream default
+article directory layout remain unfinished.
 Remaining: ugoira original individual-frame mode and conversion,
 bookmark cursor/metadata options,
 sketch,
-pixivision, upstream metadata options
+upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and
