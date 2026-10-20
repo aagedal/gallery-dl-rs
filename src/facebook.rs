@@ -504,6 +504,8 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
             filename: format!("{requested_id}.{extension}"),
             handoff: BTreeMap::new(),
             metadata: Some(PostMetadata {
+                search: None,
+                search_archive: false,
                 ranking: None,
                 ranking_archive: false,
                 profile_asset: None,

@@ -808,9 +808,17 @@ upstream metadata vectors and HTTP fixtures cover query semantics and request
 behavior. Live authenticated ranking extraction remains unverified.
 Empty or failed animation entries retain post-range positions; metadata failures
 still report native errors where upstream warns.
+Native tag/search URLs now support upstream term precedence/decoding, order and
+target aliases, optional date bounds, lazy scoped pagination and date-window
+rollover at API offset 5,000. Search metadata retains original bounds and is
+available in inspection, sidecars, predicates and templates. Term-scoped archives
+exclude sort/target/dates and remain separate from ranking/artwork entries.
+Date selection scans unordered results; empty animation posts keep their range
+positions. Recorded upstream query vectors and HTTP fixtures cover traversal;
+live authenticated search remains unverified.
 Remaining: ugoira original individual-frame mode and conversion,
 bookmark cursor/metadata options,
-searches, sketch,
+sketch,
 pixivision, series, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
 

@@ -9,3 +9,13 @@ classes, and child-filter metadata. No network requests or credentials were used
 version. It covers mode aliases, duplicate/bare query parameters, content filters,
 and date text normalization, including calendar-invalid and Unicode-decimal dates.
 The dynamic default date is omitted. No API requests were made.
+
+`search.json` records `PixivSearchExtractor.metadata()` with synthetic tag/search
+URLs. It covers path/query term precedence, decoding, empty terms, exact sort and
+target aliases, bare/duplicate parameters and unvalidated date text. No API
+requests were made.
+
+`search-pagination.json` records the actual upstream `PixivAppAPI._pagination_search`
+generator with synthetic API pages. Date-ascending, date-descending and popular
+sort cases capture offset-5,000 requests, UTC date-window changes and overlap
+suppression, including the skipped crossing row. No API requests were made.

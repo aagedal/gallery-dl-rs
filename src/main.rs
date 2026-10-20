@@ -338,6 +338,7 @@ async fn run(args: Args) -> Result<()> {
                                 gallery_dl_rs::pixiv::target(&url),
                                 Ok(gallery_dl_rs::pixiv::Target::Bookmarks { .. }
                                     | gallery_dl_rs::pixiv::Target::Ranking(_)
+                                    | gallery_dl_rs::pixiv::Target::Search(_)
                                     | gallery_dl_rs::pixiv::Target::Novel(
                                         gallery_dl_rs::pixiv::novel::Target::Bookmarks { .. }
                                     ))

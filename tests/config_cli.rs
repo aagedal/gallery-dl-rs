@@ -811,6 +811,16 @@ printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","au
             "43_p0",
         ),
         (
+            "https://www.pixiv.net/search.php?word=cat&order=popular_d",
+            "43",
+            "43_p0",
+        ),
+        (
+            "https://www.pixiv.net/tags/cat/artworks?order=date",
+            "43",
+            "43_p0",
+        ),
+        (
             "https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide",
             "43",
             "43_p0",

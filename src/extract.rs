@@ -320,7 +320,22 @@ impl Media {
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
-                if post.ranking_archive || post.ranking.is_some() {
+                if post.search_archive || post.search.is_some() {
+                    let search = post.search.as_ref()?;
+                    if !search.valid()
+                        || post.ranking_archive
+                        || post.ranking.is_some()
+                        || post.profile_asset.is_some()
+                        || !crate::pixiv::valid_media_id(&post.post_id, &post.media_id)
+                    {
+                        return None;
+                    }
+                    (
+                        "pixiv",
+                        serde_json::json!(["search", search.word, post.post_id, post.media_id])
+                            .to_string(),
+                    )
+                } else if post.ranking_archive || post.ranking.is_some() {
                     let ranking = post.ranking.as_ref()?;
                     if !ranking.valid()
                         || post.profile_asset.is_some()
@@ -459,6 +474,12 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    /// Pixiv search context; only the search term scopes archive identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<std::sync::Arc<crate::pixiv::SearchMetadata>>,
+    /// Retain a declared search scope even if its public metadata is invalid.
+    #[serde(skip_serializing)]
+    pub search_archive: bool,
     /// Pixiv ranking context; ranks do not participate in archive identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking: Option<std::sync::Arc<crate::pixiv::RankingMetadata>>,
@@ -1432,7 +1453,10 @@ fn compatibility_metadata(
                     .and_then(|user| user.get("account"))
                     .and_then(Value::as_str)
                     .map(str::to_owned),
-                if category == "pixiv-novel" || data.contains_key("ranking") {
+                if category == "pixiv-novel"
+                    || data.contains_key("ranking")
+                    || data.contains_key("search")
+                {
                     let caption = string("caption")
                         .map(|s| crate::mastodon::strip_html(&s))
                         .filter(|s| !s.trim().is_empty());
@@ -1552,6 +1576,14 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        search: (category == "pixiv")
+            .then(|| {
+                data.get("search")
+                    .and_then(crate::pixiv::SearchMetadata::parse_compat)
+                    .map(std::sync::Arc::new)
+            })
+            .flatten(),
+        search_archive: category == "pixiv" && data.contains_key("search"),
         ranking: (category == "pixiv")
             .then(|| {
                 data.get("ranking")

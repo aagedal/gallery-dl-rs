@@ -1,0 +1,108 @@
+{
+  "source": "gallery_dl.extractor.pixiv.PixivSearchExtractor.metadata",
+  "version": "1.32.17",
+  "cases": [
+    {
+      "url": "https://www.pixiv.net/tags/%E7%8C%AB/artworks?q=ignored",
+      "metadata": {
+        "word": "猫",
+        "sort": "date_desc",
+        "target": "exact_match_for_tags",
+        "date_start": null,
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/en/tags/C++/novels?word=ignored",
+      "metadata": {
+        "word": "C++",
+        "sort": "date_desc",
+        "target": "exact_match_for_tags",
+        "date_start": null,
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/tags/%2520",
+      "metadata": {
+        "word": "%20",
+        "sort": "date_desc",
+        "target": "exact_match_for_tags",
+        "date_start": null,
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/tags/%FF",
+      "metadata": {
+        "word": "�",
+        "sort": "date_desc",
+        "target": "exact_match_for_tags",
+        "date_start": null,
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/search.php?q=&word=",
+      "metadata": {
+        "word": "",
+        "sort": "date_desc",
+        "target": "exact_match_for_tags",
+        "date_start": null,
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/search?q=one+two&word=ignored&order=popular_d&s_mode=tc&scd=&ecd=2026-10-20",
+      "metadata": {
+        "word": "one two",
+        "sort": "popular_desc",
+        "target": "title_and_caption",
+        "date_start": "",
+        "date_end": "2026-10-20"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/search?q&word=x&order&order=date",
+      "metadata": {
+        "word": "x",
+        "sort": "date_asc",
+        "target": "exact_match_for_tags",
+        "date_start": null,
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/search?word=x&order=date&order=date_d",
+      "metadata": {
+        "word": "x",
+        "sort": "date_asc",
+        "target": "exact_match_for_tags",
+        "date_start": null,
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/search.php?word=x&scd=weird",
+      "metadata": {
+        "word": "x",
+        "sort": "date_desc",
+        "target": "exact_match_for_tags",
+        "date_start": "weird",
+        "date_end": null
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/search?word=x&order=DATE",
+      "error": true
+    },
+    {
+      "url": "https://www.pixiv.net/search?word=x&s_mode=",
+      "error": true
+    },
+    {
+      "url": "https://www.pixiv.net/search",
+      "error": true
+    }
+  ]
+}

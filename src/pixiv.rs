@@ -38,6 +38,9 @@ pub use novel::NovelOptions;
 #[path = "pixiv_ranking.rs"]
 pub mod ranking;
 pub use ranking::{RankingMetadata, RankingOptions};
+#[path = "pixiv_search.rs"]
+pub mod search;
+pub use search::{SearchMetadata, SearchOptions};
 #[path = "pixiv_following.rs"]
 mod following;
 
@@ -111,6 +114,7 @@ impl ProfileKind {
 pub enum Target {
     Novel(novel::Target),
     Ranking(RankingOptions),
+    Search(SearchOptions),
     Following {
         id: Option<String>,
         private: bool,
@@ -187,6 +191,9 @@ pub fn target(url: &Url) -> Result<Target> {
     }
     if url.path() == "/ranking.php" {
         return RankingOptions::parse(url).map(Target::Ranking);
+    }
+    if search::is_route(url) {
+        return SearchOptions::parse(url).map(Target::Search);
     }
     if novel::is_route(url) {
         return novel::target(url).map(Target::Novel);
@@ -1089,6 +1096,7 @@ impl Pixiv {
             Target::Novel(target) => return self.novel_events(target),
             Target::Following { id, private } => return self.following_events(id, private),
             Target::Ranking(options) => return self.ranking_events(options),
+            Target::Search(options) => return self.search_events(options),
             Target::Profile { id, kind } => {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/user/detail").expect("static");

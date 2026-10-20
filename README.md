@@ -627,6 +627,26 @@ ordered. Live authenticated ranking extraction remains unverified.
 Animation metadata failures retain an empty post position and allow later works
 to continue; native mode currently reports these as errors where upstream warns.
 
+Native Pixiv illustration search supports `/[en/]tags/WORD[/VIEW]`, `/search`
+and `/search.php` in the `pixiv` category. A path tag takes precedence; search
+pages use a nonempty `q`, falling back to `word`. Terms are decoded once, with
+literal plus signs preserved in path tags. `order` accepts `date_d` (default),
+`date`, `popular_d`, `popular_male_d` or `popular_female_d`. `s_mode` accepts
+`tag`/`s_tag`, `tag_full`/`s_tag_full` (default), or `tc`/`s_tc`. Optional
+`scd`/`ecd` bounds are passed as API start/end dates. Tag view suffixes, including
+`novels`, still select illustration search, matching upstream.
+Date-sorted searches restart their date window at offset 5,000 and suppress
+overlapping results as upstream does. Pagination preserves the selected term,
+sort, target and current bounds, detects cycles and stops at 200 pages total.
+Inspection, predicates, sidecars and templates expose `search.word`,
+`search.sort`, `search.target`, `search.date_start` and `search.date_end`;
+metadata retains the original bounds after pagination advances its window.
+Search archives are scoped by term, separately from artworks and rankings;
+sort, target and date bounds do not change their identity. Date selection scans
+search results without assuming newest-first order. Empty/failed animation
+posts retain their selection positions; metadata failures currently report
+errors where upstream warns. Live authenticated search remains unverified.
+
 Native Pixiv novels use the separate `pixiv-novel` category and
 `extractor.pixiv-novel.refresh-token`. Supported URLs are `/novel/show.php?id=ID`,
 `/n/ID`, `/users/ID/novels`, `/novel/series/ID`, and

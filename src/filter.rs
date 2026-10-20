@@ -379,6 +379,30 @@ fn context_parts(
                 ])),
             );
         }
+        if let Some(search) = &post.search {
+            metadata.insert(
+                "search".into(),
+                map(BTreeMap::from([
+                    ("word".into(), text(search.word.as_str())),
+                    ("sort".into(), text(search.sort.as_str())),
+                    ("target".into(), text(search.target.as_str())),
+                    (
+                        "date_start".into(),
+                        search
+                            .date_start
+                            .as_ref()
+                            .map_or(Value::None, |s| text(s.as_str())),
+                    ),
+                    (
+                        "date_end".into(),
+                        search
+                            .date_end
+                            .as_ref()
+                            .map_or(Value::None, |s| text(s.as_str())),
+                    ),
+                ])),
+            );
+        }
         if let Some(score) = post.score {
             metadata.insert("score".into(), Value::Int(score.into()));
         }
