@@ -274,6 +274,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
         bookmark_archive: false,
         ajax: None,
         mypixiv: None,
+        pixiv_novel_metadata: None,
         caption_html: None,
         pixiv_user_detail: None,
         comments: None,

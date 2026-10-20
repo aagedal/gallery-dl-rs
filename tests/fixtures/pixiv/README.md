@@ -283,3 +283,36 @@ detail/ugoira-meta ordering in disabled, ZIP, and original modes. Missing
 required source fields record actual exceptions without prescribing native
 malformed-response policy. All identities, dates, text, URLs, and metadata are
 synthetic. No HTTP, OAuth, sessions, media, or archive downloads ran.
+
+`novel_embeds.json` records 38 cases from the actual
+`PixivNovelExtractor.items` and `PixivExtractor._request_ajax` implementations
+in gallery-dl 1.32.17, using a `PixivNovelNovelExtractor` instance. The source
+path and SHA-256 match the values above and are repeated in the fixture.
+Only synthetic novel iteration, webview text, and AJAX JSON providers are
+stubbed; ordinary enrichment is disabled. Input work dictionaries, call
+ordering, and deep-copied post/media/queue metadata are recorded. Class markers
+are serialized by class name, datetimes as naive UTC ISO text, and expected
+filenames/archives use the real extractor formats.
+
+Cases cover default and JSON truthy/falsy embed modes, mixed markers, response
+image order differing from marker order, duplicate upload markers, ignored
+artwork page suffixes, first-occurrence artwork deduplication, literal marker
+case/nesting/unterminated behavior, empty or malformed child targets, optional
+covers and file/queue numbering, uppercase JPEG extension preservation,
+persistent uploaded-image metadata, soft AJAX lookup failures, and malformed individual rows aborting after prior
+files. Two-novel and max-posts cases distinguish source iteration limits from
+child traversal. Japanese, translated, and original tag snapshots survive
+uploads; an uploaded row tag override is retained without a second transformation. A raw ID/title
+overwrite case records unrestricted source dictionary mutation separately from
+reserved native metadata keys. Repeated artwork queues across novels remain visible here: source download-job visited
+URL suppression happens after queue predicates and is outside this extractor
+oracle. All identities, URLs, text, metadata, and dates are synthetic. No HTTP,
+OAuth, child extraction, or media downloads ran.
+
+Ten `forced_target_vectors` additionally run `re.match` against the actual
+`PixivWorkExtractor.pattern`, using synthetic artwork URLs. They record full
+capture groups and the selected illustration ID for canonical IDs, leading
+zeros, digit prefixes followed by text/query/fragment/path suffixes, and
+unsupported empty/space-prefixed/nonnumeric targets. Forced linked artwork
+matching accepts a leading digit prefix without requiring the URL to end;
+the captured leading zeros are preserved in its App API request argument.

@@ -1921,18 +1921,48 @@ fn novel_settings_and_credentials_are_separate_from_illustrations() {
     });
     assert_eq!(overridden.covers, Some(false));
     assert_eq!(overridden.full_series, Some(false));
-    for invalid in [
-        r#"{"covers":true}"#,
-        r#"{"extractor":{"covers":true}}"#,
-        r#"{"extractor":{"pixiv":{"full-series":true}}}"#,
-        r#"{"extractor":{"tumblr":{"covers":false}}}"#,
-        r#"{"extractor":{"pixiv-novel":{"covers":"secret-value"}}}"#,
-        r#"{"extractor":{"pixiv-novel":{"full-series":1}}}"#,
-        r#"{"extractor":{"pixiv-novel":{"refresh-token":"secret value"}}}"#,
+    for (document, category, covers, full_series) in [
+        (r#"{"covers":true}"#, "pixiv-novel", Some(true), None),
+        (
+            r#"{"extractor":{"covers":true}}"#,
+            "pixiv-novel",
+            Some(true),
+            None,
+        ),
+        (
+            r#"{"extractor":{"pixiv":{"full-series":true}}}"#,
+            "pixiv",
+            None,
+            Some(true),
+        ),
+        (
+            r#"{"extractor":{"tumblr":{"covers":false}}}"#,
+            "tumblr",
+            Some(false),
+            None,
+        ),
+        (
+            r#"{"extractor":{"pixiv-novel":{"covers":"secret-value"}}}"#,
+            "pixiv-novel",
+            Some(true),
+            None,
+        ),
+        (
+            r#"{"extractor":{"pixiv-novel":{"full-series":1}}}"#,
+            "pixiv-novel",
+            None,
+            Some(true),
+        ),
     ] {
-        let message = parse(invalid).err().unwrap().to_string();
-        assert!(!message.contains("secret"), "{message}");
+        let resolved = parse(document).unwrap().resolve(category).unwrap();
+        assert_eq!(resolved.covers, covers);
+        assert_eq!(resolved.full_series, full_series);
+        assert!(!format!("{resolved:?}").contains("secret-value"));
     }
+    let message = parse(r#"{"extractor":{"pixiv-novel":{"refresh-token":"secret value"}}}"#)
+        .unwrap_err()
+        .to_string();
+    assert!(!message.contains("secret"));
 }
 
 #[test]
@@ -3358,4 +3388,159 @@ fn pixiv_sanity_preserves_null_clearing_hierarchy_and_independent_categories() {
     assert_eq!(pixiv.metadata_bookmark, Some(true));
     assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, None);
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn pixiv_novel_embeds_are_sparse_truthy_and_discard_private_values() {
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("pixiv-novel").unwrap().embeds,
+        None
+    );
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"embeds":value}),
+            json!({"extractor":{"embeds":value}}),
+            json!({"extractor":{"pixiv-novel":{"embeds":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv-novel")
+                .unwrap();
+            assert_eq!(resolved.embeds, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_novel_embeds_preserve_null_clearing_hierarchy_and_independent_categories() {
+    let cfg = parse(
+        r#"{"extractor":{"embeds":true,"pixiv-novel":{"embeds":null},"pixiv":{"embeds":"false"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().embeds, Some(false));
+    assert_eq!(cfg.resolve("pixiv").unwrap().embeds, Some(true));
+    assert_eq!(cfg.resolve("direct").unwrap().embeds, Some(true));
+    let cfg = parse(r#"{"embeds":null,"extractor":{"embeds":true,"pixiv-novel":{"embeds":true}}}"#)
+        .unwrap();
+    let resolved = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(resolved.embeds, Some(false));
+    assert_eq!(
+        resolved
+            .overlay(&Options {
+                embeds: Some(true),
+                ..Options::default()
+            })
+            .embeds,
+        Some(true)
+    );
+    assert_eq!(resolved.overlay(&Options::default()).embeds, Some(false));
+    let cfg =
+        parse(r#"{"embeds":"enabled","extractor":{"embeds":false,"pixiv-novel":{"embeds":null}}}"#)
+            .unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().embeds, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv-novel":{"embeds":true,"captions":false,"comments":true,"metadata":null,"metadata-bookmark":false}}}"#).unwrap();
+    let novel = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(novel.embeds, Some(true));
+    assert_eq!(novel.captions, Some(false));
+    assert_eq!(novel.comments, Some(true));
+    assert_eq!(novel.metadata, Some(false));
+    assert_eq!(novel.metadata_bookmark, Some(false));
+    assert_eq!(cfg.resolve("pixiv").unwrap().embeds, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn novel_cover_and_series_switches_match_source_truthiness_in_all_scopes() {
+    use serde_json::json;
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"covers":value,"full-series":value}),
+            json!({"extractor":{"covers":value,"full-series":value}}),
+            json!({"extractor":{"pixiv-novel":{"covers":value,"full-series":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv-novel")
+                .unwrap();
+            assert_eq!(
+                (resolved.covers, resolved.full_series),
+                (Some(expected), Some(expected))
+            );
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn novel_cover_and_series_switches_preserve_null_clearing_and_hierarchy() {
+    let cfg = parse(r#"{"extractor":{"covers":true,"full-series":true,"pixiv-novel":{"covers":null,"full-series":false},"pixiv":{"covers":"false","full-series":[]}}}"#).unwrap();
+    let novel = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(
+        (novel.covers, novel.full_series),
+        (Some(false), Some(false))
+    );
+    let art = cfg.resolve("pixiv").unwrap();
+    assert_eq!((art.covers, art.full_series), (Some(true), Some(false)));
+    let generic = cfg.resolve("direct").unwrap();
+    assert_eq!(
+        (generic.covers, generic.full_series),
+        (Some(true), Some(true))
+    );
+    let cfg = parse(r#"{"covers":null,"full-series":null,"extractor":{"covers":true,"full-series":true,"pixiv-novel":{"covers":true,"full-series":true}}}"#).unwrap();
+    let resolved = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(
+        (resolved.covers, resolved.full_series),
+        (Some(false), Some(false))
+    );
+    let overridden = resolved.overlay(&Options {
+        covers: Some(true),
+        full_series: Some(true),
+        ..Options::default()
+    });
+    assert_eq!(
+        (overridden.covers, overridden.full_series),
+        (Some(true), Some(true))
+    );
+    assert_eq!(resolved.overlay(&Options::default()), resolved);
+    let sparse = parse("{}").unwrap().resolve("pixiv-novel").unwrap();
+    assert_eq!((sparse.covers, sparse.full_series), (None, None));
+    let cfg = parse(r#"{"extractor":{"pixiv-novel":{"covers":true,"full-series":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().covers, None);
+    assert_eq!(cfg.resolve("pixiv").unwrap().full_series, None);
 }

@@ -1,5 +1,5 @@
 //! Native Pixiv novels, using the authenticated App API and webview text payload.
-//! Embedded image markers remain literal text; embedded assets are not expanded.
+//! Optional embedded uploads and artwork queues retain the source traversal order.
 use super::{Pixiv, REFERER, id_of, percent_decode, string, valid_id};
 use crate::{
     Result, error,
@@ -17,10 +17,14 @@ use std::{
 };
 use url::Url;
 
+#[path = "pixiv_novel_embeds.rs"]
+mod embeds;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NovelOptions {
     pub covers: bool,
     pub full_series: bool,
+    pub embeds: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -127,9 +131,15 @@ struct Novel {
 
 impl Novel {
     fn parse(data: Value, mode: super::TagMode) -> Result<Self> {
-        let id = id_of(&data).ok_or_else(|| error("Pixiv returned an invalid novel ID"))?;
-        let title = string(&data, "title");
-        let caption = string(&data, "caption")
+        let metadata = Self::metadata(&data, mode)?;
+        let mut novel = Self { data, metadata };
+        novel.prepare_source()?;
+        Ok(novel)
+    }
+    fn metadata(data: &Value, mode: super::TagMode) -> Result<PostMetadata> {
+        let id = id_of(data).ok_or_else(|| error("Pixiv returned an invalid novel ID"))?;
+        let title = string(data, "title");
+        let caption = string(data, "caption")
             .map(crate::mastodon::strip_html)
             .filter(|caption| !caption.trim().is_empty());
         let caption = match (title, caption) {
@@ -158,26 +168,28 @@ impl Novel {
                 .get("user")
                 .and_then(|user| string(user, "account"))
                 .map(Arc::from),
-            timestamp: string(&data, "create_date")
+            timestamp: string(data, "create_date")
                 .and_then(|date| crate::date::parse_date(date).ok()),
             caption,
             ..PostMetadata::default()
         };
-        Ok(Self { data, metadata })
+        Ok(metadata)
     }
 
-    fn post(&self, covers: bool) -> Post {
+    fn post(&self, covers: bool, embeds: bool) -> Post {
         let mut metadata = self.metadata.clone();
         metadata.media_id.clear();
         metadata.index = 0;
         Post {
             category: "pixiv-novel".into(),
             metadata: Some(metadata),
-            count: Some(if covers { 2 } else { 1 }),
+            count: (!embeds).then_some(if covers { 2 } else { 1 }),
         }
     }
 
-    fn text(&self, text: String) -> Result<Media> {
+    fn text(&mut self, text: String) -> Result<Media> {
+        self.data["extension"] = serde_json::json!("txt");
+        self.refresh_snapshot()?;
         let (url, job) = inline_text(text)?;
         Ok(Media {
             url,
@@ -190,7 +202,7 @@ impl Novel {
         })
     }
 
-    fn cover(&self) -> Result<Media> {
+    fn cover(&mut self) -> Result<Media> {
         let invalid = || error("Pixiv novel contains no supported cover image");
         let raw = self
             .data
@@ -208,14 +220,20 @@ impl Novel {
             path.replace("_master1200", "")
         );
         let url = super::media_url(&format!("{base}.jpg")).ok_or_else(invalid)?;
+        let number = self.next_number()?;
+        let (filename, extension, date_url) = embeds::url_fields(&url);
+        self.data["filename"] = serde_json::json!(filename);
+        self.data["extension"] = serde_json::json!(extension);
+        self.data["date_url"] = date_url;
+        self.refresh_snapshot()?;
         let mut metadata = self.metadata.clone();
-        metadata.media_id = format!("{}_p1", metadata.post_id);
-        metadata.index = 2;
+        metadata.media_id = format!("{}_p{number}", metadata.post_id);
+        metadata.index = number + 1;
         Ok(Media {
             url,
             job: crate::extract::MediaJob::DirectHttp,
             category: "pixiv-novel".into(),
-            filename: format!("{}_p1.jpg", metadata.post_id),
+            filename: format!("{}_p{number}.jpg", metadata.post_id),
             metadata: Some(metadata),
             headers: BTreeMap::from([("Referer".into(), REFERER.into())]),
             handoff: BTreeMap::from([(
@@ -307,9 +325,12 @@ enum Stage {
     Load,
     Text,
     Cover,
+    EmbedScan,
+    EmbedImages,
+    EmbedChildren,
     End,
 }
-struct State {
+struct State<'a> {
     target: Option<Target>,
     feed: Option<Feed>,
     next: Option<String>,
@@ -320,10 +341,16 @@ struct State {
     active: Option<Novel>,
     stage: Stage,
     done: bool,
+    text: Option<String>,
+    plan: embeds::Plan,
+    images: VecDeque<Value>,
+    child: Option<BoxStream<'a, Result<ExtractionEvent>>>,
+    visited: Arc<tokio::sync::Mutex<embeds::Visited>>,
+    subcategory: &'static str,
 }
 
 impl Pixiv {
-    async fn initialize_novels(&self, state: &mut State) -> Result<()> {
+    async fn initialize_novels(&self, state: &mut State<'_>) -> Result<()> {
         let Some(target) = state.target.take() else {
             return Ok(());
         };
@@ -350,6 +377,7 @@ impl Pixiv {
                         .get("series")
                         .and_then(id_of)
                         .ok_or_else(|| error("Pixiv novel contains an invalid series ID"))?;
+                    state.subcategory = "series";
                     Some(Feed::Series(series))
                 } else {
                     state.works.push_back(novel.clone());
@@ -369,7 +397,7 @@ impl Pixiv {
         Ok(())
     }
 
-    async fn novel_page(&self, state: &mut State) -> Result<()> {
+    async fn novel_page(&self, state: &mut State<'_>) -> Result<()> {
         let Some(raw) = state.next.take() else {
             state.done = true;
             return Ok(());
@@ -409,6 +437,12 @@ impl Pixiv {
         if self.refresh_token.is_none() {
             return stream::once(async { Err(error("native Pixiv novel extraction requires the pixiv-novel refresh-token setting in --native-config")) }).boxed();
         }
+        let subcategory = match &target {
+            Target::Novel(_) => "novel",
+            Target::User(_) => "user",
+            Target::Series(_) => "series",
+            Target::Bookmarks { .. } => "bookmark",
+        };
         let state = State {
             target: Some(target),
             feed: None,
@@ -420,6 +454,12 @@ impl Pixiv {
             active: None,
             stage: Stage::Load,
             done: false,
+            text: None,
+            plan: embeds::Plan::default(),
+            images: VecDeque::new(),
+            child: None,
+            visited: Arc::new(tokio::sync::Mutex::new(embeds::Visited::default())),
+            subcategory,
         };
         stream::unfold(state, move |mut state| async move {
             loop {
@@ -462,7 +502,11 @@ impl Pixiv {
                                     if user_detail.is_some() {
                                         novel.metadata.pixiv_user_detail = user_detail;
                                     }
-                                    let post = novel.post(self.novel_options.covers);
+                                    if let Err(error) = novel.refresh_snapshot() {
+                                        return Some((Err(error), state));
+                                    }
+                                    let post = novel
+                                        .post(self.novel_options.covers, self.novel_options.embeds);
                                     state.active = Some(novel);
                                     state.stage = Stage::Text;
                                     return Some((
@@ -480,7 +524,7 @@ impl Pixiv {
                         }
                     }
                     Stage::Text => {
-                        let novel = state.active.as_ref().expect("active novel");
+                        let novel = state.active.as_mut().expect("active novel");
                         let mut endpoint = self
                             .api_root
                             .join("webview/v2/novel")
@@ -493,8 +537,12 @@ impl Pixiv {
                             .get(&endpoint)
                             .await
                             .and_then(|body| parse_webview(&body))
-                            .and_then(|text| novel.text(text))
-                        {
+                            .and_then(|text| {
+                                if self.novel_options.embeds {
+                                    state.text = Some(text.clone());
+                                }
+                                novel.text(text)
+                            }) {
                             Ok(mut media) => {
                                 self.network.apply_media(&mut media);
                                 media
@@ -506,20 +554,127 @@ impl Pixiv {
                         };
                         state.stage = if self.novel_options.covers {
                             Stage::Cover
+                        } else if self.novel_options.embeds {
+                            Stage::EmbedScan
                         } else {
                             Stage::End
                         };
                         return Some((Ok(ExtractionEvent::Media(Box::new(text))), state));
                     }
                     Stage::Cover => {
-                        state.stage = Stage::End;
-                        let result = state.active.as_ref().expect("active novel").cover().map(
+                        state.stage = if self.novel_options.embeds {
+                            Stage::EmbedScan
+                        } else {
+                            Stage::End
+                        };
+                        let result = state.active.as_mut().expect("active novel").cover().map(
                             |mut media| {
                                 self.network.apply_media(&mut media);
                                 ExtractionEvent::Media(Box::new(media))
                             },
                         );
                         return Some((result, state));
+                    }
+                    Stage::EmbedScan => {
+                        let text = state.text.take().unwrap_or_default();
+                        state.plan = match embeds::scan(&text).await {
+                            Ok(plan) => plan,
+                            Err(error) => {
+                                state.done = true;
+                                state.works.clear();
+                                state.next = None;
+                                state.stage = Stage::End;
+                                return Some((Err(error), state));
+                            }
+                        };
+                        if state.plan.uploads {
+                            let id = state
+                                .active
+                                .as_ref()
+                                .expect("active novel")
+                                .metadata
+                                .post_id
+                                .clone();
+                            if let Some(body) = self.request_ajax(&format!("/novel/{id}")).await {
+                                state.images = embeds::images(body).unwrap_or_default();
+                            }
+                        }
+                        state.stage = Stage::EmbedImages;
+                    }
+                    Stage::EmbedImages => {
+                        if let Some(image) = state.images.pop_front() {
+                            let result = state
+                                .active
+                                .as_mut()
+                                .expect("active novel")
+                                .uploaded(image, self.tags)
+                                .map(|mut media| {
+                                    self.network.apply_media(&mut media);
+                                    ExtractionEvent::Media(Box::new(media))
+                                });
+                            if result.is_err() {
+                                state.done = true;
+                                state.works.clear();
+                                state.next = None;
+                                state.images.clear();
+                                state.plan.ids.clear();
+                                state.stage = Stage::End;
+                            }
+                            return Some((result, state));
+                        }
+                        state.stage = Stage::EmbedChildren;
+                    }
+                    Stage::EmbedChildren => {
+                        if let Some(child) = &mut state.child {
+                            if let Some(event) = child.next().await {
+                                return Some((event, state));
+                            }
+                            state.child = None;
+                        }
+                        if let Some(id) = state.plan.ids.pop_front() {
+                            let novel = state.active.as_mut().expect("active novel");
+                            if let Err(error) = novel.next_number() {
+                                state.done = true;
+                                state.works.clear();
+                                state.next = None;
+                                state.plan.ids.clear();
+                                state.stage = Stage::End;
+                                return Some((Err(error), state));
+                            }
+                            novel.data["date_url"] = Value::Null;
+                            let metadata = crate::event::ChildMetadata::from_pixiv_novel(
+                                state.subcategory,
+                                novel.data.as_object().expect("novel object"),
+                            );
+                            let native = self.artwork_extractor.as_deref().unwrap_or(self);
+                            let visited = state.visited.clone();
+                            state.child = Some(crate::event::child_job(metadata, move || {
+                                stream::once(async move {
+                                    let mut visited = visited.lock().await;
+                                    match visited.insert(&id) {
+                                        Ok(false) => return stream::empty().boxed(),
+                                        Ok(true) => {}
+                                        Err(error) => {
+                                            return stream::once(async move { Err(error) }).boxed();
+                                        }
+                                    }
+                                    drop(visited);
+                                    let Some(id) = embeds::artwork_id(&id) else {
+                                        return stream::once(async {
+                                            Err(error(
+                                                "Pixiv novel contains an invalid linked artwork ID",
+                                            ))
+                                        })
+                                        .boxed();
+                                    };
+                                    native.target_events(super::Target::Illust(id))
+                                })
+                                .flatten()
+                                .boxed()
+                            }));
+                            continue;
+                        }
+                        state.stage = Stage::End;
                     }
                     Stage::End => {
                         state.active = None;
@@ -680,6 +835,7 @@ mod tests {
         let native = pixiv(root).with_novel_options(NovelOptions {
             covers: true,
             full_series: false,
+            embeds: false,
         });
         let events = native
             .events(&Url::parse("https://www.pixiv.net/novel/show.php?id=42").unwrap())
@@ -755,6 +911,7 @@ mod tests {
             let native = pixiv(root).with_novel_options(NovelOptions {
                 covers,
                 full_series: false,
+                embeds: false,
             });
             let files = JobSelection {
                 file_range: Some(RangeSelection::parse("1").unwrap()),
@@ -780,6 +937,7 @@ mod tests {
         let native = pixiv(root).with_novel_options(NovelOptions {
             covers: true,
             full_series: false,
+            embeds: false,
         });
         let events = native
             .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
@@ -894,6 +1052,7 @@ mod tests {
             let native = pixiv(root).with_novel_options(NovelOptions {
                 covers: false,
                 full_series,
+                embeds: false,
             });
             let files = native
                 .stream(&Url::parse("https://www.pixiv.net/n/42").unwrap())
@@ -1244,6 +1403,7 @@ mod tests {
                 .with_novel_options(NovelOptions {
                     covers: true,
                     full_series: false,
+                    embeds: false,
                 });
             let events = native
                 .events(&Url::parse(&format!("https://www.pixiv.net/{route}")).unwrap())
@@ -1330,6 +1490,7 @@ mod tests {
             .with_novel_options(NovelOptions {
                 covers: false,
                 full_series: true,
+                embeds: false,
             });
         let files = native
             .stream(&Url::parse("https://www.pixiv.net/n/42").unwrap())
@@ -1445,6 +1606,7 @@ mod tests {
                 .with_novel_options(NovelOptions {
                     covers: true,
                     full_series: false,
+                    embeds: false,
                 });
             let events = native
                 .events(&Url::parse("https://www.pixiv.net/n/42").unwrap())
@@ -1628,6 +1790,7 @@ mod tests {
             .with_novel_options(NovelOptions {
                 covers: true,
                 full_series: false,
+                embeds: false,
             });
         let url = Url::parse("https://www.pixiv.net/n/41").unwrap();
         let mut events = native.events(&url);
@@ -1658,6 +1821,7 @@ mod tests {
             .with_novel_options(NovelOptions {
                 covers: true,
                 full_series: false,
+                embeds: false,
             });
         let events = native
             .events(&Url::parse("https://www.pixiv.net/n/41").unwrap())
@@ -1721,6 +1885,7 @@ mod tests {
                     .with_novel_options(NovelOptions {
                         covers: true,
                         full_series: true,
+                        embeds: false,
                     });
                 let events = native
                     .events(&Url::parse(&format!("https://www.pixiv.net/{route}")).unwrap())
@@ -1952,6 +2117,7 @@ mod tests {
                         .get("covers")
                         .is_some_and(super::super::value_truthy),
                     full_series: false,
+                    embeds: false,
                 });
             let events = native
                 .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
@@ -2033,7 +2199,7 @@ mod tests {
                         .find(|work| id_of(work).as_deref() == Some(metadata.post_id.as_str()))
                         .unwrap()
                         .clone();
-                    let ordinary = Novel::parse(raw, mode).unwrap();
+                    let mut ordinary = Novel::parse(raw, mode).unwrap();
                     let expected_key = if metadata.index == 1 {
                         ordinary.text(String::new()).unwrap().archive_key()
                     } else {
@@ -2080,6 +2246,7 @@ mod tests {
             .with_novel_options(NovelOptions {
                 covers: true,
                 full_series: false,
+                embeds: false,
             });
         let events = native
             .events(&Url::parse("https://www.pixiv.net/users/9/novels").unwrap())
@@ -2206,6 +2373,7 @@ mod tests {
                 .with_novel_options(NovelOptions {
                     covers: true,
                     full_series,
+                    embeds: false,
                 });
             let events = native
                 .events(&Url::parse(&format!("https://www.pixiv.net/{route}")).unwrap())
@@ -2387,6 +2555,7 @@ mod tests {
             .with_novel_options(NovelOptions {
                 covers: true,
                 full_series: false,
+                embeds: false,
             });
         let events = native
             .events(&Url::parse("https://www.pixiv.net/n/42").unwrap())

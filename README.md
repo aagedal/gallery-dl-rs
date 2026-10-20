@@ -661,8 +661,7 @@ API errors and invalid JSON leave the original caption unchanged; corrupt gzip
 and transient requests retry within configured limits. Oversized payloads do
 not retry. Truthy successful bodies with malformed caption fields abort before
 that post. Source vectors and local HTTP tests cover these paths; authenticated
-live AJAX extraction remains unverified. Novel embedded-image expansion remains
-unfinished.
+live AJAX extraction remains unverified.
 
 Native Pixiv `sanity` recovery defaults to enabled and follows JSON truthiness.
 Artist artwork, illustration and manga URLs share the upstream untyped App API
@@ -867,15 +866,33 @@ Listings page lazily with a 200-page limit and retain their owner, series,
 visibility and tag scopes. Selected works fetch the App API webview text and
 save exact UTF-8 as `ID_p0.txt`, preserving newlines and embedded-image markers.
 `covers: true` adds the original JPG cover with a PNG fallback;
-`full-series: true` expands a single novel into its series. Both default false
-and belong under `extractor.pixiv-novel`. Text and covers share the novel ID
-but have separate archive entries, isolated from illustration IDs. Profile
-`include` novel children use the novel category's credentials, network and output
-settings. Embedded-image expansion and additional extended novel metadata
-fields remain unfinished. Text/cover failures close the current
-post and allow later novels to continue; native mode currently reports these as
-errors where upstream warns. Authenticated live novel extraction is unverified;
-local HTTP fixtures cover selection, pagination, text publication and recovery.
+`full-series: true` expands a single novel into its series. `embeds: true` expands
+uploaded images and linked illustrations after text and cover output. All three
+settings default false and follow JSON truthiness, with explicit null disabling
+an inherited setting. They resolve through root, extractor and category scopes;
+only novel jobs consume them. An uploaded-image marker triggers one web AJAX lookup, which emits all returned images in response
+order. Linked illustration markers ignore page selectors and queue each artwork
+once per novel, after uploaded images. Child predicates and ranges run before
+artwork requests; repeated selected artwork targets are fetched once per job.
+Artwork children use the `pixiv` category's own credentials, network, enrichment
+and ugoira settings. Profile `include` novel children retain novel-scoped settings.
+
+Novel source fields and persistent uploaded-image metadata reach sidecars,
+filters and templates, including source `num` (zero for text), `suffix`, title,
+and custom fields through `metadata`. Native `index` remains one-based for files.
+Public snapshots are bounded to 32 MiB, one million nodes and depth 128; marker,
+image and child traversal have count and aggregate URL bounds. Output numbering
+is limited to five digits. Archives include novel ID, output number and extension,
+isolated from illustration IDs. Previous entries without an extension do not
+suppress the corrected identity and may be downloaded again.
+
+Text/cover failures close the current post and allow later novels to continue;
+native mode reports these as errors where upstream warns. Embedded-image lookup
+failures skip uploads and allow linked artwork; malformed individual images abort
+the novel job after closing its post. Child failures leave later children and
+novels available. Authenticated live novel extraction remains unverified; source
+oracle and local HTTP fixtures cover ordering, mutations, selection, independent
+clients, archives, cancellation and failure boundaries.
 
 Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
 category) uses the OAuth2 API with a client-credentials token (upstream's public
@@ -1829,7 +1846,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `cursor`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `comments`,
-`metadata-bookmark`, `captions`, `sanity`, `endpoint`,
+`metadata-bookmark`, `captions`, `sanity`, `embeds`, `covers`, `full-series`, `endpoint`,
 `order-posts`, `favorites` (Kemono/Coomer options), category-scoped Bluesky
 `api-server` and likes `endpoint`, `retries` (integer 0–10), and `timeout`
 (positive seconds, including fractions).

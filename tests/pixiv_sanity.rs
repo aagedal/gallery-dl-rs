@@ -55,8 +55,18 @@ fn serve_inner(
                 let n = stream.read(&mut block).unwrap();
                 assert_ne!(n, 0);
                 bytes.extend_from_slice(&block[..n]);
-                if bytes.windows(4).any(|b| b == b"\r\n\r\n") {
-                    break;
+                if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let length = String::from_utf8_lossy(&bytes[..end])
+                        .lines()
+                        .find_map(|line| {
+                            let (key, value) = line.split_once(':')?;
+                            key.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= end + 4 + length {
+                        break;
+                    }
                 }
             }
             seen.push(String::from_utf8_lossy(&bytes).into_owned());

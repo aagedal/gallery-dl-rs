@@ -134,6 +134,8 @@ pub struct Options {
     pub captions: Option<bool>,
     /// Enable the Pixiv workaround for App API sanity restrictions.
     pub sanity: Option<bool>,
+    /// Expand images embedded in Pixiv novels.
+    pub embeds: Option<bool>,
     /// Include Pixiv illustration or novel bookmark metadata.
     pub metadata_bookmark: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
@@ -316,6 +318,7 @@ impl Options {
             comments: overrides.comments.or(self.comments),
             captions: overrides.captions.or(self.captions),
             sanity: overrides.sanity.or(self.sanity),
+            embeds: overrides.embeds.or(self.embeds),
             metadata_bookmark: overrides.metadata_bookmark.or(self.metadata_bookmark),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             refresh_token: overrides
@@ -442,7 +445,10 @@ struct RawRoot {
     comments: Field,
     captions: Field,
     sanity: Field,
+    embeds: Field,
     metadata_bookmark: Field,
+    covers: Field,
+    full_series: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -515,7 +521,10 @@ struct RawExtractor {
     comments: Field,
     captions: Field,
     sanity: Field,
+    embeds: Field,
     metadata_bookmark: Field,
+    covers: Field,
+    full_series: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -621,15 +630,16 @@ struct RawOptions {
     comments: Field,
     captions: Field,
     sanity: Field,
+    embeds: Field,
     metadata_bookmark: Field,
+    covers: Field,
+    full_series: Field,
     api_key: Field,
     username: Field,
     password: Field,
     user_id: Field,
     access_token: Field,
     refresh_token: Field,
-    covers: Field,
-    full_series: Field,
     api_server: Field,
     client_id: Field,
     client_secret: Field,
@@ -805,6 +815,7 @@ impl Config {
             comments: root.comments,
             captions: root.captions,
             sanity: root.sanity,
+            embeds: root.embeds,
             metadata_bookmark: root.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
@@ -812,8 +823,8 @@ impl Config {
             user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
-            covers: Field::default(),
-            full_series: Field::default(),
+            covers: root.covers,
+            full_series: root.full_series,
             api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
@@ -887,6 +898,7 @@ impl Config {
             comments: extractor.comments,
             captions: extractor.captions,
             sanity: extractor.sanity,
+            embeds: extractor.embeds,
             metadata_bookmark: extractor.metadata_bookmark,
             api_key: Field::default(),
             username: Field::default(),
@@ -894,8 +906,8 @@ impl Config {
             user_id: Field::default(),
             access_token: Field::default(),
             refresh_token: Field::default(),
-            covers: Field::default(),
-            full_series: Field::default(),
+            covers: extractor.covers,
+            full_series: extractor.full_series,
             api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
@@ -1021,13 +1033,6 @@ impl Config {
             if !matches!(name, "pixiv" | "pixiv-novel") && settings.refresh_token.0.is_some() {
                 return Err(error(
                     "native configuration refresh-token is only supported for pixiv or pixiv-novel",
-                ));
-            }
-            if name != "pixiv-novel"
-                && (settings.covers.0.is_some() || settings.full_series.0.is_some())
-            {
-                return Err(error(
-                    "native configuration covers/full-series require a pixiv-novel scope",
                 ));
             }
             if name != "deviantart"
@@ -1507,6 +1512,7 @@ impl RawOptions {
         let comments = self.comments.0.as_ref().map(value_truthy);
         let captions = self.captions.0.as_ref().map(value_truthy);
         let sanity = self.sanity.0.as_ref().map(value_truthy);
+        let embeds = self.embeds.0.as_ref().map(value_truthy);
         let metadata_bookmark = self.metadata_bookmark.0.as_ref().map(value_truthy);
         let max_posts = match self.max_posts.0 {
             None => None,
@@ -1701,8 +1707,8 @@ impl RawOptions {
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
-            covers: boolean(self.covers, "covers")?,
-            full_series: boolean(self.full_series, "full-series")?,
+            covers: self.covers.0.as_ref().map(value_truthy),
+            full_series: self.full_series.0.as_ref().map(value_truthy),
             api_server,
             bluesky_endpoint: None,
             proxy,
@@ -1772,6 +1778,7 @@ impl RawOptions {
             comments,
             captions,
             sanity,
+            embeds,
             metadata_bookmark,
             api_key,
             refresh_token,

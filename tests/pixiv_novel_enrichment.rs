@@ -136,3 +136,59 @@ fn compatibility_novel_enrichment_matches_actual_source_text_and_cover_events() 
     assert!(compared > 20);
     assert!(covers > 0);
 }
+
+#[test]
+fn novel_source_numbering_and_uploaded_fields_reach_filters_and_templates() {
+    let mut data = novel();
+    data["num"] = 2.into();
+    data["suffix"] = "_p02".into();
+    data["title"] = "Uploaded title".into();
+    data["extension"] = "jpeg".into();
+    data["extra_upload"] = json!({"nested":["first","second"]});
+    let item = media(data.clone(), "https://i.pximg.net/upload.jpeg");
+    let encoded = serde_json::to_value(item.metadata.as_ref().unwrap()).unwrap();
+    assert_eq!(encoded["num"], 2);
+    assert_eq!(encoded["suffix"], "_p02");
+    assert_eq!(encoded["extra_upload"], data["extra_upload"]);
+    assert!(
+        FilterExpression::parse(
+            "num == 2 and index == 3 and suffix == '_p02' and extra_upload['nested'][1] == 'second'"
+        )
+        .unwrap()
+        .matches(&item)
+        .unwrap()
+    );
+    assert_eq!(
+        FilenameTemplate::parse("{title}_{num:02}_{metadata[extra_upload][nested][0]}.{extension}")
+            .unwrap()
+            .render(&item)
+            .unwrap(),
+        "Uploaded_title_02_first.jpeg"
+    );
+}
+
+#[test]
+fn public_novel_child_snapshots_preserve_structured_fields_and_reject_transport_fields() {
+    let raw = json!({"id":42,"num":3,"title":"Writer","user":{"id":5,"account":"artist"},"tags":["cat"],"extra_upload":{"nested":[1,2]},"_http_headers":{"Authorization":"SYNTHETIC_PRIVATE"},"_extractor":"internal","category":"wrong"});
+    let child =
+        gallery_dl_rs::event::ChildMetadata::from_pixiv_novel("novel", raw.as_object().unwrap());
+    assert_eq!(child.category(), "pixiv-novel");
+    assert!(!child.fields().contains_key("_http_headers"));
+    assert!(!child.fields().contains_key("_extractor"));
+    assert!(!child.fields().contains_key("category"));
+    assert!(FilterExpression::parse("id == 42 and num == 3 and user['account'] == 'artist' and tags == ['cat'] and extra_upload['nested'][1] == 2").unwrap().matches_child(&child).unwrap());
+}
+
+#[test]
+fn novel_snapshots_reject_excess_depth_and_encoded_size_before_publication() {
+    let mut nested = json!(1);
+    for _ in 0..130 {
+        nested = json!({"next":nested});
+    }
+    let data = json!({"extra_upload":nested});
+    assert!(gallery_dl_rs::pixiv::NovelMetadata::parse(data.as_object().unwrap()).is_none());
+    // Escaping makes this value exceed the encoded limit while its raw string
+    // remains comfortably below it; the serializer counts without a large buffer.
+    let data = json!({"extra_upload":"\0".repeat(6*1024*1024)});
+    assert!(gallery_dl_rs::pixiv::NovelMetadata::parse(data.as_object().unwrap()).is_none());
+}

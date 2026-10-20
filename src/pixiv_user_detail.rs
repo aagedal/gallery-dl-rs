@@ -93,6 +93,7 @@ fn valid(fields: &Map<String, Value>) -> bool {
                 | "username"
                 | "caption"
                 | "caption_html"
+                | "pixiv_novel_metadata"
                 | "ajax"
                 | "mypixiv"
                 | "timestamp"

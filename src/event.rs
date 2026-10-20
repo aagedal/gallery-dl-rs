@@ -145,6 +145,28 @@ impl ChildMetadata {
         }
     }
 
+    /// Public, bounded source novel queue fields, including uploaded-image changes.
+    pub fn from_pixiv_novel(
+        subcategory: &str,
+        data: &serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
+        let fields = crate::pixiv::NovelMetadata::queue_fields(data).unwrap_or_default();
+        let subcategory = if subcategory.len() <= 64
+            && subcategory
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        {
+            subcategory
+        } else {
+            ""
+        };
+        Self {
+            category: "pixiv-novel".into(),
+            subcategory: subcategory.to_owned(),
+            fields,
+        }
+    }
+
     pub fn category(&self) -> &str {
         &self.category
     }

@@ -28,6 +28,9 @@ const FIELDS: &[&str] = &[
     "date",
     "caption",
     "caption_html",
+    "title",
+    "suffix",
+    "date_url",
     "ajax",
     "_ajax",
     "mypixiv",
@@ -457,6 +460,7 @@ fn lookup(
         "filename" => Value::Str(media.filename.clone()),
         "name" => Value::Str(stem.into()),
         "extension" => Value::Str(extension.into()),
+        "num" if metadata?.pixiv_novel_metadata.is_some() => convert(context.get("num")?, "num"),
         "index" | "num" => match metadata?.index {
             0 => Value::None,
             index => Value::Int(index as i128),

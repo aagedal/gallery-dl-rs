@@ -222,6 +222,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
         bookmark_archive: false,
         ajax: None,
         mypixiv: None,
+        pixiv_novel_metadata: None,
         caption_html: None,
         pixiv_user_detail: None,
         comments: None,

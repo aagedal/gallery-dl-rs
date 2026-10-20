@@ -1800,3 +1800,44 @@ async fn pixiv_sanity_truthiness_forwards_only_to_supported_illustration_jobs() 
         }
     }
 }
+
+#[tokio::test]
+async fn pixiv_novel_switches_truthiness_forward_only_to_novel_jobs() {
+    for (value, expected) in [
+        (serde_json::json!(["enabled"]), true),
+        (serde_json::Value::Null, false),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let cfg = config(
+            root.path(),
+            serde_json::json!({"extractor":{"embeds":value,"covers":value,"full-series":value}}),
+        );
+        for (url, supported) in [
+            ("https://www.pixiv.net/artworks/42", false),
+            ("https://www.pixivision.net/en/a/77", false),
+            ("https://www.pixiv.net/novel/show.php?id=42", true),
+            ("https://instagram.com/p/abc/", false),
+        ] {
+            let log = root.path().join("backend.log");
+            let _ = std::fs::remove_file(&log);
+            let mut command = binary(root.path(), &cfg);
+            command
+                .arg("--extractor-command")
+                .arg(backend(root.path()))
+                .env("CONFIG_TEST_LOG", &log)
+                .args(["-g", url]);
+            success(&output(&mut command).await);
+            let log = std::fs::read_to_string(log).unwrap();
+            for name in ["embeds", "covers", "full-series"] {
+                if supported {
+                    assert!(
+                        log.contains(&format!("--option\n{name}={expected}\n")),
+                        "{log}"
+                    );
+                } else {
+                    assert!(!log.contains(&format!("{name}=")), "{log}");
+                }
+            }
+        }
+    }
+}

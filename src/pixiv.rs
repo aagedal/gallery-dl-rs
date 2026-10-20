@@ -32,6 +32,9 @@ use std::{
 };
 use url::Url;
 
+#[path = "pixiv_novel_metadata.rs"]
+mod novel_metadata;
+pub use novel_metadata::NovelMetadata;
 #[path = "pixiv_novel.rs"]
 pub mod novel;
 pub use novel::NovelOptions;
@@ -826,6 +829,7 @@ pub struct Pixiv {
     include: Option<Include>,
     novel_options: NovelOptions,
     novel_extractor: Option<Arc<Pixiv>>,
+    artwork_extractor: Option<Arc<Pixiv>>,
 }
 
 #[derive(Clone)]
@@ -921,6 +925,7 @@ impl Pixiv {
             include: None,
             novel_options: NovelOptions::default(),
             novel_extractor: None,
+            artwork_extractor: None,
         })
     }
 
@@ -938,6 +943,15 @@ impl Pixiv {
 
     pub fn with_novel_options(mut self, options: NovelOptions) -> Self {
         self.novel_options = options;
+        self
+    }
+
+    /// Use independently configured illustration settings for novel artwork children.
+    pub fn with_artwork_extractor(mut self, native: Arc<Pixiv>) -> Self {
+        if self.api_root == native.api_root {
+            self.user_detail_cache = native.user_detail_cache.clone();
+        }
+        self.artwork_extractor = Some(native);
         self
     }
 
@@ -1484,7 +1498,9 @@ impl Pixiv {
                     let illust = body
                         .get_mut("illust")
                         .ok_or_else(|| error("Pixiv response contains no illustration"))?;
-                    if id_of(illust).as_deref() != Some(id.as_str()) {
+                    // Forced novel artwork queues retain source leading zeros
+                    // in the request while API work IDs use canonical decimals.
+                    if id_of(illust).as_deref() != Some(id.trim_start_matches('0')) {
                         return Err(error("Pixiv returned an unexpected illustration"));
                     }
                     let animation = string(illust, "type") == Some("ugoira");
@@ -1494,7 +1510,11 @@ impl Pixiv {
                         Err(error) => return Err(error.into_error()),
                     };
                     if media.is_empty() {
-                        let metadata = self.empty_work_metadata(illust, &id, failure.is_none());
+                        let metadata = self.empty_work_metadata(
+                            illust,
+                            id.trim_start_matches('0'),
+                            failure.is_none(),
+                        );
                         let mut events = Vec::new();
                         if let Some(error) = failure {
                             events.push(Err(error));

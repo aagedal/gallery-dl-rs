@@ -196,6 +196,10 @@ impl FilterExpression {
             })
         }
         for (key, value) in child.fields() {
+            if child.category() == "pixiv-novel" {
+                context.insert(key.clone(), json_value(value));
+                continue;
+            }
             if let Some(value) = child_value(value, true) {
                 context.insert(key.clone(), value);
             }
@@ -442,6 +446,11 @@ fn context_parts(
                 for key in keys {
                     metadata.insert(key.into(), Value::Bool(value));
                 }
+            }
+        }
+        if let Some(detail) = &post.pixiv_novel_metadata {
+            for (key, value) in detail.fields() {
+                metadata.insert(key.clone(), json_value(value));
             }
         }
         if let Some(caption) = &post.caption_html {
@@ -710,7 +719,7 @@ fn context_parts(
             metadata.remove("index");
         }
         values.extend(metadata.clone());
-        if media.is_some() {
+        if media.is_some() && !metadata.contains_key("num") {
             values.insert("num".into(), Value::Int(post.index as i128));
         }
         if category == "twitter" {

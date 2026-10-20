@@ -623,6 +623,7 @@ struct Extractors {
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
     pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
     pixiv_novel: OnceCell<Result<Arc<gallery_dl_rs::pixiv::Pixiv>>>,
+    pixiv_artwork: OnceCell<Result<Arc<gallery_dl_rs::pixiv::Pixiv>>>,
     deviantart: OnceCell<Result<gallery_dl_rs::deviantart::DeviantArt>>,
     flickr: OnceCell<Result<gallery_dl_rs::flickr::Flickr>>,
     wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
@@ -1116,14 +1117,79 @@ fn extract_input<'a>(
                 Extractor::Native if matches!(category, "pixiv" | "pixiv-novel") => {
                     let novel_settings = &settings["pixiv-novel"];
                     let novel_options = &novel_settings.options;
+                    let artwork = if novel_options.embeds.unwrap_or(false) {
+                        let artwork_settings = &settings["pixiv"];
+                        let artwork_options = &artwork_settings.options;
+                        Some(
+                            extractors
+                                .pixiv_artwork
+                                .get_or_init(|| async {
+                                    let jar = extractors
+                                        .cookie_jar(artwork_settings, "pixiv.net")
+                                        .await?;
+                                    gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
+                                        |native| {
+                                            native
+                                                .with_cookies(jar)
+                                                .with_captions(
+                                                    artwork_options.captions.unwrap_or(false),
+                                                )
+                                                .with_sanity(artwork_options.sanity.unwrap_or(true))
+                                                .with_ugoira_mode(
+                                                    artwork_options.ugoira.unwrap_or_default(),
+                                                )
+                                                .with_metadata(
+                                                    artwork_options.metadata.unwrap_or(false),
+                                                )
+                                                .with_comments(
+                                                    artwork_options.comments.unwrap_or(false),
+                                                )
+                                                .with_metadata_bookmark(
+                                                    artwork_options
+                                                        .metadata_bookmark
+                                                        .unwrap_or(false),
+                                                )
+                                                .with_max_posts(artwork_options.max_posts)
+                                                .with_tags(artwork_options.tags.unwrap_or_default())
+                                                .with_cursor(artwork_options.cursor.clone())
+                                                .with_refresh_token(
+                                                    artwork_options.refresh_token.as_deref(),
+                                                )
+                                                .with_retries(artwork_options.retries.unwrap())
+                                                .with_request_timeout(
+                                                    artwork_options.timeout.unwrap(),
+                                                )
+                                                .with_network(&artwork_settings.network)
+                                                .map(Arc::new)
+                                        },
+                                    )
+                                })
+                                .await
+                                .as_ref()
+                                .map_err(|e| {
+                                    error(format!(
+                                        "native Pixiv artwork initialization failed: {e}"
+                                    ))
+                                })?,
+                        )
+                    } else {
+                        None
+                    };
                     let novel = extractors
                         .pixiv_novel
                         .get_or_init(|| async {
                             let jar = extractors.cookie_jar(novel_settings, "pixiv.net").await?;
                             gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
                                 let native = native.with_cookies(jar);
+                                let native = match artwork {
+                                    Some(artwork) => {
+                                        native.with_artwork_extractor(Arc::clone(artwork))
+                                    }
+                                    None => native,
+                                };
                                 native
                                     .with_novel_options(gallery_dl_rs::pixiv::NovelOptions {
+                                        embeds: novel_options.embeds.unwrap_or(false),
                                         covers: novel_options.covers.unwrap_or(false),
                                         full_series: novel_options.full_series.unwrap_or(false),
                                     })
@@ -1342,6 +1408,9 @@ fn extract_input<'a>(
                             cursor: matches!(category, "pixiv" | "pixiv-novel")
                                 .then(|| options.cursor.clone())
                                 .flatten(),
+                            embeds: (category == "pixiv-novel")
+                                .then_some(options.embeds)
+                                .flatten(),
                             covers: (category == "pixiv-novel")
                                 .then_some(options.covers)
                                 .flatten(),
@@ -1553,6 +1622,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         metadata: None,
         api_key: None,
         refresh_token: None,
+        embeds: None,
         covers: None,
         full_series: None,
         client_id: None,

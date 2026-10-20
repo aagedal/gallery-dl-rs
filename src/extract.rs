@@ -498,12 +498,17 @@ impl Media {
             }
             "pixiv-novel" => {
                 let post = self.metadata.as_ref()?;
+                let extension = self
+                    .filename
+                    .rsplit_once('.')
+                    .map(|(_, extension)| extension)
+                    .filter(|extension| valid_extension(extension));
                 if !crate::pixiv::valid_media_id(&post.post_id, &post.media_id) {
                     return None;
                 }
                 (
                     "pixiv-novel",
-                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                    serde_json::json!([post.post_id, post.media_id, extension?]).to_string(),
                 )
             }
             "twitter"
@@ -597,6 +602,8 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub pixiv_novel_metadata: Option<std::sync::Arc<crate::pixiv::NovelMetadata>>,
     /// Pixiv artwork marked for browser AJAX recovery, including disabled attempts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ajax: Option<bool>,
@@ -887,6 +894,7 @@ pub struct BackendOptions {
     pub ugoira: Option<crate::pixiv::UgoiraMode>,
     pub tags: Option<crate::pixiv::TagMode>,
     pub cursor: Option<crate::pixiv::BookmarkCursor>,
+    pub embeds: Option<bool>,
     pub covers: Option<bool>,
     pub full_series: Option<bool>,
     pub access_token: Option<String>,
@@ -1058,6 +1066,7 @@ impl Backend {
         }
         for (name, value) in [
             ("metadata", options.metadata),
+            ("embeds", options.embeds),
             ("sanity", options.sanity),
             ("captions", options.captions),
             ("comments", options.comments),
@@ -1489,7 +1498,7 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
         && let Some(page) = metadata
             .get("num")
             .and_then(Value::as_u64)
-            .filter(|page| *page < 10_000)
+            .filter(|page| *page < 100_000)
         && let Some(extension) = metadata
             .get("extension")
             .and_then(Value::as_str)
@@ -1756,7 +1765,9 @@ fn compatibility_metadata(
                 .and_then(Value::as_u64)
                 .filter(|page| {
                     *page
-                        < if data.get("_ugoira_original").and_then(Value::as_bool) == Some(true) {
+                        < if category == "pixiv-novel"
+                            || data.get("_ugoira_original").and_then(Value::as_bool) == Some(true)
+                        {
                             100_000
                         } else {
                             10_000
@@ -1899,6 +1910,9 @@ fn compatibility_metadata(
         )
     });
     Some(PostMetadata {
+        pixiv_novel_metadata: (category == "pixiv-novel")
+            .then(|| crate::pixiv::NovelMetadata::parse(data).map(std::sync::Arc::new))
+            .flatten(),
         ajax: (category == "pixiv")
             .then(|| data.get("_ajax").and_then(Value::as_bool))
             .flatten(),
@@ -1995,10 +2009,12 @@ fn compatibility_metadata(
         discord: discord.clone(),
         creator,
         revision: compatibility_revision(data, category),
-        rating: crate::booru::Site::from_category(category)
-            .and_then(|_| string("rating"))
-            .filter(|r| r.len() <= 32 && !r.chars().any(char::is_control))
-            .map(std::sync::Arc::from),
+        rating: (category == "pixiv-novel"
+            || crate::booru::Site::from_category(category).is_some())
+        .then(|| string("rating"))
+        .flatten()
+        .filter(|r| r.len() <= 32 && !r.chars().any(char::is_control))
+        .map(std::sync::Arc::from),
         score: crate::booru::Site::from_category(category)
             .and_then(|_| data.get("score"))
             .and_then(|score| {

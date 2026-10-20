@@ -804,9 +804,16 @@ public/private bookmarks, exact UTF-8 text, optional original covers and
 `full-series` expansion. Profile novel views use novel-scoped credentials and
 network/output settings. HTTP fixtures cover lazy selection, scoped pagination,
 raw text publication and recovery; authenticated live novel extraction remains
-unverified. Embedded-image expansion and extended novel metadata remain
-unfinished; text/cover failures currently report errors where
-upstream warns. Per-child category predicate overrides remain unfinished.
+unverified. Native `embeds` expands uploaded images in response order and queues
+linked artworks after text and covers. Source numbering and persistent public
+image metadata reach files and child predicates, with bounded snapshots and
+traversal. Artwork children use independently configured illustration clients;
+selection precedes requests and selected targets deduplicate across the novel job.
+Novel archive identities now include extension. Novel `embeds`, `covers` and
+`full-series` switches support scoped JSON truthiness and explicit null clearing.
+Source oracle and HTTP tests cover
+ordering, metadata mutations, selection, client scope and failure boundaries.
+Text/cover failures currently report errors where upstream warns. Per-child category predicate overrides remain unfinished.
 Illustration and novel bookmark `cursor` settings support strings, integers and
 explicit null clearing in independent category scopes. The starting cursor is
 sent only on the first request; pagination can replace or remove it without
@@ -839,8 +846,8 @@ credentials. Same-origin redirects, request/retry deadlines and encoded/decoded
 32 MiB limits bound traversal; corrupt gzip retries while size excess does not.
 Source-compatible 4xx JSON semantics, soft request/API failures and fatal malformed
 caption bodies are covered by source vectors and HTTP tests, alongside ranges,
-empty posts and cancellation. Live authenticated AJAX and novel embeds remain
-unfinished. Shared Firefox import now accepts every native
+empty posts and cancellation. Live authenticated AJAX remains
+unverified. Shared Firefox import now accepts every native
 cookie consumer's domain, fixing Kemono/Coomer/FurAffinity allowlist omissions.
 Native Pixiv sanity recovery now uses browser AJAX metadata for limited artwork,
 including original page discovery and limited ugoira ZIP/frame metadata. Artist

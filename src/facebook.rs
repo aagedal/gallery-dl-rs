@@ -511,6 +511,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 bookmark_archive: false,
                 ajax: None,
                 mypixiv: None,
+                pixiv_novel_metadata: None,
                 caption_html: None,
                 pixiv_user_detail: None,
                 comments: None,
