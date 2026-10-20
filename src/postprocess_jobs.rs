@@ -676,12 +676,13 @@ impl State<'_> {
                 }
                 if let Some(runtime) = &mut parent.runtime {
                     runtime.context = child.queue.take().unwrap_or_default();
-                    runtime.hook(Hook::ChildAfter).await?;
+                    let result = runtime.hook(Hook::ChildAfter).await;
                     if child.queue_shared
                         && let Some(post) = &parent.post
                     {
                         post.checkpoint(&runtime.context);
                     }
+                    result?;
                 }
             }
         }
@@ -1114,6 +1115,10 @@ mod tests {
 #[cfg(test)]
 #[path = "postprocess_keywords_oracle.rs"]
 mod keywords_oracle;
+
+#[cfg(test)]
+#[path = "postprocess_child_failure_oracle.rs"]
+mod child_failure_oracle;
 
 #[cfg(test)]
 mod keyword_order_tests {

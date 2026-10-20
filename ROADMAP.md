@@ -1099,13 +1099,15 @@ counter before incrementing; cover fallback deletion runs on producer resume.
 Linked artwork queues wait for pending file hooks and retain child/child-after
 mutations across queues. Eager child initialization selects the artwork category.
 Raw native indices and archive identities remain separate from these live writes.
+Child-after failures now retain partial keyword mutations through post-after and
+error finalization, including premature child stream completion. A recorded
+DownloadJob/MetadataPP ASCII-write failure verifies the retained keywords.
 Keyword-driven pre-download selection and request/text-fetch changes remain open.
 Remaining: processor archive
 databases, additional encodings/open modes and formatter dialects (including
 typed numeric conversion/operator expressions), arbitrary
 native filename fields, keyword-driven archive identity and pre-download selection changes, further
-cross-processor hook parity (including partial child-after mutations on hook
-failure), further producer policies and framing, nested alias
+cross-processor hook parity, further producer policies and framing, nested alias
 identity, additional counter policies and mutation-driven request URLs/text
 fetches, remaining temporary-path behavior, and
 other processor types.
