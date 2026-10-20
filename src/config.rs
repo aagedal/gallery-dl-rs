@@ -55,6 +55,12 @@ pub struct Options {
     pub videos: Option<crate::twitter::VideoMode>,
     /// Include video and animated-GIF preview images.
     pub previews: Option<bool>,
+    /// Prefer MP4 over animated GIF files on Imgur.
+    pub mp4: Option<bool>,
+    /// Include Mastodon reblogs and their original attachments.
+    pub reblogs: Option<bool>,
+    /// Include Mastodon statuses without selected media.
+    pub text_posts: Option<bool>,
     /// Attempt explicitly unavailable Twitter media when a URL is provided.
     pub unavailable: Option<bool>,
     /// Emit Twitter posts without selected media as file-less post events.
@@ -85,7 +91,7 @@ pub struct Options {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
-    /// Tumblr, Flickr or Wallhaven API key; only accepted in those categories.
+    /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
     /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
     pub refresh_token: Option<String>,
@@ -162,6 +168,9 @@ impl Options {
             unique: overrides.unique.or(self.unique),
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
+            mp4: overrides.mp4.or(self.mp4),
+            reblogs: overrides.reblogs.or(self.reblogs),
+            text_posts: overrides.text_posts.or(self.text_posts),
             unavailable: overrides.unavailable.or(self.unavailable),
             text_tweets: overrides.text_tweets.or(self.text_tweets),
             size: overrides.size.clone().or_else(|| self.size.clone()),
@@ -263,6 +272,9 @@ struct RawRoot {
     unique: Field,
     videos: Field,
     previews: Field,
+    mp4: Field,
+    reblogs: Field,
+    text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
     size: Field,
@@ -310,6 +322,9 @@ struct RawExtractor {
     unique: Field,
     videos: Field,
     previews: Field,
+    mp4: Field,
+    reblogs: Field,
+    text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
     size: Field,
@@ -385,6 +400,9 @@ struct RawOptions {
     unique: Field,
     videos: Field,
     previews: Field,
+    mp4: Field,
+    reblogs: Field,
+    text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
     size: Field,
@@ -532,6 +550,9 @@ impl Config {
             unique: root.unique,
             videos: root.videos,
             previews: root.previews,
+            mp4: root.mp4,
+            reblogs: root.reblogs,
+            text_posts: root.text_posts,
             unavailable: root.unavailable,
             text_tweets: root.text_tweets,
             size: root.size,
@@ -581,6 +602,9 @@ impl Config {
             unique: extractor.unique,
             videos: extractor.videos,
             previews: extractor.previews,
+            mp4: extractor.mp4,
+            reblogs: extractor.reblogs,
+            text_posts: extractor.text_posts,
             unavailable: extractor.unavailable,
             text_tweets: extractor.text_tweets,
             size: extractor.size,
@@ -614,7 +638,7 @@ impl Config {
         }
         .resolve(directory)?;
         let mut categories = BTreeMap::new();
-        for (name, settings) in [
+        for (name, mut settings) in [
             ("instagram", extractor.instagram),
             ("twitter", extractor.twitter),
             ("facebook", extractor.facebook),
@@ -645,11 +669,13 @@ impl Config {
             ("vsco", extractor.vsco),
             ("direct", extractor.direct),
         ] {
-            if !matches!(name, "tumblr" | "flickr" | "wallhaven" | "weasyl")
-                && settings.api_key.0.is_some()
+            if !matches!(
+                name,
+                "tumblr" | "flickr" | "wallhaven" | "weasyl" | "pixeldrain"
+            ) && settings.api_key.0.is_some()
             {
                 return Err(error(
-                    "native configuration api-key is only supported for tumblr, flickr, wallhaven and weasyl",
+                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl and pixeldrain",
                 ));
             }
             if name != "pixiv" && settings.refresh_token.0.is_some() {
@@ -664,8 +690,29 @@ impl Config {
                     "native configuration client-id and client-secret are only supported for deviantart",
                 ));
             }
+            let pixeldrain_key = if name == "pixeldrain" {
+                match settings.api_key.0.take() {
+                    None => None,
+                    Some(Value::String(key))
+                        if key.len() <= 4096 && key.bytes().all(|b| b.is_ascii_graphic()) =>
+                    {
+                        Some(key)
+                    }
+                    Some(_) => {
+                        return Err(error(
+                            "native configuration Pixeldrain api-key must contain at most 4096 printable ASCII characters without spaces",
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
             // Boxed: unoptimized builds overflow the stack with inline settings.
-            categories.insert(name.into(), (*settings).resolve(directory)?);
+            let mut resolved = (*settings).resolve(directory)?;
+            if name == "pixeldrain" {
+                resolved.api_key = pixeldrain_key;
+            }
+            categories.insert(name.into(), resolved);
         }
         Ok(Self {
             global,
@@ -771,6 +818,9 @@ impl RawOptions {
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration previews must be a boolean")),
         };
+        let mp4 = boolean(self.mp4, "mp4")?;
+        let reblogs = boolean(self.reblogs, "reblogs")?;
+        let text_posts = boolean(self.text_posts, "text-posts")?;
         let unavailable = match self.unavailable.0 {
             None => None,
             Some(Value::Bool(value)) => Some(value),
@@ -1121,6 +1171,9 @@ impl RawOptions {
             unique,
             videos,
             previews,
+            mp4,
+            reblogs,
+            text_posts,
             unavailable,
             text_tweets,
             size: image_size,
@@ -1377,6 +1430,16 @@ fn bounded_integer(field: Field, min: u64, max: u64, name: &str) -> Result<Optio
             }),
         Some(_) => Err(error(format!(
             "native configuration {name} must be an integer from {min} to {max}"
+        ))),
+    }
+}
+
+fn boolean(field: Field, name: &str) -> Result<Option<bool>> {
+    match field.0 {
+        None => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(value)),
+        Some(_) => Err(error(format!(
+            "native configuration {name} must be a boolean"
         ))),
     }
 }

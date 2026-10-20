@@ -515,9 +515,9 @@ downloads. Document compatibility differences as features land.
 
 **Implemented experimental native Imgur:** single images, albums and gallery
 posts via the public `post/v1` API, with shared retries, timeouts, network
-options and Retry-After cooldowns. Not yet: user profiles, favorites,
-subreddits, searches, tag listings, and the upstream `mp4` option (animated GIFs
-always use MP4).
+options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
+to true; false preserves animated GIFs while leaving native video unchanged.
+Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts and tag searches, plus Danbooru/e621 pools. Remaining: API
@@ -527,8 +527,11 @@ key/login credentials, favorites/popular/artist views, Gelbooru pools, notes,
 **Implemented experimental native Mastodon:** statuses and user media
 timelines on mastodon.social, pawoo.net and baraag.net (single `mastodon`
 category). Remaining: access tokens, arbitrary instances, bookmarks/favorites/
-lists/hashtags/followed views, card images, `reblogs`/`replies`/`text-posts`
-options, and per-instance categories.
+lists/hashtags/followed views, card images, and per-instance categories.
+Native `reblogs`/`replies`/`text-posts` now preserve outer repost metadata,
+attachment archive identity, source-order empty post boundaries, lazy paging,
+and API-side reply filtering. Defaults match upstream; synthetic/local HTTP and
+configuration/compatibility tests cover selection. Live verification remains.
 
 **Implemented experimental native Kemono/Coomer:** posts and creator post
 listings with deduplicated files. Remaining: creator names, favorites,
@@ -537,15 +540,18 @@ content images, archive/link extraction from post text, cookies/login, and
 upstream options (`duplicates`, `revisions`, `max-posts`, `endpoint`).
 
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
-lists, albums, galleries and image pages. Remaining: Pixeldrain API keys,
-`#item=N` selection, filesystem (`/d/`) links and other domains; Catbox file
+lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
+and image pages. Pixeldrain API keys authenticate API requests and file downloads.
+Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
 `/c/` descriptions; imgbox per-image metadata (width/height); Postimg
 JS-paginated gallery pages beyond the server-rendered listing.
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
-tagged listings via API v2 with an overridable `api-key`. Remaining: OAuth and
-private/dashboard blogs, likes/search/day views, NPF posts, upstream's
-highest-resolution image rewriting (`s2048x3072`/`_1280` to original),
+tagged listings via API v2 with an overridable `api-key`, original-image token
+resolution for capped photos and modern inline images, legacy inline `_1280`
+rewriting, and GIFV download fallbacks. Failed token lookups fall back to the
+API rendition; upstream's delayed token refresh retries remain unimplemented.
+Remaining: OAuth and private/dashboard blogs, likes/search/day views, NPF posts,
 external audio/video, `reblogs`/`posts`/`inline`/`external`/`original`/
 `fallback-delay` options, and custom-domain blogs.
 

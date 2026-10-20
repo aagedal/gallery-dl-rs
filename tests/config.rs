@@ -1923,3 +1923,62 @@ fn client_credentials_are_deviantart_only_and_never_echoed() {
         assert!(!error.contains("abc"), "{error}");
     }
 }
+
+#[test]
+fn site_media_booleans_obey_scope_precedence_and_reject_private_invalid_values() {
+    let cfg = parse(r#"{"extractor":{"mp4":true,"reblogs":false,"text-posts":false,"imgur":{"mp4":false},"mastodon":{"reblogs":true,"text-posts":true,"replies":false}}}"#).unwrap();
+    assert_eq!(cfg.resolve("imgur").unwrap().mp4, Some(false));
+    assert_eq!(cfg.resolve("reddit").unwrap().mp4, Some(true));
+    let m = cfg.resolve("mastodon").unwrap();
+    assert_eq!(m.reblogs, Some(true));
+    assert_eq!(m.text_posts, Some(true));
+    assert_eq!(m.replies, Some(gallery_dl_rs::twitter::ReplyMode::Skip));
+    assert_eq!(
+        m.overlay(&Options {
+            reblogs: Some(false),
+            ..Options::default()
+        })
+        .reblogs,
+        Some(false)
+    );
+    let cfg = parse(r#"{"mp4":true,"reblogs":false,"text-posts":false,"extractor":{"imgur":{"mp4":false},"mastodon":{"reblogs":true,"text-posts":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("imgur").unwrap().mp4, Some(true));
+    assert_eq!(cfg.resolve("mastodon").unwrap().reblogs, Some(false));
+    assert_eq!(cfg.resolve("mastodon").unwrap().text_posts, Some(false));
+    for key in ["mp4", "reblogs", "text-posts"] {
+        for bad in [
+            serde_json::json!(null),
+            serde_json::json!(1),
+            serde_json::json!("private-value"),
+            serde_json::json!([]),
+        ] {
+            let body = serde_json::json!({"extractor": {"mastodon": {key: bad}}}).to_string();
+            let error = parse(&body).err().unwrap().to_string();
+            assert!(error.contains(key), "{error}");
+            assert!(!error.contains("private-value"));
+        }
+    }
+}
+
+#[test]
+fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
+    let key = "opaque:key-_.!";
+    let cfg = parse(&serde_json::json!({"extractor":{"pixeldrain":{"api-key":key}}}).to_string())
+        .unwrap();
+    assert_eq!(
+        cfg.resolve("pixeldrain").unwrap().api_key.as_deref(),
+        Some(key)
+    );
+    assert_eq!(cfg.resolve("catbox").unwrap().api_key, None);
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(7),
+        serde_json::json!("private key"),
+        serde_json::json!("private\nkey"),
+        serde_json::json!("x".repeat(4097)),
+    ] {
+        let body = serde_json::json!({"extractor":{"pixeldrain":{"api-key":value}}}).to_string();
+        let error = parse(&body).err().unwrap().to_string();
+        assert!(!error.contains("private"));
+    }
+}

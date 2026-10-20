@@ -597,7 +597,7 @@ struct Extractors {
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
     mastodon: OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>,
     kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
-    imagehosts: OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>,
+    imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
     pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
     deviantart: OnceCell<Result<gallery_dl_rs::deviantart::DeviantArt>>,
@@ -749,6 +749,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_mp4(options.mp4.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -799,7 +800,20 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
                                 |native| {
+                                    if options.replies
+                                        == Some(gallery_dl_rs::twitter::ReplyMode::SelfOnly)
+                                    {
+                                        return Err(error(
+                                            "native Mastodon replies must be a boolean",
+                                        ));
+                                    }
                                     native
+                                        .with_selection(gallery_dl_rs::mastodon::SelectionOptions {
+                                            reblogs: options.reblogs.unwrap_or(false),
+                                            replies: options.replies
+                                                != Some(gallery_dl_rs::twitter::ReplyMode::Skip),
+                                            text_posts: options.text_posts.unwrap_or(false),
+                                        })
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1041,14 +1055,15 @@ fn extract_input<'a>(
                     native.events(&url)
                 }
                 Extractor::Native
-                    if gallery_dl_rs::imagehosts::Site::from_category(category).is_some() =>
+                    if let Some(site) =
+                        gallery_dl_rs::imagehosts::Site::from_category(category) =>
                 {
-                    let native = extractors
-                        .imagehosts
+                    let native = extractors.imagehosts[site as usize]
                         .get_or_init(|| async {
                             gallery_dl_rs::imagehosts::ImageHosts::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_pixeldrain_api_key(options.api_key.as_deref())?
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1110,6 +1125,13 @@ fn extract_input<'a>(
                             size: (category == "twitter")
                                 .then(|| options.size.clone())
                                 .flatten(),
+                            mp4: (category == "imgur").then_some(options.mp4).flatten(),
+                            reblogs: (category == "mastodon")
+                                .then_some(options.reblogs)
+                                .flatten(),
+                            text_posts: (category == "mastodon")
+                                .then_some(options.text_posts)
+                                .flatten(),
                             fallback: options.fallback,
                             articles: (category == "twitter")
                                 .then_some(options.articles)
@@ -1129,7 +1151,9 @@ fn extract_input<'a>(
                                 .then_some(options.conversations)
                                 .flatten(),
                             pinned: (category == "twitter").then_some(options.pinned).flatten(),
-                            replies: (category == "twitter").then_some(options.replies).flatten(),
+                            replies: matches!(category, "twitter" | "mastodon")
+                                .then_some(options.replies)
+                                .flatten(),
                             strategy: (category == "twitter")
                                 .then_some(options.strategy)
                                 .flatten(),
@@ -1221,6 +1245,9 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         unique: None,
         videos: None,
         previews: None,
+        mp4: None,
+        reblogs: None,
+        text_posts: None,
         unavailable: None,
         text_tweets: if args.text_tweets {
             Some(true)

@@ -584,3 +584,50 @@ async fn default_native_configuration_is_discovered_and_can_be_ignored() {
     success(&output(&mut run(&[], &[("GALLERY_DL_RS_CONFIG", &valid)])).await);
     success(&output(&mut run(&["--native-config", valid.to_str().unwrap()], &[])).await);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn site_media_options_forward_only_to_their_compatibility_categories() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "imgur": {"mp4": false},
+            "mastodon": {"reblogs": true, "replies": false, "text-posts": true}
+        }}),
+    );
+    for (url, expected, absent) in [
+        (
+            "https://imgur.com/a/abcde",
+            vec!["mp4=false"],
+            vec!["reblogs=", "text-posts=", "replies="],
+        ),
+        (
+            "https://mastodon.social/@alice",
+            vec!["reblogs=true", "text-posts=true", "replies=false"],
+            vec!["mp4="],
+        ),
+        (
+            "https://instagram.com/p/abc/",
+            vec![],
+            vec!["mp4=", "reblogs=", "text-posts=", "replies="],
+        ),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        for option in expected {
+            assert!(log.contains(&format!("--option\n{option}\n")), "{log}");
+        }
+        for option in absent {
+            assert!(!log.contains(option), "{log}");
+        }
+    }
+}

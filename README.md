@@ -219,7 +219,10 @@ accepts single images (`i.imgur.com/ID.ext`, `imgur.com/ID`), albums
 the anonymous web client ID used upstream; no cookies are needed. Galleries use
 the albums endpoint and fall back to the media endpoint on 404. File URLs are
 rebuilt as `https://i.imgur.com/{id}.{ext}` (`jpeg` becomes `jpg`; animated GIFs
-use the MP4 rendition, like upstream's default `mp4` option). Each post is one
+use the MP4 rendition by default). Set `extractor.imgur.mp4` to `false` in the
+native JSON configuration to preserve animated GIFs; static GIFs and native
+MP4 videos are unaffected. This boolean also supports extractor and global
+defaults with the usual configuration precedence. Each post is one
 group: `post_id` is the album/gallery ID (or image ID), `media_id`/`id` the image
 ID, `index` is 1-based, `timestamp` comes from `created_at`, `username` from the
 account and `caption` from the image or post description/title. Default
@@ -279,9 +282,16 @@ exposed as `instance`). Supported: statuses (`/@USER/ID`, `/web/statuses/ID`)
 and user media timelines (`/@USER`, `/@USER/media`, including `@user@remote`
 accounts) via the public REST API, 40 per page with Link/`max_id` paging capped
 at 100 pages. Image, GIFV, video and audio attachments are downloaded from any
-HTTPS CDN host without API headers or cookies; reblogs and media-less statuses
-are skipped (a media-less single status is an error). `post_id` is the status
-ID, `media_id` the attachment ID, `username` the account `acct`, caption the
+HTTPS CDN host without API headers or cookies. Under `extractor.mastodon`,
+`reblogs` defaults to false, `replies` to true, and `text-posts` to false.
+Enabling reblogs includes original attachments under the outer status identity;
+attachment archive IDs remain the same as direct extraction. `replies: false`
+filters replies locally and in account API requests. `text-posts: true` emits
+metadata-only post boundaries for statuses without selected files, so post ranges
+and filters include them. Without it, media-less statuses are skipped (a
+media-less single status is an error). These explicit options also forward to
+the compatibility backend. Native Mastodon `replies` accepts booleans only.
+`post_id` is the status ID, `media_id` the attachment ID, `username` the account `acct`, caption the
 status HTML with tags stripped. Default filenames are
 `{post_id}_{media_id}.{extension}`; archive identity is (instance, attachment ID).
 No access tokens are sent, so private/followers-only content stays hidden.
@@ -301,7 +311,11 @@ hash). Plain `/data/` file links stay direct downloads.
 
 Experimental native image host extraction (`--extractor native`), one category
 per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
-`/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`); `catbox` albums
+`/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`), including
+zero-based `#item=N` selection with original list numbering (out-of-range
+selection produces no files). Set `extractor.pixeldrain.api-key` to use HTTP
+Basic authentication for API requests and file downloads; credentials stay in
+private request headers and are omitted from inspection JSON. `catbox` albums
 (`/c/ID`, file links and `<h1>` title from the page); `imgbox` galleries
 (`/g/ID`, thumbnails mapped to `imagesN.imgbox.com/.../ID_o.EXT`) and image pages
 (`/ID`); `postimg` (postimg.cc/postimages.org) image pages (download link, else
@@ -320,13 +334,20 @@ category) covers blog listings (`BLOG.tumblr.com`, `/posts`,
 (`/v2/blog/BLOG.tumblr.com/posts`, legacy format, reblogs included, offset
 paging capped at 200 pages). It uses upstream's public API key unless
 `extractor.tumblr.api-key` is set (accepted only in the `tumblr` category).
-Media: photo `original_size` (else the widest `alt_sizes`), `video_url`, direct
+Media: photo `original_size` or a larger `alt_sizes` rendition, `video_url`, direct
 `audio_url`, and inline `<img>` images; all must be HTTPS on
 `*.media.tumblr.com` (audio also `a.tumblr.com`). `post_id` is the post ID,
 `media_id` a hash of the media path, `username` the blog name, caption the
 summary (or caption with HTML stripped), with timestamp and width/height.
 Default filenames are `{post_id}_{index}.{extension}`; archive identity is
-(blog, post, media ID). Plain media links stay direct downloads.
+(blog, post, media ID). Capped photo renditions (`s2048x3072` at width 2048 or
+height 3072) and modern inline image sizes request the original through
+Tumblr's `s99999x99999` HTML token page. Legacy inline image sizes become
+`_1280`; GIF downloads also offer a GIFV fallback. Token requests use the
+configured network settings and timeouts without API credentials. Failed
+token lookups retain the API rendition as a download fallback; upstream's
+delayed token refresh retries are not implemented. Archive identities remain
+stable across refreshed tokens. Plain media links stay direct downloads.
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted only in the `pixiv`
@@ -364,7 +385,7 @@ the title, with `published_time` and width/height. Default filenames are
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
 uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`, never
+`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`, never
 echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
 `photos.getSizes`: "Original" or the largest photo; videos pick the best
 stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
@@ -1180,11 +1201,14 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `file-filter`, `image-filter`, `post-range`, `post-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
-`expand`, `unique`, `videos`, `previews`, `unavailable`, `text-tweets`, `articles`, `cards`,
+`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `text-posts`,
+`unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
-They can appear at the root, under `extractor`, or under `extractor.instagram`,
-`extractor.twitter`, `extractor.facebook`, and `extractor.direct`. Precedence is
+They can appear at the root, under `extractor`, or under a supported category
+such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
+Site-specific media options affect their respective extractors. API credentials
+are accepted only in the documented category scopes. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
 explicit CLI flags. In particular, an explicit `--retries 2` or `--timeout 60`
 overrides a different configured value even though it equals the built-in default.

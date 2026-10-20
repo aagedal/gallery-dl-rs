@@ -502,6 +502,9 @@ pub struct BackendOptions {
     pub unique: Option<bool>,
     pub videos: Option<crate::twitter::VideoMode>,
     pub previews: Option<bool>,
+    pub mp4: Option<bool>,
+    pub reblogs: Option<bool>,
+    pub text_posts: Option<bool>,
     pub unavailable: Option<bool>,
     pub text_tweets: Option<bool>,
     pub size: Option<crate::twitter::ImageOptions>,
@@ -632,6 +635,15 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("size={}", serde_json::json!(size.sizes())));
+        }
+        for (name, value) in [
+            ("mp4", options.mp4),
+            ("reblogs", options.reblogs),
+            ("text-posts", options.text_posts),
+        ] {
+            if let Some(value) = value {
+                command.arg("--option").arg(format!("{name}={value}"));
+            }
         }
         if let Some(fallback) = options.fallback {
             command.arg("--option").arg(format!("fallback={fallback}"));
