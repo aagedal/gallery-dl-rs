@@ -302,7 +302,7 @@ async fn last_root_file_drops_input_before_yield_and_child_last_file_sets_contro
 }
 
 #[tokio::test]
-async fn empty_ranges_do_not_poll_root_but_empty_child_range_preserves_root_posts() {
+async fn empty_ranges_do_not_poll_root_and_empty_child_range_stops_at_first_eligible_child() {
     for selection in [
         JobSelection {
             file_range: Some(range("0")),
@@ -337,9 +337,39 @@ async fn empty_ranges_do_not_poll_root_but_empty_child_range_preserves_root_post
             input
         )
         .await,
-        [1, 3]
+        [1]
     );
     assert_eq!(request.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn empty_child_range_waits_for_a_child_that_passes_filter_then_stops_its_parent() {
+    let requests = count();
+    let later = count();
+    let polled = later.clone();
+    let input = post(&[1], None)
+        .chain(child(scope(1), post(&[2], None), requests.clone()))
+        .chain(post(&[3], None))
+        .chain(child(scope(2), post(&[4], None), requests.clone()))
+        .chain(stream::once(async move {
+            polled.fetch_add(1, Ordering::SeqCst);
+            Err(error("later parent page must not start"))
+        }))
+        .boxed();
+    assert_eq!(
+        ids(
+            JobSelection {
+                child_filter: Some(FilterExpression::parse("id >= 2").unwrap()),
+                child_range: Some(range("0")),
+                ..Default::default()
+            },
+            input
+        )
+        .await,
+        [1, 3]
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+    assert_eq!(later.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

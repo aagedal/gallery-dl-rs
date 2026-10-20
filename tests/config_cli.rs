@@ -1290,6 +1290,14 @@ async fn child_selection_forwards_to_backend_and_cli_overrides_scoped_settings()
             vec!["child-range=\"2\"", "child-filter=\"\""],
         ),
         (
+            "https://www.pixiv.net/users/9/following?rest=hide",
+            true,
+            vec![
+                "child-range=\"1\"",
+                "child-filter=[\"id == '42'\",\"name != None\"]",
+            ],
+        ),
+        (
             "https://kemono.cr/artists",
             true,
             vec![
@@ -1389,6 +1397,7 @@ async fn include_settings_forward_to_compatibility_with_all_and_empty_preserved(
             "include=\"all\"",
         ),
         ("https://www.pixiv.net/users/9", "include=[]"),
+        ("https://www.pixiv.net/users/9/following", "include=[]"),
     ] {
         let log = root.path().join("backend.log");
         let _ = std::fs::remove_file(&log);

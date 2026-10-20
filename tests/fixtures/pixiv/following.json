@@ -1,0 +1,195 @@
+{
+  "source": "gallery_dl.extractor.pixiv.PixivFavoriteExtractor._items_following + gallery_dl.job.Job.update_kwdict",
+  "version": "1.32.17",
+  "users": [
+    {
+      "id": 17,
+      "name": "Artist 猫",
+      "account": "artist",
+      "is_followed": true,
+      "profile_image_urls": {
+        "medium": "https://cdn.example/avatar.jpg"
+      }
+    },
+    {
+      "id": "18",
+      "name": "Second",
+      "account": "second"
+    },
+    {
+      "id": "invalid/id",
+      "name": "Skipped",
+      "account": "skip"
+    }
+  ],
+  "cases": [
+    {
+      "url": "https://www.pixiv.net/users/9/following",
+      "api": {
+        "user_id": "9",
+        "restrict": "public"
+      },
+      "queues": [
+        {
+          "url": "https://www.pixiv.net/users/17",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": 17,
+            "name": "Artist 猫",
+            "account": "artist",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/18",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "18",
+            "name": "Second",
+            "account": "second",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/invalid/id",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "invalid/id",
+            "name": "Skipped",
+            "account": "skip",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        }
+      ]
+    },
+    {
+      "url": "https://www.pixiv.net/en/users/9/following/ignored?rest=hide",
+      "api": {
+        "user_id": "9",
+        "restrict": "private"
+      },
+      "queues": [
+        {
+          "url": "https://www.pixiv.net/users/17",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": 17,
+            "name": "Artist 猫",
+            "account": "artist",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/18",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "18",
+            "name": "Second",
+            "account": "second",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/invalid/id",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "invalid/id",
+            "name": "Skipped",
+            "account": "skip",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        }
+      ]
+    },
+    {
+      "url": "https://www.pixiv.net/bookmark.php?id=9&type=user",
+      "api": {
+        "user_id": "9",
+        "restrict": "public"
+      },
+      "queues": [
+        {
+          "url": "https://www.pixiv.net/users/17",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": 17,
+            "name": "Artist 猫",
+            "account": "artist",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/18",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "18",
+            "name": "Second",
+            "account": "second",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/invalid/id",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "invalid/id",
+            "name": "Skipped",
+            "account": "skip",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        }
+      ]
+    },
+    {
+      "url": "https://www.pixiv.net/users/9/bookmarks/artworks/tag?type=user&rest=hide",
+      "api": {
+        "user_id": "9",
+        "restrict": "private"
+      },
+      "queues": [
+        {
+          "url": "https://www.pixiv.net/users/17",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": 17,
+            "name": "Artist 猫",
+            "account": "artist",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/18",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "18",
+            "name": "Second",
+            "account": "second",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        },
+        {
+          "url": "https://www.pixiv.net/users/invalid/id",
+          "extractor": "PixivUserExtractor",
+          "metadata": {
+            "id": "invalid/id",
+            "name": "Skipped",
+            "account": "skip",
+            "category": "pixiv",
+            "subcategory": "following"
+          }
+        }
+      ]
+    }
+  ]
+}

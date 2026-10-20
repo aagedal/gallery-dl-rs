@@ -199,11 +199,9 @@ impl JobSelection {
                                     .child_range
                                     .as_ref()
                                     .is_none_or(|range| range.contains(index)),
-                                state
-                                    .selection
-                                    .child_range
-                                    .as_ref()
-                                    .is_some_and(|range| range.last_index() == Some(index)),
+                                state.selection.child_range.as_ref().is_some_and(|range| {
+                                    range.last_index().is_none_or(|last| index >= last)
+                                }),
                             )
                         };
                         if !selected {

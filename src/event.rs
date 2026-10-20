@@ -82,6 +82,7 @@ impl ChildMetadata {
         for key in [
             "id",
             "name",
+            "account",
             "service",
             "user",
             "indexed",

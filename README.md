@@ -574,8 +574,8 @@ capped at 200 pages per type). Public and private illustration bookmarks support
 bookmarks; all other values select public bookmarks. Without `id`,
 the legacy bookmark URL uses the authenticated user's ID from OAuth.
 A `tag` query overrides the path tag, following upstream's URL decoding.
-Pagination preserves the selected user, visibility, and tag. Following
-(`type=user`) remains unsupported. Bookmarked files retain the original artist metadata and
+Pagination preserves the selected user, visibility, and tag.
+Bookmarked files retain the original artist metadata and
 (illustration, page) archive identity. `/users/ID/avatar` and `/background`
 read `user/detail`, remove upstream's thumbnail/crop suffixes and emit original
 profile images. JPEG backgrounds without query suffixes carry upstream's PNG/GIF
@@ -595,6 +595,19 @@ title plus HTML-stripped caption, with `create_date` timestamp and page-0
 width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
 is (illustration, page). Plain `i.pximg.net` links stay direct downloads and
 usually fail without the Referer.
+
+Native Pixiv following lists support `/users/ID/following` and illustration
+bookmark URLs with `type=user`, including legacy `/bookmark.php` URLs. `rest=hide`
+selects private following; ownerless legacy URLs resolve the authenticated user.
+The list queues each followed user's profile, whose `include` settings select
+artworks or other views normally. Child filters see `category == 'pixiv'`,
+`subcategory == 'following'`, and the preview's `id`, `name` and `account`;
+nested profile views have `subcategory == 'user'`. Filtering precedes child
+ranges and duplicate-user checks, so rejecting a preview starts no child
+requests. Pagination preserves owner and visibility, detects cycles, and stops
+at 200 pages. Stopping a selected child leaves later followed users available;
+dropping the input stops later users and pages. Authenticated live following
+extraction remains unverified.
 
 Native Pixiv novels use the separate `pixiv-novel` category and
 `extractor.pixiv-novel.refresh-token`. Supported URLs are `/novel/show.php?id=ID`,
@@ -1320,7 +1333,8 @@ stream methods remain available; `event::media_only` ignores framing events.
 `child-range` strings/lists and `child-filter` string/list expressions with the
 same scopes and limits as post selection. Explicit CLI values override config;
 empty strings/lists clear inherited selections. A mathematical empty child range
-skips all children while leaving root posts available. Empty file/post ranges
+stops the parent at the first child that passes its filter; preceding root posts
+remain available. Empty file/post ranges
 still start no extraction.
 
 Child filters run before child counters and ranges. Rejected children do not
@@ -1335,7 +1349,7 @@ has finished their parent.
 The cumulative input extraction budget is shared across every child.
 
 Collection child expressions expose bounded public queue fields such as `id`,
-`name`, `service`, `user`, `indexed`, `updated`, `favorited`, `faved_seq`, plus
+`name`, `account`, `service`, `user`, `indexed`, `updated`, `favorited`, `faved_seq`, plus
 `category` and the parent `subcategory`. Values retain their raw scalar types;
 creator IDs in observed catalogs are strings. Discord channel children expose
 upstream's `server` and `channel` objects with public scalar fields, for example:

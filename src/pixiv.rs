@@ -35,6 +35,8 @@ use url::Url;
 #[path = "pixiv_novel.rs"]
 pub mod novel;
 pub use novel::NovelOptions;
+#[path = "pixiv_following.rs"]
+mod following;
 
 /// Upstream gallery-dl's public iOS app constants.
 const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
@@ -105,6 +107,10 @@ impl ProfileKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Novel(novel::Target),
+    Following {
+        id: Option<String>,
+        private: bool,
+    },
     Illust(String),
     User {
         id: String,
@@ -196,7 +202,13 @@ pub fn target(url: &Url) -> Result<Target> {
             .map(|(_, value)| value.into_owned())
     };
     let bookmarks = |raw_id: Option<&str>, path_tag: Option<&str>| {
-        if matches!(query("type").as_deref(), Some("user" | "novel")) {
+        if query("type").as_deref() == Some("user") {
+            return Ok(Target::Following {
+                id: raw_id.map(id).transpose()?,
+                private: query("rest").as_deref() == Some("hide"),
+            });
+        }
+        if query("type").as_deref() == Some("novel") {
             return Err(unsupported());
         }
         let tag = match query("tag") {
@@ -238,6 +250,10 @@ pub fn target(url: &Url) -> Result<Target> {
         ["users", raw, "background"] => Ok(Target::Profile {
             id: id(raw)?,
             kind: ProfileKind::Background,
+        }),
+        ["users", raw, "following"] | ["users", raw, "following", _] => Ok(Target::Following {
+            id: Some(id(raw)?),
+            private: query("rest").as_deref() == Some("hide"),
         }),
         ["users", raw, "bookmarks", "artworks"] => bookmarks(Some(raw), None),
         ["users", raw, "bookmarks", "artworks", tag] => bookmarks(Some(raw), Some(tag)),
@@ -1057,6 +1073,7 @@ impl Pixiv {
         }
         let (user, kinds) = match target {
             Target::Novel(target) => return self.novel_events(target),
+            Target::Following { id, private } => return self.following_events(id, private),
             Target::Profile { id, kind } => {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/user/detail").expect("static");
@@ -1507,10 +1524,10 @@ mod tests {
             );
         }
         for raw in [
-            "https://www.pixiv.net/bookmark.php?type=user",
+            "https://www.pixiv.net/bookmark.php?id=bad&type=user",
             "https://www.pixiv.net/bookmark.php?type=novel",
             "https://www.pixiv.net/users/9/bookmarks/novel-unknown",
-            "https://www.pixiv.net/users/9/following",
+            "https://www.pixiv.net/users/9/following/extra/path",
             "https://www.pixiv.net/users/9/bookmarks/artworks/%00",
             "https://www.pixiv.net/users/9/bookmarks/artworks/%FF",
             "https://www.pixiv.net/users/09/bookmarks/artworks",

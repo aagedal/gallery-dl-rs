@@ -793,8 +793,14 @@ raw text publication and recovery; authenticated live novel extraction remains
 unverified. Embedded-image expansion, extended novel metadata and bookmark
 cursors remain unfinished; text/cover failures currently report errors where
 upstream warns. Per-child category predicate overrides remain unfinished.
+Native following lists queue selected users through normal profile `include`
+dispatch, with bounded preview fields for child filters, lazy scoped pagination,
+cycle detection and a 200-page cap. Modern and legacy URLs support public/private
+visibility; ownerless legacy routes resolve the OAuth user. Fixture/oracle tests
+cover queue metadata, selection and recovery. Live authenticated following remains
+unverified.
 Remaining: ugoira original individual-frame mode and conversion,
-bookmark cursor/metadata options, following, rankings,
+bookmark cursor/metadata options, rankings,
 searches, sketch,
 pixivision, series, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.

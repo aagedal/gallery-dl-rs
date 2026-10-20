@@ -18,6 +18,45 @@ fn matches(expression: &str, child: &ChildMetadata) -> bool {
 }
 
 #[test]
+fn pixiv_following_queue_fields_match_recorded_upstream_metadata() {
+    let reference: Value =
+        serde_json::from_str(include_str!("fixtures/pixiv/following.json")).unwrap();
+    let users = reference["users"].as_array().unwrap();
+    for case in reference["cases"].as_array().unwrap() {
+        let url = extract::http_url(case["url"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            gallery_dl_rs::pixiv::target(&url).unwrap(),
+            gallery_dl_rs::pixiv::Target::Following {
+                id: case["api"]["user_id"].as_str().map(str::to_owned),
+                private: case["api"]["restrict"] == "private",
+            }
+        );
+        assert_eq!(extract::social_site(&url), Some("pixiv"));
+        for (user, expected) in users.iter().zip(case["queues"].as_array().unwrap()) {
+            let child = ChildMetadata::from_raw("pixiv", "following", user.as_object().unwrap());
+            let mut actual = child.fields().clone();
+            actual.insert("category".into(), json!(child.category()));
+            actual.insert("subcategory".into(), json!(child.subcategory()));
+            assert_eq!(Value::Object(actual), expected["metadata"]);
+            assert!(matches(
+                "category == 'pixiv' and subcategory == 'following' and account == child['account']",
+                &child
+            ));
+            assert!(!child.fields().contains_key("profile_image_urls"));
+            assert!(!child.fields().contains_key("is_followed"));
+        }
+    }
+    for invalid in [
+        json!({"account":"X".repeat(65537)}),
+        json!({"account":"bad\0value"}),
+        json!({"account":{"token":"PRIVATE"}}),
+    ] {
+        let child = ChildMetadata::from_raw("pixiv", "following", invalid.as_object().unwrap());
+        assert!(!child.fields().contains_key("account"));
+    }
+}
+
+#[test]
 fn child_filter_preserves_scalar_types_and_raw_dates_without_identity_validation() {
     let child = metadata(json!({
         "id":"  invalid/id  ", "name":"Artist 猫", "service":"patreon", "user":42,
