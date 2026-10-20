@@ -781,8 +781,10 @@ and custom-domain blogs.
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
 with ordered frame filenames/delays in metadata (`ugoira: false` skips them).
-Public illustration bookmarks support user/legacy URLs, path/query tag filters,
-and own bookmarks resolved from OAuth, with scoped lazy pagination.
+Public/private illustration bookmarks support user/legacy URLs, path/query tag
+filters, and own bookmarks resolved from OAuth, with lazy pagination scoped to
+the selected visibility, owner and tag. Private access still requires an account
+authorized by Pixiv; live authenticated bookmark verification remains unverified.
 The separate `pixiv-novel` category supports single novels, user works, series,
 public/private bookmarks, exact UTF-8 text, optional original covers and
 `full-series` expansion. Profile novel views use novel-scoped credentials and
@@ -792,7 +794,7 @@ unverified. Embedded-image expansion, extended novel metadata and bookmark
 cursors remain unfinished; text/cover failures currently report errors where
 upstream warns. Per-child category predicate overrides remain unfinished.
 Remaining: ugoira original individual-frame mode and conversion,
-private bookmarks and bookmark cursor/metadata options, following, rankings,
+bookmark cursor/metadata options, following, rankings,
 searches, sketch,
 pixivision, series, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.

@@ -113,6 +113,7 @@ pub enum Target {
     Bookmarks {
         id: Option<String>,
         tag: Option<String>,
+        private: bool,
     },
     Profile {
         id: String,
@@ -195,9 +196,7 @@ pub fn target(url: &Url) -> Result<Target> {
             .map(|(_, value)| value.into_owned())
     };
     let bookmarks = |raw_id: Option<&str>, path_tag: Option<&str>| {
-        if query("rest").as_deref() == Some("hide")
-            || matches!(query("type").as_deref(), Some("user" | "novel"))
-        {
+        if matches!(query("type").as_deref(), Some("user" | "novel")) {
             return Err(unsupported());
         }
         let tag = match query("tag") {
@@ -216,6 +215,7 @@ pub fn target(url: &Url) -> Result<Target> {
         Ok(Target::Bookmarks {
             id: raw_id.map(id).transpose()?,
             tag,
+            private: query("rest").as_deref() == Some("hide"),
         })
     };
     match rest {
@@ -684,7 +684,7 @@ pub struct Pixiv {
 #[derive(Clone)]
 enum Feed {
     Works(Kind),
-    Bookmarks { tag: Option<String> },
+    Bookmarks { tag: Option<String>, private: bool },
 }
 
 impl Feed {
@@ -915,8 +915,9 @@ impl Pixiv {
             Feed::Works(kind) => {
                 url.query_pairs_mut().append_pair("type", kind.as_str());
             }
-            Feed::Bookmarks { tag } => {
-                url.query_pairs_mut().append_pair("restrict", "public");
+            Feed::Bookmarks { tag, private } => {
+                url.query_pairs_mut()
+                    .append_pair("restrict", if *private { "private" } else { "public" });
                 if let Some(tag) = tag {
                     url.query_pairs_mut().append_pair("tag", tag);
                 }
@@ -940,7 +941,7 @@ impl Pixiv {
             || url.password().is_some()
             || url.fragment().is_some()
             || !valid_scope
-            || matches!(feed, Feed::Bookmarks { tag: None })
+            || matches!(feed, Feed::Bookmarks { tag: None, .. })
                 && query.iter().any(|(key, _)| key == "tag")
         {
             return Err(error("Pixiv returned an unexpected next page"));
@@ -1030,7 +1031,7 @@ impl Pixiv {
     fn view_events(&self, id: String, view: &str) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match view {
             "artworks" => Target::User { id, kinds: vec![Kind::Illust, Kind::Manga] },
-            "favorite" => Target::Bookmarks { id: Some(id), tag: None },
+            "favorite" => Target::Bookmarks { id: Some(id), tag: None, private: false },
             "avatar" => Target::Profile { id, kind: ProfileKind::Avatar },
             "background" => Target::Profile { id, kind: ProfileKind::Background },
             "bookmark" | "user" => {
@@ -1100,7 +1101,7 @@ impl Pixiv {
                 Some(id),
                 kinds.into_iter().map(Feed::Works).collect::<Vec<_>>(),
             ),
-            Target::Bookmarks { id, tag } => (id, vec![Feed::Bookmarks { tag }]),
+            Target::Bookmarks { id, tag, private } => (id, vec![Feed::Bookmarks { tag, private }]),
         };
         let state = ListingState {
             kinds: kinds.into(),
@@ -1469,6 +1470,7 @@ mod tests {
         let bookmarks = |id: Option<&str>, tag: Option<&str>| Target::Bookmarks {
             id: id.map(str::to_owned),
             tag: tag.map(str::to_owned),
+            private: false,
         };
         for raw in [
             "https://www.pixiv.net/users/9/bookmarks/artworks",
@@ -1505,8 +1507,6 @@ mod tests {
             );
         }
         for raw in [
-            "https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide",
-            "https://www.pixiv.net/bookmark.php?id=9&rest=hide",
             "https://www.pixiv.net/bookmark.php?type=user",
             "https://www.pixiv.net/bookmark.php?type=novel",
             "https://www.pixiv.net/users/9/bookmarks/novel-unknown",
@@ -1526,10 +1526,83 @@ mod tests {
     }
 
     #[test]
+    fn private_bookmark_routes_follow_upstream_first_rest_value_semantics() {
+        for raw in [
+            "https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide",
+            "https://www.pixiv.net/en/users/9/bookmarks/artworks/cat?tag=override&rest=hide&rest=show",
+            "https://www.pixiv.net/bookmark.php?id=9&rest=hide",
+            "https://www.pixiv.net/bookmark.php?rest=hide",
+        ] {
+            assert!(
+                matches!(
+                    target(&Url::parse(raw).unwrap()).unwrap(),
+                    Target::Bookmarks { private: true, .. }
+                ),
+                "{raw}"
+            );
+        }
+        for suffix in [
+            "",
+            "?rest=show",
+            "?rest=show&rest=hide",
+            "?rest=unknown&rest=hide",
+        ] {
+            let raw = format!("https://www.pixiv.net/users/9/bookmarks/artworks{suffix}");
+            assert!(matches!(
+                target(&Url::parse(&raw).unwrap()).unwrap(),
+                Target::Bookmarks { private: false, .. }
+            ));
+        }
+        assert!(matches!(
+            target(&Url::parse("https://www.pixiv.net/bookmark.php?rest=hide").unwrap()).unwrap(),
+            Target::Bookmarks {
+                id: None,
+                private: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn public_and_private_bookmark_next_urls_cannot_change_or_duplicate_visibility() {
+        let native = Pixiv::new(Duration::from_secs(2)).unwrap();
+        for private in [false, true] {
+            let feed = Feed::Bookmarks {
+                tag: Some("cat".into()),
+                private,
+            };
+            let mut valid = native.first_page("9", &feed);
+            valid
+                .query_pairs_mut()
+                .append_pair("max_bookmark_id", "123");
+            assert!(native.next_url(valid.as_str(), &feed, "9").is_ok());
+            let other = if private { "public" } else { "private" };
+            let changed = format!(
+                "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&restrict={other}&tag=cat&max_bookmark_id=123"
+            );
+            assert_eq!(
+                native
+                    .next_url(&changed, &feed, "9")
+                    .unwrap_err()
+                    .to_string(),
+                "Pixiv returned an unexpected next page"
+            );
+            for restriction in ["public", "private"] {
+                let mut duplicate = valid.clone();
+                duplicate
+                    .query_pairs_mut()
+                    .append_pair("restrict", restriction);
+                assert!(native.next_url(duplicate.as_str(), &feed, "9").is_err());
+            }
+        }
+    }
+
+    #[test]
     fn bookmark_pagination_cannot_change_origin_endpoint_user_visibility_or_tag() {
         let native = Pixiv::new(Duration::from_secs(2)).unwrap();
         let feed = Feed::Bookmarks {
             tag: Some("猫".into()),
+            private: false,
         };
         let mut next = native.first_page("9", &feed);
         next.query_pairs_mut().append_pair("max_bookmark_id", "123");
@@ -1553,7 +1626,14 @@ mod tests {
         }
         assert!(
             native
-                .next_url(next.as_str(), &Feed::Bookmarks { tag: None }, "9")
+                .next_url(
+                    next.as_str(),
+                    &Feed::Bookmarks {
+                        tag: None,
+                        private: false
+                    },
+                    "9"
+                )
                 .is_err()
         );
     }
@@ -2208,6 +2288,101 @@ mod tests {
                     .contains("authorization: bearer current-user-access")
             );
         }
+    }
+
+    #[tokio::test]
+    async fn private_modern_legacy_and_own_bookmarks_paginate_with_original_artist_archive_ids() {
+        for (raw, user) in [
+            (
+                "https://www.pixiv.net/users/9/bookmarks/artworks/cat?rest=hide",
+                "9",
+            ),
+            (
+                "https://www.pixiv.net/bookmark.php?id=9&rest=hide&tag=cat",
+                "9",
+            ),
+            ("https://www.pixiv.net/bookmark.php?rest=hide&tag=cat", "17"),
+        ] {
+            let mut second = illust(42, 1);
+            second["user"]["account"] = json!("second-artist");
+            let (root, server) = serve_with(|root| {
+                vec![
+                response("200 OK", json!({"response":{"access_token":"private-access","user":{"id":17}}}).to_string().as_bytes()),
+                response("200 OK", json!({"illusts":[illust(41,1)], "next_url":root.join(&format!("v1/user/bookmarks/illust?user_id={user}&restrict=private&tag=cat&max_bookmark_id=100")).unwrap()}).to_string().as_bytes()),
+                response("200 OK", json!({"illusts":[second.clone()], "next_url":null}).to_string().as_bytes()),
+            ]
+            });
+            let files = pixiv(root)
+                .stream(&Url::parse(raw).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(files.len(), 2);
+            for (media, original) in files.iter().zip([illust(41, 1), second]) {
+                let original = parse_illust(&original).unwrap().remove(0);
+                assert_eq!(media.archive_key(), original.archive_key());
+                assert_eq!(
+                    media.metadata.as_ref().unwrap().username,
+                    original.metadata.as_ref().unwrap().username
+                );
+                assert_eq!(
+                    media.headers,
+                    BTreeMap::from([("Referer".into(), REFERER.into())])
+                );
+                assert!(!format!("{media:?}").contains("private-access"));
+            }
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert!(requests[1].starts_with(&format!(
+                "GET /v1/user/bookmarks/illust?user_id={user}&restrict=private&tag=cat "
+            )));
+            assert!(requests[2].starts_with(&format!("GET /v1/user/bookmarks/illust?user_id={user}&restrict=private&tag=cat&max_bookmark_id=100 ")));
+            assert!(
+                requests[1]
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer private-access")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn private_bookmarks_keep_later_work_metadata_and_pagination_requests_lazy() {
+        for raw in [
+            "https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide",
+            "https://www.pixiv.net/bookmark.php?id=9&rest=hide",
+        ] {
+            let (root, server) = serve_with(|root| {
+                vec![token("t"), response("200 OK",
+                json!({"illusts":[illust(41,1),animation(42)],"next_url":root.join("v1/user/bookmarks/illust?user_id=9&restrict=private&max_bookmark_id=100").unwrap()}).to_string().as_bytes())]
+            });
+            let native = pixiv(root);
+            let mut files = native.stream(&Url::parse(raw).unwrap());
+            assert_eq!(files.next().await.unwrap().unwrap().filename, "41_p0.jpg");
+            drop(files);
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn private_bookmarks_refuse_public_next_page_before_sending_authenticated_request() {
+        let (root, server) = serve_with(|root| {
+            vec![token("t"), response("200 OK",
+            json!({"illusts":[illust(41,1)], "next_url":root.join("v1/user/bookmarks/illust?user_id=9&restrict=public").unwrap()}).to_string().as_bytes())]
+        });
+        let files = pixiv(root)
+            .stream(
+                &Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide").unwrap(),
+            )
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].as_ref().unwrap_err().to_string(),
+            "Pixiv returned an unexpected next page"
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     #[tokio::test]

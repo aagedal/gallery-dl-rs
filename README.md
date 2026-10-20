@@ -568,14 +568,14 @@ access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `illust/detail`) and `users/ID` (one artworks child: illustrations then manga),
 `users/ID/artworks` (the same works as a root job),
 `users/ID/illustrations`, `users/ID/manga` (`user/illusts`, `next_url` paging
-capped at 200 pages per type). Public illustration bookmarks support
+capped at 200 pages per type). Public and private illustration bookmarks support
 `users/ID/bookmarks/artworks[/TAG]` and `bookmark.php[?id=ID]` through
-`user/bookmarks/illust` (`restrict=public`, at most 200 pages). Without `id`,
+`user/bookmarks/illust` (at most 200 pages). `rest=hide` selects private
+bookmarks; all other values select public bookmarks. Without `id`,
 the legacy bookmark URL uses the authenticated user's ID from OAuth.
 A `tag` query overrides the path tag, following upstream's URL decoding.
-Pagination preserves the selected user, public visibility, and tag;
-private illustration bookmarks (`rest=hide`) and following (`type=user`) remain
-unsupported. Bookmarked files retain the original artist metadata and
+Pagination preserves the selected user, visibility, and tag. Following
+(`type=user`) remains unsupported. Bookmarked files retain the original artist metadata and
 (illustration, page) archive identity. `/users/ID/avatar` and `/background`
 read `user/detail`, remove upstream's thumbnail/crop suffixes and emit original
 profile images. JPEG backgrounds without query suffixes carry upstream's PNG/GIF
