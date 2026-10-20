@@ -2499,3 +2499,57 @@ fn kemono_endpoint_and_discord_post_order_are_scoped_sparse_and_strict() {
         }
     }
 }
+
+#[test]
+fn kemono_favorites_are_sparse_scoped_and_validated_privately() {
+    use gallery_dl_rs::kemono::Favorites;
+    let cfg =
+        parse(r#"{"extractor":{"favorites":"post","kemono":{"favorites":"artist"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("kemono").unwrap().favorites,
+        Some(Favorites::Artist)
+    );
+    assert_eq!(
+        cfg.resolve("coomer").unwrap().favorites,
+        Some(Favorites::Post)
+    );
+    let cfg =
+        parse(r#"{"favorites":"post","extractor":{"kemono":{"favorites":"artist"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("kemono").unwrap().favorites,
+        Some(Favorites::Post)
+    );
+    assert_eq!(
+        cfg.resolve("kemono")
+            .unwrap()
+            .overlay(&Options {
+                favorites: Some(Favorites::Artist),
+                ..Default::default()
+            })
+            .favorites,
+        Some(Favorites::Artist)
+    );
+    assert_eq!(
+        parse("{}").unwrap().resolve("kemono").unwrap().favorites,
+        None
+    );
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!(1),
+        serde_json::json!([]),
+        serde_json::json!("PRIVATE_VALUE"),
+    ] {
+        for doc in [
+            serde_json::json!({"favorites":value}),
+            serde_json::json!({"extractor":{"favorites":value}}),
+            serde_json::json!({"extractor":{"coomer":{"favorites":value}}}),
+        ] {
+            let error = parse(&doc.to_string()).unwrap_err().to_string();
+            assert!(
+                error.contains("favorites") && !error.contains("PRIVATE_VALUE"),
+                "{error}"
+            );
+        }
+    }
+}

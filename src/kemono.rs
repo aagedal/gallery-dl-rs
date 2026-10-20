@@ -29,6 +29,9 @@ use std::{
 };
 use url::Url;
 
+#[path = "kemono_collections.rs"]
+mod collections;
+pub use collections::Favorites;
 #[path = "kemono_discord.rs"]
 mod discord;
 pub use discord::{DiscordMetadata, parse_discord_post, valid_discord_id};
@@ -77,6 +80,12 @@ pub fn category(host: &str) -> Option<&'static str> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
+    Artists {
+        host: String,
+    },
+    Favorites {
+        host: String,
+    },
     Posts {
         host: String,
     },
@@ -180,7 +189,7 @@ pub fn valid_hash(hash: &str) -> bool {
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Kemono/Coomer URL; expected /posts, /SERVICE/user/USER_ID[/post/POST_ID] or /discord/server/SERVER_ID[/CHANNEL_ID] on kemono.cr, kemono.su, coomer.st or coomer.su",
+            "unsupported Kemono/Coomer URL; expected /posts, /artists, /favorites, /account/favorites, /SERVICE/user/USER_ID[/post/POST_ID] or /discord/server/SERVER_ID[/CHANNEL_ID] on kemono.cr, kemono.su, coomer.st or coomer.su",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -286,7 +295,16 @@ pub fn target(url: &Url) -> Result<Target> {
                 post: (*post).into(),
             })
         }
-        _ => Err(unsupported()),
+        _ => match collections::kind(url) {
+            Some(kind) => {
+                collections::validate(url, kind)?;
+                Ok(match kind {
+                    collections::Kind::Artists => Target::Artists { host },
+                    collections::Kind::Favorites => Target::Favorites { host },
+                })
+            }
+            None => Err(unsupported()),
+        },
     }
 }
 
@@ -304,12 +322,15 @@ fn listing_query(url: &Url) -> Result<ListingQuery> {
     }
     let mut parsed = ListingQuery::default();
     let mut seen = HashSet::new();
-    for (key, value) in url.query_pairs() {
-        if !matches!(key.as_ref(), "o" | "q" | "tag") {
+    for (key, value) in url
+        .query()
+        .unwrap_or_default()
+        .split('&')
+        .filter(|part| part.contains('='))
+        .flat_map(|part| url::form_urlencoded::parse(part.as_bytes()))
+    {
+        if !matches!(key.as_ref(), "o" | "q" | "tag") || !seen.insert(key.to_string()) {
             continue;
-        }
-        if !seen.insert(key.to_string()) {
-            return Err(invalid());
         }
         if key == "o" {
             if value.is_empty()
@@ -855,6 +876,7 @@ pub struct Kemono {
     session: CookieSession,
     post_order: PostOrder,
     endpoint: Endpoint,
+    favorites: Favorites,
 }
 
 struct ListingState {
@@ -893,7 +915,13 @@ impl Kemono {
             session: CookieSession::default(),
             post_order: PostOrder::Forward,
             endpoint: Endpoint::Posts,
+            favorites: Favorites::Artist,
         })
+    }
+
+    pub fn with_favorites(mut self, favorites: Favorites) -> Self {
+        self.favorites = favorites;
+        self
     }
 
     pub fn with_post_order(mut self, order: PostOrder) -> Self {
@@ -1225,6 +1253,12 @@ impl Kemono {
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
         let (host, context) = match target {
+            Target::Artists { .. } => {
+                return collections::events(self, url, collections::Kind::Artists);
+            }
+            Target::Favorites { .. } => {
+                return collections::events(self, url, collections::Kind::Favorites);
+            }
             Target::Discord {
                 host,
                 server,
@@ -1793,14 +1827,26 @@ mod tests {
             assert_eq!(query.offset, 100);
             assert_eq!(query.query.as_deref(), Some("red & blue"));
             assert_eq!(query.tag.as_deref(), Some("猫"));
+            let query = listing_query(&Url::parse(&format!(
+                "https://kemono.cr{path}?q&o&tag&q=first&q=bad%00&o=149&o=secret&tag=猫&tag=bad%00&type=invalid&type=post"
+            )).unwrap()).unwrap();
+            assert_eq!(query.offset, 100);
+            assert_eq!(query.query.as_deref(), Some("first"));
+            assert_eq!(query.tag.as_deref(), Some("猫"));
+            let bare =
+                listing_query(&Url::parse(&format!("https://kemono.cr{path}?q&o&tag")).unwrap())
+                    .unwrap();
+            assert_eq!(bare.offset, 0);
+            assert!(bare.query.is_none());
+            assert!(bare.tag.is_none());
             for query in [
                 "o=-1",
                 "o=secret",
                 "o=999999999999999999999999",
                 "q=secret%00",
                 "tag=secret%0A",
-                "q=secret&q=again",
-                "o=1&o=2",
+                "q=secret%00&q=valid",
+                "o=secret&o=1",
             ] {
                 let error =
                     target(&Url::parse(&format!("https://kemono.cr{path}?{query}")).unwrap())

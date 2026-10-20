@@ -444,6 +444,30 @@ Kemono extraction; newer upstream master has removed thumbnail selection.
 Further author/embed/revision/archive metadata and authenticated verification
 remain unfinished.
 
+Native collection discovery supports `/artists`, `/favorites`, and
+`/account/favorites`. Artist discovery filters creator names with `q` and
+services with `service` (both case-insensitive), then sorts by `sort_by`
+(default `favorited`); `order=asc` selects ascending order, otherwise descending.
+Favorites require session cookies: `favorites: "artist"` (default) traverses each
+favorite creator or Discord server; `favorites: "post"` fetches individual posts.
+A nonempty `type=artist` or `type=post` query overrides the configured type.
+Favorites accept `sort` (default `updated` for artists, `faved_seq` for posts)
+and `order` (descending by default; values other than `desc` select ascending).
+Use query parameters on the bare favorites routes: upstream-compatible trailing
+labels such as `/favorites/artists` do not select a type and ignore their query.
+Repeated recognized query parameters use the first value; bare keys without
+`=` are ignored.
+
+Catalog responses are limited to 32 MiB and 500,000 entries, with bounded
+background parsing and cancellable sorting. Numeric sort keys retain wide integer
+precision; equal nonempty keys retain source order, while empty/zero keys follow
+upstream's reversed source ordering. Child identities validate only when consumed,
+and media retain the same metadata/archive identity as direct post/creator URLs.
+Child requests are lazy, failures report an error and leave later children
+available, and cancellation drops the active child. `max-posts` applies per
+creator or Discord channel. Rust post/file ranges still count across the input;
+upstream's independent child counters and child filters remain unimplemented.
+
 Kemono/Coomer API requests now accept scoped Netscape or imported Firefox
 cookies, recomputed for each request URL and rotated from responses. Cookies
 respect domain, path, expiry and Secure attributes, and stay out of media jobs
@@ -1374,7 +1398,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `revisions`, `order-revisions`, `strategy`, `search-pagination`,
-`search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`, `order-posts` (the last three for Kemono/Coomer), `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
+`search-results`, `limit`, `search-limit`, `search-stop`, `metadata`, `endpoint`, `order-posts`, `favorites` (Kemono/Coomer options), `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
 Site-specific media options affect their respective extractors. Booru

@@ -606,6 +606,8 @@ mod tests {
                         Err(error) => panic!("{error}"),
                     }
                 };
+                // Accepted sockets inherit nonblocking mode on macOS.
+                connection.set_nonblocking(false).unwrap();
                 connection
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();

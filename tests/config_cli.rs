@@ -1211,3 +1211,38 @@ async fn kemono_endpoint_and_discord_order_forward_only_to_their_categories() {
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn kemono_favorites_setting_forwards_only_to_supported_categories() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor":{"favorites":"post","kemono":{"favorites":"artist"}}}),
+    );
+    for (url, expected) in [
+        (
+            "https://kemono.cr/account/favorites",
+            Some("favorites=\"artist\""),
+        ),
+        ("https://coomer.st/favorites", Some("favorites=\"post\"")),
+        ("https://x.com/alice/status/42", None),
+        ("https://alice.tumblr.com/", None),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        if let Some(expected) = expected {
+            assert!(log.contains(&format!("--option\n{expected}\n")), "{log}");
+        } else {
+            assert!(!log.contains("favorites="), "{log}");
+        }
+    }
+}

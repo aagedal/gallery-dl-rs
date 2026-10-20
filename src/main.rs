@@ -901,6 +901,7 @@ fn extract_input<'a>(
                                     )
                                     .with_endpoint(options.endpoint.unwrap_or_default())
                                     .with_post_order(options.order_posts.unwrap_or_default())
+                                    .with_favorites(options.favorites.unwrap_or_default())
                                     .with_max_posts(options.max_posts)
                                     .with_metadata(options.metadata.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
@@ -1205,6 +1206,9 @@ fn extract_input<'a>(
                             endpoint: matches!(category, "kemono" | "coomer")
                                 .then_some(options.endpoint)
                                 .flatten(),
+                            favorites: matches!(category, "kemono" | "coomer")
+                                .then_some(options.favorites)
+                                .flatten(),
                             order_posts: matches!(category, "kemono" | "coomer")
                                 .then_some(options.order_posts)
                                 .flatten(),
@@ -1406,6 +1410,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         order_revisions: None,
         endpoint: None,
         order_posts: None,
+        favorites: None,
         username: None,
         password: None,
         user_id: None,

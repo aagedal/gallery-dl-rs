@@ -1,0 +1,26 @@
+[
+  {
+    "id": "42",
+    "name": "Fixture Artist",
+    "service": "patreon",
+    "indexed": 1600000000,
+    "updated": 1700000000,
+    "favorited": 7
+  },
+  {
+    "id": "43",
+    "name": "Fixture 猫",
+    "service": "fanbox",
+    "indexed": 1600000001,
+    "updated": 1700000001,
+    "favorited": 7
+  },
+  {
+    "id": "100",
+    "name": "Fixture Server",
+    "service": "discord",
+    "indexed": 1600000002,
+    "updated": 1700000002,
+    "favorited": 0
+  }
+]

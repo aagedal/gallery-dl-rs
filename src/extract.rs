@@ -642,6 +642,7 @@ pub struct BackendOptions {
     pub metadata: Option<bool>,
     pub endpoint: Option<crate::kemono::Endpoint>,
     pub order_posts: Option<crate::kemono::PostOrder>,
+    pub favorites: Option<crate::kemono::Favorites>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -849,6 +850,15 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("endpoint={}", serde_json::json!(endpoint)));
+        }
+        if let Some(favorites) = options.favorites {
+            let value = match favorites {
+                crate::kemono::Favorites::Artist => "artist",
+                crate::kemono::Favorites::Post => "post",
+            };
+            command
+                .arg("--option")
+                .arg(format!("favorites={}", serde_json::json!(value)));
         }
         if let Some(order) = options.order_posts {
             let order = match order {

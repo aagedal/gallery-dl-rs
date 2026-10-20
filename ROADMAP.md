@@ -571,7 +571,7 @@ no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
 thumbnail job and a Coomer MP4 original job with creator display names; no media
 was downloaded in those inspections. Authenticated verification, wider service
 captures and successful original transfers remain required.
-Remaining: favorites, artist discovery, popular views, comments/DMs, archive/link
+Remaining: popular views, comments/DMs, archive/link
 extraction from post text, username/password login, additional endpoint behavior
 and full upstream metadata/default naming.
 
@@ -609,6 +609,24 @@ extensions rather than forming upstream's malformed thumbnail path. Newer
 upstream master removes thumbnail selection, so version alignment remains open.
 Discord author/embed/revision/archive metadata, authenticated verification,
 full downloads and broader service coverage remain unfinished.
+
+**Implemented Kemono/Coomer favorites and artists:** session-backed artist/post
+favorites and public creator discovery share lazy creator/post/Discord traversal.
+Scoped `favorites` selects the default type; supported URL query overrides,
+name/service filtering and sorting follow upstream behavior, including exact wide
+integer comparisons, stable truthy ties and reversed false-value ties. Child
+identities validate when consumed, preserving cutoffs before later malformed
+entries; failed children report private errors and leave later children available.
+Catalogs retain the 32 MiB response bound and accept up to 500,000 entries, with
+background parsing and cancellable filtering/sorting. Sanitized public creator
+schema captures and Python-generated ordering vectors accompany local tests.
+On 2026-10-20 public catalog checks returned 108,063 Kemono and 220,005 Coomer
+creators within those bounds; anonymous favorites returned HTTP 401. A filtered
+native Kemono artist inspection emitted two original media jobs; a separate
+Coomer artist inspection emitted one. Both retained creator identities and
+reported no errors; no media was downloaded.
+Authenticated favorites traversal and downloads remain unverified; login,
+independent nested child counters/filters and fuller queue metadata remain open.
 
 **Implemented Kemono/Coomer file selection:** ordered `files`, per-kind
 `duplicates`, and `original` settings now match upstream category order and

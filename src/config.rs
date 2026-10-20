@@ -69,6 +69,7 @@ pub struct Options {
     pub order_revisions: Option<crate::kemono::RevisionOrder>,
     pub endpoint: Option<crate::kemono::Endpoint>,
     pub order_posts: Option<crate::kemono::PostOrder>,
+    pub favorites: Option<crate::kemono::Favorites>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub user_id: Option<String>,
@@ -240,6 +241,7 @@ impl Options {
             order_revisions: overrides.order_revisions.or(self.order_revisions),
             endpoint: overrides.endpoint.or(self.endpoint),
             order_posts: overrides.order_posts.or(self.order_posts),
+            favorites: overrides.favorites.or(self.favorites),
             username: overrides.username.clone().or_else(|| self.username.clone()),
             password: overrides.password.clone().or_else(|| self.password.clone()),
             user_id: overrides.user_id.clone().or_else(|| self.user_id.clone()),
@@ -364,6 +366,7 @@ struct RawRoot {
     order_revisions: Field,
     endpoint: Field,
     order_posts: Field,
+    favorites: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -427,6 +430,7 @@ struct RawExtractor {
     order_revisions: Field,
     endpoint: Field,
     order_posts: Field,
+    favorites: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -522,6 +526,7 @@ struct RawOptions {
     order_revisions: Field,
     endpoint: Field,
     order_posts: Field,
+    favorites: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -692,6 +697,7 @@ impl Config {
             order_revisions: root.order_revisions,
             endpoint: root.endpoint,
             order_posts: root.order_posts,
+            favorites: root.favorites,
             reposts: root.reposts,
             ugoira: root.ugoira,
             text_posts: root.text_posts,
@@ -761,6 +767,7 @@ impl Config {
             order_revisions: extractor.order_revisions,
             endpoint: extractor.endpoint,
             order_posts: extractor.order_posts,
+            favorites: extractor.favorites,
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
             text_posts: extractor.text_posts,
@@ -1079,6 +1086,19 @@ impl RawOptions {
                 }
             }),
             Some(_) => return Err(error("native configuration endpoint must be a string")),
+        };
+        let favorites = match self.favorites.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "artist" => crate::kemono::Favorites::Artist,
+                "post" => crate::kemono::Favorites::Post,
+                _ => {
+                    return Err(error(
+                        "native configuration favorites must be artist or post",
+                    ));
+                }
+            }),
+            Some(_) => return Err(error("native configuration favorites must be a string")),
         };
         let order_posts = match self.order_posts.0 {
             None => None,
@@ -1528,6 +1548,7 @@ impl RawOptions {
             order_revisions,
             endpoint,
             order_posts,
+            favorites,
             username,
             password,
             user_id,
