@@ -52,6 +52,7 @@ const FIELDS: &[&str] = &[
     "reposted_by_id",
     "id",
     "metadata",
+    "frames",
 ];
 
 #[derive(Clone, Debug)]

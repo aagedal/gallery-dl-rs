@@ -524,14 +524,23 @@ Safebooru posts and tag searches, plus Danbooru/e621 pools. Remaining: API
 key/login credentials, favorites/popular/artist views, Gelbooru pools, notes,
 `tags`/`metadata` options, and file-size/rating metadata.
 
-**Implemented experimental native Mastodon:** statuses and user media
-timelines on mastodon.social, pawoo.net and baraag.net (single `mastodon`
-category). Remaining: access tokens, arbitrary instances, bookmarks/favorites/
-lists/hashtags/followed views, card images, and per-instance categories.
-Native `reblogs`/`replies`/`text-posts` now preserve outer repost metadata,
-attachment archive identity, source-order empty post boundaries, lazy paging,
-and API-side reply filtering. Defaults match upstream; synthetic/local HTTP and
-configuration/compatibility tests cover selection. Live verification remains.
+**Implemented experimental native Mastodon:** statuses, user timelines,
+bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
+pawoo.net and baraag.net. Instance scopes (`mastodon.social`/`pawoo`/`baraag`)
+inherit shared `mastodon` settings; tokens bind explicitly to an instance API
+origin and stay out of media requests. Instance output categories now match
+upstream; existing attachment archive identities remain stable, while default
+category directories change without migrating files. Numeric account IDs skip
+lookup. Collection paging follows server bookmark/status cursors from all Link
+fields, detects cycles, and stops lazily; collection dates are non-terminating.
+`reblogs`/`replies`/`text-posts` preserve outer repost metadata, attachment IDs,
+and empty post boundaries. Optional card images append outer-post previews with
+upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
+Scoped config, compatibility forwarding, header
+privacy, split Link fields, date ordering and cancellation have local coverage.
+Remaining: OAuth/cache discovery, arbitrary/additional instances, followed views,
+account-search fallback/moved handling, and fuller metadata/default
+naming. Authenticated live verification and real captures remain required.
 
 **Implemented experimental native Kemono/Coomer:** posts and creator post
 listings with deduplicated files. Remaining: creator names, favorites,
@@ -556,8 +565,13 @@ external audio/video, `reblogs`/`posts`/`inline`/`external`/`original`/
 `fallback-delay` options, and custom-domain blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
-works via the App API with a `refresh-token`. Remaining: ugoira (frame ZIP and
-delays), bookmarks/favorites, following, rankings, searches, novels, sketch,
+works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
+with ordered frame filenames/delays in metadata (`ugoira: false` skips them).
+Public illustration bookmarks support user/legacy URLs, path/query tag filters,
+and own bookmarks resolved from OAuth, with scoped lazy pagination.
+Remaining: ugoira original individual-frame mode and conversion,
+private bookmarks and bookmark cursor/metadata options, following, rankings,
+searches, novels, sketch,
 pixivision, series, user avatars/backgrounds, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
 
@@ -616,11 +630,17 @@ album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
 
-**Implemented experimental native Bluesky:** single posts and author
-media/posts feeds via the public AppView, with full-size `getBlob` images and
-videos. Not yet: likes, custom feeds, lists, searches, quoted-post media,
-authentication, PDS-specific blob hosts (blobs always use `bsky.social`), and
-upstream's `include`, `reposts`, `quoted` and `videos` options.
+**Implemented experimental native Bluesky:** single posts, author media/posts
+feeds, public custom feeds and list feeds via the public AppView, with full-size
+`getBlob` images and videos. Custom feeds/lists resolve their record owner once,
+retain mixed post authors/reposts, follow opaque cursors lazily, and stop cursor
+cycles. `reposts`, `quoted`, and boolean `videos` match upstream defaults;
+quoted records retain their own media identity, validate reference/view
+identities, use hydrated data and fetch missing records lazily with cycle and
+depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
+requested; own pinned posts are retained. Not yet: likes, searches,
+replies/video/profile-image views, authentication, PDS-specific blob hosts (blobs always use `bsky.social`), upstream's `include`, thread `depth`,
+metadata facets/user expansion, and newer multi-item media embeds.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook
 selections retain available file dimensions, original dimensions, seconds-based

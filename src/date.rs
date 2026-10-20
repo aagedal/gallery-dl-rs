@@ -237,6 +237,7 @@ mod tests {
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
                 file: None,
+                frames: None,
                 community: None,
                 community_archive: false,
                 retweet_id: None,

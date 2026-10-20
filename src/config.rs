@@ -59,6 +59,12 @@ pub struct Options {
     pub mp4: Option<bool>,
     /// Include Mastodon reblogs and their original attachments.
     pub reblogs: Option<bool>,
+    /// Include Bluesky reposts in author feeds.
+    pub reposts: Option<bool>,
+    /// Include Pixiv ugoira frame ZIPs.
+    pub ugoira: Option<bool>,
+    /// Explicit Mastodon bearer token, confined to API requests. Empty disables.
+    pub access_token: Option<String>,
     /// Include Mastodon statuses without selected media.
     pub text_posts: Option<bool>,
     /// Attempt explicitly unavailable Twitter media when a URL is provided.
@@ -170,6 +176,12 @@ impl Options {
             previews: overrides.previews.or(self.previews),
             mp4: overrides.mp4.or(self.mp4),
             reblogs: overrides.reblogs.or(self.reblogs),
+            reposts: overrides.reposts.or(self.reposts),
+            ugoira: overrides.ugoira.or(self.ugoira),
+            access_token: overrides
+                .access_token
+                .clone()
+                .or_else(|| self.access_token.clone()),
             text_posts: overrides.text_posts.or(self.text_posts),
             unavailable: overrides.unavailable.or(self.unavailable),
             text_tweets: overrides.text_tweets.or(self.text_tweets),
@@ -274,6 +286,8 @@ struct RawRoot {
     previews: Field,
     mp4: Field,
     reblogs: Field,
+    reposts: Field,
+    ugoira: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -324,6 +338,8 @@ struct RawExtractor {
     previews: Field,
     mp4: Field,
     reblogs: Field,
+    reposts: Field,
+    ugoira: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -362,6 +378,10 @@ struct RawExtractor {
     gelbooru: Box<RawOptions>,
     safebooru: Box<RawOptions>,
     mastodon: Box<RawOptions>,
+    #[serde(rename = "mastodon.social")]
+    mastodon_social: Box<RawOptions>,
+    pawoo: Box<RawOptions>,
+    baraag: Box<RawOptions>,
     kemono: Box<RawOptions>,
     coomer: Box<RawOptions>,
     pixeldrain: Box<RawOptions>,
@@ -402,6 +422,8 @@ struct RawOptions {
     previews: Field,
     mp4: Field,
     reblogs: Field,
+    reposts: Field,
+    ugoira: Field,
     text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
@@ -421,6 +443,7 @@ struct RawOptions {
     search_limit: Field,
     search_stop: Field,
     api_key: Field,
+    access_token: Field,
     refresh_token: Field,
     client_id: Field,
     client_secret: Field,
@@ -507,6 +530,9 @@ impl Config {
                 "gelbooru",
                 "safebooru",
                 "mastodon",
+                "mastodon.social",
+                "pawoo",
+                "baraag",
                 "kemono",
                 "coomer",
                 "pixeldrain",
@@ -552,6 +578,8 @@ impl Config {
             previews: root.previews,
             mp4: root.mp4,
             reblogs: root.reblogs,
+            reposts: root.reposts,
+            ugoira: root.ugoira,
             text_posts: root.text_posts,
             unavailable: root.unavailable,
             text_tweets: root.text_tweets,
@@ -571,6 +599,7 @@ impl Config {
             search_limit: root.search_limit,
             search_stop: root.search_stop,
             api_key: Field::default(),
+            access_token: Field::default(),
             refresh_token: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
@@ -604,6 +633,8 @@ impl Config {
             previews: extractor.previews,
             mp4: extractor.mp4,
             reblogs: extractor.reblogs,
+            reposts: extractor.reposts,
+            ugoira: extractor.ugoira,
             text_posts: extractor.text_posts,
             unavailable: extractor.unavailable,
             text_tweets: extractor.text_tweets,
@@ -623,6 +654,7 @@ impl Config {
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
             api_key: Field::default(),
+            access_token: Field::default(),
             refresh_token: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
@@ -650,6 +682,9 @@ impl Config {
             ("gelbooru", extractor.gelbooru),
             ("safebooru", extractor.safebooru),
             ("mastodon", extractor.mastodon),
+            ("mastodon.social", extractor.mastodon_social),
+            ("pawoo", extractor.pawoo),
+            ("baraag", extractor.baraag),
             ("kemono", extractor.kemono),
             ("coomer", extractor.coomer),
             ("pixeldrain", extractor.pixeldrain),
@@ -676,6 +711,13 @@ impl Config {
             {
                 return Err(error(
                     "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl and pixeldrain",
+                ));
+            }
+            if !matches!(name, "mastodon.social" | "pawoo" | "baraag")
+                && settings.access_token.0.is_some()
+            {
+                return Err(error(
+                    "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
                 ));
             }
             if name != "pixiv" && settings.refresh_token.0.is_some() {
@@ -735,6 +777,9 @@ impl Config {
                 | "gelbooru"
                 | "safebooru"
                 | "mastodon"
+                | "mastodon.social"
+                | "pawoo"
+                | "baraag"
                 | "kemono"
                 | "coomer"
                 | "pixeldrain"
@@ -756,10 +801,15 @@ impl Config {
         ) {
             return Err(error("unsupported native configuration category"));
         }
-        let settings = self.categories.get(category).map_or_else(
-            || self.extractor.clone(),
-            |specific| self.extractor.overlay(specific),
-        );
+        let mut settings = self.extractor.clone();
+        if matches!(category, "mastodon.social" | "pawoo" | "baraag")
+            && let Some(base) = self.categories.get("mastodon")
+        {
+            settings = settings.overlay(base);
+        }
+        if let Some(specific) = self.categories.get(category) {
+            settings = settings.overlay(specific);
+        }
         Ok(settings.overlay(&self.global))
     }
 }
@@ -820,6 +870,26 @@ impl RawOptions {
         };
         let mp4 = boolean(self.mp4, "mp4")?;
         let reblogs = boolean(self.reblogs, "reblogs")?;
+        let reposts = boolean(self.reposts, "reposts")?;
+        let ugoira = boolean(self.ugoira, "ugoira")?;
+        let access_token = match self.access_token.0 {
+            None => None,
+            Some(Value::Bool(false)) => Some(String::new()),
+            Some(Value::String(value))
+                if value != "cache"
+                    && value.len() <= 4096
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b)) =>
+            {
+                Some(value)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration Mastodon access-token must be a bearer token string or false; OAuth cache discovery is not implemented",
+                ));
+            }
+        };
         let text_posts = boolean(self.text_posts, "text-posts")?;
         let unavailable = match self.unavailable.0 {
             None => None,
@@ -1173,6 +1243,9 @@ impl RawOptions {
             previews,
             mp4,
             reblogs,
+            reposts,
+            ugoira,
+            access_token,
             text_posts,
             unavailable,
             text_tweets,

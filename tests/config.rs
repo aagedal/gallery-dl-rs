@@ -1982,3 +1982,88 @@ fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
         assert!(!error.contains("private"));
     }
 }
+
+#[test]
+fn reposts_and_ugoira_are_sparse_strict_scoped_booleans() {
+    let cfg = parse(r#"{"extractor":{"reposts":false,"ugoira":false,"bluesky":{"reposts":true},"pixiv":{"ugoira":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("bluesky").unwrap().reposts, Some(true));
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(true));
+    assert_eq!(cfg.resolve("direct").unwrap().reposts, Some(false));
+    let cfg = parse(r#"{"reposts":false,"ugoira":false,"extractor":{"bluesky":{"reposts":true},"pixiv":{"ugoira":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("bluesky").unwrap().reposts, Some(false));
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(false));
+    for key in ["reposts", "ugoira"] {
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(1),
+            serde_json::json!("private-value"),
+            serde_json::json!([]),
+        ] {
+            let error =
+                parse(&serde_json::json!({"extractor":{"bluesky":{key:value}}}).to_string())
+                    .err()
+                    .unwrap()
+                    .to_string();
+            assert!(!error.contains("private-value"));
+        }
+    }
+}
+
+#[test]
+fn mastodon_instance_credentials_are_separate_and_inherit_shared_settings() {
+    let cfg = parse(r#"{"extractor":{"retries":1,"mastodon":{"reblogs":true,"text-posts":true,"timeout":5},"mastodon.social":{"access-token":"social-token","replies":false},"pawoo":{"access-token":"pawoo-token","timeout":7}}}"#).unwrap();
+    let social = cfg.resolve("mastodon.social").unwrap();
+    assert_eq!(social.access_token.as_deref(), Some("social-token"));
+    assert_eq!(social.reblogs, Some(true));
+    assert_eq!(
+        social.replies,
+        Some(gallery_dl_rs::twitter::ReplyMode::Skip)
+    );
+    assert_eq!(social.timeout, Some(Duration::from_secs(5)));
+    let pawoo = cfg.resolve("pawoo").unwrap();
+    assert_eq!(pawoo.access_token.as_deref(), Some("pawoo-token"));
+    assert_eq!(pawoo.reblogs, Some(true));
+    assert_eq!(pawoo.timeout, Some(Duration::from_secs(7)));
+    let baraag = cfg.resolve("baraag").unwrap();
+    assert_eq!(baraag.access_token, None);
+    assert_eq!(baraag.text_posts, Some(true));
+    assert_eq!(cfg.resolve("mastodon").unwrap().access_token, None);
+    let disabled = parse(r#"{"extractor":{"pawoo":{"access-token":false}}}"#).unwrap();
+    assert_eq!(
+        disabled.resolve("pawoo").unwrap().access_token.as_deref(),
+        Some("")
+    );
+    for scope in ["mastodon", "twitter", "bluesky", "direct"] {
+        assert!(
+            parse(
+                &serde_json::json!({"extractor":{scope:{"access-token":"private-token"}}})
+                    .to_string()
+            )
+            .is_err()
+        );
+    }
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!(7),
+        serde_json::json!("private token"),
+        serde_json::json!("private\r\ntoken"),
+        serde_json::json!("cache"),
+        serde_json::json!("x".repeat(4097)),
+    ] {
+        let error =
+            parse(&serde_json::json!({"extractor":{"pawoo":{"access-token":value}}}).to_string())
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(!error.contains("private"));
+    }
+    for text in [
+        r#"{"access-token":"private-token"}"#,
+        r#"{"extractor":{"access-token":"private-token"}}"#,
+        r#"{"extractor":{"pawoo":{"access-token":"a","access-token":"b"}}}"#,
+    ] {
+        assert!(parse(text).is_err());
+    }
+    assert!(!format!("{social:?}").contains("social-token"));
+}

@@ -593,7 +593,7 @@ async fn site_media_options_forward_only_to_their_compatibility_categories() {
         root.path(),
         serde_json::json!({"extractor": {
             "imgur": {"mp4": false},
-            "mastodon": {"reblogs": true, "replies": false, "text-posts": true}
+            "mastodon": {"reblogs": true, "replies": false, "text-posts": true, "cards": true}
         }}),
     );
     for (url, expected, absent) in [
@@ -604,7 +604,12 @@ async fn site_media_options_forward_only_to_their_compatibility_categories() {
         ),
         (
             "https://mastodon.social/@alice",
-            vec!["reblogs=true", "text-posts=true", "replies=false"],
+            vec![
+                "reblogs=true",
+                "text-posts=true",
+                "replies=false",
+                "cards=true",
+            ],
             vec!["mp4="],
         ),
         (
@@ -628,6 +633,182 @@ async fn site_media_options_forward_only_to_their_compatibility_categories() {
         }
         for option in absent {
             assert!(!log.contains(option), "{log}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn bluesky_and_pixiv_selection_forward_only_to_matching_backends() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "bluesky": {"reposts": true, "quoted": true, "videos": false},
+            "pixiv": {"ugoira": false}
+        }}),
+    );
+    for (url, expected, absent) in [
+        (
+            "https://bsky.app/profile/alice.test",
+            vec!["reposts=true", "quoted=true", "videos=false"],
+            vec!["ugoira="],
+        ),
+        (
+            "https://www.pixiv.net/artworks/42",
+            vec!["ugoira=false"],
+            vec!["reposts=", "quoted=", "videos="],
+        ),
+        (
+            "https://instagram.com/p/abc/",
+            vec![],
+            vec!["ugoira=", "reposts=", "quoted=", "videos="],
+        ),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        for option in expected {
+            assert!(log.contains(&format!("--option\n{option}\n")), "{log}");
+        }
+        for option in absent {
+            assert!(!log.contains(option), "{log}");
+        }
+    }
+}
+
+#[cfg(unix)]
+fn mastodon_backend(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join("mastodon-backend");
+    std::fs::write(&path, br#"#!/bin/sh
+printf 'BEGIN\n' >> "$CONFIG_TEST_LOG"
+printf '%s\n' "$@" >> "$CONFIG_TEST_LOG"
+for source do :; done
+case "$source" in
+  *mastodon.social*) instance=mastodon.social ;;
+  *pawoo.net*) instance=pawoo.net ;;
+  *baraag.net*) instance=baraag.net ;;
+esac
+printf '[[2,"",{"id":"100","account":{"acct":"alice"},"instance":"%s","date":"2020-01-01T00:00:00Z"}],[3,"https://cdn.example/shared.jpg",{"filename":"shared","extension":"jpg","id":"100","num":1,"media":{"id":"101"},"account":{"acct":"alice"},"instance":"%s","date":"2020-01-01T00:00:00Z"}],[2,"",{"id":"200","account":{"acct":"alice"},"instance":"%s","date":"2025-01-01T00:00:00Z"}],[3,"https://cdn.example/shared.jpg",{"filename":"shared","extension":"jpg","id":"200","num":1,"media":{"id":"102"},"account":{"acct":"alice"},"instance":"%s","date":"2025-01-01T00:00:00Z"}]]\n' "$instance" "$instance" "$instance" "$instance"
+"#).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mastodon_instance_scopes_preserve_credentials_metadata_and_distinct_archives() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "mastodon": {"reblogs":true, "post-filter":"id >= 100", "filename":"{category}_{id}.{extension}"},
+            "mastodon.social":{"access-token":"social-token"},
+            "pawoo":{"access-token":"pawoo-token"}
+        }}),
+    );
+    let log = root.path().join("backend.log");
+    let mut command = binary(root.path(), &cfg);
+    command
+        .arg("--extractor-command")
+        .arg(mastodon_backend(root.path()))
+        .env("CONFIG_TEST_LOG", &log)
+        .args([
+            "-j",
+            "https://mastodon.social/bookmarks",
+            "https://pawoo.net/bookmarks",
+            "https://baraag.net/bookmarks",
+        ]);
+    let result = output(&mut command).await;
+    success(&result);
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(items.len(), 6, "{items:?}");
+    for (pair, (category, instance)) in items.as_chunks::<2>().0.iter().zip([
+        ("mastodon.social", "mastodon.social"),
+        ("pawoo", "pawoo.net"),
+        ("baraag", "baraag.net"),
+    ]) {
+        assert_eq!(pair[0]["category"], category);
+        assert_eq!(pair[1]["category"], category);
+        assert_eq!(pair[0]["metadata"]["instance"], instance);
+        assert_eq!(pair[0]["metadata"]["media_id"], "101");
+        assert_eq!(pair[1]["metadata"]["media_id"], "102");
+    }
+    let stdout = String::from_utf8(result.stdout).unwrap();
+    assert!(!stdout.contains("social-token") && !stdout.contains("pawoo-token"));
+    let log = std::fs::read_to_string(log).unwrap();
+    let invocations: Vec<_> = log.split("BEGIN\n").skip(1).collect();
+    assert_eq!(invocations.len(), 3);
+    assert!(invocations[0].contains("access-token=\"social-token\""));
+    assert!(!invocations[0].contains("pawoo-token"));
+    assert!(invocations[1].contains("access-token=\"pawoo-token\""));
+    assert!(!invocations[1].contains("social-token"));
+    assert!(!invocations[2].contains("access-token="));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mastodon_bookmark_date_filter_keeps_later_newer_posts() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path(), serde_json::json!({}));
+    let mut command = binary(root.path(), &cfg);
+    command
+        .arg("--extractor-command")
+        .arg(mastodon_backend(root.path()))
+        .env("CONFIG_TEST_LOG", root.path().join("backend.log"))
+        .args([
+            "-j",
+            "--date-after",
+            "2024-01-01",
+            "https://mastodon.social/bookmarks",
+        ]);
+    let result = output(&mut command).await;
+    success(&result);
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(items[0]["metadata"]["post_id"], "200");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn date_selection_preserves_later_newer_bluesky_posts_and_pixiv_bookmarks() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path(), serde_json::json!({}));
+    let executable = root.path().join("bluesky-backend");
+    std::fs::write(&executable, br#"#!/bin/sh
+printf '%s\n' '[[2,"",{"id":42,"post_id":"old","date":"2020-01-01T00:00:00Z","author":{"handle":"alice.test"}}],[3,"https://bsky.social/xrpc/com.atproto.sync.getBlob?did=did:plc:abcdefghijklmnopqrstuvwx&cid=bafykreia",{"filename":"bafykreia","extension":"png","id":42,"post_id":"old","num":0,"date":"2020-01-01T00:00:00Z","author":{"handle":"alice.test"}}],[2,"",{"id":43,"post_id":"new","date":"2025-01-01T00:00:00Z","author":{"handle":"alice.test"}}],[3,"https://bsky.social/xrpc/com.atproto.sync.getBlob?did=did:plc:abcdefghijklmnopqrstuvwx&cid=bafykreib",{"filename":"bafykreib","extension":"png","id":43,"post_id":"new","num":0,"date":"2025-01-01T00:00:00Z","author":{"handle":"alice.test"}}]]'
+"#).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (url, post_id, media_id) in [
+        ("https://bsky.app/profile/alice.test", "new", "bafykreib"),
+        (
+            "https://www.pixiv.net/users/9/bookmarks/artworks",
+            "43",
+            "43_p0",
+        ),
+    ] {
+        for extra in [vec![], vec!["--post-range", "1"]] {
+            let mut command = binary(root.path(), &cfg);
+            command
+                .arg("--extractor-command")
+                .arg(&executable)
+                .args(extra)
+                .args(["-j", "--date-after", "2024-01-01", url]);
+            let result = output(&mut command).await;
+            success(&result);
+            let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(items.len(), 1, "{items:?}");
+            assert_eq!(items[0]["metadata"]["post_id"], post_id);
+            assert_eq!(items[0]["metadata"]["media_id"], media_id);
         }
     }
 }

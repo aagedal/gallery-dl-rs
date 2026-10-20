@@ -1,4 +1,4 @@
-//! Experimental native Bluesky post and author-feed extraction.
+//! Experimental native Bluesky post, author-feed, custom-feed and list extraction.
 //!
 //! Mirrors gallery_dl/extractor/bluesky.py: posts are read from the public,
 //! unauthenticated AppView, and files are downloaded as full-size blobs via
@@ -18,7 +18,7 @@ use futures_util::{
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -29,21 +29,43 @@ const API_ROOT: &str = "https://public.api.bsky.app/xrpc/";
 const BLOB_ROOT: &str = "https://bsky.social/xrpc/com.atproto.sync.getBlob";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const PAGE_LIMIT: &str = "100";
-/// Bound author feeds to 1,000 pages (100,000 posts).
+/// Bound each feed/list to 1,000 pages (100,000 posts).
 const MAX_PAGES: usize = 1000;
+const MAX_QUOTES: usize = 32;
 
-/// Which author feed to read.
+/// Upstream author-feed and media selection defaults.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selection {
+    pub reposts: bool,
+    pub videos: bool,
+    pub quoted: bool,
+}
+
+impl Default for Selection {
+    fn default() -> Self {
+        Self {
+            reposts: false,
+            videos: true,
+            quoted: false,
+        }
+    }
+}
+
+/// Which author feed or mixed-author collection to read.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Feed {
     Media,
     Posts,
+    Custom(String),
+    List(String),
 }
 
 impl Feed {
-    fn filter(self) -> &'static str {
+    fn filter(&self) -> Option<&'static str> {
         match self {
-            Self::Media => "posts_with_media",
-            Self::Posts => "posts_no_replies",
+            Self::Media => Some("posts_with_media"),
+            Self::Posts => Some("posts_and_author_threads"),
+            Self::Custom(_) | Self::List(_) => None,
         }
     }
 }
@@ -101,12 +123,11 @@ pub fn valid_cid(cid: &str) -> bool {
         && cid.bytes().all(|b| matches!(b, b'a'..=b'z' | b'2'..=b'7'))
 }
 
-/// Classify a Bluesky URL. Likes, feeds, lists, searches and other views are
-/// rejected explicitly rather than guessed.
+/// Classify a Bluesky URL. Unsupported views are rejected explicitly.
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Bluesky URL; expected a post (/profile/NAME/post/ID) or profile (/profile/NAME[/media|/posts]) link",
+            "unsupported Bluesky URL; expected a post, profile, custom feed (/profile/NAME/feed/ID) or list (/profile/NAME/lists/ID) link",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -139,6 +160,14 @@ pub fn target(url: &Url) -> Result<Target> {
         ["profile", name, "posts"] => Ok(Target::Feed {
             actor: actor(name)?,
             feed: Feed::Posts,
+        }),
+        ["profile", name, "feed", rkey] if valid_rkey(rkey) => Ok(Target::Feed {
+            actor: actor(name)?,
+            feed: Feed::Custom((*rkey).into()),
+        }),
+        ["profile", name, "lists", rkey] if valid_rkey(rkey) => Ok(Target::Feed {
+            actor: actor(name)?,
+            feed: Feed::List((*rkey).into()),
         }),
         _ => Err(unsupported()),
     }
@@ -184,6 +213,10 @@ fn blobs(embed: &Value) -> Vec<(&Value, &'static str)> {
 /// Parse an `app.bsky.feed.defs#postView` into its files. Posts without
 /// media yield an empty list.
 pub fn parse_post_view(post: &Value) -> Result<Vec<Media>> {
+    parse_post_view_selected(post, Selection::default())
+}
+
+pub fn parse_post_view_selected(post: &Value, selection: Selection) -> Result<Vec<Media>> {
     let uri = string(post, "uri").ok_or_else(|| error("Bluesky post is missing its URI"))?;
     let (did, rkey) = uri
         .strip_prefix("at://")
@@ -203,6 +236,9 @@ pub fn parse_post_view(post: &Value) -> Result<Vec<Media>> {
     let embed = record.get("embed").unwrap_or(&Value::Null);
     let mut media = Vec::new();
     for (item, kind) in blobs(embed) {
+        if kind == "video" && !selection.videos {
+            continue;
+        }
         let blob = item.get(kind).unwrap_or(&Value::Null);
         let cid = blob
             .pointer("/ref/$link")
@@ -274,8 +310,8 @@ pub fn parse_thread(bytes: &[u8], did: &str, rkey: &str) -> Result<Vec<Media>> {
     Ok(media)
 }
 
-/// One parsed `getAuthorFeed` page: per-post files (reposts, pins and
-/// media-free posts skipped) and the next cursor.
+/// One parsed `getAuthorFeed` page using default selection: own posts with
+/// media and the next cursor. Pinned own posts retain their normal identity.
 pub struct Page {
     pub posts: Vec<Vec<Media>>,
     pub cursor: Option<String>,
@@ -289,24 +325,149 @@ pub fn parse_feed(bytes: &[u8], did: &str) -> Result<Page> {
         .and_then(Value::as_array)
         .ok_or_else(|| error("Bluesky response is missing its feed"))?;
     let mut posts = Vec::new();
-    for item in items {
-        // Reposts carry a reason; pinned posts also appear in their place.
-        if item.get("reason").is_some_and(|reason| !reason.is_null()) {
-            continue;
-        }
-        let post = item.get("post").unwrap_or(&Value::Null);
-        if post.pointer("/author/did").and_then(Value::as_str) != Some(did) {
-            continue;
-        }
+    for post in feed_posts(items, Some(did), Selection::default()) {
         let media = parse_post_view(post)?;
         if !media.is_empty() {
             posts.push(media);
         }
     }
-    let cursor = string(&body, "cursor")
-        .filter(|cursor| cursor.len() <= 1024)
-        .map(str::to_owned);
+    let cursor = page_cursor(&body)?;
     Ok(Page { posts, cursor })
+}
+
+fn page_cursor(body: &Value) -> Result<Option<String>> {
+    match body.get("cursor") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(cursor)) if cursor.is_empty() => Ok(None),
+        Some(Value::String(cursor)) if cursor.len() <= 1024 => Ok(Some(cursor.clone())),
+        Some(Value::String(_)) => Err(error("Bluesky cursor exceeded 1024 bytes")),
+        Some(_) => Err(error("Bluesky returned an invalid cursor")),
+    }
+}
+
+fn feed_posts<'a>(items: &'a [Value], did: Option<&str>, selection: Selection) -> Vec<&'a Value> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let post = item.get("post")?;
+            // Upstream selects by the underlying author, including pinned own posts.
+            if !selection.reposts
+                && let Some(did) = did
+                && post.pointer("/author/did").and_then(Value::as_str) != Some(did)
+            {
+                return None;
+            }
+            Some(post)
+        })
+        .collect()
+}
+
+fn post_identity(uri: &str) -> Result<(&str, &str)> {
+    uri.strip_prefix("at://")
+        .and_then(|rest| rest.split_once("/app.bsky.feed.post/"))
+        .filter(|(did, rkey)| valid_did(did) && valid_rkey(rkey))
+        .ok_or_else(|| error("Bluesky quote has an invalid post URI"))
+}
+
+fn thread_post(bytes: &[u8], uri: &str) -> Result<Value> {
+    let body: Value =
+        serde_json::from_slice(bytes).map_err(|_| error("Bluesky returned invalid JSON"))?;
+    let thread = body.get("thread").unwrap_or(&Value::Null);
+    match thread.get("$type").and_then(Value::as_str) {
+        Some("app.bsky.feed.defs#threadViewPost") => {}
+        Some("app.bsky.feed.defs#blockedPost") => return Err(error("Bluesky post is blocked")),
+        _ => return Err(error("Bluesky post not found or removed")),
+    }
+    let post = thread.get("post").unwrap_or(&Value::Null);
+    if string(post, "uri") != Some(uri) {
+        return Err(error("Bluesky response does not match the requested post"));
+    }
+    Ok(post.clone())
+}
+
+/// A quote can be fully hydrated in the AppView embed, or only a strong record
+/// reference. Never use a quoted author or URI to construct arbitrary URLs.
+type Quote = (String, Option<String>, Option<Value>);
+
+fn quoted_post(post: &Value) -> Result<Option<Quote>> {
+    let Some(embed) = post.pointer("/record/embed") else {
+        return Ok(None);
+    };
+    let reference = match embed.get("$type").and_then(Value::as_str) {
+        Some("app.bsky.embed.record") => embed.get("record"),
+        Some("app.bsky.embed.recordWithMedia") => embed.pointer("/record/record"),
+        _ => return Ok(None),
+    };
+    let Some(reference) = reference else {
+        return Ok(None);
+    };
+    let Some(uri) = string(reference, "uri") else {
+        return Err(error("Bluesky quote is missing its post URI"));
+    };
+    post_identity(uri)?;
+    if let Some(cid) = string(reference, "cid")
+        && !valid_cid(cid)
+    {
+        return Err(error("Bluesky quote has an invalid record CID"));
+    }
+    let view = match post.get("embed").and_then(|v| string(v, "$type")) {
+        Some("app.bsky.embed.record#view") => post.pointer("/embed/record"),
+        Some("app.bsky.embed.recordWithMedia#view") => post.pointer("/embed/record/record"),
+        _ => None,
+    };
+    let Some(view) = view else {
+        return Ok(Some((
+            uri.into(),
+            string(reference, "cid").map(str::to_owned),
+            None,
+        )));
+    };
+    // Unavailable/blocked quotes must not be fetched around the AppView's decision.
+    if matches!(
+        string(view, "$type"),
+        Some(
+            "app.bsky.embed.record#viewNotFound"
+                | "app.bsky.embed.record#viewBlocked"
+                | "app.bsky.embed.record#viewDetached"
+        )
+    ) {
+        return Ok(None);
+    }
+    if string(view, "uri") != Some(uri) {
+        return Err(error(
+            "Bluesky quoted view does not match its record reference",
+        ));
+    }
+    if let Some(expected) = string(reference, "cid")
+        && Some(expected) != string(view, "cid")
+    {
+        return Err(error("Bluesky quoted view has a mismatched record CID"));
+    }
+    let Some(value) = view.get("value") else {
+        return Ok(Some((
+            uri.into(),
+            string(reference, "cid").map(str::to_owned),
+            None,
+        )));
+    };
+    let mut quoted = serde_json::json!({"uri": uri, "author": view.get("author"), "record": value});
+    if let Some(embed) = view
+        .get("embeds")
+        .and_then(Value::as_array)
+        .and_then(|v| v.first())
+    {
+        quoted["embed"] = embed.clone();
+    }
+    // Validate identities even on media-free hydrated quotes.
+    let (did, _) = post_identity(uri)?;
+    if quoted.pointer("/author/did").and_then(Value::as_str) != Some(did) {
+        return Err(error("Bluesky quoted author does not match its URI"));
+    }
+    Ok(Some((
+        uri.into(),
+        string(reference, "cid").map(str::to_owned),
+        Some(quoted),
+    )))
 }
 
 pub struct Bluesky {
@@ -317,6 +478,7 @@ pub struct Bluesky {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    selection: Selection,
 }
 
 struct FeedState {
@@ -324,9 +486,33 @@ struct FeedState {
     actor: String,
     feed: Feed,
     cursor: Option<String>,
+    seen_cursors: BTreeSet<String>,
     pages: usize,
     done: bool,
+    posts: VecDeque<Value>,
+    active: Option<SelectedState>,
+}
+
+struct SelectedState {
+    post: Option<Value>,
+    quote: Option<Quote>,
     pending: VecDeque<ExtractionEvent>,
+    seen: BTreeSet<String>,
+    depth: usize,
+    emitted: bool,
+}
+
+impl SelectedState {
+    fn new(post: Value) -> Self {
+        Self {
+            post: Some(post),
+            quote: None,
+            pending: VecDeque::new(),
+            seen: BTreeSet::new(),
+            depth: 0,
+            emitted: false,
+        }
+    }
 }
 
 impl Bluesky {
@@ -339,7 +525,13 @@ impl Bluesky {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            selection: Selection::default(),
         })
+    }
+
+    pub fn with_selection(mut self, selection: Selection) -> Self {
+        self.selection = selection;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -396,7 +588,7 @@ impl Bluesky {
             .ok_or_else(|| error("Bluesky handle did not resolve to a valid DID"))
     }
 
-    async fn post(&self, actor: &str, rkey: &str) -> Result<Vec<Media>> {
+    async fn post(&self, actor: &str, rkey: &str) -> Result<Value> {
         let did = self.resolve(actor).await?;
         let uri = format!("at://{did}/app.bsky.feed.post/{rkey}");
         let body = self
@@ -405,7 +597,66 @@ impl Bluesky {
                 &[("uri", &uri), ("depth", "0"), ("parentHeight", "0")],
             )
             .await?;
-        parse_thread(&body, &did, rkey)
+        thread_post(&body, &uri)
+    }
+
+    async fn next_selected(&self, state: &mut SelectedState) -> Result<Option<ExtractionEvent>> {
+        loop {
+            if let Some(event) = state.pending.pop_front() {
+                return Ok(Some(event));
+            }
+            let post = match state.post.take() {
+                Some(post) => post,
+                None => match state.quote.take() {
+                    None => return Ok(None),
+                    Some((uri, expected_cid, hydrated)) => {
+                        if state.seen.contains(&uri) {
+                            return Ok(None);
+                        }
+                        if state.depth >= MAX_QUOTES {
+                            return Err(error("Bluesky quoted-post chain exceeded 32 records"));
+                        }
+                        state.depth += 1;
+                        match hydrated {
+                            Some(post) => post,
+                            None => {
+                                let body = self
+                                    .call(
+                                        "app.bsky.feed.getPostThread",
+                                        &[("uri", &uri), ("depth", "0"), ("parentHeight", "0")],
+                                    )
+                                    .await?;
+                                let quoted = thread_post(&body, &uri)?;
+                                if let Some(cid) = expected_cid
+                                    && string(&quoted, "cid") != Some(cid.as_str())
+                                {
+                                    return Err(error(
+                                        "Bluesky fetched quote has a mismatched record CID",
+                                    ));
+                                }
+                                quoted
+                            }
+                        }
+                    }
+                },
+            };
+            let uri =
+                string(&post, "uri").ok_or_else(|| error("Bluesky post is missing its URI"))?;
+            if !state.seen.insert(uri.to_owned()) {
+                return Ok(None);
+            }
+            let mut media = parse_post_view_selected(&post, self.selection)?;
+            if self.selection.quoted {
+                state.quote = quoted_post(&post)?;
+            }
+            state.emitted |= !media.is_empty();
+            for item in &mut media {
+                self.network.apply_media(item);
+            }
+            if !media.is_empty() {
+                state.pending.extend(group(media, "bluesky"));
+            }
+        }
     }
 
     async fn next_page(&self, state: &mut FeedState) -> Result<()> {
@@ -417,25 +668,46 @@ impl Bluesky {
                 did
             }
         };
-        let mut query = vec![
-            ("actor", did.as_str()),
-            ("filter", state.feed.filter()),
-            ("limit", PAGE_LIMIT),
-        ];
+        let (method, parameter, resource) = match &state.feed {
+            Feed::Media | Feed::Posts => ("app.bsky.feed.getAuthorFeed", "actor", did.clone()),
+            Feed::Custom(rkey) => (
+                "app.bsky.feed.getFeed",
+                "feed",
+                format!("at://{did}/app.bsky.feed.generator/{rkey}"),
+            ),
+            Feed::List(rkey) => (
+                "app.bsky.feed.getListFeed",
+                "list",
+                format!("at://{did}/app.bsky.graph.list/{rkey}"),
+            ),
+        };
+        let mut query = vec![(parameter, resource.as_str())];
+        if let Some(filter) = state.feed.filter() {
+            query.push(("filter", filter));
+        }
+        query.push(("limit", PAGE_LIMIT));
         if let Some(cursor) = &state.cursor {
             query.push(("cursor", cursor));
         }
-        let body = self.call("app.bsky.feed.getAuthorFeed", &query).await?;
-        let page = parse_feed(&body, &did)?;
+        let body = self.call(method, &query).await?;
+        let body: Value =
+            serde_json::from_slice(&body).map_err(|_| error("Bluesky returned invalid JSON"))?;
+        let items = body
+            .get("feed")
+            .and_then(Value::as_array)
+            .ok_or_else(|| error("Bluesky response is missing its feed"))?;
+        let cursor = page_cursor(&body)?;
         state.pages += 1;
-        state.done =
-            page.cursor.is_none() || page.cursor == state.cursor || state.pages >= MAX_PAGES;
-        state.cursor = page.cursor;
-        for mut media in page.posts {
-            for item in &mut media {
-                self.network.apply_media(item);
-            }
-            state.pending.extend(group(media, "bluesky"));
+        state.done = cursor
+            .as_ref()
+            .is_none_or(|cursor| !state.seen_cursors.insert(cursor.clone()))
+            || state.pages >= MAX_PAGES;
+        state.cursor = cursor;
+        // Collection owners identify the feed/list record, not the returned post
+        // authors. Upstream's reposts author restriction applies only to author feeds.
+        let author = state.feed.filter().map(|_| did.as_str());
+        for post in feed_posts(items, author, self.selection) {
+            state.posts.push_back(post.clone());
         }
         Ok(())
     }
@@ -444,41 +716,64 @@ impl Bluesky {
         crate::event::media_only(self.events(url))
     }
 
-    /// Emit one post boundary per post; author feeds are paginated lazily.
+    /// Emit one post boundary per post; feeds and lists are paginated lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
         match target {
-            Target::Post { actor, rkey } => stream::once(async move {
-                let mut media = self.post(&actor, &rkey).await?;
-                for item in &mut media {
-                    self.network.apply_media(item);
+            Target::Post { actor, rkey } => {
+                stream::once(async move { self.post(&actor, &rkey).await.map(SelectedState::new) })
+                    .map(move |result| match result {
+                        Ok(state) => stream::unfold(Some(state), move |state| async move {
+                            let mut state = state?;
+                            match self.next_selected(&mut state).await {
+                                Ok(Some(event)) => Some((Ok(event), Some(state))),
+                                Ok(None) if !state.emitted => Some((
+                                    Err(error("Bluesky post contains no selected media")),
+                                    None,
+                                )),
+                                Ok(None) => None,
+                                Err(e) => Some((Err(e), None)),
+                            }
+                        })
+                        .boxed(),
+                        Err(e) => stream::once(async move { Err(e) }).boxed(),
+                    })
+                    .flatten()
+                    .boxed()
+            }
+            Target::Feed { actor, mut feed } => {
+                if url.path().trim_matches('/').split('/').count() == 2
+                    && (self.selection.quoted || self.selection.reposts)
+                {
+                    feed = Feed::Posts;
                 }
-                Ok::<_, crate::Error>(stream::iter(group(media, "bluesky").into_iter().map(Ok)))
-            })
-            .map(|result| match result {
-                Ok(events) => events.boxed(),
-                Err(e) => stream::once(async move { Err(e) }).boxed(),
-            })
-            .flatten()
-            .boxed(),
-            Target::Feed { actor, feed } => {
                 let state = FeedState {
                     did: None,
                     actor,
                     feed,
                     cursor: None,
+                    seen_cursors: BTreeSet::new(),
                     pages: 0,
                     done: false,
-                    pending: VecDeque::new(),
+                    posts: VecDeque::new(),
+                    active: None,
                 };
                 stream::unfold(Some(state), move |state| async move {
                     let mut state = state?;
                     loop {
-                        if let Some(event) = state.pending.pop_front() {
-                            return Some((Ok(event), Some(state)));
+                        if let Some(active) = &mut state.active {
+                            match self.next_selected(active).await {
+                                Ok(Some(event)) => return Some((Ok(event), Some(state))),
+                                Ok(None) => state.active = None,
+                                Err(e) => return Some((Err(e), None)),
+                            }
+                        }
+                        if let Some(post) = state.posts.pop_front() {
+                            state.active = Some(SelectedState::new(post));
+                            continue;
                         }
                         if state.done {
                             return None;
@@ -547,10 +842,10 @@ impl Bluesky {
         }
         if status == StatusCode::BAD_REQUEST {
             // XRPC reports unknown actors, handles and posts as 400 errors.
-            return Err(error("Bluesky profile or post not found").into());
+            return Err(error("Bluesky profile, feed, list or post not found").into());
         }
         if matches!(status.as_u16(), 404 | 410) {
-            return Err(error("Bluesky profile or post not found or removed").into());
+            return Err(error("Bluesky profile, feed, list or post not found or removed").into());
         }
         if matches!(status.as_u16(), 401 | 403) {
             return Err(error("Bluesky refused access to this content").into());
@@ -713,7 +1008,7 @@ mod tests {
     }
 
     #[test]
-    fn feed_skips_reposts_and_media_free_posts() {
+    fn feed_keeps_own_posts_with_reason_and_skips_media_free_posts() {
         let embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]});
         let body = json!({"cursor": "c2", "feed": [
             {"post": post("3ka", embed.clone())},
@@ -721,7 +1016,7 @@ mod tests {
             {"post": post("3kc", json!(null))},
         ]});
         let page = parse_feed(body.to_string().as_bytes(), DID).unwrap();
-        assert_eq!(page.posts.len(), 1);
+        assert_eq!(page.posts.len(), 2);
         assert_eq!(page.posts[0][0].metadata.as_ref().unwrap().post_id, "3ka");
         assert_eq!(page.cursor.as_deref(), Some("c2"));
     }
@@ -759,7 +1054,6 @@ mod tests {
         );
         for raw in [
             "https://bsky.app/profile/alice.bsky.social/likes",
-            "https://bsky.app/profile/alice.bsky.social/feed/x",
             "https://bsky.app/profile/alice/post/3kabc",
             "https://bsky.app/profile/alice.bsky.social/post/a%2Fb",
             "https://bsky.app/search?q=x",
@@ -860,6 +1154,470 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].contains("filter=posts_with_media&limit=100 "));
         assert!(requests[1].contains("&cursor=next "));
+    }
+
+    #[test]
+    fn classifies_feed_and_list_records_with_validated_owners_and_keys() {
+        for (suffix, feed) in [
+            ("feed/custom-name", Feed::Custom("custom-name".into())),
+            ("lists/3klist", Feed::List("3klist".into())),
+        ] {
+            let url = Url::parse(&format!(
+                "https://bsky.app/profile/Owner.bsky.social/{suffix}"
+            ))
+            .unwrap();
+            assert_eq!(
+                target(&url).unwrap(),
+                Target::Feed {
+                    actor: "owner.bsky.social".into(),
+                    feed
+                }
+            );
+        }
+        let url = Url::parse(&format!("https://bsky.app/profile/{DID}/feed/3kfeed")).unwrap();
+        assert_eq!(
+            target(&url).unwrap(),
+            Target::Feed {
+                actor: DID.into(),
+                feed: Feed::Custom("3kfeed".into())
+            }
+        );
+        for path in [
+            "alice/feed/key",
+            "alice.bsky.social/feed/a%2Fb",
+            "alice.bsky.social/lists/a%3Fb",
+            "alice.bsky.social/feed/key/extra",
+            "alice.bsky.social/lists",
+            "did:plc:short/lists/key",
+        ] {
+            assert!(
+                target(&Url::parse(&format!("https://bsky.app/profile/{path}")).unwrap()).is_err(),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn feed_cursors_preserve_opaque_values_and_reject_unsupported_shapes_and_sizes() {
+        let body = json!({"feed": [], "cursor": " opaque +/=? cursor "});
+        assert_eq!(
+            parse_feed(body.to_string().as_bytes(), DID)
+                .unwrap()
+                .cursor
+                .as_deref(),
+            Some(" opaque +/=? cursor ")
+        );
+        for cursor in [json!(false), json!([]), json!({}), json!("x".repeat(1025))] {
+            let body = json!({"feed": [], "cursor": cursor});
+            assert!(parse_feed(body.to_string().as_bytes(), DID).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn collection_owners_resolve_once_and_mixed_authors_and_reposts_are_retained() {
+        for (path, method, parameter, collection) in [
+            ("feed", "getFeed", "feed", "app.bsky.feed.generator"),
+            ("lists", "getListFeed", "list", "app.bsky.graph.list"),
+        ] {
+            let owner = "did:web:owner.example";
+            let page = |rkey: &str, cid: &str, cursor: &str| {
+                json!({"cursor": cursor, "feed": [{
+                "post": post(rkey, json!({"$type": "app.bsky.embed.images", "images": [image(cid, "")] })),
+                "reason": {"$type": "app.bsky.feed.defs#reasonRepost"}
+            }]}).to_string()
+            };
+            let cursor = " page+1?cursor=x&limit=1 ";
+            let (root, server) = serve(vec![
+                response("200 OK", "", json!({"did": owner}).to_string().as_bytes()),
+                response("200 OK", "", page("first", CID1, cursor).as_bytes()),
+                response("200 OK", "", page("second", CID2, "page2").as_bytes()),
+                response("200 OK", "", page("third", CID3, cursor).as_bytes()),
+            ]);
+            let media = bluesky(root)
+                .stream(
+                    &Url::parse(&format!(
+                        "https://bsky.app/profile/owner.bsky.social/{path}/chosen"
+                    ))
+                    .unwrap(),
+                )
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(media.len(), 3, "{path}: {media:?}");
+            for (index, file) in media.into_iter().enumerate() {
+                let file = file.unwrap();
+                assert_eq!(
+                    file.url
+                        .query_pairs()
+                        .find(|(key, _)| key == "did")
+                        .unwrap()
+                        .1,
+                    DID
+                );
+                assert_eq!(
+                    file.metadata.as_ref().unwrap().post_id,
+                    ["first", "second", "third"][index]
+                );
+                assert!(file.archive_key().is_some());
+            }
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 4);
+            assert!(requests[0].contains("resolveHandle?handle=owner.bsky.social "));
+            for (index, request) in requests[1..].iter().enumerate() {
+                let target = request
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap();
+                let url = Url::parse(&format!("http://test{target}")).unwrap();
+                assert_eq!(url.path(), format!("/xrpc/app.bsky.feed.{method}"));
+                let query = url.query_pairs().collect::<BTreeMap<_, _>>();
+                assert_eq!(
+                    query.get(parameter).unwrap(),
+                    &format!("at://{owner}/{collection}/chosen")
+                );
+                assert_eq!(query.get("limit").unwrap(), "100");
+                assert!(!query.contains_key("actor"));
+                assert!(!query.contains_key("filter"));
+                if index == 0 {
+                    assert!(!query.contains_key("cursor"));
+                } else {
+                    assert_eq!(
+                        query.get("cursor").unwrap(),
+                        if index == 1 { cursor } else { "page2" }
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn collections_cancel_before_later_posts_quotes_and_pages() {
+        for path in ["feed", "lists"] {
+            let quoted = post("quoted", Value::Null);
+            let mut original = quote_post("root", &quoted, false);
+            let reference = original["record"]["embed"].clone();
+            original["record"]["embed"] = json!({"$type": "app.bsky.embed.recordWithMedia",
+                "record": reference, "media": {"$type": "app.bsky.embed.images", "images": [image(CID1, "own")]}});
+            let body = json!({"cursor": "next", "feed": [{"post": original},
+                {"post": {"uri": "https://evil.example/invalid"}}]})
+            .to_string();
+            let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+            let media = bluesky(root)
+                .with_selection(Selection {
+                    quoted: true,
+                    ..Selection::default()
+                })
+                .stream(
+                    &Url::parse(&format!("https://bsky.app/profile/{DID}/{path}/chosen")).unwrap(),
+                )
+                .take(1)
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(
+                media[0]
+                    .as_ref()
+                    .unwrap()
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .post_id,
+                "root"
+            );
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn collections_validate_post_identity_independently_of_owner() {
+        let mut forged = post(
+            "forged",
+            json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")] }),
+        );
+        forged["author"]["did"] = json!("did:web:other.example");
+        for path in ["feed", "lists"] {
+            let body = json!({"feed": [{"post": forged}]}).to_string();
+            let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+            let results = bluesky(root)
+                .stream(
+                    &Url::parse(&format!("https://bsky.app/profile/{DID}/{path}/chosen")).unwrap(),
+                )
+                .collect::<Vec<_>>()
+                .await;
+            assert!(
+                results[0]
+                    .as_ref()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("author does not match")
+            );
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    fn quote_post(rkey: &str, quoted: &Value, hydrated: bool) -> Value {
+        let mut root = post(
+            rkey,
+            json!({"$type": "app.bsky.embed.record", "record": {
+                "uri": quoted["uri"], "cid": quoted["cid"]
+            }}),
+        );
+        if hydrated {
+            root["embed"] = json!({"$type": "app.bsky.embed.record#view", "record": {
+                "$type": "app.bsky.embed.record#viewRecord", "uri": quoted["uri"],
+                "cid": quoted["cid"], "author": quoted["author"], "value": quoted["record"]
+            }});
+            if let Some(embed) = quoted.get("embed") {
+                root["embed"]["record"]["embeds"] = json!([embed]);
+            }
+        }
+        root
+    }
+
+    fn thread_view(post: Value) -> Vec<u8> {
+        json!({"thread": {"$type": "app.bsky.feed.defs#threadViewPost", "post": post}})
+            .to_string()
+            .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn quoted_inline_media_is_opt_in_and_preserves_underlying_identity() {
+        let embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "quote")]});
+        let quoted = post("quoted", embed);
+        let root_post = quote_post("root", &quoted, true);
+        let expected = parse_post_view(&quoted).unwrap().remove(0);
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            "",
+            &thread_view(root_post.clone()),
+        )]);
+        let url = Url::parse(&format!("https://bsky.app/profile/{DID}/post/root")).unwrap();
+        let result = bluesky(root).stream(&url).collect::<Vec<_>>().await;
+        assert!(
+            result[0]
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("no selected media")
+        );
+        assert_eq!(server.join().unwrap().len(), 1);
+        let (root, server) = serve(vec![response("200 OK", "", &thread_view(root_post))]);
+        let result = bluesky(root)
+            .with_selection(Selection {
+                quoted: true,
+                ..Selection::default()
+            })
+            .stream(&url)
+            .collect::<Vec<_>>()
+            .await;
+        let actual = result[0].as_ref().unwrap();
+        assert_eq!(actual.archive_key(), expected.archive_key());
+        assert_eq!(actual.metadata.as_ref().unwrap().post_id, "quoted");
+        assert_eq!(actual.filename, "quoted_1.jpg");
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fetches_only_missing_selected_quotes_and_checks_fetched_identity() {
+        let quoted = post(
+            "quoted",
+            json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")] }),
+        );
+        let root_post = quote_post("root", &quoted, false);
+        let url = Url::parse(&format!("https://bsky.app/profile/{DID}/post/root")).unwrap();
+        let (root, server) = serve(vec![
+            response("200 OK", "", &thread_view(root_post.clone())),
+            response("200 OK", "", &thread_view(quoted.clone())),
+        ]);
+        let result = bluesky(root)
+            .with_selection(Selection {
+                quoted: true,
+                ..Selection::default()
+            })
+            .stream(&url)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_ok());
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("%2Fquoted&depth=0"));
+        let mut forged = quoted;
+        forged["cid"] = json!(CID2);
+        let (root, server) = serve(vec![
+            response("200 OK", "", &thread_view(root_post)),
+            response("200 OK", "", &thread_view(forged)),
+        ]);
+        let result = bluesky(root)
+            .with_selection(Selection {
+                quoted: true,
+                ..Selection::default()
+            })
+            .stream(&url)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(
+            result[0]
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("mismatched record CID")
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn record_with_media_quote_emits_separate_post_boundaries_in_feeds() {
+        let quoted = post(
+            "quoted",
+            json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "quote")] }),
+        );
+        let mut original = quote_post("root", &quoted, true);
+        let reference = original["record"]["embed"].clone();
+        let view = original["embed"].clone();
+        original["record"]["embed"] = json!({"$type": "app.bsky.embed.recordWithMedia",
+            "record": reference, "media": {"$type": "app.bsky.embed.images", "images": [image(CID2, "own")]}});
+        original["embed"] = json!({"$type": "app.bsky.embed.recordWithMedia#view", "record": view});
+        let body = json!({"feed": [{"post": original}]}).to_string();
+        let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+        let events = bluesky(root)
+            .with_selection(Selection {
+                quoted: true,
+                ..Selection::default()
+            })
+            .events(&Url::parse(&format!("https://bsky.app/profile/{DID}/media")).unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(events.len(), 6);
+        let ExtractionEvent::Media(first) = events[1].as_ref().unwrap() else {
+            panic!("missing own media")
+        };
+        let ExtractionEvent::Media(second) = events[4].as_ref().unwrap() else {
+            panic!("missing quote media")
+        };
+        assert_eq!(first.metadata.as_ref().unwrap().post_id, "root");
+        assert_eq!(second.metadata.as_ref().unwrap().post_id, "quoted");
+        assert_eq!(
+            second.archive_key(),
+            parse_post_view(&quoted).unwrap()[0].archive_key()
+        );
+        assert!(server.join().unwrap()[0].contains("filter=posts_with_media"));
+    }
+
+    #[tokio::test]
+    async fn quote_requests_are_lazy_after_the_original_post_media() {
+        let quoted = post("quoted", Value::Null);
+        let mut original = quote_post("root", &quoted, false);
+        let reference = original["record"]["embed"].clone();
+        original["record"]["embed"] = json!({"$type": "app.bsky.embed.recordWithMedia",
+            "record": reference, "media": {"$type": "app.bsky.embed.images", "images": [image(CID1, "own")]}});
+        let (root, server) = serve(vec![response("200 OK", "", &thread_view(original))]);
+        let result = bluesky(root)
+            .with_selection(Selection {
+                quoted: true,
+                ..Selection::default()
+            })
+            .stream(&Url::parse(&format!("https://bsky.app/profile/{DID}/post/root")).unwrap())
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(
+            result[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .post_id,
+            "root"
+        );
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn quote_chains_are_bounded_and_cycles_do_not_request_again() {
+        let client = Bluesky::new(Duration::from_secs(1))
+            .unwrap()
+            .with_selection(Selection {
+                quoted: true,
+                ..Selection::default()
+            });
+        let mut quoted = post("leaf", Value::Null);
+        for index in 0..=MAX_QUOTES {
+            quoted = quote_post(&format!("chain{index}"), &quoted, true);
+        }
+        let mut state = SelectedState::new(quoted);
+        assert!(
+            client
+                .next_selected(&mut state)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("exceeded 32")
+        );
+        let same = post("same", Value::Null);
+        let cycle = quote_post("same", &same, false);
+        let mut state = SelectedState::new(cycle);
+        assert!(client.next_selected(&mut state).await.unwrap().is_none());
+    }
+
+    #[test]
+    fn quoted_view_identity_is_validated_and_blocked_quotes_are_not_fetched() {
+        let quoted = post("quoted", Value::Null);
+        let mut root = quote_post("root", &quoted, true);
+        root["embed"]["record"]["uri"] = json!(format!("at://{DID}/app.bsky.feed.post/other"));
+        assert!(quoted_post(&root).is_err());
+        root = quote_post("root", &quoted, true);
+        root["embed"]["record"]["author"]["did"] = json!("did:web:evil.example");
+        assert!(quoted_post(&root).is_err());
+        root = quote_post("root", &quoted, true);
+        root["embed"]["record"]["$type"] = json!("app.bsky.embed.record#viewBlocked");
+        assert!(quoted_post(&root).unwrap().is_none());
+        root = quote_post("root", &quoted, false);
+        root["record"]["embed"]["record"]["uri"] = json!("https://evil.example/post");
+        assert!(quoted_post(&root).is_err());
+    }
+
+    #[tokio::test]
+    async fn selection_switches_default_feed_and_keeps_repost_author_and_video_identity() {
+        let embed = json!({"$type": "app.bsky.embed.video", "video": {"ref": {"$link": CID3}, "mimeType": "video/mp4"}});
+        let mut repost = post("repost", embed.clone());
+        let other = "did:web:other.example";
+        repost["uri"] = json!(format!("at://{other}/app.bsky.feed.post/repost"));
+        repost["author"]["did"] = json!(other);
+        let body = json!({"feed": [{"post": repost.clone(), "reason": {"$type": "app.bsky.feed.defs#reasonRepost"}}]});
+        assert!(
+            parse_feed(body.to_string().as_bytes(), DID)
+                .unwrap()
+                .posts
+                .is_empty()
+        );
+        assert!(
+            parse_post_view_selected(
+                &repost,
+                Selection {
+                    videos: false,
+                    ..Selection::default()
+                }
+            )
+            .unwrap()
+            .is_empty()
+        );
+        let (root, server) = serve(vec![response("200 OK", "", body.to_string().as_bytes())]);
+        let result = bluesky(root)
+            .with_selection(Selection {
+                reposts: true,
+                ..Selection::default()
+            })
+            .stream(&Url::parse(&format!("https://bsky.app/profile/{DID}")).unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].as_ref().unwrap().archive_key(),
+            parse_post_view(&repost).unwrap()[0].archive_key()
+        );
+        assert!(server.join().unwrap()[0].contains("filter=posts_and_author_threads"));
     }
 
     #[tokio::test]

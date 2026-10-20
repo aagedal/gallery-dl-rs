@@ -317,6 +317,20 @@ fn context_parts(
                     .map_or(Value::None, |value| Value::Int(value.into())),
             ),
         ]);
+        if let Some(frames) = &post.frames {
+            let frames = Value::List(
+                frames
+                    .iter()
+                    .map(|frame| {
+                        map(BTreeMap::from([
+                            ("file".into(), text(frame.file.as_str())),
+                            ("delay".into(), Value::Int(frame.delay.into())),
+                        ]))
+                    })
+                    .collect(),
+            );
+            metadata.insert("frames".into(), frames);
+        }
         for (key, value) in [
             ("retweet_id", &post.retweet_id),
             ("quoted_by_id", &post.quoted_by_id),
@@ -363,6 +377,9 @@ fn context_parts(
             category,
             "facebook"
                 | "mastodon"
+                | "mastodon.social"
+                | "pawoo"
+                | "baraag"
                 | "kemono"
                 | "coomer"
                 | "pixiv"

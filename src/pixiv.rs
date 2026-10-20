@@ -5,9 +5,9 @@
 //! through the OAuth refresh-token grant; the token is cached in memory for the
 //! run and refreshed once when the API reports `invalid_grant`. Single-page
 //! works yield `meta_single_page.original_image_url`, multi-page works
-//! `meta_pages[].image_urls.original`. Ugoira animations are not supported
-//! (upstream downloads a frame ZIP plus frame delays). Files are served from
-//! `i.pximg.net`, which requires the App API `Referer` header.
+//! `meta_pages[].image_urls.original`. Ugoira works yield the full-resolution
+//! frame ZIP and ordered frame delays from the ugoira metadata endpoint. Files
+//! are served from `i.pximg.net`, which requires the App API `Referer` header.
 use crate::{
     Result, error,
     event::{ExtractionEvent, group},
@@ -21,6 +21,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, RequestBuilder, StatusCode};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -38,6 +39,15 @@ const APP_OS_VERSION: &str = "14.6";
 pub const REFERER: &str = "https://app-api.pixiv.net/";
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const MAX_PAGES: usize = 200;
+const MAX_UGOIRA_FRAMES: usize = 100_000;
+const MAX_UGOIRA_DELAY: u64 = u32::MAX as u64;
+
+/// One ZIP frame and its display duration in milliseconds, in animation order.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct UgoiraFrame {
+    pub file: String,
+    pub delay: u64,
+}
 
 pub fn valid_id(id: &str) -> bool {
     (1..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit()) && !id.starts_with('0')
@@ -74,13 +84,38 @@ impl Kind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Illust(String),
-    User { id: String, kinds: Vec<Kind> },
+    User {
+        id: String,
+        kinds: Vec<Kind>,
+    },
+    Bookmarks {
+        id: Option<String>,
+        tag: Option<String>,
+    },
 }
 
 fn segments(url: &Url) -> Vec<&str> {
     url.path_segments()
         .map(|s| s.filter(|s| !s.is_empty()).collect())
         .unwrap_or_default()
+}
+
+/// Decode URL tag segments without changing literal plus characters.
+fn percent_decode(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 /// Whether a URL is a Pixiv page handled by this extractor.
@@ -91,7 +126,7 @@ pub fn is_pixiv_url(url: &Url) -> bool {
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Pixiv URL; expected https://www.pixiv.net/artworks/ID or https://www.pixiv.net/users/ID[/illustrations|/manga]",
+            "unsupported Pixiv URL; expected https://www.pixiv.net/artworks/ID or https://www.pixiv.net/users/ID[/illustrations|/manga|/bookmarks/artworks]",
         )
     };
     if !matches!(url.scheme(), "http" | "https")
@@ -114,6 +149,35 @@ pub fn target(url: &Url) -> Result<Target> {
             kinds,
         })
     };
+    let query = |name: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+    };
+    let bookmarks = |raw_id: Option<&str>, path_tag: Option<&str>| {
+        if query("rest").as_deref() == Some("hide")
+            || matches!(query("type").as_deref(), Some("user" | "novel"))
+        {
+            return Err(unsupported());
+        }
+        let tag = match query("tag") {
+            // Upstream parses the query, then unquotes the tag a second time.
+            Some(tag) => Some(percent_decode(&tag).ok_or_else(unsupported)?),
+            None => path_tag
+                .map(|tag| percent_decode(tag).ok_or_else(unsupported))
+                .transpose()?,
+        };
+        if tag
+            .as_ref()
+            .is_some_and(|tag| tag.len() > 1024 || tag.chars().any(char::is_control))
+        {
+            return Err(unsupported());
+        }
+        Ok(Target::Bookmarks {
+            id: raw_id.map(id).transpose()?,
+            tag,
+        })
+    };
     match rest {
         ["artworks", raw] => Ok(Target::Illust(id(raw)?)),
         ["member_illust.php"] => {
@@ -127,6 +191,9 @@ pub fn target(url: &Url) -> Result<Target> {
         ["users", raw] | ["users", raw, "artworks"] => user(raw, vec![Kind::Illust, Kind::Manga]),
         ["users", raw, "illustrations"] => user(raw, vec![Kind::Illust]),
         ["users", raw, "manga"] => user(raw, vec![Kind::Manga]),
+        ["users", raw, "bookmarks", "artworks"] => bookmarks(Some(raw), None),
+        ["users", raw, "bookmarks", "artworks", tag] => bookmarks(Some(raw), Some(tag)),
+        ["bookmark.php"] => bookmarks(query("id").filter(|id| !id.is_empty()).as_deref(), None),
         _ => Err(unsupported()),
     }
 }
@@ -208,6 +275,10 @@ pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
                 .ok_or(Skip::NoMedia)?,
         ),
     }
+    Ok(parse_files(illust, &id, urls))
+}
+
+fn parse_files(illust: &Value, id: &str, urls: Vec<Url>) -> Vec<Media> {
     let username = illust
         .get("user")
         .and_then(|user| string(user, "account"))
@@ -225,8 +296,7 @@ pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
     let timestamp = string(illust, "create_date").and_then(|d| crate::date::parse_date(d).ok());
     let dimension = |key| illust.get(key).and_then(Value::as_u64).filter(|v| *v > 0);
     let headers = BTreeMap::from([("Referer".to_owned(), REFERER.to_owned())]);
-    Ok(urls
-        .into_iter()
+    urls.into_iter()
         .enumerate()
         .map(|(page, url)| {
             let ext = extension(&url);
@@ -245,7 +315,7 @@ pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
                         height,
                         ..FileMetadata::default()
                     }),
-                    post_id: id.clone(),
+                    post_id: id.to_owned(),
                     media_id: format!("{id}_p{page}"),
                     username: username.clone(),
                     caption: caption.clone(),
@@ -258,7 +328,58 @@ pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
                 handoff: BTreeMap::new(),
             }
         })
-        .collect())
+        .collect()
+}
+
+/// The shared allowlist for native and compatibility ugoira frame metadata.
+pub(crate) fn parse_frames(value: &Value) -> Option<Arc<[UgoiraFrame]>> {
+    let raw_frames = value
+        .as_array()
+        .filter(|frames| !frames.is_empty() && frames.len() <= MAX_UGOIRA_FRAMES)?;
+    let frames = raw_frames
+        .iter()
+        .map(|frame| {
+            let file = frame.get("file").and_then(Value::as_str).filter(|file| {
+                !file.is_empty()
+                    && file.len() <= 255
+                    && !matches!(*file, "." | "..")
+                    && !file
+                        .chars()
+                        .any(|c| c.is_control() || matches!(c, '/' | '\\'))
+            })?;
+            let delay = frame
+                .get("delay")
+                .and_then(Value::as_u64)
+                .filter(|delay| *delay <= MAX_UGOIRA_DELAY)?;
+            Some(UgoiraFrame {
+                file: file.to_owned(),
+                delay,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(frames.into())
+}
+
+/// Parse App API animation metadata without downloading or unpacking the ZIP.
+pub fn parse_ugoira(illust: &Value, bytes: &[u8]) -> Result<Vec<Media>> {
+    let invalid = || error("Pixiv returned invalid ugoira metadata");
+    let id = id_of(illust).ok_or_else(invalid)?;
+    let body = json(bytes)?;
+    let data = body.get("ugoira_metadata").ok_or_else(invalid)?;
+    let raw = data
+        .get("zip_urls")
+        .and_then(|urls| string(urls, "medium"))
+        .ok_or_else(invalid)?;
+    let url = media_url(&raw.replacen("_ugoira600x600", "_ugoira1920x1080", 1))
+        .filter(|url| extension(url) == "zip")
+        .ok_or_else(invalid)?;
+    let frames = data
+        .get("frames")
+        .and_then(parse_frames)
+        .ok_or_else(invalid)?;
+    let mut media = parse_files(illust, &id, vec![url]);
+    media[0].metadata.as_mut().expect("Pixiv metadata").frames = Some(frames);
+    Ok(media)
 }
 
 fn json(bytes: &[u8]) -> Result<Value> {
@@ -272,16 +393,14 @@ pub fn parse_detail(bytes: &[u8]) -> Result<Vec<Media>> {
         .get("illust")
         .ok_or_else(|| error("Pixiv response contains no illustration"))?;
     parse_illust(illust).map_err(|skip| match skip {
-        Skip::Ugoira => error(
-            "Pixiv ugoira animations are not supported natively; use --extractor compatibility",
-        ),
+        Skip::Ugoira => error("Pixiv ugoira illustration requires animation metadata"),
         Skip::NoMedia => error("Pixiv illustration contains no supported media"),
     })
 }
 
 /// One user-works page: per-illustration media and the raw `next_url`.
 pub struct Page {
-    pub works: Vec<Vec<Media>>,
+    pub works: Vec<Value>,
     pub next: Option<String>,
 }
 
@@ -292,11 +411,9 @@ pub fn parse_page(bytes: &[u8]) -> Result<Page> {
         .and_then(Value::as_array)
         .ok_or_else(|| error("Pixiv response contains no illustration list"))?;
     Ok(Page {
-        // Ugoira and restricted works are skipped in listings.
-        works: entries
-            .iter()
-            .filter_map(|illust| parse_illust(illust).ok())
-            .collect(),
+        // Keep raw works so animation metadata is fetched only as each work
+        // is consumed, never eagerly for an entire listing page.
+        works: entries.clone(),
         next: string(&body, "next_url").map(str::to_owned),
     })
 }
@@ -373,18 +490,37 @@ pub struct Pixiv {
     oauth_root: Url,
     refresh_token: Option<String>,
     access_token: tokio::sync::Mutex<Option<String>>,
+    authenticated_user: tokio::sync::Mutex<Option<String>>,
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    ugoira: bool,
+}
+
+#[derive(Clone)]
+enum Feed {
+    Works(Kind),
+    Bookmarks { tag: Option<String> },
+}
+
+impl Feed {
+    fn endpoint(&self) -> &'static str {
+        match self {
+            Self::Works(_) => "v1/user/illusts",
+            Self::Bookmarks { .. } => "v1/user/bookmarks/illust",
+        }
+    }
 }
 
 struct ListingState {
-    kinds: VecDeque<Kind>,
-    user: String,
+    kinds: VecDeque<Feed>,
+    active: Option<Feed>,
+    user: Option<String>,
     next: Option<Url>,
     pages: usize,
     pending: VecDeque<ExtractionEvent>,
+    works: VecDeque<Value>,
 }
 
 impl Pixiv {
@@ -396,10 +532,12 @@ impl Pixiv {
             oauth_root: Url::parse("https://oauth.secure.pixiv.net/").expect("static URL"),
             refresh_token: None,
             access_token: tokio::sync::Mutex::new(None),
+            authenticated_user: tokio::sync::Mutex::new(None),
             timeout,
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            ugoira: true,
         })
     }
 
@@ -412,6 +550,12 @@ impl Pixiv {
 
     pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
         self.refresh_token = token.map(str::to_owned);
+        self
+    }
+
+    /// Download animation frame ZIPs (upstream defaults to enabled).
+    pub fn with_ugoira(mut self, enabled: bool) -> Self {
+        self.ugoira = enabled;
         self
     }
 
@@ -472,12 +616,21 @@ impl Pixiv {
             })
             .await?;
         match response {
-            Reply::Ok(body) => json(&body)?
-                .get("access_token")
-                .and_then(Value::as_str)
-                .filter(|token| !token.is_empty() && token.bytes().all(|b| b.is_ascii_graphic()))
-                .map(str::to_owned)
-                .ok_or_else(|| error("Pixiv OAuth response contains no access token")),
+            Reply::Ok(body) => {
+                let data = json(&body)?;
+                // Current OAuth replies wrap the login result in `response`;
+                // accept the historical top-level token format as well.
+                let data = data.get("response").unwrap_or(&data);
+                let access = data
+                    .get("access_token")
+                    .and_then(Value::as_str)
+                    .filter(|token| {
+                        !token.is_empty() && token.bytes().all(|b| b.is_ascii_graphic())
+                    })
+                    .ok_or_else(|| error("Pixiv OAuth response contains no access token"))?;
+                *self.authenticated_user.lock().await = data.get("user").and_then(id_of);
+                Ok(access.to_owned())
+            }
             Reply::Status(status, _) if status.is_client_error() => Err(error(
                 "Pixiv rejected the refresh-token setting; obtain a new refresh token",
             )),
@@ -527,6 +680,24 @@ impl Pixiv {
         .map_err(|_| error("native Pixiv extraction timed out"))?
     }
 
+    async fn work(&self, illust: &Value, listing: bool) -> Result<Vec<Media>> {
+        match parse_illust(illust) {
+            Ok(media) => Ok(media),
+            Err(Skip::Ugoira) if !self.ugoira => Ok(Vec::new()),
+            Err(Skip::Ugoira) => {
+                let id = id_of(illust).ok_or_else(|| error("Pixiv illustration has no ID"))?;
+                let mut endpoint = self
+                    .api_root
+                    .join("v1/ugoira/metadata")
+                    .expect("static path");
+                endpoint.query_pairs_mut().append_pair("illust_id", &id);
+                parse_ugoira(illust, &self.get(&endpoint).await?)
+            }
+            Err(Skip::NoMedia) if listing => Ok(Vec::new()),
+            Err(Skip::NoMedia) => Err(error("Pixiv illustration contains no supported media")),
+        }
+    }
+
     fn finish(&self, mut media: Vec<Media>) -> VecDeque<ExtractionEvent> {
         for item in &mut media {
             self.network.apply_media(item);
@@ -534,26 +705,40 @@ impl Pixiv {
         group(media, "pixiv")
     }
 
-    fn first_page(&self, user: &str, kind: Kind) -> Url {
-        let mut url = self.api_root.join("v1/user/illusts").expect("static path");
-        url.query_pairs_mut()
-            .append_pair("user_id", user)
-            .append_pair("type", kind.as_str());
+    fn first_page(&self, user: &str, feed: &Feed) -> Url {
+        let mut url = self.api_root.join(feed.endpoint()).expect("static path");
+        url.query_pairs_mut().append_pair("user_id", user);
+        match feed {
+            Feed::Works(kind) => {
+                url.query_pairs_mut().append_pair("type", kind.as_str());
+            }
+            Feed::Bookmarks { tag } => {
+                url.query_pairs_mut().append_pair("restrict", "public");
+                if let Some(tag) = tag {
+                    url.query_pairs_mut().append_pair("tag", tag);
+                }
+            }
+        }
         url
     }
 
-    /// `next_url` must stay on the App API origin and user-works endpoint.
-    fn next_url(&self, raw: &str) -> Result<Url> {
+    /// Keep pagination on the authenticated API origin and the selected feed.
+    fn next_url(&self, raw: &str, feed: &Feed, user: &str) -> Result<Url> {
         let url = Url::parse(raw).map_err(|_| error("Pixiv returned an invalid next page"))?;
+        let expected = self.first_page(user, feed);
+        let query: Vec<_> = url.query_pairs().collect();
+        let valid_scope = expected.query_pairs().all(|(key, value)| {
+            let mut values = query.iter().filter(|(name, _)| *name == key);
+            values.next().is_some_and(|(_, actual)| *actual == value) && values.next().is_none()
+        });
         if url.origin() != self.api_root.origin()
-            || url.path()
-                != self
-                    .api_root
-                    .join("v1/user/illusts")
-                    .expect("static")
-                    .path()
+            || url.path() != expected.path()
             || !url.username().is_empty()
             || url.password().is_some()
+            || url.fragment().is_some()
+            || !valid_scope
+            || matches!(feed, Feed::Bookmarks { tag: None })
+                && query.iter().any(|(key, _)| key == "tag")
         {
             return Err(error("Pixiv returned an unexpected next page"));
         }
@@ -561,14 +746,26 @@ impl Pixiv {
     }
 
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
+        if state.user.is_none() {
+            tokio::time::timeout(self.timeout, self.access_token(None))
+                .await
+                .map_err(|_| error("native Pixiv extraction timed out"))??;
+            state.user = self.authenticated_user.lock().await.clone();
+            if state.user.is_none() {
+                return Err(error("Pixiv OAuth response contains no current user ID"));
+            }
+        }
+        let user = state.user.as_deref().expect("resolved listing user");
         let endpoint = match state.next.take() {
             Some(url) => url,
             None => {
-                let Some(kind) = state.kinds.pop_front() else {
+                let Some(feed) = state.kinds.pop_front() else {
                     return Ok(());
                 };
                 state.pages = 0;
-                self.first_page(&state.user, kind)
+                let endpoint = self.first_page(user, &feed);
+                state.active = Some(feed);
+                endpoint
             }
         };
         let page = parse_page(&self.get(&endpoint).await?)?;
@@ -576,12 +773,10 @@ impl Pixiv {
         if state.pages < MAX_PAGES
             && let Some(next) = page.next
         {
-            state.next = Some(self.next_url(&next)?);
+            state.next =
+                Some(self.next_url(&next, state.active.as_ref().expect("active feed"), user)?);
         }
-        for media in page.works {
-            let events = self.finish(media);
-            state.pending.extend(events);
-        }
+        state.works.extend(page.works);
         Ok(())
     }
 
@@ -604,7 +799,14 @@ impl Pixiv {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/illust/detail").expect("static");
                     endpoint.query_pairs_mut().append_pair("illust_id", &id);
-                    let media = parse_detail(&self.get(&endpoint).await?)?;
+                    let body = json(&self.get(&endpoint).await?)?;
+                    let illust = body
+                        .get("illust")
+                        .ok_or_else(|| error("Pixiv response contains no illustration"))?;
+                    if id_of(illust).as_deref() != Some(id.as_str()) {
+                        return Err(error("Pixiv returned an unexpected illustration"));
+                    }
+                    let media = self.work(illust, false).await?;
                     Ok::<_, crate::Error>(stream::iter(self.finish(media).into_iter().map(Ok)))
                 })
                 .map(|result| match result {
@@ -614,20 +816,33 @@ impl Pixiv {
                 .flatten()
                 .boxed();
             }
-            Target::User { id, kinds } => (id, kinds),
+            Target::User { id, kinds } => (
+                Some(id),
+                kinds.into_iter().map(Feed::Works).collect::<Vec<_>>(),
+            ),
+            Target::Bookmarks { id, tag } => (id, vec![Feed::Bookmarks { tag }]),
         };
         let state = ListingState {
             kinds: kinds.into(),
+            active: None,
             user,
             next: None,
             pages: 0,
             pending: VecDeque::new(),
+            works: VecDeque::new(),
         };
         stream::unfold(Some(state), move |state| async move {
             let mut state = state?;
             loop {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), Some(state)));
+                }
+                if let Some(work) = state.works.pop_front() {
+                    match self.work(&work, true).await {
+                        Ok(media) => state.pending.extend(self.finish(media)),
+                        Err(e) => return Some((Err(e), Some(state))),
+                    }
+                    continue;
                 }
                 if state.next.is_none() && state.kinds.is_empty() {
                     return None;
@@ -822,6 +1037,109 @@ mod tests {
         assert!(!valid_media_id("42", "43_p0") && !valid_media_id("42", "42_p01"));
     }
 
+    fn animation(id: u64) -> Value {
+        let mut work = illust(id, 1);
+        work["type"] = json!("ugoira");
+        work
+    }
+
+    fn animation_metadata() -> Value {
+        json!({"ugoira_metadata": {
+            "zip_urls": {"medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/01/00/00/00/42_ugoira600x600.zip"},
+            "frames": [{"file": "000002.jpg", "delay": 120},
+                       {"file": "000000.jpg", "delay": 0},
+                       {"file": "000001.jpg", "delay": 80}]
+        }})
+    }
+
+    #[test]
+    fn ugoira_uses_full_resolution_zip_and_preserves_frame_order_and_delays() {
+        let media =
+            parse_ugoira(&animation(42), animation_metadata().to_string().as_bytes()).unwrap();
+        assert_eq!(media.len(), 1);
+        let item = &media[0];
+        assert!(item.url.as_str().ends_with("42_ugoira1920x1080.zip"));
+        assert_eq!(item.filename, "42_p0.zip");
+        assert_eq!(
+            item.headers,
+            BTreeMap::from([("Referer".into(), REFERER.into())])
+        );
+        assert!(matches!(item.job, MediaJob::DirectHttp));
+        let metadata = item.metadata.as_ref().unwrap();
+        assert_eq!(metadata.media_id, "42_p0");
+        assert!(valid_media_id(&metadata.post_id, &metadata.media_id));
+        let frames = metadata.frames.as_ref().unwrap();
+        assert_eq!(
+            frames
+                .iter()
+                .map(|f| (f.file.as_str(), f.delay))
+                .collect::<Vec<_>>(),
+            [("000002.jpg", 120), ("000000.jpg", 0), ("000001.jpg", 80)]
+        );
+        // Inspection and JSON sidecars serialize the same metadata object.
+        assert_eq!(
+            serde_json::to_value(metadata).unwrap()["frames"],
+            animation_metadata()["ugoira_metadata"]["frames"]
+        );
+        assert_eq!(metadata.username.as_deref(), Some("alice"));
+        assert_eq!(metadata.file.as_ref().unwrap().width, Some(1000));
+        let mut already_full = animation_metadata();
+        already_full["ugoira_metadata"]["zip_urls"]["medium"] =
+            json!("https://i.pximg.net/img-zip-ugoira/42_ugoira1920x1080.zip");
+        assert!(parse_ugoira(&animation(42), already_full.to_string().as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn rejects_malformed_or_unsafe_ugoira_metadata() {
+        for value in [
+            json!(null),
+            json!([]),
+            json!({}),
+            json!({"ugoira_metadata": {}}),
+        ] {
+            assert!(parse_ugoira(&animation(42), value.to_string().as_bytes()).is_err());
+        }
+        for raw in [
+            "https://evil.example/42.zip",
+            "https://i.pximg.net:444/x.zip",
+            "http://i.pximg.net/x.zip",
+            "https://a:b@i.pximg.net/x.zip",
+            "https://i.pximg.net/x.jpg",
+        ] {
+            let mut data = animation_metadata();
+            data["ugoira_metadata"]["zip_urls"]["medium"] = json!(raw);
+            assert!(
+                parse_ugoira(&animation(42), data.to_string().as_bytes()).is_err(),
+                "{raw}"
+            );
+        }
+        for frames in [
+            json!([]),
+            json!([{"file": "../x.jpg", "delay": 10}]),
+            json!([{"file": "a\\b.jpg", "delay": 10}]),
+            json!([{"file": "", "delay": 10}]),
+            json!([{"file": "..", "delay": 10}]),
+            json!([{"file": "a\u{0}.jpg", "delay": 10}]),
+            json!([{"file": "a".repeat(256), "delay": 10}]),
+            json!([{"file": "x.jpg", "delay": -1}]),
+            json!([{"file": "x.jpg", "delay": 1.5}]),
+            json!([{"file": "x.jpg", "delay": MAX_UGOIRA_DELAY + 1}]),
+            json!([{"file": "x.jpg"}]),
+            json!([{"delay": 10}]),
+            json!(vec![
+                json!({"file": "x.jpg", "delay": 10});
+                MAX_UGOIRA_FRAMES + 1
+            ]),
+        ] {
+            let mut data = animation_metadata();
+            data["ugoira_metadata"]["frames"] = frames;
+            let error = parse_ugoira(&animation(42), data.to_string().as_bytes())
+                .unwrap_err()
+                .to_string();
+            assert_eq!(error, "Pixiv returned invalid ugoira metadata");
+        }
+    }
+
     #[test]
     fn classifies_supported_urls() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
@@ -856,7 +1174,7 @@ mod tests {
             "https://www.pixiv.net/",
             "https://www.pixiv.net/artworks/abc",
             "https://www.pixiv.net/artworks/0123",
-            "https://www.pixiv.net/users/9/bookmarks/artworks",
+            "https://www.pixiv.net/users/9/bookmarks/novels",
             "https://www.pixiv.net/member_illust.php?id=9",
             "https://i.pximg.net/img-original/img/1_p0.png",
             "https://www.pixiv.net:444/artworks/1",
@@ -864,6 +1182,100 @@ mod tests {
         ] {
             assert!(t(raw).is_err(), "{raw}");
         }
+    }
+
+    #[test]
+    fn classifies_public_bookmarks_and_upstream_tag_precedence() {
+        let bookmarks = |id: Option<&str>, tag: Option<&str>| Target::Bookmarks {
+            id: id.map(str::to_owned),
+            tag: tag.map(str::to_owned),
+        };
+        for raw in [
+            "https://www.pixiv.net/users/9/bookmarks/artworks",
+            "https://pixiv.net/en/users/9/bookmarks/artworks/",
+            "https://www.pixiv.net/bookmark.php?id=9",
+        ] {
+            assert_eq!(
+                target(&Url::parse(raw).unwrap()).unwrap(),
+                bookmarks(Some("9"), None)
+            );
+        }
+        for raw in [
+            "https://www.pixiv.net/bookmark.php",
+            "https://www.pixiv.net/bookmark.php?id=",
+        ] {
+            assert_eq!(
+                target(&Url::parse(raw).unwrap()).unwrap(),
+                bookmarks(None, None)
+            );
+        }
+        for (suffix, tag) in [
+            ("/cat%20ears", "cat ears"),
+            ("/C++", "C++"),
+            ("/%E7%8C%AB", "猫"),
+            ("/old?tag=new+tag", "new tag"),
+            ("/old?tag=%25E7%258C%25AB", "猫"),
+            ("/old?tag=first&tag=second", "first"),
+            ("/old?tag=", ""),
+        ] {
+            let raw = format!("https://www.pixiv.net/users/9/bookmarks/artworks{suffix}");
+            assert_eq!(
+                target(&Url::parse(&raw).unwrap()).unwrap(),
+                bookmarks(Some("9"), Some(tag))
+            );
+        }
+        for raw in [
+            "https://www.pixiv.net/users/9/bookmarks/artworks?rest=hide",
+            "https://www.pixiv.net/bookmark.php?id=9&rest=hide",
+            "https://www.pixiv.net/bookmark.php?type=user",
+            "https://www.pixiv.net/bookmark.php?type=novel",
+            "https://www.pixiv.net/users/9/bookmarks/novels",
+            "https://www.pixiv.net/users/9/following",
+            "https://www.pixiv.net/users/9/bookmarks/artworks/%00",
+            "https://www.pixiv.net/users/9/bookmarks/artworks/%FF",
+            "https://www.pixiv.net/users/09/bookmarks/artworks",
+            "https://u:p@www.pixiv.net/users/9/bookmarks/artworks",
+        ] {
+            assert!(target(&Url::parse(raw).unwrap()).is_err(), "{raw}");
+        }
+        let overlong = format!(
+            "https://www.pixiv.net/users/9/bookmarks/artworks/{}",
+            "a".repeat(1025)
+        );
+        assert!(target(&Url::parse(&overlong).unwrap()).is_err());
+    }
+
+    #[test]
+    fn bookmark_pagination_cannot_change_origin_endpoint_user_visibility_or_tag() {
+        let native = Pixiv::new(Duration::from_secs(2)).unwrap();
+        let feed = Feed::Bookmarks {
+            tag: Some("猫".into()),
+        };
+        let mut next = native.first_page("9", &feed);
+        next.query_pairs_mut().append_pair("max_bookmark_id", "123");
+        assert!(native.next_url(next.as_str(), &feed, "9").is_ok());
+        for raw in [
+            "https://evil.example/v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB",
+            "https://app-api.pixiv.net/v1/user/illusts?user_id=9&restrict=public&tag=%E7%8C%AB",
+            "https://app-api.pixiv.net/v1/user/bookmarks/novel?user_id=9&restrict=public&tag=%E7%8C%AB",
+            "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=10&restrict=public&tag=%E7%8C%AB",
+            "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&restrict=private&tag=%E7%8C%AB",
+            "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&restrict=public&tag=dog",
+            "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&restrict=public",
+            "https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&user_id=10&restrict=public&tag=%E7%8C%AB",
+            "https://u:p@app-api.pixiv.net/v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB",
+        ] {
+            assert_eq!(
+                native.next_url(raw, &feed, "9").unwrap_err().to_string(),
+                "Pixiv returned an unexpected next page",
+                "{raw}"
+            );
+        }
+        assert!(
+            native
+                .next_url(next.as_str(), &Feed::Bookmarks { tag: None }, "9")
+                .is_err()
+        );
     }
 
     #[test]
@@ -896,10 +1308,25 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let responses = responses(&root);
+        listener.set_nonblocking(true).unwrap();
         let task = thread::spawn(move || {
             let mut requests = Vec::new();
             for reply in responses {
-                let (mut stream, _) = listener.accept().unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let (mut stream, _) = loop {
+                    match listener.accept() {
+                        Ok(connection) => break connection,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "missing Pixiv request"
+                            );
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(e) => panic!("Pixiv test accept failed: {e}"),
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -1024,6 +1451,401 @@ mod tests {
         assert!(requests[1].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
         assert!(requests[2].starts_with("GET /v1/user/illusts?user_id=9&type=illust&offset=30 "));
         assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=manga "));
+    }
+
+    #[tokio::test]
+    async fn fetches_authenticated_ugoira_metadata_without_leaking_tokens_to_zip() {
+        let detail = json!({"illust": animation(42)}).to_string();
+        let (root, server) = serve(vec![
+            token("access-secret"),
+            response("200 OK", detail.as_bytes()),
+            response("200 OK", animation_metadata().to_string().as_bytes()),
+        ]);
+        let items = pixiv(root)
+            .stream(&Url::parse("https://www.pixiv.net/artworks/42").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(items.len(), 1);
+        let item = items[0].as_ref().unwrap();
+        assert_eq!(item.filename, "42_p0.zip");
+        assert_eq!(
+            item.metadata
+                .as_ref()
+                .unwrap()
+                .frames
+                .as_ref()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            item.headers,
+            BTreeMap::from([("Referer".into(), REFERER.into())])
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[2].starts_with("GET /v1/ugoira/metadata?illust_id=42 "));
+        assert!(
+            requests[2]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer access-secret")
+        );
+        assert!(!format!("{item:?}").contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn rejects_unexpected_detail_identity_before_fetching_animation_metadata() {
+        for returned_id in [json!(43), json!("43"), json!(null), json!("invalid")] {
+            let mut work = animation(42);
+            work["id"] = returned_id;
+            let detail = json!({"illust": work});
+            let (root, server) = serve(vec![
+                token("access-secret"),
+                response("200 OK", detail.to_string().as_bytes()),
+            ]);
+            let result = pixiv(root)
+                .stream(&Url::parse("https://www.pixiv.net/artworks/42").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(result.len(), 1);
+            assert_eq!(
+                result[0].as_ref().unwrap_err().to_string(),
+                "Pixiv returned an unexpected illustration"
+            );
+            // A metadata request would fail against the closed local listener;
+            // the identity-specific error proves it was rejected beforehand.
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn disabling_ugoira_skips_metadata_requests_for_details_and_listings() {
+        for listing in [false, true] {
+            let body = if listing {
+                json!({"illusts": [animation(42), illust(43, 1)], "next_url": null})
+            } else {
+                json!({"illust": animation(42)})
+            };
+            let (root, server) = serve(vec![
+                token("t"),
+                response("200 OK", body.to_string().as_bytes()),
+            ]);
+            let url = if listing {
+                "https://www.pixiv.net/users/9/illustrations"
+            } else {
+                "https://www.pixiv.net/artworks/42"
+            };
+            let items = pixiv(root)
+                .with_ugoira(false)
+                .stream(&Url::parse(url).unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(items.len(), usize::from(listing), "{items:?}");
+            if listing {
+                assert_eq!(items[0].as_ref().unwrap().filename, "43_p0.jpg");
+            }
+            assert_eq!(server.join().unwrap().len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn listings_fetch_each_animation_only_when_consumed() {
+        for first_animation in [false, true] {
+            let first = if first_animation {
+                animation(42)
+            } else {
+                illust(42, 1)
+            };
+            let body = json!({"illusts": [first, animation(43)], "next_url": null});
+            let mut replies = vec![token("t"), response("200 OK", body.to_string().as_bytes())];
+            if first_animation {
+                replies.push(response(
+                    "200 OK",
+                    animation_metadata().to_string().as_bytes(),
+                ));
+            }
+            let (root, server) = serve(replies);
+            let native = pixiv(root);
+            let mut items =
+                native.stream(&Url::parse("https://www.pixiv.net/users/9/illustrations").unwrap());
+            let first = items.next().await.unwrap().unwrap();
+            assert_eq!(first.metadata.as_ref().unwrap().post_id, "42");
+            assert_eq!(
+                first.metadata.as_ref().unwrap().frames.is_some(),
+                first_animation
+            );
+            drop(items);
+            assert_eq!(
+                server.join().unwrap().len(),
+                if first_animation { 3 } else { 2 }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_animation_does_not_discard_later_listing_works() {
+        let body = json!({"illusts": [animation(42), illust(43, 1)], "next_url": null});
+        let (root, server) = serve(vec![
+            token("t"),
+            response("200 OK", body.to_string().as_bytes()),
+            response("200 OK", b"{\"ugoira_metadata\":{}}"),
+        ]);
+        let items = pixiv(root)
+            .stream(&Url::parse("https://www.pixiv.net/users/9/illustrations").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(items.len(), 2);
+        assert!(
+            items[0]
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("ugoira metadata")
+        );
+        assert_eq!(items[1].as_ref().unwrap().filename, "43_p0.jpg");
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn cancelling_ugoira_metadata_closes_unfinished_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let (started, waiting) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let replies = [
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illust": animation(42)}).to_string().as_bytes(),
+                ),
+            ];
+            for reply in replies {
+                let (mut connection, _) = listener.accept().await.unwrap();
+                let mut request = vec![0; 8192];
+                let count = connection.read(&mut request).await.unwrap();
+                assert_ne!(count, 0, "expected Pixiv API request");
+                connection.write_all(&reply).await.unwrap();
+            }
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 8192];
+            let count = connection.read(&mut request).await.unwrap();
+            assert!(
+                String::from_utf8_lossy(&request[..count])
+                    .starts_with("GET /v1/ugoira/metadata?illust_id=42 ")
+            );
+            connection
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n{")
+                .await
+                .unwrap();
+            started.send(()).unwrap();
+            let count = tokio::time::timeout(Duration::from_secs(2), connection.read(&mut request))
+                .await
+                .expect("cancelled metadata connection remained open")
+                .unwrap();
+            assert_eq!(count, 0);
+        });
+        let extraction = tokio::spawn(async move {
+            pixiv(root)
+                .stream(&Url::parse("https://www.pixiv.net/artworks/42").unwrap())
+                .collect::<Vec<_>>()
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        extraction.abort();
+        assert!(extraction.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn paginates_public_bookmarks_and_preserves_original_work_metadata_and_archive_ids() {
+        let page = |works: Vec<Value>, next: Option<Url>| {
+            response(
+                "200 OK",
+                json!({"illusts": works, "next_url": next})
+                    .to_string()
+                    .as_bytes(),
+            )
+        };
+        let (root, server) = serve_with(|root| {
+            let next = root.join("v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB&max_bookmark_id=100").unwrap();
+            vec![
+                token("bookmark-access"),
+                page(vec![illust(41, 2)], Some(next)),
+                page(vec![animation(42)], None),
+                response("200 OK", animation_metadata().to_string().as_bytes()),
+            ]
+        });
+        let native = pixiv(root);
+        let items = native
+            .stream(
+                &Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks/%E7%8C%AB").unwrap(),
+            )
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["41_p0.png", "41_p1.png", "42_p0.zip"]
+        );
+        let ordinary = parse_illust(&illust(41, 2)).unwrap();
+        assert_eq!(items[0].archive_key(), ordinary[0].archive_key());
+        assert_eq!(items[1].archive_key(), ordinary[1].archive_key());
+        assert_eq!(
+            items[0].metadata.as_ref().unwrap().username.as_deref(),
+            Some("alice")
+        );
+        assert_eq!(
+            items[2]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .frames
+                .as_ref()
+                .unwrap()
+                .len(),
+            3
+        );
+        for item in &items {
+            assert_eq!(
+                item.headers,
+                BTreeMap::from([("Referer".into(), REFERER.into())])
+            );
+            assert!(!format!("{item:?}").contains("bookmark-access"));
+        }
+        let requests = server.join().unwrap();
+        assert!(
+            requests[1].starts_with(
+                "GET /v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB "
+            )
+        );
+        assert!(requests[2].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public&tag=%E7%8C%AB&max_bookmark_id=100 "));
+        assert!(requests[3].starts_with("GET /v1/ugoira/metadata?illust_id=42 "));
+        for request in &requests[1..] {
+            assert!(
+                request
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer bookmark-access")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn own_bookmarks_resolve_oauth_user_from_upstream_response_envelope() {
+        for nested in [false, true] {
+            let login = json!({"access_token": "current-user-access", "user": {"id": "17"}});
+            let login = if nested {
+                json!({"response": login})
+            } else {
+                login
+            };
+            let (root, server) = serve(vec![
+                response("200 OK", login.to_string().as_bytes()),
+                response(
+                    "200 OK",
+                    json!({"illusts": [illust(42, 1)], "next_url": null})
+                        .to_string()
+                        .as_bytes(),
+                ),
+            ]);
+            let items = pixiv(root)
+                .stream(&Url::parse("https://www.pixiv.net/bookmark.php?tag=cat+ears").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].as_ref().unwrap().filename, "42_p0.jpg");
+            let requests = server.join().unwrap();
+            assert!(requests[1].starts_with(
+                "GET /v1/user/bookmarks/illust?user_id=17&restrict=public&tag=cat+ears "
+            ));
+            assert!(
+                requests[1]
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer current-user-access")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn own_bookmarks_require_valid_oauth_user_without_guessing_or_echoing_login() {
+        for user in [json!(null), json!({"id": "bad-id"}), json!({"id": "0"})] {
+            let login = json!({"response": {"access_token": "sensitive-access", "user": user}});
+            let (root, server) = serve(vec![response("200 OK", login.to_string().as_bytes())]);
+            let result = pixiv(root)
+                .stream(&Url::parse("https://www.pixiv.net/bookmark.php").unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(result.len(), 1);
+            assert_eq!(
+                result[0].as_ref().unwrap_err().to_string(),
+                "Pixiv OAuth response contains no current user ID"
+            );
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn bookmark_pagination_and_animation_requests_are_lazy() {
+        let (root, server) = serve_with(|root| {
+            let next = root
+                .join("v1/user/bookmarks/illust?user_id=9&restrict=public&max_bookmark_id=100")
+                .unwrap();
+            vec![
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illusts": [illust(42, 1), animation(43)],
+                "next_url": next})
+                    .to_string()
+                    .as_bytes(),
+                ),
+            ]
+        });
+        let native = pixiv(root);
+        let mut items =
+            native.stream(&Url::parse("https://www.pixiv.net/bookmark.php?id=9").unwrap());
+        assert_eq!(items.next().await.unwrap().unwrap().filename, "42_p0.jpg");
+        drop(items);
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn bookmarks_reject_unexpected_pagination_before_sending_authorization() {
+        let (root, server) = serve_with(|root| {
+            let next = root
+                .join("v1/user/bookmarks/illust?user_id=9&restrict=private")
+                .unwrap();
+            vec![
+                token("t"),
+                response(
+                    "200 OK",
+                    json!({"illusts": [illust(42, 1)],
+                "next_url": next})
+                    .to_string()
+                    .as_bytes(),
+                ),
+            ]
+        });
+        let result = pixiv(root)
+            .stream(&Url::parse("https://www.pixiv.net/users/9/bookmarks/artworks").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].as_ref().unwrap_err().to_string(),
+            "Pixiv returned an unexpected next page"
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     #[tokio::test]

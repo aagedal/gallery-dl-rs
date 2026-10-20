@@ -236,6 +236,16 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
     })
 }
 
+fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
+    match routed_site(url, extractor) {
+        Some("mastodon") => {
+            gallery_dl_rs::mastodon::instance_category(url.host_str().unwrap()).unwrap()
+        }
+        Some(category) => category,
+        None => "direct",
+    }
+}
+
 fn parse_sleep(value: &str) -> std::result::Result<gallery_dl_rs::sleep::SleepRange, String> {
     gallery_dl_rs::sleep::SleepRange::parse(value).map_err(|e| e.to_string())
 }
@@ -312,6 +322,15 @@ async fn run(args: Args) -> Result<()> {
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || gallery_dl_rs::twitter::is_search_url(&url)
                             || gallery_dl_rs::twitter::is_collection_url(&url)
+                            || extract::social_site(&url) == Some("bluesky")
+                            || matches!(
+                                gallery_dl_rs::pixiv::target(&url),
+                                Ok(gallery_dl_rs::pixiv::Target::Bookmarks { .. })
+                            )
+                            || matches!(
+                                gallery_dl_rs::mastodon::target(&url),
+                                Ok(gallery_dl_rs::mastodon::Target::Collection { .. })
+                            )
                             || (extract::social_site(&url) == Some("twitter")
                                 && (settings["twitter"].options.quoted == Some(true)
                                     || settings["twitter"].options.expand == Some(true)
@@ -324,9 +343,9 @@ async fn run(args: Args) -> Result<()> {
                                             )
                                         ))))
                     });
-                    let selected_settings = extract::http_url(&source).ok().map(|url| {
-                        &settings[routed_site(&url, args.extractor).unwrap_or("direct")]
-                    });
+                    let selected_settings = extract::http_url(&source)
+                        .ok()
+                        .map(|url| &settings[settings_category(&url, args.extractor)]);
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
@@ -404,6 +423,9 @@ async fn run(args: Args) -> Result<()> {
                     | "gelbooru"
                     | "safebooru"
                     | "mastodon"
+                    | "mastodon.social"
+                    | "pawoo"
+                    | "baraag"
                     | "kemono"
                     | "coomer"
                     | "pixeldrain"
@@ -595,7 +617,7 @@ struct Extractors {
     bluesky: OnceCell<Result<gallery_dl_rs::bluesky::Bluesky>>,
     reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
-    mastodon: OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>,
+    mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 3],
     kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
     imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
@@ -635,7 +657,7 @@ fn extract_input<'a>(
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
         {
-            let configured = &settings[category];
+            let configured = &settings[settings_category(&url, extractor)];
             let options = &configured.options;
             match extractor {
                 Extractor::Native if category == "instagram" => {
@@ -766,7 +788,20 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::bluesky::Bluesky::new(backend.timeout).and_then(
                                 |native| {
+                                    if options.videos
+                                        == Some(gallery_dl_rs::twitter::VideoMode::Ytdl)
+                                    {
+                                        return Err(error(
+                                            "native Bluesky videos must be a boolean",
+                                        ));
+                                    }
                                     native
+                                        .with_selection(gallery_dl_rs::bluesky::Selection {
+                                            reposts: options.reposts.unwrap_or(false),
+                                            videos: options.videos
+                                                != Some(gallery_dl_rs::twitter::VideoMode::Skip),
+                                            quoted: options.quoted.unwrap_or(false),
+                                        })
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -795,8 +830,12 @@ fn extract_input<'a>(
                     native.events(&url)
                 }
                 Extractor::Native if category == "mastodon" => {
-                    let native = extractors
-                        .mastodon
+                    let host = url.host_str().expect("Mastodon input host");
+                    let slot = gallery_dl_rs::mastodon::INSTANCES
+                        .iter()
+                        .position(|candidate| *candidate == host)
+                        .expect("supported instance");
+                    let native = extractors.mastodon[slot]
                         .get_or_init(|| async {
                             gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
                                 |native| {
@@ -807,12 +846,24 @@ fn extract_input<'a>(
                                             "native Mastodon replies must be a boolean",
                                         ));
                                     }
+                                    if options.cards == Some(gallery_dl_rs::twitter::CardMode::Ytdl)
+                                    {
+                                        return Err(error(
+                                            "native Mastodon cards must be a boolean",
+                                        ));
+                                    }
                                     native
+                                        .with_access_token_for(
+                                            host,
+                                            options.access_token.as_deref(),
+                                        )?
                                         .with_selection(gallery_dl_rs::mastodon::SelectionOptions {
                                             reblogs: options.reblogs.unwrap_or(false),
                                             replies: options.replies
                                                 != Some(gallery_dl_rs::twitter::ReplyMode::Skip),
                                             text_posts: options.text_posts.unwrap_or(false),
+                                            cards: options.cards
+                                                == Some(gallery_dl_rs::twitter::CardMode::Files),
                                         })
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
@@ -1043,6 +1094,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_ugoira(options.ugoira.unwrap_or(true))
                                     .with_refresh_token(options.refresh_token.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1113,7 +1165,9 @@ fn extract_input<'a>(
                             retweets: (category == "twitter")
                                 .then_some(options.retweets)
                                 .flatten(),
-                            quoted: (category == "twitter").then_some(options.quoted).flatten(),
+                            quoted: matches!(category, "twitter" | "bluesky")
+                                .then_some(options.quoted)
+                                .flatten(),
                             expand: (category == "twitter").then_some(options.expand).flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
                             text_tweets: (category == "twitter")
@@ -1126,6 +1180,11 @@ fn extract_input<'a>(
                                 .then(|| options.size.clone())
                                 .flatten(),
                             mp4: (category == "imgur").then_some(options.mp4).flatten(),
+                            reposts: (category == "bluesky").then_some(options.reposts).flatten(),
+                            ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
+                            access_token: (category == "mastodon")
+                                .then(|| options.access_token.clone())
+                                .flatten(),
                             reblogs: (category == "mastodon")
                                 .then_some(options.reblogs)
                                 .flatten(),
@@ -1136,11 +1195,15 @@ fn extract_input<'a>(
                             articles: (category == "twitter")
                                 .then_some(options.articles)
                                 .flatten(),
-                            cards: (category == "twitter").then_some(options.cards).flatten(),
+                            cards: matches!(category, "twitter" | "mastodon")
+                                .then_some(options.cards)
+                                .flatten(),
                             cards_blacklist: (category == "twitter")
                                 .then(|| options.cards_blacklist.clone())
                                 .flatten(),
-                            videos: (category == "twitter").then_some(options.videos).flatten(),
+                            videos: matches!(category, "twitter" | "bluesky")
+                                .then_some(options.videos)
+                                .flatten(),
                             previews: (category == "twitter")
                                 .then_some(options.previews)
                                 .flatten(),
@@ -1180,6 +1243,23 @@ fn extract_input<'a>(
             return Err(error(
                 "unsupported URL; expected a social URL or direct media file",
             ));
+        };
+        let input = if routed_site(&url, extractor) == Some("mastodon") {
+            let category = settings_category(&url, extractor);
+            input
+                .map(move |event| {
+                    event.map(|mut event| {
+                        match &mut event {
+                            ExtractionEvent::Media(media) => media.category = category.into(),
+                            ExtractionEvent::Post(post) => post.category = category.into(),
+                            ExtractionEvent::EndPost => {}
+                        }
+                        event
+                    })
+                })
+                .boxed()
+        } else {
+            input
         };
         Ok(input)
     })
@@ -1247,6 +1327,9 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         previews: None,
         mp4: None,
         reblogs: None,
+        reposts: None,
+        ugoira: None,
+        access_token: None,
         text_posts: None,
         unavailable: None,
         text_tweets: if args.text_tweets {
@@ -1296,6 +1379,9 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "gelbooru",
         "safebooru",
         "mastodon",
+        "mastodon.social",
+        "pawoo",
+        "baraag",
         "kemono",
         "coomer",
         "pixeldrain",

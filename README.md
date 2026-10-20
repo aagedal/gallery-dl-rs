@@ -232,20 +232,37 @@ as unsupported. Compatibility mode sends Imgur URLs to the backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
-feeds (`bsky.app/profile/NAME`, `/media`, `/posts`), where NAME is a handle or
-DID. It reads the public, unauthenticated AppView (`public.api.bsky.app`):
-handles resolve via `com.atproto.identity.resolveHandle`, posts via
+feeds (`bsky.app/profile/NAME`, `/media`, `/posts`), custom feeds
+(`/profile/NAME/feed/RKEY`) and lists (`/profile/NAME/lists/RKEY`), where NAME
+is a handle or DID. It reads the public, unauthenticated AppView
+(`public.api.bsky.app`): handles resolve via `com.atproto.identity.resolveHandle`, posts via
 `getPostThread` and feeds via `getAuthorFeed` (`posts_with_media` for the bare
-profile and `/media`, `posts_no_replies` for `/posts`; cursor pagination capped
-at 1,000 pages of 100). Images and videos (also inside `recordWithMedia`) are
-downloaded as full-size blobs from
+profile and `/media`, `posts_and_author_threads` for `/posts`; cursor pagination
+capped at 1,000 pages of 100). Custom feeds use `getFeed` with an
+`app.bsky.feed.generator` record URI; lists use `getListFeed` with an
+`app.bsky.graph.list` record URI. Their owners resolve once, while returned
+posts retain their individual authors; the author-feed `reposts` restriction
+does not filter mixed-author feed/list results. All feed/list pagination is
+capped at 1,000 pages, follows opaque cursors (up to 1 KiB), and stops on
+repeated cursors; invalid or oversized cursors are explicit errors. Images and videos (also inside
+`recordWithMedia`) are downloaded as full-size blobs from
 `https://bsky.social/xrpc/com.atproto.sync.getBlob?did=DID&cid=CID`, built from
-validated identifiers only. Reposts, pinned entries and media-free posts are
-skipped in feeds; quoted posts are not followed. `post_id` is the record key,
-`media_id`/`id` the blob CID, `username` the handle, `caption` the post text,
-`timestamp` from `createdAt`; files carry aspect-ratio width/height, alt text
-and MIME type. Default filenames are `{post_id}_{index}.{extension}`; archive
-identity is (DID, CID). Compatibility mode sends Bluesky URLs to the backend.
+validated identifiers only. `extractor.bluesky.reposts` defaults to false and
+selects the underlying author; own pinned posts retain their normal identity.
+`extractor.bluesky.videos` defaults to true; false omits video blobs.
+`extractor.bluesky.quoted` defaults to false; true follows quoted-post media
+using hydrated quote records when available, fetching missing records only as
+the stream reaches them. Quote URI, CID and author identities are checked,
+blocked/detached/deleted quote views are skipped, and chains stop on cycles or
+fail beyond 32 quotes. Date filters preserve later newer posts after older pins,
+reposts, or quotes. Bare profiles use the posts feed when `quoted` or
+`reposts` is true; explicit `/media` retains its media filter. Media-free posts
+are skipped. `post_id` is the underlying record key, `media_id`/`id` the blob
+CID, `username` the underlying handle, `caption` the post text, `timestamp`
+from `createdAt`; files carry aspect-ratio width/height, alt text and MIME type.
+Default filenames are `{post_id}_{index}.{extension}`; archive identity is
+(DID, CID), including quoted and reposted media. Compatibility mode sends
+Bluesky URLs to the backend.
 
 Experimental native Reddit extraction (`--extractor native`, category `reddit`)
 accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),
@@ -276,25 +293,41 @@ unauthenticated API requests and restricted content stays hidden. Plain CDN file
 links stay direct downloads.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
-mastodon.social, pawoo.net and baraag.net under one `mastodon` category (upstream
-uses separate `mastodon.social`, `pawoo` and `baraag` categories; the host is
-exposed as `instance`). Supported: statuses (`/@USER/ID`, `/web/statuses/ID`)
-and user media timelines (`/@USER`, `/@USER/media`, including `@user@remote`
-accounts) via the public REST API, 40 per page with Link/`max_id` paging capped
-at 100 pages. Image, GIFV, video and audio attachments are downloaded from any
-HTTPS CDN host without API headers or cookies. Under `extractor.mastodon`,
-`reblogs` defaults to false, `replies` to true, and `text-posts` to false.
+mastodon.social, pawoo.net and baraag.net with upstream categories
+`mastodon.social`, `pawoo` and `baraag`; the host is also exposed as `instance`.
+Supported: statuses (`/@USER/ID`, `/web/statuses/ID`), user timelines
+(`/@USER`, `/@USER/media`, `/users/USER`, including `@user@remote` and numeric
+`id:ID` accounts), `/bookmarks`, `/favourites`, `/lists/ID`, and `/tags/TAG`.
+Hashtags accept Unicode letters/numbers and underscores. Pages contain up to 40
+statuses and traverse lazily, capped at 100 pages. Collection cursors come from
+all `Link` headers, including bookmark cursors distinct from status IDs. Date
+selection over collections preserves later newer posts in source order.
+
+Shared options belong under `extractor.mastodon`; instance settings under
+`extractor["mastodon.social"]`, `extractor.pawoo`, and `extractor.baraag` override
+them. Set `access-token` only in an instance scope; the token is bound to that
+instance's HTTPS API origin and never attached to media or other instances.
+An empty string or false disables the native token. OAuth login/cache discovery
+is not implemented. Explicit credentials and selection options also forward to
+the compatibility backend for their input instance.
+
+`reblogs` and `cards` default to false, `replies` to true, and `text-posts` to false.
 Enabling reblogs includes original attachments under the outer status identity;
 attachment archive IDs remain the same as direct extraction. `replies: false`
 filters replies locally and in account API requests. `text-posts: true` emits
-metadata-only post boundaries for statuses without selected files, so post ranges
-and filters include them. Without it, media-less statuses are skipped (a
-media-less single status is an error). These explicit options also forward to
-the compatibility backend. Native Mastodon `replies` accepts booleans only.
-`post_id` is the status ID, `media_id` the attachment ID, `username` the account `acct`, caption the
-status HTML with tags stripped. Default filenames are
-`{post_id}_{media_id}.{extension}`; archive identity is (instance, attachment ID).
-No access tokens are sent, so private/followers-only content stays hidden.
+metadata-only post boundaries, so post ranges and filters include statuses
+without files. `cards: true` appends the outer status's card preview image after
+attachments and requests non-media-only account pages. Native `cards` accepts
+booleans only. Numeric preview-thumbnail path IDs share upstream's `cardID`
+archive identity; unknown thumbnail paths download without a stable archive key.
+Otherwise media-less statuses are skipped (a media-less single
+status is an error). Native `replies` accepts booleans only. Image, GIFV, video
+and audio attachments are served from HTTPS CDN hosts without API credentials.
+`post_id`/`id` is the status ID, `media_id` the attachment ID, `username` the account
+`acct`, and caption the status HTML with tags stripped. Default filenames remain
+`{post_id}_{media_id}.{extension}`. Default category directories now use the
+upstream instance labels; existing files are not moved. Stable archive identity
+remains (instance, attachment ID), including for older `mastodon` archive entries.
 
 Experimental native Kemono/Coomer extraction (`--extractor native`) covers
 kemono.cr/.su/.party (`kemono` category) and coomer.st/.su/.party (`coomer`).
@@ -357,10 +390,24 @@ access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
 `illust/detail`) and `users/ID` (illustrations then manga),
 `users/ID/illustrations`, `users/ID/manga` (`user/illusts`, `next_url` paging
-capped at 200 pages per type). Media are original `i.pximg.net` files
+capped at 200 pages per type). Public illustration bookmarks support
+`users/ID/bookmarks/artworks[/TAG]` and `bookmark.php[?id=ID]` through
+`user/bookmarks/illust` (`restrict=public`, at most 200 pages). Without `id`,
+the legacy bookmark URL uses the authenticated user's ID from OAuth.
+A `tag` query overrides the path tag, following upstream's URL decoding.
+Pagination preserves the selected user, public visibility, and tag;
+private (`rest=hide`), following (`type=user`), and novel bookmarks remain
+unsupported. Bookmarked files retain the original artist metadata and
+(illustration, page) archive identity. Media are original `i.pximg.net` files
 (`meta_single_page`/`meta_pages`) downloaded with
 `Referer: https://app-api.pixiv.net/` (same-origin redirects only). Ugoira
-animations fail for single works and are skipped in listings. `post_id`/`id` is
+animations fetch `ugoira/metadata` lazily per work and download the frame ZIP
+(upstream's `600x600` ZIP URL is upgraded to `1920x1080`). Ordered `frames`
+metadata contains each ZIP filename and its millisecond `delay`, available in
+JSON inspection, sidecars, and filter/naming context; `ugoira: false` skips
+animations without fetching their metadata. Bookmark date selection preserves
+later newer artworks in source order. Original individual-frame mode
+and animation conversion are not implemented. `post_id`/`id` is
 the illustration ID, `media_id` `ID_pN`, `username` the account, caption the
 title plus HTML-stripped caption, with `create_date` timestamp and page-0
 width/height. Default filenames are `{id}_p{N}.{extension}`; archive identity
@@ -1176,7 +1223,14 @@ may remain after a rejected response.
 [gallery-dl's JSON configuration structure](https://gdl-org.github.io/docs/configuration.html).
 It works with native and compatibility extraction;
 `--config` remains a separate file passed only to the compatibility executable.
-Neither configuration file is loaded automatically.
+When no explicit native configuration is given, discovery checks
+`$GALLERY_DL_RS_CONFIG` first. On Unix it then checks
+`$XDG_CONFIG_HOME/gallery-dl-rs/config.json` (or
+`~/.config/gallery-dl-rs/config.json`) and `~/.gallery-dl-rs.conf`; on Windows,
+`%APPDATA%/gallery-dl-rs/config.json` and `%USERPROFILE%/gallery-dl-rs.conf`.
+The first existing file is loaded. `--native-config-ignore` disables discovery.
+Upstream gallery-dl config files are not discovered because the native schema
+is a strict subset. Compatibility config is loaded only when explicitly selected.
 
 ```json
 {
@@ -1201,14 +1255,15 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `file-filter`, `image-filter`, `post-range`, `post-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
-`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `text-posts`,
+`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
 Site-specific media options affect their respective extractors. API credentials
-are accepted only in the documented category scopes. Precedence is
+are accepted only in the documented category scopes. Mastodon instance scopes
+inherit `extractor.mastodon` before applying their own overrides. Precedence is
 built-in defaults, extractor defaults, category settings, root settings, then
 explicit CLI flags. In particular, an explicit `--retries 2` or `--timeout 60`
 overrides a different configured value even though it equals the built-in default.

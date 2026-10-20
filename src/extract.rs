@@ -95,11 +95,14 @@ impl Media {
                 )
             }
             // Mastodon attachment IDs are scoped to their instance.
-            "mastodon" => {
+            "mastodon" | "mastodon.social" | "pawoo" | "baraag" => {
                 let post = self.metadata.as_ref()?;
                 let instance = post.instance.as_deref()?;
                 if !crate::mastodon::INSTANCES.contains(&instance)
-                    || !crate::mastodon::valid_id(&post.media_id)
+                    || (self.category != "mastodon"
+                        && crate::mastodon::instance_category(instance)
+                            != Some(self.category.as_str()))
+                    || !crate::mastodon::valid_media_id(&post.media_id)
                 {
                     return None;
                 }
@@ -318,6 +321,9 @@ impl Media {
 pub struct PostMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<crate::file_metadata::FileMetadata>,
+    /// Ordered Pixiv ugoira ZIP member names and millisecond frame delays.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frames: Option<std::sync::Arc<[crate::pixiv::UgoiraFrame]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<crate::twitter::CommunityMetadata>,
     /// Community feeds use their own archive namespace; ordinary posts do not.
@@ -504,6 +510,9 @@ pub struct BackendOptions {
     pub previews: Option<bool>,
     pub mp4: Option<bool>,
     pub reblogs: Option<bool>,
+    pub reposts: Option<bool>,
+    pub ugoira: Option<bool>,
+    pub access_token: Option<String>,
     pub text_posts: Option<bool>,
     pub unavailable: Option<bool>,
     pub text_tweets: Option<bool>,
@@ -639,11 +648,18 @@ impl Backend {
         for (name, value) in [
             ("mp4", options.mp4),
             ("reblogs", options.reblogs),
+            ("reposts", options.reposts),
+            ("ugoira", options.ugoira),
             ("text-posts", options.text_posts),
         ] {
             if let Some(value) = value {
                 command.arg("--option").arg(format!("{name}={value}"));
             }
+        }
+        if let Some(token) = &options.access_token {
+            command
+                .arg("--option")
+                .arg(format!("access-token={}", serde_json::json!(token)));
         }
         if let Some(fallback) = options.fallback {
             command.arg("--option").arg(format!("fallback={fallback}"));
@@ -962,6 +978,14 @@ fn compatibility_metadata(
         .and_then(Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
         .unwrap_or(0);
+    let index = if category == "pixiv" {
+        data.get("num")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok()?.checked_add(1))
+            .unwrap_or(0)
+    } else {
+        index
+    };
     let (post_id, media_id, shortcode, username, caption) = match category {
         "instagram" => (
             id("post_id"),
@@ -999,6 +1023,53 @@ fn compatibility_metadata(
                 string("caption"),
             )
         }
+        "mastodon" | "mastodon.social" | "pawoo" | "baraag" => (
+            id("id"),
+            data.get("media")
+                .and_then(|m| m.get("id"))
+                .and_then(Value::as_str)
+                .filter(|id| crate::mastodon::valid_media_id(id))
+                .unwrap_or_default()
+                .into(),
+            String::new(),
+            data.get("account")
+                .and_then(|a| a.get("acct"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            string("content").map(|s| crate::mastodon::strip_html(&s)),
+        ),
+        "bluesky" => (
+            id("post_id"),
+            string("filename")
+                .filter(|id| crate::bluesky::valid_cid(id))
+                .unwrap_or_default(),
+            String::new(),
+            data.get("author")
+                .and_then(|author| author.get("handle"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            string("text"),
+        ),
+        "pixiv" => {
+            let post_id = id("id");
+            let media_id = data
+                .get("num")
+                .and_then(Value::as_u64)
+                .filter(|page| *page < 10000)
+                .map(|page| format!("{post_id}_p{page}"))
+                .unwrap_or_default();
+            (
+                post_id,
+                media_id,
+                String::new(),
+                data.get("user")
+                    .and_then(|user| user.get("account"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                string("title")
+                    .or_else(|| string("caption").map(|s| crate::mastodon::strip_html(&s))),
+            )
+        }
         _ => return None,
     };
     let context_id = |key: &str| {
@@ -1011,6 +1082,9 @@ fn compatibility_metadata(
     };
     Some(PostMetadata {
         file: crate::file_metadata::compatibility(data),
+        frames: (category == "pixiv")
+            .then(|| data.get("frames").and_then(crate::pixiv::parse_frames))
+            .flatten(),
         community: (category == "twitter")
             .then(|| {
                 data.get("community")
@@ -1026,7 +1100,14 @@ fn compatibility_metadata(
         quoted_by_id: context_id("quote_id"),
         reposted_by_id: None,
         article: compatibility_article(data.get("article")),
-        instance: None,
+        instance: matches!(
+            category,
+            "mastodon" | "mastodon.social" | "pawoo" | "baraag"
+        )
+        .then(|| {
+            string("instance").filter(|host| crate::mastodon::INSTANCES.contains(&host.as_str()))
+        })
+        .flatten(),
         post_id,
         media_id,
         shortcode,

@@ -520,6 +520,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                         .map(std::sync::Arc::from),
                     ..Default::default()
                 }),
+                frames: None,
                 community: None,
                 community_archive: false,
                 retweet_id: None,
