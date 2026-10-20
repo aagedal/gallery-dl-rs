@@ -794,6 +794,8 @@ async fn attempt_download(
         .await?;
     let mut stream = response.bytes_stream();
     let mut received = 0u64;
+    let check_placeholder = kemono_txt_resource(media);
+    let mut prefix = Vec::new();
     loop {
         io.set_remote(true);
         let chunk = stream.next().await;
@@ -809,6 +811,9 @@ async fn attempt_download(
         if let Some(rejection) = limits.check_max(received) {
             return Ok(Outcome::Filtered(rejection));
         }
+        if check_placeholder && prefix.len() < 9 {
+            prefix.extend_from_slice(&chunk[..chunk.len().min(9 - prefix.len())]);
+        }
         file.write_all(&chunk).await?;
         io.throttle(chunk.len()).await;
     }
@@ -821,6 +826,9 @@ async fn attempt_download(
     }
     if let Some(rejection) = limits.check(received) {
         return Ok(Outcome::Filtered(rejection));
+    }
+    if check_placeholder && received == 9 && prefix == b"not found" {
+        return Err(terminal("Kemono media returned a missing-file placeholder"));
     }
     file.flush().await?;
     let file = file.into_std().await;
@@ -850,11 +858,10 @@ async fn request_media(
     headers: &HeaderMap,
 ) -> std::result::Result<reqwest::Response, Failure> {
     let mut target = media.url.clone();
-    // Kemono/Coomer serve files from the root host, which redirects to an
-    // `nN.` CDN subdomain; those requests carry no credentials.
-    let mut redirects = Redirects::new(&target).allow_subdomains(
-        matches!(media.category.as_str(), "kemono" | "coomer") && media.headers.is_empty(),
-    );
+    // Kemono/Coomer serve files through CDN redirects. Only their public
+    // resource headers may cross that origin boundary.
+    let mut redirects =
+        Redirects::new(&target).allow_subdomains(kemono_public_redirects(media, headers));
     let response = loop {
         client
             .rate_limits
@@ -890,6 +897,95 @@ async fn request_media(
         }
     };
     Ok(response)
+}
+
+fn kemono_public_redirects(media: &Media, headers: &HeaderMap) -> bool {
+    use reqwest::header::{ACCEPT_ENCODING, IF_RANGE, RANGE, REFERER, USER_AGENT};
+    let category = media.category.as_str();
+    if !matches!(category, "kemono" | "coomer") {
+        return false;
+    }
+    let Some(host) = media.url.host_str() else {
+        return false;
+    };
+    let known_host = crate::kemono::category(host) == Some(category)
+        || host
+            .strip_prefix("img.")
+            .is_some_and(|domain| crate::kemono::HOSTS.contains(&(domain, category)));
+    if !known_host
+        || headers.keys().any(|name| {
+            !matches!(
+                *name,
+                USER_AGENT | ACCEPT_ENCODING | RANGE | IF_RANGE | REFERER
+            )
+        })
+    {
+        return false;
+    }
+    let mut referers = headers.get_all(REFERER).iter();
+    if let Some(referer) = referers.next() {
+        if referers.next().is_some() {
+            return false;
+        }
+        let Some(referer) = referer
+            .to_str()
+            .ok()
+            .and_then(|value| url::Url::parse(value).ok())
+        else {
+            return false;
+        };
+        if referer.scheme() != "https"
+            || referer.query().is_some()
+            || referer.fragment().is_some()
+            || referer.host_str().and_then(crate::kemono::category) != Some(category)
+            || !matches!(
+                crate::kemono::target(&referer),
+                Ok(crate::kemono::Target::Post { .. })
+            )
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn kemono_txt_resource(media: &Media) -> bool {
+    matches!(media.category.as_str(), "kemono" | "coomer")
+        && media
+            .url
+            .path()
+            .rsplit('.')
+            .next()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+        && media
+            .filename
+            .rsplit('.')
+            .next()
+            .is_some_and(|ext| !ext.eq_ignore_ascii_case("txt"))
+}
+
+async fn validate_kemono_partial(
+    media: &Media,
+    partial: &mut crate::resume::Partial,
+) -> std::result::Result<(), Failure> {
+    if kemono_txt_resource(media)
+        && partial
+            .has_content(b"not found")
+            .await
+            .map_err(|error| Failure {
+                error,
+                retry: false,
+                fallback: false,
+            })?
+    {
+        partial.reset(None).await.map_err(|error| Failure {
+            error,
+            retry: false,
+            fallback: false,
+        })?;
+        return Err(terminal("Kemono media returned a missing-file placeholder"));
+    }
+    Ok(())
 }
 
 fn check_status(
@@ -1057,6 +1153,7 @@ async fn attempt_resume(
                     _ => None,
                 };
                 let modified = mtime.fixed.or(saved);
+                validate_kemono_partial(media, partial).await?;
                 return partial
                     .publish(path, modified)
                     .await
@@ -1141,6 +1238,7 @@ async fn attempt_resume(
             if let Some(rejection) = limits.check(completed) {
                 return filter_partial(partial, rejection).await;
             }
+            validate_kemono_partial(media, partial).await?;
             return partial
                 .publish(path, modified)
                 .await
@@ -1165,4 +1263,85 @@ async fn filter_partial(
         fallback: false,
     })?;
     Ok(Outcome::Filtered(rejection))
+}
+
+#[cfg(test)]
+mod kemono_redirect_tests {
+    use super::*;
+    use reqwest::{
+        StatusCode,
+        header::{ACCEPT_ENCODING, AUTHORIZATION, COOKIE, LOCATION, REFERER, USER_AGENT},
+    };
+
+    fn media() -> Media {
+        Media {
+            url: url::Url::parse("https://kemono.cr/data/aa/bb/file.jpg").unwrap(),
+            job: MediaJob::DirectHttp,
+            category: "kemono".into(),
+            filename: "file.jpg".into(),
+            metadata: None,
+            headers: Default::default(),
+            handoff: Default::default(),
+        }
+    }
+    #[test]
+    fn public_kemono_headers_follow_cdn_redirects_but_credentials_do_not() {
+        let media = media();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            REFERER,
+            HeaderValue::from_static("https://kemono.cr/patreon/user/42/post/7"),
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static("gallery-dl-rs fixture"),
+        );
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+        let mut location = HeaderMap::new();
+        location.insert(
+            LOCATION,
+            HeaderValue::from_static("https://n1.kemono.cr/data/aa/bb/file.jpg"),
+        );
+        let mut redirects =
+            Redirects::new(&media.url).allow_subdomains(kemono_public_redirects(&media, &headers));
+        assert!(
+            redirects
+                .next(&media.url, StatusCode::FOUND, &location)
+                .unwrap()
+                .is_some()
+        );
+        for credential in [COOKIE, AUTHORIZATION, HeaderName::from_static("x-api-key")] {
+            let mut headers = headers.clone();
+            headers.insert(credential, HeaderValue::from_static("PRIVATE_VALUE"));
+            let mut redirects = Redirects::new(&media.url)
+                .allow_subdomains(kemono_public_redirects(&media, &headers));
+            assert!(
+                redirects
+                    .next(&media.url, StatusCode::FOUND, &location)
+                    .is_err()
+            );
+        }
+    }
+    #[test]
+    fn kemono_redirect_allowance_rejects_private_or_foreign_referers_and_other_origins() {
+        let mut media = media();
+        for referer in [
+            "https://kemono.cr/patreon/user/42/post/7?token=private",
+            "https://private@kemono.cr/patreon/user/42/post/7",
+            "https://kemono.cr/patreon/user/42/post/7#private",
+            "https://coomer.st/onlyfans/user/42/post/7",
+            "https://evil.test/patreon/user/42/post/7",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(REFERER, HeaderValue::from_str(referer).unwrap());
+            assert!(!kemono_public_redirects(&media, &headers));
+        }
+        for url in [
+            "https://evil.test/file.jpg",
+            "https://kemono.cr.evil.test/file.jpg",
+        ] {
+            media.url = url::Url::parse(url).unwrap();
+            assert!(!kemono_public_redirects(&media, &HeaderMap::new()));
+        }
+    }
 }

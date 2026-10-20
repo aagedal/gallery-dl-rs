@@ -887,6 +887,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::kemono::Kemono::new(backend.timeout).and_then(|native| {
                                 native
                                     .with_expand(options.expand.unwrap_or(false))
+                                    .with_selection(options.kemono_selection())
                                     .with_max_posts(options.max_posts)
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1209,7 +1210,15 @@ fn extract_input<'a>(
                                 .then(|| options.posts.clone())
                                 .flatten(),
                             inline: (category == "tumblr").then_some(options.inline).flatten(),
-                            original: (category == "tumblr").then_some(options.original).flatten(),
+                            original: matches!(category, "tumblr" | "kemono" | "coomer")
+                                .then_some(options.original)
+                                .flatten(),
+                            files: matches!(category, "kemono" | "coomer")
+                                .then(|| options.files.clone())
+                                .flatten(),
+                            duplicates: matches!(category, "kemono" | "coomer")
+                                .then_some(options.duplicates)
+                                .flatten(),
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
                             ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
                             access_token: (category == "mastodon")
@@ -1362,6 +1371,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         posts: None,
         inline: None,
         original: None,
+        files: None,
+        duplicates: None,
         username: None,
         password: None,
         user_id: None,

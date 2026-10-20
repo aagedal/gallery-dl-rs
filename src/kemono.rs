@@ -23,7 +23,7 @@ use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -76,6 +76,43 @@ pub enum Target {
         service: String,
         user: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileKind {
+    File,
+    Attachments,
+    Inline,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DuplicateOptions {
+    pub file: bool,
+    pub attachment: bool,
+    pub inline: bool,
+}
+impl DuplicateOptions {
+    pub const fn all() -> Self {
+        Self {
+            file: true,
+            attachment: true,
+            inline: true,
+        }
+    }
+    fn allows(self, kind: FileKind) -> bool {
+        match kind {
+            FileKind::File => self.file,
+            FileKind::Attachments => self.attachment,
+            FileKind::Inline => self.inline,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Selection {
+    pub files: Option<Vec<FileKind>>,
+    pub duplicates: DuplicateOptions,
+    pub original: bool,
 }
 
 pub fn valid_service(service: &str) -> bool {
@@ -296,74 +333,323 @@ fn clean_extension(ext: &str) -> Option<String> {
         .then(|| if ext == "jpeg" { "jpg".into() } else { ext })
 }
 
-/// Parse one post object into its deduplicated files (`file` first, then
-/// `attachments`). Posts without files yield an empty list.
-pub fn parse_post(post: &Value, host: &str, service: &str, user: &str) -> Vec<Media> {
-    let Some(category) = category(host) else {
+const MAX_POST_FILES: usize = 10_000;
+
+fn safe_file_path(path: &str) -> bool {
+    path.len() <= 4096
+        && path.starts_with('/')
+        && path.len() > 1
+        && path[1..].split('/').all(|segment| {
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
+}
+
+fn image_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "jpg"
+            | "jpeg"
+            | "png"
+            | "gif"
+            | "bmp"
+            | "svg"
+            | "psd"
+            | "ico"
+            | "webp"
+            | "avif"
+            | "heic"
+            | "heif"
+    )
+}
+fn archive_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "lzma" | "xz"
+    )
+}
+
+/// Hash recognition follows upstream's `/xx/yy/64-lowercase-hex` pattern.
+fn content_hash(path: &str) -> Option<&str> {
+    let mut parts = path.strip_prefix('/')?.split('/');
+    let hex = |value: &str, len| {
+        value.len() == len
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    };
+    if !hex(parts.next()?, 2) || !hex(parts.next()?, 2) {
+        return None;
+    }
+    let file = parts.next()?;
+    let hash = file.split('.').next()?;
+    (parts.next().is_none() && hex(hash, 64)).then_some(hash)
+}
+
+/// Inline extraction is deliberately limited to upstream's double-quoted src
+/// values on its two canonical origins and safe relative paths.
+fn inline_paths(post: &Value) -> Vec<String> {
+    let Some(content) = post.get("content").and_then(Value::as_str) else {
         return Vec::new();
     };
-    let Ok(identity) = post_identity(post, Some((service, user)), None) else {
-        return Vec::new();
-    };
-    let id = identity.id.clone();
-    let caption: Option<Arc<str>> = string(post, "title").map(Arc::from);
-    let timestamp = ["published", "added"]
-        .into_iter()
-        .find_map(|key| string(post, key).and_then(|d| crate::date::parse_date(d).ok()));
-    let username: Arc<str> = Arc::from(user);
-    let files = post.get("file").into_iter().chain(
-        post.get("attachments")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten(),
-    );
-    let mut seen = HashSet::new();
-    let mut media = Vec::new();
-    for file in files {
-        let Some(path) = string(file, "path") else {
+    let mut paths = Vec::new();
+    for (at, _) in content.match_indices("src=\"") {
+        let rest = &content[at + 5..];
+        let Some((raw, _)) = rest.split_once('"') else {
             continue;
         };
-        let Some((hash, ext)) = split_path(path) else {
-            continue;
-        };
-        if !seen.insert(path.to_owned()) {
+        if raw.len() > 4096 {
             continue;
         }
-        let name = string(file, "name");
-        let Ok(url) = Url::parse(&format!("https://{host}/data{path}")) else {
+        let normalized = raw.replace('\\', "/");
+        if normalized.contains('%') || normalized.split('/').any(|part| matches!(part, "." | ".."))
+        {
+            continue;
+        }
+        let path = if normalized.starts_with('/') {
+            normalized
+        } else {
+            let Some(path) = [
+                "https://kemono.cr",
+                "http://kemono.cr",
+                "https://coomer.st",
+                "http://coomer.st",
+            ]
+            .into_iter()
+            .find_map(|origin| normalized.strip_prefix(origin)) else {
+                continue;
+            };
+            path.to_owned()
+        };
+        if safe_file_path(&path)
+            && (path.starts_with("/inline/")
+                || content_hash(&path).is_some_and(|_| {
+                    path.rsplit_once('.')
+                        .is_some_and(|(_, ext)| !ext.is_empty())
+                }))
+        {
+            paths.push(path);
+        }
+        if paths.len() >= MAX_POST_FILES {
+            break;
+        }
+    }
+    paths
+}
+
+#[derive(Clone)]
+struct SelectedFile {
+    path: String,
+    name: Option<Arc<str>>,
+    kind: FileKind,
+}
+
+fn source_file<'a>(
+    file: &'a Value,
+    kind: FileKind,
+    names: &mut HashMap<&'a str, Arc<str>>,
+) -> Option<SelectedFile> {
+    // Reject oversized source paths before allocating a normalized copy.
+    let path = file.get("path")?.as_str()?;
+    if path.len() > 4096 || path.trim().is_empty() {
+        return None;
+    }
+    let name = string(file, "name")
+        .map(|name| names.entry(name).or_insert_with(|| Arc::from(name)).clone());
+    Some(SelectedFile {
+        path: path.trim().replace('\\', "/"),
+        name,
+        kind,
+    })
+}
+
+fn selected_files(post: &Value, category: &str, selection: &Selection) -> Vec<SelectedFile> {
+    let default = if category == "coomer" {
+        [FileKind::File, FileKind::Attachments, FileKind::Inline]
+    } else {
+        [FileKind::Attachments, FileKind::File, FileKind::Inline]
+    };
+    let kinds = selection.files.as_deref().unwrap_or(&default);
+    let mut files = Vec::new();
+    let mut names = HashMap::new();
+    let mut inline = None;
+    for kind in kinds {
+        match kind {
+            FileKind::File => {
+                if let Some(file) = post
+                    .get("file")
+                    .and_then(|file| source_file(file, *kind, &mut names))
+                {
+                    files.push(file);
+                }
+            }
+            FileKind::Attachments => {
+                if let Some(attachments) = post.get("attachments").and_then(Value::as_array) {
+                    for file in attachments {
+                        if let Some(file) = source_file(file, *kind, &mut names) {
+                            files.push(file);
+                        }
+                        if files.len() >= MAX_POST_FILES {
+                            break;
+                        }
+                    }
+                }
+            }
+            FileKind::Inline => {
+                let inline = inline.get_or_insert_with(|| {
+                    inline_paths(post)
+                        .into_iter()
+                        .map(|path| SelectedFile {
+                            name: Some(Arc::from(path.as_str())),
+                            path,
+                            kind: FileKind::Inline,
+                        })
+                        .collect::<Vec<_>>()
+                });
+                files.extend(inline.iter().take(MAX_POST_FILES - files.len()).cloned());
+            }
+        }
+        if files.len() >= MAX_POST_FILES {
+            break;
+        }
+    }
+    files
+}
+
+/// Parse a post using the category's upstream file order and thumbnail defaults.
+pub fn parse_post(post: &Value, host: &str, service: &str, user: &str) -> Vec<Media> {
+    parse_post_with_selection(post, host, service, user, &Selection::default())
+}
+
+pub fn parse_post_with_selection(
+    post: &Value,
+    host: &str,
+    service: &str,
+    user: &str,
+    selection: &Selection,
+) -> Vec<Media> {
+    selected_post(post, host, service, user, selection).0
+}
+
+/// The count includes selected nonimages that thumbnail mode does not emit.
+fn selected_post(
+    post: &Value,
+    host: &str,
+    service: &str,
+    user: &str,
+    selection: &Selection,
+) -> (Vec<Media>, usize) {
+    let Some(category) = category(host) else {
+        return (Vec::new(), 0);
+    };
+    let Ok(identity) = post_identity(post, Some((service, user)), None) else {
+        return (Vec::new(), 0);
+    };
+    let host = host
+        .strip_prefix("www.")
+        .or_else(|| host.strip_prefix("beta."))
+        .unwrap_or(host);
+    let base = post_metadata(post, &identity);
+    let mut hashes = HashSet::new();
+    let mut count = 0;
+    let mut media = Vec::new();
+    for file in selected_files(post, category, selection) {
+        if !safe_file_path(&file.path) {
+            continue;
+        }
+        let hash = content_hash(&file.path);
+        let parsed = split_path(&file.path);
+        if file.kind != FileKind::Inline && parsed.is_none() {
+            continue;
+        }
+        if let Some(hash) = hash {
+            if !selection.duplicates.allows(file.kind) && hashes.contains(hash) {
+                continue;
+            }
+            hashes.insert(hash.to_owned());
+        }
+        let path_ext = file
+            .path
+            .rsplit('/')
+            .next()
+            .and_then(|file| file.rsplit_once('.'))
+            .and_then(|(_, ext)| clean_extension(ext));
+        let name_ext = file
+            .name
+            .as_deref()
+            .and_then(|name| name.rsplit(['/', '\\']).next())
+            .and_then(|name| name.rsplit_once('.'))
+            .filter(|(stem, _)| !stem.is_empty())
+            .and_then(|(_, ext)| clean_extension(ext));
+        let output_ext = name_ext
+            .or_else(|| path_ext.clone())
+            .unwrap_or_else(|| "bin".into());
+        count += 1;
+        if !selection.original && !path_ext.as_deref().is_some_and(image_extension) {
+            continue;
+        }
+        let url = if selection.original {
+            format!("https://{host}/data{}", file.path)
+        } else {
+            format!("https://img.{host}/thumbnail/data{}", file.path)
+        };
+        let Ok(url) = Url::parse(&url) else {
             continue;
         };
-        let ext = ext
+        let ext = if selection.original {
+            output_ext
+        } else {
+            "jpg".into()
+        };
+        let archive = path_ext.as_deref().is_some_and(archive_extension)
+            || path_ext.as_deref() == Some("bin") && archive_extension(&ext);
+        let kind = if archive {
+            "archive"
+        } else {
+            match file.kind {
+                FileKind::File => "file",
+                FileKind::Attachments => "attachment",
+                FileKind::Inline => "inline",
+            }
+        };
+        let mut metadata = base.clone();
+        metadata.file = Some(FileMetadata {
+            description: file.name,
+            media_type: Some(Arc::from(kind)),
+            ..FileMetadata::default()
+        });
+        metadata.media_id = hash
             .or_else(|| {
-                name.and_then(|n| n.rsplit_once('.'))
-                    .and_then(|(_, ext)| clean_extension(ext))
+                if file.kind != FileKind::Inline {
+                    parsed.as_ref().map(|(hash, _)| *hash)
+                } else {
+                    None
+                }
             })
-            .unwrap_or_else(|| "bin".into());
-        let index = media.len() + 1;
+            .unwrap_or_default()
+            .to_owned();
+        metadata.index = count;
         media.push(Media {
             url,
             job: MediaJob::DirectHttp,
             category: category.into(),
-            filename: format!("{id}_{index:02}.{ext}"),
-            metadata: Some(PostMetadata {
-                file: Some(FileMetadata {
-                    description: name.map(Arc::from),
-                    ..FileMetadata::default()
-                }),
-                post_id: id.clone(),
-                media_id: hash.into(),
-                username: Some(username.clone()),
-                caption: caption.clone(),
-                timestamp,
-                index,
-                instance: Some(service.into()),
-                ..PostMetadata::default()
-            }),
-            headers: BTreeMap::new(),
+            filename: format!("{}_{count:02}.{ext}", identity.id),
+            metadata: Some(metadata),
+            headers: BTreeMap::from([
+                ("Accept-Encoding".into(), "identity".into()),
+                (
+                    "Referer".into(),
+                    format!("https://{host}/{service}/user/{user}/post/{}", identity.id),
+                ),
+            ]),
             handoff: BTreeMap::new(),
         });
     }
-    media
+    (media, count)
 }
 
 fn json(bytes: &[u8]) -> Result<Value> {
@@ -443,6 +729,7 @@ pub struct Kemono {
     rate_limits: RateLimits,
     expand: bool,
     max_posts: Option<usize>,
+    selection: Selection,
 }
 
 struct ListingState {
@@ -470,7 +757,13 @@ impl Kemono {
             rate_limits: RateLimits::default(),
             expand: false,
             max_posts: None,
+            selection: Selection::default(),
         })
+    }
+
+    pub fn with_selection(mut self, selection: Selection) -> Self {
+        self.selection = selection;
+        self
     }
 
     /// Fetch each listing post's full detail response only when it is consumed.
@@ -525,7 +818,13 @@ impl Kemono {
     }
 
     fn finish(&self, host: &str, post: &Value, identity: &Identity) -> VecDeque<ExtractionEvent> {
-        let mut media = parse_post(post, host, &identity.service, &identity.user);
+        let (mut media, count) = selected_post(
+            post,
+            host,
+            &identity.service,
+            &identity.user,
+            &self.selection,
+        );
         let category = category(host).expect("validated host");
         for item in &mut media {
             self.network.apply_media(item);
@@ -535,12 +834,16 @@ impl Kemono {
                 ExtractionEvent::Post(Box::new(Post {
                     category: category.into(),
                     metadata: Some(post_metadata(post, identity)),
-                    count: Some(0),
+                    count: Some(count),
                 })),
                 ExtractionEvent::EndPost,
             ])
         } else {
-            group(media, category)
+            let mut events = group(media, category);
+            if let Some(ExtractionEvent::Post(post)) = events.front_mut() {
+                post.count = Some(count);
+            }
+            events
         }
     }
 
@@ -802,8 +1105,8 @@ mod tests {
         thread::{self, JoinHandle},
     };
 
-    const HASH_A: &str = "aa11";
-    const HASH_B: &str = "bb22";
+    const HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     fn post(id: &str) -> Value {
         json!({"id": id, "user": "42", "service": "patreon", "title": "Hello",
@@ -819,7 +1122,17 @@ mod tests {
     fn parses_post_and_dedupes_files() {
         for body in [json!({"post": post("7"), "attachments": []}), post("7")] {
             let body = body.to_string();
-            let media = parse_single(body.as_bytes(), "kemono.cr", "patreon", "42", "7").unwrap();
+            let raw = single_post(body.as_bytes(), "patreon", "42", "7").unwrap();
+            let media = parse_post_with_selection(
+                &raw,
+                "kemono.cr",
+                "patreon",
+                "42",
+                &Selection {
+                    original: true,
+                    ..Selection::default()
+                },
+            );
             assert_eq!(media.len(), 2);
             assert_eq!(
                 media[0].url.as_str(),
@@ -952,6 +1265,10 @@ mod tests {
             .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
             .unwrap()
             .with_api_root(root)
+            .with_selection(Selection {
+                original: true,
+                ..Selection::default()
+            })
     }
 
     #[tokio::test]
@@ -1234,7 +1551,17 @@ mod tests {
         assert_eq!(first.filename, "7_01.jpg");
         assert_eq!(
             first.archive_key(),
-            parse_post(&detail, "kemono.cr", "patreon", "42")[0].archive_key()
+            parse_post_with_selection(
+                &detail,
+                "kemono.cr",
+                "patreon",
+                "42",
+                &Selection {
+                    original: true,
+                    ..Selection::default()
+                }
+            )[0]
+            .archive_key()
         );
         drop(events);
         let requests = server.join().unwrap();
@@ -1410,6 +1737,494 @@ mod tests {
                 .contains("repeated a page")
         );
         assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    fn selection_post() -> Value {
+        let hash_c = "c".repeat(64);
+        json!({"id": "7", "user": "42", "service": "patreon",
+            "file": {"name": "original.webp", "path": format!("/aa/11/{HASH_A}.png")},
+            "attachments": [
+                {"name": "video.mp4", "path": format!("/bb/22/{HASH_B}.mp4")},
+                {"name": "photo.png", "path": format!("/cc/33/{hash_c}.jpg")}
+            ],
+            "content": format!(r#"<img src="/aa/11/{HASH_A}.png"><img src="https://kemono.cr/inline/extra-image.jpg">"#)
+        })
+    }
+
+    #[test]
+    fn defaults_use_category_file_order_thumbnails_and_source_indices() {
+        let post = selection_post();
+        for (host, indices, kinds) in [
+            (
+                "kemono.cr",
+                vec![2, 3, 4],
+                vec!["attachment", "file", "inline"],
+            ),
+            (
+                "coomer.st",
+                vec![1, 3, 4],
+                vec!["file", "attachment", "inline"],
+            ),
+        ] {
+            let (media, count) = selected_post(&post, host, "patreon", "42", &Selection::default());
+            assert_eq!(count, 4);
+            assert_eq!(media.len(), 3);
+            for ((media, index), kind) in media.iter().zip(indices).zip(kinds) {
+                assert_eq!(media.metadata.as_ref().unwrap().index, index);
+                assert_eq!(media.filename, format!("7_{index:02}.jpg"));
+                assert!(
+                    media
+                        .url
+                        .as_str()
+                        .starts_with(&format!("https://img.{host}/thumbnail/data/"))
+                );
+                assert_eq!(
+                    media
+                        .metadata
+                        .as_ref()
+                        .unwrap()
+                        .file
+                        .as_ref()
+                        .unwrap()
+                        .media_type
+                        .as_deref(),
+                    Some(kind)
+                );
+                assert_eq!(
+                    media.headers.get("Accept-Encoding").map(String::as_str),
+                    Some("identity")
+                );
+                assert_eq!(
+                    media.headers.get("Referer").map(String::as_str),
+                    Some(format!("https://{host}/patreon/user/42/post/7").as_str())
+                );
+                let public = serde_json::to_string(media).unwrap();
+                assert!(!public.contains("Referer"));
+                assert!(!public.contains("Accept-Encoding"));
+            }
+        }
+        let normalized = parse_post(&post, "www.kemono.cr", "patreon", "42");
+        assert!(
+            normalized[0]
+                .url
+                .as_str()
+                .starts_with("https://img.kemono.cr/")
+        );
+    }
+
+    #[test]
+    fn explicit_file_order_and_original_names_preserve_selection_positions() {
+        let selection = Selection {
+            original: true,
+            files: Some(vec![
+                FileKind::Inline,
+                FileKind::File,
+                FileKind::Attachments,
+            ]),
+            ..Selection::default()
+        };
+        let (media, count) =
+            selected_post(&selection_post(), "kemono.cr", "patreon", "42", &selection);
+        assert_eq!(count, 4);
+        assert_eq!(
+            media
+                .iter()
+                .map(|media| media.filename.as_str())
+                .collect::<Vec<_>>(),
+            ["7_01.png", "7_02.jpg", "7_03.mp4", "7_04.png"]
+        );
+        assert_eq!(
+            media
+                .iter()
+                .map(|media| media
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .file
+                    .as_ref()
+                    .unwrap()
+                    .media_type
+                    .as_deref()
+                    .unwrap())
+                .collect::<Vec<_>>(),
+            ["inline", "inline", "attachment", "attachment"]
+        );
+        assert!(
+            media
+                .iter()
+                .all(|media| media.url.as_str().starts_with("https://kemono.cr/data/"))
+        );
+        assert_eq!(media[1].metadata.as_ref().unwrap().media_id, "");
+
+        let mut post = selection_post();
+        post["file"]["path"] = json!(format!(r"\aa\11\{HASH_A}.png"));
+        let selection = Selection {
+            files: Some(vec![FileKind::File]),
+            original: true,
+            ..Selection::default()
+        };
+        let media = parse_post_with_selection(&post, "kemono.cr", "patreon", "42", &selection);
+        assert_eq!(media[0].filename, "7_01.webp");
+        assert_eq!(
+            media[0].url.as_str(),
+            format!("https://kemono.cr/data/aa/11/{HASH_A}.png")
+        );
+        assert_eq!(media[0].metadata.as_ref().unwrap().media_id, HASH_A);
+        assert!(
+            parse_post_with_selection(
+                &post,
+                "kemono.cr",
+                "patreon",
+                "42",
+                &Selection {
+                    files: Some(Vec::new()),
+                    original: true,
+                    ..Selection::default()
+                }
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn original_name_extension_uses_basename_and_dotfiles_fall_back_to_path() {
+        let selection = Selection {
+            original: true,
+            files: Some(vec![FileKind::File]),
+            ..Selection::default()
+        };
+        for (name, extension) in [
+            (".png", "zip"),
+            ("folder.jpg/.png", "zip"),
+            (r"folder.jpg\.png", "zip"),
+            ("folder.jpg/no_extension", "zip"),
+            (r"folder.jpg\no_extension", "zip"),
+            ("folder.jpg/photo.webp", "webp"),
+            (r"folder.jpg\photo.gif", "gif"),
+        ] {
+            let post = json!({"id": "7", "user": "42", "service": "patreon",
+                "file": {"name": name, "path": format!("/aa/11/{HASH_A}.zip")}});
+            let media = parse_post_with_selection(&post, "kemono.cr", "patreon", "42", &selection);
+            assert_eq!(media.len(), 1);
+            assert_eq!(media[0].filename, format!("7_01.{extension}"), "{name}");
+            assert_eq!(
+                media[0]
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .file
+                    .as_ref()
+                    .unwrap()
+                    .description
+                    .as_deref(),
+                Some(name)
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_generators_share_descriptive_names_and_reject_oversized_paths() {
+        let name = format!("{}.webp", "descriptive-name-".repeat(128));
+        let post = json!({"id": "7", "user": "42", "service": "patreon",
+            "file": {"name": name, "path": format!("/aa/11/{HASH_A}.png")}});
+        let selection = Selection {
+            original: true,
+            files: Some(vec![FileKind::File; 64]),
+            duplicates: DuplicateOptions::all(),
+        };
+        let media = parse_post_with_selection(&post, "kemono.cr", "patreon", "42", &selection);
+        assert_eq!(media.len(), 64);
+        let first = media[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .file
+            .as_ref()
+            .unwrap()
+            .description
+            .as_ref()
+            .unwrap();
+        assert_eq!(first.as_ref(), name);
+        for (index, media) in media.iter().enumerate() {
+            assert_eq!(media.filename, format!("7_{:02}.webp", index + 1));
+            let description = media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .description
+                .as_ref()
+                .unwrap();
+            assert!(Arc::ptr_eq(first, description));
+        }
+        let huge_path = format!("/inline/{}.jpg", "s".repeat(4096));
+        let rejected = json!({"id": "7", "user": "42", "service": "patreon",
+            "file": {"name": name, "path": huge_path},
+            "attachments": [{"name": "attachment.jpg", "path": huge_path}],
+            "content": format!(r#"<img src="{huge_path}">"#)});
+        let selection = Selection {
+            original: true,
+            files: Some([FileKind::File, FileKind::Attachments, FileKind::Inline].repeat(64)),
+            duplicates: DuplicateOptions::all(),
+        };
+        assert!(selected_files(&rejected, "kemono", &selection).is_empty());
+        assert!(
+            parse_post_with_selection(&rejected, "kemono.cr", "patreon", "42", &selection)
+                .is_empty()
+        );
+
+        let inline = json!({"id": "7", "user": "42", "service": "patreon", "content": r#"<img src="/inline/shared-name.jpg">"#});
+        let selection = Selection {
+            original: true,
+            files: Some(vec![FileKind::Inline; 64]),
+            duplicates: DuplicateOptions::all(),
+        };
+        let media = parse_post_with_selection(&inline, "kemono.cr", "patreon", "42", &selection);
+        assert_eq!(media.len(), 64);
+        let first = media[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .file
+            .as_ref()
+            .unwrap()
+            .description
+            .as_ref()
+            .unwrap();
+        assert!(media.iter().all(|media| {
+            Arc::ptr_eq(
+                first,
+                media
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .file
+                    .as_ref()
+                    .unwrap()
+                    .description
+                    .as_ref()
+                    .unwrap(),
+            )
+        }));
+    }
+
+    #[test]
+    fn duplicates_are_hash_based_and_enabled_per_incoming_kind() {
+        let post = json!({"id": "7", "user": "42", "service": "patreon",
+            "file": {"path": format!("/aa/11/{HASH_A}.png")},
+            "attachments": [{"path": format!("/bb/22/{HASH_A}.jpg")}, {"path": format!("/cc/33/{HASH_A}.webp")}],
+            "content": format!(r#"<img src="/dd/44/{HASH_A}.png"><img src="/ee/55/{HASH_A}.jpg">"#)
+        });
+        for (duplicates, expected_kinds) in [
+            (DuplicateOptions::default(), vec!["attachment"]),
+            (
+                DuplicateOptions {
+                    file: true,
+                    ..DuplicateOptions::default()
+                },
+                vec!["attachment", "file"],
+            ),
+            (
+                DuplicateOptions {
+                    attachment: true,
+                    ..DuplicateOptions::default()
+                },
+                vec!["attachment", "attachment"],
+            ),
+            (
+                DuplicateOptions {
+                    inline: true,
+                    ..DuplicateOptions::default()
+                },
+                vec!["attachment", "inline", "inline"],
+            ),
+            (
+                DuplicateOptions::all(),
+                vec!["attachment", "attachment", "file", "inline", "inline"],
+            ),
+        ] {
+            let media = parse_post_with_selection(
+                &post,
+                "kemono.cr",
+                "patreon",
+                "42",
+                &Selection {
+                    original: true,
+                    duplicates,
+                    files: None,
+                },
+            );
+            assert_eq!(
+                media
+                    .iter()
+                    .map(|media| media
+                        .metadata
+                        .as_ref()
+                        .unwrap()
+                        .file
+                        .as_ref()
+                        .unwrap()
+                        .media_type
+                        .as_deref()
+                        .unwrap())
+                    .collect::<Vec<_>>(),
+                expected_kinds
+            );
+            for (index, media) in media.iter().enumerate() {
+                assert_eq!(media.metadata.as_ref().unwrap().index, index + 1);
+            }
+        }
+        let media = parse_post_with_selection(
+            &post,
+            "kemono.cr",
+            "patreon",
+            "42",
+            &Selection {
+                original: true,
+                files: Some(vec![
+                    FileKind::File,
+                    FileKind::Attachments,
+                    FileKind::Inline,
+                ]),
+                ..Selection::default()
+            },
+        );
+        assert_eq!(media.len(), 1);
+        assert_eq!(
+            media[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .media_type
+                .as_deref(),
+            Some("file")
+        );
+    }
+
+    #[test]
+    fn inline_paths_accept_fixed_firstparty_sources_and_reject_unsafe_values() {
+        let path = format!("/aa/11/{HASH_A}.png");
+        let post = json!({"id": "7", "user": "42", "service": "patreon", "content": format!(r#"
+            <img src="{path}"><img src="http://kemono.cr{path}"><img src="https://coomer.st/inline/another-image.jpg">
+            <img src="/inline/nohash.jpg"><img src="/inline/nohash.jpg">
+            <img src="https://evil.example{path}"><img src="https://kemono.cr.evil.example{path}">
+            <img src="https://kemono.su{path}"><img src="//kemono.cr/inline/foo.jpg">
+            <img src="https://user:secret@kemono.cr{path}"><img src="https://kemono.cr:443/inline/port-image.jpg">
+            <img src="/inline/../escape.jpg"><img src="https://kemono.cr/inline/foo/../../inline/escape.jpg">
+            <img src="/inline/%2e%2e/escape.jpg"><img src="https://kemono.cr/inline/file.jpg?token=secret">
+            <img src="https://kemono.cr/inline/file.jpg#secret"><img src="/logo.png">
+            <img src='{path}'><img src="/aa/11/short.png">
+        "#)});
+        let media = parse_post_with_selection(
+            &post,
+            "kemono.cr",
+            "patreon",
+            "42",
+            &Selection {
+                original: true,
+                files: Some(vec![FileKind::Inline]),
+                ..Selection::default()
+            },
+        );
+        assert_eq!(media.len(), 4, "{media:?}");
+        assert_eq!(media[0].metadata.as_ref().unwrap().media_id, HASH_A);
+        assert!(
+            media[1..]
+                .iter()
+                .all(|media| media.metadata.as_ref().unwrap().media_id.is_empty())
+        );
+        assert!(
+            media
+                .iter()
+                .all(|media| !media.url.as_str().contains("secret"))
+        );
+    }
+
+    #[test]
+    fn thumbnail_eligibility_uses_path_extension_and_archives_keep_source_type() {
+        let post = json!({"id": "7", "user": "42", "service": "patreon",
+        "attachments": [
+            {"name": "video.jpg", "path": format!("/aa/11/{HASH_A}.mp4")},
+            {"name": "saved.zip", "path": format!("/bb/22/{HASH_B}.bin")},
+            {"name": "photo.jpg", "path": format!("/cc/33/{}.png", "c".repeat(64))}
+        ]});
+        let (media, count) =
+            selected_post(&post, "kemono.cr", "patreon", "42", &Selection::default());
+        assert_eq!(count, 3);
+        assert_eq!(media.len(), 1);
+        assert_eq!(media[0].filename, "7_03.jpg");
+        let original = parse_post_with_selection(
+            &post,
+            "kemono.cr",
+            "patreon",
+            "42",
+            &Selection {
+                original: true,
+                ..Selection::default()
+            },
+        );
+        assert_eq!(original.len(), 3);
+        assert_eq!(original[0].filename, "7_01.jpg");
+        assert_eq!(original[1].filename, "7_02.zip");
+        assert_eq!(
+            original[1]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .media_type
+                .as_deref(),
+            Some("archive")
+        );
+    }
+
+    #[tokio::test]
+    async fn thumbnail_post_boundaries_count_all_selected_files_before_skipping_nonimages() {
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            json!({"post": selection_post()}).to_string().as_bytes(),
+        )]);
+        let client = kemono(root).with_selection(Selection::default());
+        let events: Vec<_> = client
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 5);
+        let ExtractionEvent::Post(post) = events[0].as_ref().unwrap() else {
+            panic!("expected post")
+        };
+        assert_eq!(post.count, Some(4));
+        let indices: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event.as_ref().unwrap() {
+                ExtractionEvent::Media(media) => Some(media.metadata.as_ref().unwrap().index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(indices, [2, 3, 4]);
+        server.join().unwrap();
+
+        let post = json!({"id": "7", "user": "42", "service": "patreon", "file": {"path": format!("/aa/11/{HASH_A}.mp4")}});
+        let (root, server) = serve(vec![response("200 OK", post.to_string().as_bytes())]);
+        let client = kemono(root).with_selection(Selection::default());
+        let events: Vec<_> = client
+            .events(&Url::parse("https://coomer.st/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 2);
+        let ExtractionEvent::Post(post) = events[0].as_ref().unwrap() else {
+            panic!("expected post")
+        };
+        assert_eq!(post.count, Some(1));
+        assert!(matches!(events[1], Ok(ExtractionEvent::EndPost)));
+        server.join().unwrap();
     }
 
     #[tokio::test]

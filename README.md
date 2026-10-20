@@ -347,18 +347,38 @@ and service. Scoped `expand: true` fetches full post details lazily;
 limit). Both options forward to the compatibility backend when explicit.
 Post limits and consumer cancellation prevent later detail/page requests.
 Dates filter without stopping at an older post, since publication dates need
-not follow listing order. The post `file` and `attachments` are
-downloaded from `https://HOST/data/PATH` (redirects to `nN.HOST` CDN subdomains
-are allowed for these categories only), with identical paths deduplicated.
-`post_id` is the post ID, `media_id` the file hash, `username` the creator ID,
-`service` the service, caption the title, date from `published`/`added`, and the
-file description is the original name. These fields are also normalized from
-compatibility output; `service` and `user` are available in filename templates.
-Default filenames are
-`{post_id}_{index:02}.{extension}`; archive identity is (service, creator, post,
-hash). Plain `/data/` file links stay direct downloads.
-Native selection currently downloads originals in file-then-attachment order;
-Kemono/Coomer `files`, `original` and `duplicates` options remain unsupported.
+not follow listing order. Default selection is attachments, primary file, then
+inline images for Kemono; Coomer selects the primary file first. `files` accepts
+an ordered comma-separated string or list of `file`, `attachments` and `inline`;
+`[]` selects no files. Inline sources are limited to safe `/inline/` or hashed
+paths, optionally prefixed by the canonical kemono.cr/coomer.st origin.
+
+`original` defaults to false, matching upstream: image files emit JPEG thumbnail
+jobs on `https://img.HOST/thumbnail/data/PATH`, while other files are skipped.
+`original: true` emits original files at `https://HOST/data/PATH`, with the
+original name's extension when present. Named originals backed by a `.txt` URL
+reject the exact missing-file placeholder before publication, including resumed
+and HTTP 416 completions. Public post Referer and identity-encoding headers may
+follow CDN redirects; credential headers disable that exception.
+
+Repeated hashes are skipped by default. `duplicates` accepts a boolean, or a
+comma-separated string/list of `file`, `attachment` and `inline` to retain
+repeated files of those types. Hashless inline paths remain separate source
+files. Source numbering/counts include nonimages skipped by thumbnail mode, so
+file numbers can have gaps. At most 10,000 candidates are selected per post.
+
+`post_id` is the post ID, `media_id` the file hash when available, `username`
+the creator ID, `service` the service, caption the title, date from
+`published`/`added`, and file description the original name. File `type` identifies
+`file`, `attachment`, `inline` or `archive`. Compatibility output normalizes these
+fields; `service` and `user` are available in filename templates. Media names
+are `{post_id}_{index:02}.{extension}`; default destinations also carry the shared
+request digest. New media headers change that digest and resume checkpoint keys.
+Archive identity now uses service,
+creator, post and source file number so requested duplicates and hashless inline
+files remain distinct. Previous hash-based archive entries and output paths are
+not migrated.
+Plain `/data/` file links stay direct downloads.
 
 Experimental native image host extraction (`--extractor native`), one category
 per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
@@ -1280,7 +1300,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
 `file-filter`, `image-filter`, `post-range`, `post-filter`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
-`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `text-posts`,
+`expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,
 `cards-blacklist`, `size`, `fallback`, `max-posts`, `strategy`, `search-pagination`,
 `search-results`, `limit`, `search-limit`, `search-stop`, `retries` (integer 0–10), and `timeout` (positive seconds, including fractions).

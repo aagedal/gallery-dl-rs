@@ -568,11 +568,30 @@ and local HTTP pagination/cancellation tests cover these paths. Reduced sanitize
 public listing/detail captures are included. On 2026-10-20 native Kemono global
 inspection and a separate one-post detail expansion each emitted two media jobs;
 no files were downloaded. Coomer returned non-JSON data, so live Coomer traversal,
-authenticated verification, wider service captures and CDN downloads remain.
+authenticated verification, wider service captures and original transfers remain.
 Remaining: creator names, favorites, Discord servers, popular views, revisions,
-comments/DMs, inline content images, archive/link extraction from post text,
-cookies/login, and upstream file selection/order, thumbnail defaults and options
-(`files`, `original`, `duplicates`, `revisions`, `endpoint`).
+comments/DMs, archive/link extraction from post text, cookies/login,
+revisions/endpoint options and full upstream metadata/default naming.
+
+**Implemented Kemono/Coomer file selection:** ordered `files`, per-kind
+`duplicates`, and `original` settings now match upstream category order and
+thumbnail defaults. Safe inline sources, backslash normalization, original-name
+extensions and file types are covered. Source counts/indices precede thumbnail
+skips. Positional archives preserve requested duplicates and hashless inline
+archives; old hash-based entries are not migrated. Public media headers preserve
+CDN redirects while credentials disable that exception. Exact missing-file
+placeholders on renamed `.txt` originals fail before direct, resumed, range-
+assembled or HTTP 416 publication; poisoned partials are reset. Candidate paths
+are bounded and descriptive names shared across repeated file groups.
+Scoped configuration, compatibility forwarding, source identity/counts,
+inline validation, memory sharing, safe redirects, and download cleanup tests
+cover these paths. A public native thumbnail check on 2026-10-20 downloaded one
+27,699-byte JPEG from `img.kemono.cr` with the default selection; separate
+inspection confirmed thumbnail-host jobs. This verifies one anonymous image
+transfer, not complete CDN/original/service coverage.
+A separate original-file attempt with a 15-second download timeout and 2 MiB
+size limit timed out without publication; successful original transfers remain
+unverified.
 
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
 lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries

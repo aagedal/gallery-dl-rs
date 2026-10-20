@@ -938,3 +938,101 @@ async fn changed_configured_user_agent_does_not_resume_another_representation() 
     assert_full(&requests[1]);
     assert!(!item.headers.contains_key("User-Agent"));
 }
+
+#[tokio::test]
+async fn kemono_renamed_txt_resources_reject_placeholder_without_publication() {
+    for (body, category, filename, rejected) in [
+        (b"not found".to_vec(), "kemono", "image.png", true),
+        (b"not found".to_vec(), "coomer", "image.png", true),
+        (b"not found!".to_vec(), "kemono", "image.png", false),
+        (b"123456789".to_vec(), "kemono", "image.png", false),
+        (b"not found".to_vec(), "kemono", "file.txt", false),
+        (b"not found".to_vec(), "direct", "image.png", false),
+    ] {
+        for (resume, resource) in [
+            (false, "/resource.txt"),
+            (true, "/resource.txt"),
+            (false, "/resource.TXT"),
+            (true, "/resource.TXT"),
+        ] {
+            let server = Server::new(vec![full(body.clone())]);
+            let mut item = media(&server);
+            item.category = category.into();
+            item.filename = filename.into();
+            item.url.set_path(resource);
+            let root = tempfile::tempdir().unwrap();
+            let result =
+                download::download(&client().with_resume(resume), root.path(), &item, 0).await;
+            let destination = download::destination(root.path(), &item);
+            if rejected {
+                assert!(result.unwrap_err().to_string().contains("placeholder"));
+                assert!(!destination.exists());
+            } else {
+                result.unwrap();
+                assert_eq!(std::fs::read(destination).unwrap(), body);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn kemono_placeholder_validation_covers_range_assembly_and_416_completions() {
+    for complete in [false, true] {
+        let bytes = if complete {
+            b"not found".as_slice()
+        } else {
+            b"not ".as_slice()
+        };
+        let first = [
+            format!("{:x}\r\n", bytes.len()).into_bytes(),
+            bytes.to_vec(),
+            b"\r\n".to_vec(),
+        ]
+        .concat();
+        let second = if complete {
+            response(
+                "416 Range Not Satisfiable",
+                "Content-Length: 0\r\nETag: \"v1\"\r\nContent-Range: bytes */9\r\n",
+                vec![],
+            )
+        } else {
+            response(
+                "206 Partial Content",
+                "Content-Length: 5\r\nETag: \"v1\"\r\nContent-Range: bytes 4-8/9\r\n",
+                b"found".to_vec(),
+            )
+        };
+        let server = Server::new(vec![
+            response(
+                "200 OK",
+                "Transfer-Encoding: chunked\r\nETag: \"v1\"\r\n",
+                first,
+            ),
+            second,
+            full(b"valid bytes".to_vec()),
+        ]);
+        let mut item = media(&server);
+        item.category = "kemono".into();
+        item.filename = "image.png".into();
+        item.url.set_path("/resource.txt");
+        let root = tempfile::tempdir().unwrap();
+        assert!(
+            download::download(&client(), root.path(), &item, 0)
+                .await
+                .is_err()
+        );
+        let error = download::download(&client(), root.path(), &item, 0)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("placeholder"), "{error}");
+        let destination = download::destination(root.path(), &item);
+        assert!(!destination.exists());
+        download::download(&client(), root.path(), &item, 0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(destination).unwrap(), b"valid bytes");
+        assert_range(&server.requests()[1], bytes.len(), "\"v1\"");
+        assert_full(&server.requests()[2]);
+    }
+}

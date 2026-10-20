@@ -105,6 +105,26 @@ impl Partial {
         self.checkpoint.as_ref()
     }
 
+    /// Compare a completed small representation before publication, including
+    /// completions assembled across ranges or authorized by HTTP 416.
+    pub(crate) async fn has_content(&self, expected: &'static [u8]) -> Result<bool> {
+        let part = self.part.clone();
+        let lock = self.lock.clone();
+        let operation = self.operations.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || -> Result<bool> {
+            let _lock = lock;
+            let _operation = operation;
+            let mut file = open_regular(&part)?;
+            if file.metadata()?.len() != expected.len() as u64 {
+                return Ok(false);
+            }
+            let mut bytes = vec![0; expected.len()];
+            file.read_exact(&mut bytes)?;
+            Ok(bytes == expected)
+        })
+        .await?
+    }
+
     /// Remove a failed candidate's bytes before another representation is tried.
     /// Keep the lock inode/reservation so concurrent writers cannot reuse it.
     pub(crate) async fn discard(&mut self) -> Result<()> {

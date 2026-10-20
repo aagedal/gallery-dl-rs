@@ -63,6 +63,8 @@ pub struct Options {
     pub posts: Option<Vec<String>>,
     pub inline: Option<crate::tumblr::Inline>,
     pub original: Option<bool>,
+    pub files: Option<Vec<crate::kemono::FileKind>>,
+    pub duplicates: Option<crate::kemono::DuplicateOptions>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub user_id: Option<String>,
@@ -139,6 +141,14 @@ impl std::fmt::Debug for Options {
 }
 
 impl Options {
+    pub fn kemono_selection(&self) -> crate::kemono::Selection {
+        crate::kemono::Selection {
+            files: self.files.clone(),
+            duplicates: self.duplicates.unwrap_or_default(),
+            original: self.original.unwrap_or(false),
+        }
+    }
+
     pub fn tumblr_selection(&self) -> crate::tumblr::Selection {
         crate::tumblr::Selection {
             reblogs: self.tumblr_reblogs.unwrap_or_else(|| {
@@ -218,6 +228,8 @@ impl Options {
             posts: overrides.posts.clone().or_else(|| self.posts.clone()),
             inline: overrides.inline.or(self.inline),
             original: overrides.original.or(self.original),
+            files: overrides.files.clone().or_else(|| self.files.clone()),
+            duplicates: overrides.duplicates.or(self.duplicates),
             username: overrides.username.clone().or_else(|| self.username.clone()),
             password: overrides.password.clone().or_else(|| self.password.clone()),
             user_id: overrides.user_id.clone().or_else(|| self.user_id.clone()),
@@ -335,6 +347,8 @@ struct RawRoot {
     posts: Field,
     inline: Field,
     original: Field,
+    files: Field,
+    duplicates: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -391,6 +405,8 @@ struct RawExtractor {
     posts: Field,
     inline: Field,
     original: Field,
+    files: Field,
+    duplicates: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -479,6 +495,8 @@ struct RawOptions {
     posts: Field,
     inline: Field,
     original: Field,
+    files: Field,
+    duplicates: Field,
     reposts: Field,
     ugoira: Field,
     text_posts: Field,
@@ -642,6 +660,8 @@ impl Config {
             posts: root.posts,
             inline: root.inline,
             original: root.original,
+            files: root.files,
+            duplicates: root.duplicates,
             reposts: root.reposts,
             ugoira: root.ugoira,
             text_posts: root.text_posts,
@@ -704,6 +724,8 @@ impl Config {
             posts: extractor.posts,
             inline: extractor.inline,
             original: extractor.original,
+            files: extractor.files,
+            duplicates: extractor.duplicates,
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
             text_posts: extractor.text_posts,
@@ -977,6 +999,8 @@ impl RawOptions {
         let reblogs = boolean(self.reblogs, "reblogs")?;
         let posts = tumblr_posts(self.posts)?;
         let original = boolean(self.original, "original")?;
+        let files = kemono_files(self.files)?;
+        let duplicates = kemono_duplicates(self.duplicates)?;
         let inline = match self.inline.0 {
             None => None,
             Some(Value::Bool(true)) => Some(crate::tumblr::Inline::All),
@@ -1405,6 +1429,8 @@ impl RawOptions {
             posts,
             inline,
             original,
+            files,
+            duplicates,
             username,
             password,
             user_id,
@@ -1723,4 +1749,75 @@ fn tumblr_posts(field: Field) -> Result<Option<Vec<String>>> {
         .with_posts(types.clone())
         .map_err(|_| invalid())?;
     Ok(Some(types))
+}
+
+fn kemono_files(field: Field) -> Result<Option<Vec<crate::kemono::FileKind>>> {
+    use crate::kemono::FileKind;
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
+    let invalid = || {
+        error(
+            "native configuration files must be a comma-separated string or list of file, attachments, inline",
+        )
+    };
+    let names = selection_names(value).ok_or_else(invalid)?;
+    let files = names
+        .into_iter()
+        .map(|name| match name.as_str() {
+            "file" => Ok(FileKind::File),
+            "attachments" => Ok(FileKind::Attachments),
+            "inline" => Ok(FileKind::Inline),
+            _ => Err(invalid()),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(files))
+}
+
+fn kemono_duplicates(field: Field) -> Result<Option<crate::kemono::DuplicateOptions>> {
+    use crate::kemono::DuplicateOptions;
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
+    match value {
+        Value::Bool(true) => return Ok(Some(DuplicateOptions::all())),
+        Value::Bool(false) => return Ok(Some(DuplicateOptions::default())),
+        _ => {}
+    }
+    let invalid = || {
+        error(
+            "native configuration duplicates must be a boolean, comma-separated string or list of file, attachment, inline",
+        )
+    };
+    let names = if value.as_str() == Some("") {
+        Vec::new()
+    } else {
+        selection_names(value).ok_or_else(invalid)?
+    };
+    let mut selected = DuplicateOptions::default();
+    for name in names {
+        match name.as_str() {
+            "file" => selected.file = true,
+            "attachment" => selected.attachment = true,
+            "inline" => selected.inline = true,
+            _ => return Err(invalid()),
+        }
+    }
+    Ok(Some(selected))
+}
+
+fn selection_names(value: Value) -> Option<Vec<String>> {
+    match value {
+        Value::String(value) if value.len() <= 1024 => Some(
+            value
+                .split(',')
+                .map(|name| name.trim().to_owned())
+                .collect(),
+        ),
+        Value::Array(names) if names.len() <= 64 => names
+            .into_iter()
+            .map(|name| name.as_str().map(str::to_owned))
+            .collect(),
+        _ => None,
+    }
 }

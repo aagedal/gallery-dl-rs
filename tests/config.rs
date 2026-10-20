@@ -2231,3 +2231,99 @@ fn kemono_post_limits_reject_invalid_types_privately_in_all_scopes() {
     }
     assert!(parse(r#"{"max-posts":1,"max-posts":2}"#).is_err());
 }
+
+#[test]
+fn kemono_file_selection_is_typed_scoped_and_preserves_explicit_empty_values() {
+    use gallery_dl_rs::kemono::{DuplicateOptions, FileKind};
+    let config = parse(r#"{"extractor":{"files":"file, inline","duplicates":true,"original":true,"kemono":{"files":["attachments","file","attachments"],"duplicates":["attachment"],"original":false},"coomer":{"files":[],"duplicates":false}}}"#).unwrap();
+    let kemono = config.resolve("kemono").unwrap();
+    assert_eq!(
+        kemono.files,
+        Some(vec![
+            FileKind::Attachments,
+            FileKind::File,
+            FileKind::Attachments
+        ])
+    );
+    assert_eq!(
+        kemono.duplicates,
+        Some(DuplicateOptions {
+            attachment: true,
+            ..Default::default()
+        })
+    );
+    assert!(!kemono.kemono_selection().original);
+    let coomer = config.resolve("coomer").unwrap();
+    assert_eq!(coomer.files, Some(vec![]));
+    assert_eq!(coomer.duplicates, Some(DuplicateOptions::default()));
+    assert!(coomer.kemono_selection().original);
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(
+        inherited.files,
+        Some(vec![FileKind::File, FileKind::Inline])
+    );
+    assert_eq!(inherited.duplicates, Some(DuplicateOptions::all()));
+    assert_eq!(
+        inherited
+            .overlay(&Options {
+                files: Some(vec![]),
+                duplicates: Some(Default::default()),
+                ..Default::default()
+            })
+            .files,
+        Some(vec![])
+    );
+    let root =
+        parse(r#"{"files":[],"duplicates":"","extractor":{"files":"file","duplicates":true}}"#)
+            .unwrap()
+            .resolve("kemono")
+            .unwrap();
+    assert_eq!(root.files, Some(vec![]));
+    assert_eq!(root.duplicates, Some(DuplicateOptions::default()));
+    let defaults = Options::default();
+    assert!(!defaults.kemono_selection().original);
+    assert!(defaults.tumblr_selection().original);
+}
+
+#[test]
+fn kemono_file_selection_rejects_unknown_names_and_types_privately() {
+    use serde_json::json;
+    for (field, values) in [
+        (
+            "files",
+            vec![
+                json!(null),
+                json!(false),
+                json!(1),
+                json!(""),
+                json!("attachment"),
+                json!("PRIVATE_VALUE"),
+                json!(["file", 1]),
+            ],
+        ),
+        (
+            "duplicates",
+            vec![
+                json!(null),
+                json!(1),
+                json!("attachments"),
+                json!("PRIVATE_VALUE"),
+                json!(["inline", false]),
+            ],
+        ),
+    ] {
+        for value in values {
+            for document in [
+                json!({field:value}),
+                json!({"extractor":{field:value}}),
+                json!({"extractor":{"kemono":{field:value}}}),
+            ] {
+                let error = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(error.contains(field), "{error}");
+                assert!(!error.contains("PRIVATE_VALUE"), "{error}");
+            }
+        }
+    }
+    assert!(parse(&json!({"files":vec!["file";65]}).to_string()).is_err());
+    assert!(parse(&json!({"duplicates":vec!["file";65]}).to_string()).is_err());
+}

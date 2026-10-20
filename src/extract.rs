@@ -111,7 +111,8 @@ impl Media {
                     serde_json::json!([instance, post.media_id]).to_string(),
                 )
             }
-            // Kemono/Coomer file hashes are scoped to their service, creator and post.
+            // Kemono/Coomer source positions preserve explicitly retained
+            // duplicates and hashless inline files, as upstream does.
             category @ ("kemono" | "coomer") => {
                 let post = self.metadata.as_ref()?;
                 let service = post.instance.as_deref()?;
@@ -129,13 +130,24 @@ impl Media {
                     || !crate::kemono::valid_service(service)
                     || !crate::kemono::valid_id(user)
                     || !crate::kemono::valid_id(&post.post_id)
-                    || !crate::kemono::valid_hash(&post.media_id)
+                    || post.index == 0
+                    || !(crate::kemono::valid_hash(&post.media_id)
+                        || post.media_id.is_empty()
+                            && match post
+                                .file
+                                .as_ref()
+                                .and_then(|file| file.media_type.as_deref())
+                            {
+                                Some("inline") => true,
+                                Some("archive") => self.url.path().starts_with("/data/inline/"),
+                                _ => false,
+                            })
                 {
                     return None;
                 }
                 (
                     category,
-                    serde_json::json!([service, user, post.post_id, post.media_id]).to_string(),
+                    serde_json::json!([service, user, post.post_id, post.index]).to_string(),
                 )
             }
             // Image host file IDs are global per site.
@@ -528,6 +540,8 @@ pub struct BackendOptions {
     pub posts: Option<Vec<String>>,
     pub inline: Option<crate::tumblr::Inline>,
     pub original: Option<bool>,
+    pub files: Option<Vec<crate::kemono::FileKind>>,
+    pub duplicates: Option<crate::kemono::DuplicateOptions>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub user_id: Option<String>,
@@ -708,6 +722,32 @@ impl Backend {
                 crate::tumblr::Inline::Original => serde_json::json!("original"),
             };
             command.arg("--option").arg(format!("inline={value}"));
+        }
+        if let Some(files) = &options.files {
+            let names: Vec<_> = files
+                .iter()
+                .map(|kind| match kind {
+                    crate::kemono::FileKind::File => "file",
+                    crate::kemono::FileKind::Attachments => "attachments",
+                    crate::kemono::FileKind::Inline => "inline",
+                })
+                .collect();
+            command
+                .arg("--option")
+                .arg(format!("files={}", serde_json::json!(names)));
+        }
+        if let Some(duplicates) = options.duplicates {
+            let names: Vec<_> = [
+                ("file", duplicates.file),
+                ("attachment", duplicates.attachment),
+                ("inline", duplicates.inline),
+            ]
+            .into_iter()
+            .filter_map(|(name, enabled)| enabled.then_some(name))
+            .collect();
+            command
+                .arg("--option")
+                .arg(format!("duplicates={}", serde_json::json!(names)));
         }
         if let Some(posts) = &options.posts {
             let value = if posts.as_slice() == ["all"] {
@@ -1174,6 +1214,12 @@ fn compatibility_metadata(
         && let Some(name) = string("name")
     {
         file.get_or_insert_default().description = Some(std::sync::Arc::from(name));
+    }
+    if matches!(category, "kemono" | "coomer")
+        && let Some(kind) = string("type")
+            .filter(|kind| matches!(kind.as_str(), "file" | "attachment" | "inline" | "archive"))
+    {
+        file.get_or_insert_default().media_type = Some(std::sync::Arc::from(kind));
     }
     Some(PostMetadata {
         rating: crate::booru::Site::from_category(category)

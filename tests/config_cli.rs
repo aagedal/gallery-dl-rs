@@ -993,3 +993,76 @@ printf '%s\n' '[[2,"",{"id":"1","user":"42","service":"patreon","date":"2020-01-
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn kemono_file_selection_forwards_only_to_its_category_and_keeps_duplicates() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor":{
+            "files":["attachments","file","inline"],"duplicates":true,"original":false,
+            "coomer":{"files":[],"duplicates":false,"original":true}
+        }}),
+    );
+    for (url, expected, absent) in [
+        (
+            "https://kemono.cr/posts",
+            vec![
+                "files=[\"attachments\",\"file\",\"inline\"]",
+                "duplicates=[\"file\",\"attachment\",\"inline\"]",
+                "original=false",
+            ],
+            vec![],
+        ),
+        (
+            "https://coomer.st/posts",
+            vec!["files=[]", "duplicates=[]", "original=true"],
+            vec![],
+        ),
+        (
+            "https://alice.tumblr.com/",
+            vec!["original=false"],
+            vec!["files=", "duplicates="],
+        ),
+        (
+            "https://x.com/alice/status/42",
+            vec![],
+            vec!["files=", "duplicates=", "original="],
+        ),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let mut command = binary(root.path(), &cfg);
+        command
+            .arg("--extractor-command")
+            .arg(backend(root.path()))
+            .env("CONFIG_TEST_LOG", &log)
+            .args(["-g", url]);
+        success(&output(&mut command).await);
+        let log = std::fs::read_to_string(log).unwrap();
+        for value in expected {
+            assert!(log.contains(&format!("--option\n{value}\n")), "{log}");
+        }
+        for value in absent {
+            assert!(!log.contains(value), "{log}");
+        }
+    }
+    let executable = root.path().join("duplicate-backend");
+    std::fs::write(&executable,br#"#!/bin/sh
+printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42","service":"patreon","hash":"aabb","num":1,"type":"attachment","filename":"first","extension":"jpg"}],[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42","service":"patreon","hash":"aabb","num":2,"type":"attachment","filename":"second","extension":"jpg"}]]'
+"#).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut command = binary(root.path(), &cfg);
+    command
+        .arg("--extractor-command")
+        .arg(&executable)
+        .args(["-j", "https://kemono.cr/posts"]);
+    let result = output(&mut command).await;
+    success(&result);
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(items.len(), 2, "{items:?}");
+    assert_eq!(items[0]["metadata"]["index"], 1);
+    assert_eq!(items[1]["metadata"]["index"], 2);
+}
