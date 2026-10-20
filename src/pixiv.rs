@@ -9,7 +9,9 @@
 //! frame ZIP and ordered frame delays from the ugoira metadata endpoint. Files
 //! are served from `i.pximg.net`, which requires the App API `Referer` header.
 use crate::{
-    Result, error,
+    Result,
+    dispatch::Include,
+    error,
     event::{ChildMetadata, ExtractionEvent, group},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
@@ -81,6 +83,21 @@ impl Kind {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileKind {
+    Avatar,
+    Background,
+}
+
+impl ProfileKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Avatar => "avatar",
+            Self::Background => "background",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Illust(String),
@@ -91,6 +108,10 @@ pub enum Target {
     Bookmarks {
         id: Option<String>,
         tag: Option<String>,
+    },
+    Profile {
+        id: String,
+        kind: ProfileKind,
     },
 }
 
@@ -191,6 +212,14 @@ pub fn target(url: &Url) -> Result<Target> {
         ["users", raw] | ["users", raw, "artworks"] => user(raw, vec![Kind::Illust, Kind::Manga]),
         ["users", raw, "illustrations"] => user(raw, vec![Kind::Illust]),
         ["users", raw, "manga"] => user(raw, vec![Kind::Manga]),
+        ["users", raw, "avatar"] => Ok(Target::Profile {
+            id: id(raw)?,
+            kind: ProfileKind::Avatar,
+        }),
+        ["users", raw, "background"] => Ok(Target::Profile {
+            id: id(raw)?,
+            kind: ProfileKind::Background,
+        }),
         ["users", raw, "bookmarks", "artworks"] => bookmarks(Some(raw), None),
         ["users", raw, "bookmarks", "artworks", tag] => bookmarks(Some(raw), Some(tag)),
         ["bookmark.php"] => bookmarks(query("id").filter(|id| !id.is_empty()).as_deref(), None),
@@ -382,6 +411,138 @@ pub fn parse_ugoira(illust: &Value, bytes: &[u8]) -> Result<Vec<Media>> {
     Ok(media)
 }
 
+/// Shared native/compatibility archive identity for Pixiv user profile images.
+pub(crate) fn profile_asset_identity(
+    kind: &str,
+    owner: &str,
+    timestamp: Option<i64>,
+) -> Option<crate::profile_asset::ProfileAssetMetadata> {
+    use crate::profile_asset::{ProfileAssetKind, ProfileAssetMetadata};
+    if !valid_id(owner) {
+        return None;
+    }
+    let kind = match kind {
+        "avatar" => ProfileAssetKind::Avatar,
+        "background" => ProfileAssetKind::Background,
+        _ => return None,
+    };
+    Some(ProfileAssetMetadata {
+        kind,
+        owner_id: owner.to_owned(),
+        version: timestamp
+            .map(|date| date.to_string())
+            .unwrap_or_else(|| "none".into()),
+    })
+}
+
+/// Profile images use the upstream kind/user/date identity and URL-derived UTC
+/// timestamp, independent of signed query parameters or download fallbacks.
+pub fn parse_profile(bytes: &[u8], owner: &str, kind: ProfileKind) -> Result<Vec<Media>> {
+    let body = json(bytes)?;
+    let user = body
+        .get("user")
+        .ok_or_else(|| error("Pixiv response contains no user"))?;
+    if !valid_id(owner) || id_of(user).as_deref() != Some(owner) {
+        return Err(error("Pixiv returned an unexpected user"));
+    }
+    let raw = match kind {
+        ProfileKind::Avatar => user
+            .get("profile_image_urls")
+            .and_then(|urls| string(urls, "medium"))
+            .ok_or_else(|| error("Pixiv user contains no avatar"))?
+            .replace("_170.", "."),
+        ProfileKind::Background => {
+            let profile = body
+                .get("profile")
+                .ok_or_else(|| error("Pixiv response contains no profile"))?;
+            let raw = match profile.get("background_image_url") {
+                Some(Value::Null) => return Ok(Vec::new()),
+                Some(Value::String(raw)) if raw.is_empty() => return Ok(Vec::new()),
+                Some(Value::String(raw)) => raw.as_str(),
+                _ => return Err(error("Pixiv profile contains no background URL")),
+            };
+            let mut parts: Vec<_> = raw.split('/').collect();
+            if raw.contains("/c/") && parts.len() >= 5 {
+                parts.drain(3..5);
+            }
+            parts.join("/").replace("_master1200.", ".")
+        }
+    };
+    let url = Url::parse(&raw)
+        .ok()
+        .filter(|url| {
+            url.scheme() == "https"
+                && url.port().is_none()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && (url.host_str() == Some("i.pximg.net")
+                    || url.host_str() == Some("s.pximg.net")
+                        && url.path().starts_with("/common/images/"))
+        })
+        .ok_or_else(|| error("Pixiv returned an unsupported profile image URL"))?;
+    let parts: Vec<_> = url.path_segments().into_iter().flatten().collect();
+    let timestamp = if parts.len() >= 8 {
+        crate::date::parse_date(&format!(
+            "{}-{}-{}T{}:{}:{}+09:00",
+            parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+        ))
+        .ok()
+    } else {
+        None
+    };
+    let version = timestamp
+        .map(|date| date.to_string())
+        .unwrap_or_else(|| "none".into());
+    let date_suffix = timestamp
+        .and_then(|timestamp| time::OffsetDateTime::from_unix_timestamp(timestamp).ok())
+        .map(|date| {
+            format!(
+                "_{:04}-{:02}-{:02}",
+                date.year(),
+                u8::from(date.month()),
+                date.day()
+            )
+        })
+        .unwrap_or_default();
+    let label = kind.as_str();
+    let ext = extension(&url);
+    let mut handoff = BTreeMap::new();
+    if kind == ProfileKind::Background && url.as_str().ends_with(".jpg") {
+        let mut fallback = url.clone();
+        let base = fallback
+            .path()
+            .strip_suffix(".jpg")
+            .expect("jpg suffix")
+            .to_owned();
+        let candidates: Vec<_> = ["png", "gif"]
+            .into_iter()
+            .map(|ext| {
+                fallback.set_path(&format!("{base}.{ext}"));
+                fallback.to_string()
+            })
+            .collect();
+        handoff.insert("_fallback".into(), serde_json::json!(candidates));
+    }
+    Ok(vec![Media {
+        url,
+        job: MediaJob::DirectHttp,
+        category: "pixiv".into(),
+        filename: format!("{label}{date_suffix}.{ext}"),
+        metadata: Some(PostMetadata {
+            post_id: label.into(),
+            media_id: format!("{label}_{owner}_{version}"),
+            username: string(user, "account").map(Arc::from),
+            caption: Some(Arc::from(label)),
+            timestamp,
+            index: 1,
+            profile_asset: profile_asset_identity(label, owner, timestamp),
+            ..PostMetadata::default()
+        }),
+        headers: BTreeMap::from([("Referer".into(), REFERER.into())]),
+        handoff,
+    }])
+}
+
 fn json(bytes: &[u8]) -> Result<Value> {
     serde_json::from_slice(bytes).map_err(|_| error("Pixiv returned invalid JSON"))
 }
@@ -496,6 +657,7 @@ pub struct Pixiv {
     retries: u8,
     rate_limits: RateLimits,
     ugoira: bool,
+    include: Option<Include>,
 }
 
 #[derive(Clone)]
@@ -538,6 +700,7 @@ impl Pixiv {
             retries: 0,
             rate_limits: RateLimits::default(),
             ugoira: true,
+            include: None,
         })
     }
 
@@ -550,6 +713,12 @@ impl Pixiv {
 
     pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
         self.refresh_token = token.map(str::to_owned);
+        self
+    }
+
+    /// Select bare-profile child views; explicit views remain root jobs.
+    pub fn with_include(mut self, include: Option<Include>) -> Self {
+        self.include = include;
         self
     }
 
@@ -794,13 +963,53 @@ impl Pixiv {
         let path = segments(url);
         let bare_user = matches!(path.as_slice(), ["users", _] | ["en", "users", _]);
         if bare_user {
-            // Upstream Dispatch queues only `_extractor`, with no public
-            // child fields. Authentication belongs to the selected child.
-            return crate::event::child_job(
-                ChildMetadata::from_raw("pixiv", "user", &serde_json::Map::new()),
-                move || self.target_events(target),
+            let Target::User { id, .. } = target else {
+                unreachable!("validated bare user")
+            };
+            let views = crate::dispatch::select(
+                self.include.as_ref(),
+                &["artworks"],
+                &[
+                    "avatar",
+                    "background",
+                    "artworks",
+                    "favorite",
+                    "bookmark",
+                    "user",
+                    "sketch",
+                ],
+                &[("novel-bookmark", "bookmark"), ("novel-user", "user")],
             );
+            return stream::iter(views)
+                .flat_map(move |view| {
+                    let id = id.clone();
+                    crate::event::child_job(
+                        ChildMetadata::from_raw("pixiv", "user", &serde_json::Map::new()),
+                        move || self.view_events(id, &view),
+                    )
+                })
+                .boxed();
         }
+        self.target_events(target)
+    }
+
+    fn view_events(&self, id: String, view: &str) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let target = match view {
+            "artworks" => Target::User { id, kinds: vec![Kind::Illust, Kind::Manga] },
+            "favorite" => Target::Bookmarks { id: Some(id), tag: None },
+            "avatar" => Target::Profile { id, kind: ProfileKind::Avatar },
+            "background" => Target::Profile { id, kind: ProfileKind::Background },
+            "bookmark" => return stream::once(async {
+                Err(error("native Pixiv novel bookmarks are not supported; use --extractor compatibility"))
+            }).boxed(),
+            "user" => return stream::once(async {
+                Err(error("native Pixiv user novels are not supported; use --extractor compatibility"))
+            }).boxed(),
+            "sketch" => return stream::once(async {
+                Err(error("native Pixiv Sketch extraction is not supported; use --extractor compatibility"))
+            }).boxed(),
+            _ => return stream::empty().boxed(),
+        };
         self.target_events(target)
     }
 
@@ -809,6 +1018,25 @@ impl Pixiv {
             return stream::once(async { Err(missing_token()) }).boxed();
         }
         let (user, kinds) = match target {
+            Target::Profile { id, kind } => {
+                return stream::once(async move {
+                    let mut endpoint = self.api_root.join("v1/user/detail").expect("static");
+                    endpoint.query_pairs_mut().append_pair("user_id", &id);
+                    let media = parse_profile(&self.get(&endpoint).await?, &id, kind)?;
+                    let events = if media.is_empty() {
+                        VecDeque::new()
+                    } else {
+                        self.finish(media)
+                    };
+                    Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)))
+                })
+                .map(|result| match result {
+                    Ok(events) => events.boxed(),
+                    Err(e) => stream::once(async move { Err(e) }).boxed(),
+                })
+                .flatten()
+                .boxed();
+            }
             Target::Illust(id) => {
                 return stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/illust/detail").expect("static");
@@ -1290,6 +1518,152 @@ mod tests {
                 .next_url(next.as_str(), &Feed::Bookmarks { tag: None }, "9")
                 .is_err()
         );
+    }
+
+    fn user_detail() -> Value {
+        json!({"user": {"id": 9, "account": "alice", "profile_image_urls": {
+            "medium": "https://i.pximg.net/user-profile/img/2024/01/01/00/00/00/9_170.jpg?token=private-avatar"}},
+            "profile": {"background_image_url": "https://i.pximg.net/c/1200x600_90_a2/background/img/2024/01/01/00/00/00/99_master1200.jpg?token=private-background"}})
+    }
+
+    #[test]
+    fn parses_upstream_avatar_and_background_urls_dates_fallbacks_and_archive_versions() {
+        use crate::profile_asset::ProfileAssetKind;
+        let body = user_detail().to_string();
+        let avatar = parse_profile(body.as_bytes(), "9", ProfileKind::Avatar)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            avatar.url.path(),
+            "/user-profile/img/2024/01/01/00/00/00/9.jpg"
+        );
+        assert_eq!(avatar.filename, "avatar_2023-12-31.jpg");
+        let metadata = avatar.metadata.as_ref().unwrap();
+        assert_eq!(metadata.post_id, "avatar");
+        assert_eq!(metadata.username.as_deref(), Some("alice"));
+        assert_eq!(metadata.caption.as_deref(), Some("avatar"));
+        assert_eq!(metadata.timestamp, Some(1704034800));
+        let asset = metadata.profile_asset.as_ref().unwrap();
+        assert_eq!(asset.kind, ProfileAssetKind::Avatar);
+        assert_eq!(asset.owner_id, "9");
+        assert_eq!(asset.version, "1704034800");
+        assert!(avatar.archive_key().is_some());
+        assert!(!valid_media_id(&metadata.post_id, &metadata.media_id));
+        let mut refreshed = avatar.clone();
+        refreshed.url.set_query(Some("token=another-secret"));
+        assert_eq!(avatar.archive_key(), refreshed.archive_key());
+        let mut changed = avatar.clone();
+        changed
+            .metadata
+            .as_mut()
+            .unwrap()
+            .profile_asset
+            .as_mut()
+            .unwrap()
+            .version = "1704034801".into();
+        assert_ne!(avatar.archive_key(), changed.archive_key());
+        let background = parse_profile(body.as_bytes(), "9", ProfileKind::Background)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            background.url.path(),
+            "/background/img/2024/01/01/00/00/00/99.jpg"
+        );
+        assert_eq!(background.filename, "background_2023-12-31.jpg");
+        assert_eq!(
+            background
+                .metadata
+                .as_ref()
+                .unwrap()
+                .profile_asset
+                .as_ref()
+                .unwrap()
+                .kind,
+            ProfileAssetKind::Background
+        );
+        assert_ne!(avatar.archive_key(), background.archive_key());
+        assert!(background.handoff.is_empty());
+        // Upstream adds fallbacks only when the complete URL ends in .jpg.
+        let mut unsigned = user_detail();
+        unsigned["profile"]["background_image_url"] = json!(
+            "https://i.pximg.net/c/1200x600_90_a2/background/img/2024/01/01/00/00/00/99_master1200.jpg"
+        );
+        let fallback = parse_profile(
+            unsigned.to_string().as_bytes(),
+            "9",
+            ProfileKind::Background,
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(fallback.archive_key(), background.archive_key());
+        assert_eq!(
+            fallback.handoff["_fallback"],
+            json!([
+                "https://i.pximg.net/background/img/2024/01/01/00/00/00/99.png",
+                "https://i.pximg.net/background/img/2024/01/01/00/00/00/99.gif"
+            ])
+        );
+        for media in [&avatar, &background] {
+            assert_eq!(
+                media.headers,
+                BTreeMap::from([("Referer".into(), REFERER.into())])
+            );
+            assert_ne!(
+                media.archive_key(),
+                parse_illust(&illust(9, 1)).unwrap()[0].archive_key()
+            );
+        }
+        for kind in [ProfileKind::Avatar, ProfileKind::Background] {
+            assert!(
+                parse_profile(body.as_bytes(), "10", kind)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unexpected user")
+            );
+        }
+    }
+
+    #[test]
+    fn default_avatar_and_empty_background_preserve_upstream_absent_date_behavior() {
+        let mut detail = user_detail();
+        detail["user"]["profile_image_urls"]["medium"] =
+            json!("https://s.pximg.net/common/images/no_profile.png");
+        detail["profile"]["background_image_url"] = Value::Null;
+        let media = parse_profile(detail.to_string().as_bytes(), "9", ProfileKind::Avatar)
+            .unwrap()
+            .remove(0);
+        assert_eq!(media.filename, "avatar.png");
+        assert_eq!(media.metadata.as_ref().unwrap().timestamp, None);
+        assert_eq!(
+            media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .profile_asset
+                .as_ref()
+                .unwrap()
+                .version,
+            "none"
+        );
+        assert!(media.archive_key().is_some());
+        assert!(
+            parse_profile(detail.to_string().as_bytes(), "9", ProfileKind::Background)
+                .unwrap()
+                .is_empty()
+        );
+        for raw in [
+            "https://evil.example/9.jpg",
+            "http://i.pximg.net/9.jpg",
+            "https://x:y@i.pximg.net/9.jpg",
+            "https://i.pximg.net:444/9.jpg",
+            "https://s.pximg.net/private/9.jpg",
+        ] {
+            detail["user"]["profile_image_urls"]["medium"] = json!(raw);
+            let error = parse_profile(detail.to_string().as_bytes(), "9", ProfileKind::Avatar)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(error, "Pixiv returned an unsupported profile image URL");
+        }
     }
 
     #[test]
@@ -2105,6 +2479,258 @@ mod tests {
                 .contains("refresh-token")
         );
         assert!(direct.next().await.is_none());
+    }
+
+    fn included(views: &[&str]) -> Include {
+        Include::Views(views.iter().map(|view| (*view).to_owned()).collect())
+    }
+
+    #[tokio::test]
+    async fn include_empty_and_unknown_views_do_not_validate_token_or_open_http() {
+        for include in [included(&[]), included(&["unknown", "artworks-invalid"])] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+            let native = pixiv(root)
+                .with_refresh_token(None)
+                .with_include(Some(include));
+            assert!(
+                native
+                    .events(&Url::parse("https://www.pixiv.net/users/9").unwrap())
+                    .collect::<Vec<_>>()
+                    .await
+                    .is_empty()
+            );
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn include_all_keeps_exact_catalog_order_and_unsupported_errors_scoped() {
+        let page = |id| {
+            response(
+                "200 OK",
+                json!({"illusts": [illust(id, 1)], "next_url": null})
+                    .to_string()
+                    .as_bytes(),
+            )
+        };
+        let profile = response("200 OK", user_detail().to_string().as_bytes());
+        let (root, server) = serve(vec![
+            token("access-secret"),
+            profile.clone(),
+            profile,
+            page(41),
+            response("200 OK", br#"{"illusts":[],"next_url":null}"#),
+            page(42),
+        ]);
+        let native = pixiv(root).with_include(Some(Include::All));
+        let events = native
+            .events(&Url::parse("https://www.pixiv.net/users/9").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Ok(ExtractionEvent::BeginChild(_))))
+                .count(),
+            7
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Ok(ExtractionEvent::EndChild(_))))
+                .count(),
+            7
+        );
+        let results = events
+            .iter()
+            .filter_map(|event| match event {
+                Ok(ExtractionEvent::Media(media)) => {
+                    Some(media.metadata.as_ref().unwrap().post_id.clone())
+                }
+                Err(error) => Some(error.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(&results[..4], ["avatar", "background", "41", "42"]);
+        assert!(results[4].contains("novel bookmarks"));
+        assert!(results[5].contains("user novels"));
+        assert!(results[6].contains("Sketch"));
+        assert!(results.iter().all(|value| !value.contains("secret")));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 6);
+        assert!(requests[1].starts_with("GET /v1/user/detail?user_id=9 "));
+        assert!(requests[2].starts_with("GET /v1/user/detail?user_id=9 "));
+        assert!(requests[3].starts_with("GET /v1/user/illusts?user_id=9&type=illust "));
+        assert!(
+            requests[5].starts_with("GET /v1/user/bookmarks/illust?user_id=9&restrict=public ")
+        );
+    }
+
+    #[tokio::test]
+    async fn ordered_aliases_duplicates_and_failed_selected_children_leave_later_siblings_available()
+     {
+        use crate::job_selection::JobSelection;
+        let profile = response("200 OK", user_detail().to_string().as_bytes());
+        let (root, server) = serve(vec![token("t"), profile.clone(), profile]);
+        let native = pixiv(root).with_include(Some(included(&[
+            "novel-user",
+            "avatar",
+            "novel-bookmark",
+            "avatar",
+        ])));
+        let results = JobSelection::default()
+            .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(results.len(), 4, "{results:?}");
+        assert!(
+            results[0]
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("user novels")
+        );
+        assert_eq!(
+            results[1].as_ref().unwrap().filename,
+            "avatar_2023-12-31.jpg"
+        );
+        assert!(
+            results[2]
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("novel bookmarks")
+        );
+        assert_eq!(
+            results[3].as_ref().unwrap().filename,
+            "avatar_2023-12-31.jpg"
+        );
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn rejected_unsupported_include_children_never_validate_token_or_authenticate() {
+        use crate::{filter::FilterExpression, job_selection::JobSelection};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let native = pixiv(root)
+            .with_refresh_token(None)
+            .with_include(Some(included(&["novel-user", "novel-bookmark", "sketch"])));
+        let items = JobSelection {
+            child_filter: Some(FilterExpression::parse("False").unwrap()),
+            ..Default::default()
+        }
+        .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+        .collect::<Vec<_>>()
+        .await;
+        assert!(items.is_empty(), "{items:?}");
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+    }
+
+    #[tokio::test]
+    async fn selected_child_range_skips_earlier_unsupported_views_and_stops_later_views() {
+        use crate::{job_selection::JobSelection, selection::RangeSelection};
+        let (root, server) = serve(vec![
+            token("t"),
+            response("200 OK", user_detail().to_string().as_bytes()),
+        ]);
+        let native = pixiv(root).with_include(Some(included(&["sketch", "avatar", "novel-user"])));
+        let results = JobSelection {
+            child_range: Some(RangeSelection::parse("2").unwrap()),
+            ..Default::default()
+        }
+        .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(results.len(), 1, "{results:?}");
+        assert_eq!(
+            results[0].as_ref().unwrap().filename,
+            "avatar_2023-12-31.jpg"
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn included_child_post_and_file_ranges_restart_for_each_selected_view() {
+        use crate::{
+            job_selection::JobSelection, post_selection::PostSelection, selection::RangeSelection,
+        };
+        for post_range in [false, true] {
+            let (root, server) = serve_with(|root| {
+                let page = |id, cursor| {
+                    response("200 OK", json!({"illusts": [illust(id, 2), illust(id + 1, 1)],
+                    "next_url": root.join(&format!("v1/user/bookmarks/illust?user_id=9&restrict=public&max_bookmark_id={cursor}")).unwrap()}).to_string().as_bytes())
+                };
+                vec![token("t"), page(41, 100), page(43, 200)]
+            });
+            let native = pixiv(root).with_include(Some(included(&["favorite", "favorite"])));
+            let selection = if post_range {
+                JobSelection {
+                    post_selection: Some(PostSelection::new(
+                        Some(RangeSelection::parse("1").unwrap()),
+                        None,
+                    )),
+                    ..Default::default()
+                }
+            } else {
+                JobSelection {
+                    file_range: Some(RangeSelection::parse("1").unwrap()),
+                    ..Default::default()
+                }
+            };
+            let items = selection
+                .apply(native.events(&Url::parse("https://www.pixiv.net/users/9").unwrap()))
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(items.len(), if post_range { 4 } else { 2 });
+            assert_eq!(items[0].metadata.as_ref().unwrap().post_id, "41");
+            assert_eq!(
+                items.last().unwrap().metadata.as_ref().unwrap().post_id,
+                "43"
+            );
+            assert_eq!(server.join().unwrap().len(), 3);
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_profile_assets_bypass_include_and_child_selection_and_keep_referer_only() {
+        use crate::{filter::FilterExpression, job_selection::JobSelection};
+        for kind in ["avatar", "background"] {
+            let (root, server) = serve(vec![
+                token("access-secret"),
+                response("200 OK", user_detail().to_string().as_bytes()),
+            ]);
+            let native = pixiv(root).with_include(Some(included(&[])));
+            let url = Url::parse(&format!("https://www.pixiv.net/users/9/{kind}")).unwrap();
+            let items = JobSelection {
+                child_filter: Some(FilterExpression::parse("False").unwrap()),
+                ..Default::default()
+            }
+            .apply(native.events(&url))
+            .collect::<Vec<_>>()
+            .await;
+            assert_eq!(items.len(), 1);
+            let media = items[0].as_ref().unwrap();
+            assert_eq!(media.metadata.as_ref().unwrap().post_id, kind);
+            assert_eq!(
+                media.headers,
+                BTreeMap::from([("Referer".into(), REFERER.into())])
+            );
+            let requests = server.join().unwrap();
+            assert!(
+                requests[1]
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer access-secret")
+            );
+        }
     }
 
     #[tokio::test]

@@ -473,7 +473,30 @@ metadata privacy, shared server metadata and actual nested HTTP traversal.
 Profile tests also cover request-free rejection, deferred token errors, default
 feed selection, direct-view isolation and unchanged archive identities.
 Additional native queue producers, per-child/subcategory settings, parent metadata
-propagation, configurable profile include lists and authenticated verification remain unfinished.
+propagation and authenticated verification remain unfinished.
+
+**Implemented ordered profile include dispatch:** scoped native `include`
+supports exact-string `all`, comma strings, literal lists and explicit empty
+overrides, forwarded as typed compatibility options. Bare X, Bluesky and Pixiv
+profiles queue their configured views in upstream catalog order or requested
+order, preserving aliases and repeated child positions. Post/file limits cancel
+each selected child independently; explicit view URLs remain roots. Recorded
+upstream Dispatch reference vectors cover string/list distinctions and unknown
+entries. Native mode currently omits unknown include names without upstream's
+warning. All X profile views have native paths; Bluesky adds replies/video,
+avatar/banner blobs and normalized fileless info; Pixiv adds original
+avatar/background images and extension fallbacks. Native Pixiv novels/Sketch and
+Bluesky likes still produce scoped unsupported errors, including in `all`,
+without suppressing later selected children. Profile info retains only the
+normalized public subset; full metadata-only JSON dumping remains unfinished.
+X/Pixiv typed profile image identity isolates owner/kind/version archives from
+ordinary posts and agrees with compatibility rows. Inspection, filters and
+templates expose those public identity fields. HTTP fixtures verify actual
+request order, no-request rejection, independent counters, failed-child recovery,
+default preservation and native/compatibility archive stability. Successful live
+public Bluesky avatar inspection on 2026-10-20 emitted one original blob job
+under `include`/child/file limits, with no errors or media download. Live
+authenticated X/Pixiv profile asset/include traversal remains unverified.
 
 **Implemented native file metadata expressions:** repeated `--filter` and scoped
 `file-filter` / `image-filter` string/list settings select normalized public fields
@@ -723,7 +746,7 @@ and own bookmarks resolved from OAuth, with scoped lazy pagination.
 Remaining: ugoira original individual-frame mode and conversion,
 private bookmarks and bookmark cursor/metadata options, following, rankings,
 searches, novels, sketch,
-pixivision, series, user avatars/backgrounds, upstream metadata options
+pixivision, series, upstream metadata options
 (`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and
@@ -789,8 +812,9 @@ cycles. `reposts`, `quoted`, and boolean `videos` match upstream defaults;
 quoted records retain their own media identity, validate reference/view
 identities, use hydrated data and fetch missing records lazily with cycle and
 depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
-requested; own pinned posts are retained. Not yet: likes, searches,
-replies/video/profile-image views, authentication, PDS-specific blob hosts (blobs always use `bsky.social`), upstream's `include`, thread `depth`,
+requested; own pinned posts are retained. Ordered include, replies/video and
+profile-image views are described above. Not yet: likes, searches,
+authentication, PDS-specific blob hosts (blobs always use `bsky.social`), thread `depth`,
 metadata facets/user expansion, and newer multi-item media embeds.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook

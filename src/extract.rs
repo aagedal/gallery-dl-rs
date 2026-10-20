@@ -320,12 +320,39 @@ impl Media {
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;
-                if !crate::pixiv::valid_media_id(&post.post_id, &post.media_id) {
+                if let Some(asset) = &post.profile_asset {
+                    if !crate::pixiv::valid_id(&asset.owner_id) || !asset.valid_version() {
+                        return None;
+                    }
+                    (
+                        "pixiv",
+                        serde_json::json!(["profile", asset.kind, asset.owner_id, asset.version])
+                            .to_string(),
+                    )
+                } else {
+                    if !crate::pixiv::valid_media_id(&post.post_id, &post.media_id) {
+                        return None;
+                    }
+                    (
+                        "pixiv",
+                        serde_json::json!([post.post_id, post.media_id]).to_string(),
+                    )
+                }
+            }
+            "twitter"
+                if self
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|post| post.profile_asset.is_some()) =>
+            {
+                let asset = self.metadata.as_ref()?.profile_asset.as_ref()?;
+                if !crate::twitter::valid_id(&asset.owner_id) || !asset.valid_version() {
                     return None;
                 }
                 (
-                    "pixiv",
-                    serde_json::json!([post.post_id, post.media_id]).to_string(),
+                    "twitter",
+                    serde_json::json!(["profile", asset.kind, asset.owner_id, asset.version])
+                        .to_string(),
                 )
             }
             // Booru files are identified by their site and post ID.
@@ -403,6 +430,8 @@ impl Media {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PostMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_asset: Option<crate::profile_asset::ProfileAssetMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discord: Option<crate::kemono::DiscordMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -594,6 +623,7 @@ pub fn direct(url: &Url) -> Option<Media> {
 /// Runtime overrides passed as individual arguments to the compatibility process.
 #[derive(Clone, Default)]
 pub struct BackendOptions {
+    pub include: Option<crate::dispatch::Include>,
     pub child_range: Option<String>,
     pub child_filter: Option<Vec<String>>,
     pub browser: Option<String>,
@@ -758,6 +788,11 @@ impl Backend {
             command
                 .arg("--option")
                 .arg(format!("child-range={}", serde_json::json!(range)));
+        }
+        if let Some(include) = &options.include {
+            command
+                .arg("--option")
+                .arg(format!("include={}", include.value()));
         }
         if let Some(clauses) = &options.child_filter {
             // An empty clause list explicitly clears inherited backend filters.
@@ -1166,12 +1201,40 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
             }
         }
     }
+    let mut normalized = compatibility_metadata(metadata, category);
+    if category == "twitter"
+        && let Some(kind) = metadata
+            .get("subcategory")
+            .and_then(Value::as_str)
+            .and_then(|kind| match kind {
+                "avatar" => Some(crate::profile_asset::ProfileAssetKind::Avatar),
+                "background" => Some(crate::profile_asset::ProfileAssetKind::Background),
+                _ => None,
+            })
+        && let Some(post) = &mut normalized
+    {
+        let owner = metadata
+            .get("user")
+            .and_then(|user| user.get("id"))
+            .and_then(|id| {
+                id.as_str()
+                    .map(str::to_owned)
+                    .or_else(|| id.as_u64().map(|id| id.to_string()))
+            });
+        post.profile_asset =
+            owner.and_then(|owner| crate::twitter::profile_asset_identity(kind, &owner, &url));
+        if post.profile_asset.is_none() {
+            // Profile rows must not acquire an ordinary tweet archive identity
+            // when their public owner/version or canonical source is invalid.
+            post.media_id.clear();
+        }
+    }
     Ok(Some(Media {
         url,
         job,
         category: category.into(),
         filename,
-        metadata: compatibility_metadata(metadata, category),
+        metadata: normalized,
         headers,
         handoff,
     }))
@@ -1383,7 +1446,36 @@ fn compatibility_metadata(
     } else {
         username
     };
+    let timestamp = data.get("date").and_then(|date| match date {
+        Value::String(value) => crate::date::parse_date(value).ok(),
+        value => value.as_i64(),
+    });
+    let profile_asset = if category == "pixiv"
+        && data.get("subcategory").and_then(Value::as_str) == Some(post_id.as_str())
+        && matches!(post_id.as_str(), "avatar" | "background")
+    {
+        let owner = data
+            .get("user")
+            .and_then(|user| user.get("id"))
+            .and_then(|id| {
+                id.as_str()
+                    .map(str::to_owned)
+                    .or_else(|| id.as_u64().map(|id| id.to_string()))
+            });
+        owner.and_then(|owner| crate::pixiv::profile_asset_identity(&post_id, &owner, timestamp))
+    } else {
+        None
+    };
+    let media_id = profile_asset.as_ref().map_or(media_id, |asset| {
+        format!(
+            "{}_{}_{}",
+            asset.kind.as_str(),
+            asset.owner_id,
+            asset.version
+        )
+    });
     Some(PostMetadata {
+        profile_asset,
         discord: discord.clone(),
         creator,
         revision: compatibility_revision(data, category),
@@ -1445,10 +1537,7 @@ fn compatibility_metadata(
             caption
         }
         .map(std::sync::Arc::from),
-        timestamp: data.get("date").and_then(|date| match date {
-            Value::String(value) => crate::date::parse_date(value).ok(),
-            value => value.as_i64(),
-        }),
+        timestamp,
         index,
     })
 }

@@ -10,6 +10,9 @@ pub(super) enum ProfileInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProfileTab {
+    Info,
+    Avatar,
+    Background,
     Media,
     Tweets,
     Replies,
@@ -93,6 +96,9 @@ pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
         ["", user, tab] => (
             *user,
             match *tab {
+                "info" => ProfileTab::Info,
+                "photo" => ProfileTab::Avatar,
+                "header_photo" => ProfileTab::Background,
                 "media" => ProfileTab::Media,
                 "tweets" => ProfileTab::Tweets,
                 "with_replies" => ProfileTab::Replies,

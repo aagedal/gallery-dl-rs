@@ -1346,3 +1346,70 @@ async fn native_profile_child_selection_skips_requests_and_missing_credentials()
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn include_settings_forward_to_compatibility_with_all_and_empty_preserved() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "twitter":{"include":" media, replies,media "},
+            "bluesky":{"include":"all"},"pixiv":{"include":false}
+        }}),
+    );
+    let executable = backend(root.path());
+    for (source, expected) in [
+        (
+            "https://x.com/fixture",
+            "include=[\"media\",\"replies\",\"media\"]",
+        ),
+        (
+            "https://bsky.app/profile/alice.bsky.social",
+            "include=\"all\"",
+        ),
+        ("https://www.pixiv.net/users/9", "include=[]"),
+    ] {
+        let log = root.path().join("backend.log");
+        let _ = std::fs::remove_file(&log);
+        let result = output(
+            binary(root.path(), &cfg)
+                .arg("--extractor-command")
+                .arg(&executable)
+                .env("CONFIG_TEST_LOG", &log)
+                .args(["-g", source]),
+        )
+        .await;
+        success(&result);
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(log.contains(&format!("--option\n{expected}\n")), "{log}");
+    }
+}
+
+#[tokio::test]
+async fn disabled_native_profile_include_starts_no_children_or_requests() {
+    let root = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let cfg = config(
+        root.path(),
+        serde_json::json!({"extractor": {
+            "proxy":format!("http://{}",listener.local_addr().unwrap()),"timeout":1,"retries":0,
+            "twitter":{"include":[]},"bluesky":{"include":false},"pixiv":{"include":null}
+        }}),
+    );
+    for source in [
+        "https://x.com/fixture",
+        "https://bsky.app/profile/alice.bsky.social",
+        "https://www.pixiv.net/users/9",
+    ] {
+        let result =
+            output(binary(root.path(), &cfg).args(["--extractor", "native", "-g", source])).await;
+        success(&result);
+        assert!(result.stdout.is_empty());
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+}

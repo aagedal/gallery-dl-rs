@@ -232,12 +232,13 @@ as unsupported. Compatibility mode sends Imgur URLs to the backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
-feeds (`bsky.app/profile/NAME`, `/media`, `/posts`), custom feeds
+feeds (`bsky.app/profile/NAME`, `/media`, `/posts`, `/replies`, `/video`), custom feeds
 (`/profile/NAME/feed/RKEY`) and lists (`/profile/NAME/lists/RKEY`), where NAME
 is a handle or DID. It reads the public, unauthenticated AppView
 (`public.api.bsky.app`): handles resolve via `com.atproto.identity.resolveHandle`, posts via
 `getPostThread` and feeds via `getAuthorFeed` (`posts_with_media` for the bare
-profile and `/media`, `posts_and_author_threads` for `/posts`; cursor pagination
+profile and `/media`, `posts_and_author_threads` for `/posts`, `posts_with_replies`
+for `/replies`, `posts_with_video` for `/video`; cursor pagination
 capped at 1,000 pages of 100). Custom feeds use `getFeed` with an
 `app.bsky.feed.generator` record URI; lists use `getListFeed` with an
 `app.bsky.graph.list` record URI. Their owners resolve once, while returned
@@ -258,7 +259,12 @@ fail beyond 32 quotes. Date filters preserve later newer posts after older pins,
 reposts, or quotes. Bare profiles use the posts feed when `quoted` or
 `reposts` is true; explicit `/media` retains its media filter. Media-free posts
 are skipped. Bare profiles queue one native child job for that default feed;
-explicit feed URLs are root jobs. `post_id` is the underlying record key, `media_id`/`id` the blob
+`include` can select other views as described below. Explicit feed URLs are root
+jobs. `/avatar` and `/banner` (also `/background`) resolve the profile's blob CID
+and emit original blob jobs, with upstream's synthetic JPEG/1000×1000 metadata.
+`/info` exposes normalized handle/description in fileless post events; full
+profile metadata dumping remains unfinished. `/likes` still requires the
+compatibility backend. `post_id` is the underlying record key, `media_id`/`id` the blob
 CID, `username` the underlying handle, `caption` the post text, `timestamp`
 from `createdAt`; files carry aspect-ratio width/height, alt text and MIME type.
 Default filenames are `{post_id}_{index}.{extension}`; archive identity is
@@ -540,7 +546,11 @@ A `tag` query overrides the path tag, following upstream's URL decoding.
 Pagination preserves the selected user, public visibility, and tag;
 private (`rest=hide`), following (`type=user`), and novel bookmarks remain
 unsupported. Bookmarked files retain the original artist metadata and
-(illustration, page) archive identity. Media are original `i.pximg.net` files
+(illustration, page) archive identity. `/users/ID/avatar` and `/background`
+read `user/detail`, remove upstream's thumbnail/crop suffixes and emit original
+profile images. JPEG backgrounds without query suffixes carry upstream's PNG/GIF
+fallbacks. Dated profile filenames use UTC dates; archives use kind, owner and
+asset date, including `none` for undated default images. Media are original `i.pximg.net` files
 (`meta_single_page`/`meta_pages`) downloaded with
 `Referer: https://app-api.pixiv.net/` (same-origin redirects only). Ugoira
 animations fetch `ugoira/metadata` lazily per work and download the frame ZIP
@@ -909,6 +919,13 @@ does not discard the continuation boundary.
 Bare user profiles queue this timeline as one native child job, matching
 upstream's default dispatcher. An explicit `/USER/timeline` or another tab URL
 is a root job; it is not filtered by child predicates.
+Native `/USER/photo` and `/USER/header_photo` extract the original avatar and
+banner from the validated user response; default avatars and absent banners
+emit no files. These accept canonical HTTPS `pbs.twimg.com` profile paths,
+with owner/version archive identities separate from tweets. Banner filenames
+remain extensionless when the URL declares no format. `/USER/info` emits a
+fileless post containing normalized username, description and account creation
+date; full raw profile metadata dumping remains unfinished.
 
 Native `/search?q=QUERY` and `/hashtag/TAG` URLs use the same lazy search engine.
 Query parameters decode once, hashtag path plus signs stay literal, duplicate
@@ -983,8 +1000,8 @@ date filtering preserves source order because bookmark, like, list, and ranked
 feed order need not match original post dates. No collection request credentials
 are copied to media requests.
 
-List membership/follow relations, arbitrary
-root-profile dispatch selection, cursor-resume configuration,
+List membership/follow relations, subcategory-specific
+profile settings, cursor-resume configuration,
 and other collection routes remain
 unfinished. New collection behavior has synthetic/local coverage; successful
 live authenticated traversal remains unverified. See the
@@ -1288,17 +1305,52 @@ any request; invalid unselected identities can be skipped. Direct Discord channe
 URLs are root jobs, so child predicates do not filter their own messages.
 
 Bare X, Bluesky and Pixiv profiles also expose one child job for their default
-timeline/feed/artworks view. These dispatch queues contain only the private
+timeline/feed/artworks view, or one child per configured `include` view.
+These dispatch queues contain only the private
 extractor marker upstream, so public child fields are empty apart from
 `category` and `subcategory` (`user`). Rejecting that child avoids owner
 resolution, session requests and Pixiv token validation/refresh. Explicit feed
 URLs remain root jobs. One child wraps the whole feed, rather than each post,
 illustration kind or fallback search stage. A reusable `event::child_job` adapter
 provides lazy construction, matching ends and cooperative cancellation of
-visible nested scopes. Media-only callers retain the same files and archive keys.
+visible nested scopes. Media-only callers retain the same default files and archive keys.
+
+Scoped `include` selects profile children in the requested order. For example:
+
+```json
+{"extractor": {
+  "twitter": {"include": ["media", "likes"]},
+  "bluesky": {"include": "avatar,posts"},
+  "pixiv": {"include": ["avatar", "artworks"]}
+}}
+```
+
+| Category | Default | Catalog order for `"all"` |
+| --- | --- | --- |
+| twitter | timeline | info, avatar, background, timeline, tweets, media, with-replies, highlights, likes |
+| bluesky | media (posts with quotes/reposts enabled) | info, avatar, background, posts, replies, media, video, likes |
+| pixiv | artworks | avatar, background, artworks, favorite, bookmark, user, sketch |
+
+Only the exact string `"all"` expands the catalog; `["all"]` selects no known
+view. Comma-separated strings remove ASCII spaces; list entries remain literal.
+Empty strings/lists, `false` and `null` disable dispatch rather than restore the
+default. At most 128 entries of 128 bytes are accepted. Unknown names are omitted
+(native mode does not yet emit upstream's warning). Repeated views retain their
+child positions; downstream deduplication/archive selection still applies.
+X accepts `replies` as an alias for `with-replies`. Pixiv's illustration bookmarks
+are `favorite`; `bookmark` and `user` select novels, also available as
+`novel-bookmark` and `novel-user`. Native Pixiv novels/Sketch and Bluesky likes
+report errors inside their selected scopes and leave later children available.
+`"all"` includes those entries; child ranges/filters can reject them without
+requests. Include settings forward to compatibility mode as typed options.
+Explicit view URLs ignore `include`. Post/file ranges reset for each selected
+view, while the CLI extraction budget covers the whole input.
+
+X/Pixiv profile image metadata exposes `profile_asset` (`kind`, string `owner_id`
+and `version`) in inspection, filters and templates. Native and compatibility
+profile archive keys agree; ordinary post identities stay unchanged.
 Additional extractor queue boundaries, subcategory-specific child settings,
-configurable profile `include` lists, full queue metadata and authenticated
-verification remain unfinished.
+full queue metadata and authenticated verification remain unfinished.
 
 ## Metadata file filters
 
@@ -1330,7 +1382,7 @@ before extraction without echoing the expression.
 
 Available names include `category`, `filename`/`name` (stem), `extension`,
 `url`/`_url`, post/media IDs, `username`, `caption`/`content`, `timestamp`/`date`
-(epoch seconds), `index`/`num`, file properties, `community`, `article`, and the
+(epoch seconds), `index`/`num`, file properties, `community`, `article`, `profile_asset`, and the
 nested public `metadata` map. Available dimensions have `image_width` /
 `image_height` aliases; `type` aliases `media_type`. X also supplies `tweet_id`,
 `quote_id`, `retweet_id`, and available `source_user` attribution; Facebook
@@ -1457,7 +1509,7 @@ is a strict subset. Compatibility config is loaded only when explicitly selected
 
 Supported settings are `base-directory`, `directory`, `filename`, `file-range`, `cookies`, `archive`,
 `proxy`, `user-agent`, `date-before`, `date-after`, `filesize-min`, `filesize-max`,
-`file-filter`, `image-filter`, `post-range`, `post-filter`, `child-range`, `child-filter`,
+`file-filter`, `image-filter`, `post-range`, `post-filter`, `child-range`, `child-filter`, `include`,
 `retweets`, `quoted`, `pinned`, `replies`, `tweet-endpoint`, `conversations`,
 `expand`, `unique`, `videos`, `previews`, `mp4`, `reblogs`, `reposts`, `ugoira`, `posts`, `inline`, `original`, `files`, `duplicates`, `text-posts`,
 `unavailable`, `text-tweets`, `articles`, `cards`,

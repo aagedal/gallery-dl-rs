@@ -682,6 +682,7 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_include(options.include.clone())
                                     .with_expansion(ExpansionOptions {
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
@@ -786,6 +787,7 @@ fn extract_input<'a>(
                                         ));
                                     }
                                     native
+                                        .with_include(options.include.clone())
                                         .with_selection(gallery_dl_rs::bluesky::Selection {
                                             reposts: options.reposts.unwrap_or(false),
                                             videos: options.videos
@@ -1102,6 +1104,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_include(options.include.clone())
                                     .with_ugoira(options.ugoira.unwrap_or(true))
                                     .with_refresh_token(options.refresh_token.as_deref())
                                     .with_retries(options.retries.unwrap())
@@ -1175,6 +1178,7 @@ fn extract_input<'a>(
                     backend.events_with_options(
                         &url,
                         BackendOptions {
+                            include: options.include.clone(),
                             child_range: options.child_range.clone(),
                             child_filter: options.child_filter.clone(),
                             browser: configured.browser_spec.clone(),
@@ -1376,6 +1380,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         post_filter: (!args.post_filter.is_empty()).then(|| args.post_filter.clone()),
         child_range: args.child_range.clone(),
         child_filter: (!args.child_filter.is_empty()).then(|| args.child_filter.clone()),
+        include: None,
         date_before: args.date_before,
         date_after: args.date_after,
         directory: if args.exact_directory.is_some() {

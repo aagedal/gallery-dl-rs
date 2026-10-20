@@ -397,6 +397,16 @@ fn context_parts(
             metadata.extend(fields.clone());
             metadata.insert("discord".into(), map(fields));
         }
+        if let Some(asset) = &post.profile_asset {
+            metadata.insert(
+                "profile_asset".into(),
+                map(BTreeMap::from([
+                    ("kind".into(), text(asset.kind.as_str())),
+                    ("owner_id".into(), text(asset.owner_id.as_str())),
+                    ("version".into(), text(asset.version.as_str())),
+                ])),
+            );
+        }
         if let Some(creator) = &post.creator {
             let mut fields = BTreeMap::from([
                 ("id".into(), text(creator.id.as_str())),

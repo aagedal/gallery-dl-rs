@@ -2614,3 +2614,56 @@ fn child_selection_is_scoped_sparse_and_explicitly_clearable() {
         }
     }
 }
+
+#[test]
+fn include_configuration_is_sparse_ordered_and_explicitly_clearable() {
+    use gallery_dl_rs::dispatch::Include;
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().include,
+        None
+    );
+    let cfg = parse(
+        &json!({"extractor":{"include":" media, replies,media ",
+        "pixiv":{"include":"all"},"twitter":{"include":[]},"bluesky":{"include":null}}})
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().include, Some(Include::All));
+    for category in ["twitter", "bluesky"] {
+        assert_eq!(
+            cfg.resolve(category).unwrap().include,
+            Some(Include::Views(vec![]))
+        );
+    }
+    assert_eq!(
+        cfg.resolve("tumblr").unwrap().include,
+        Some(Include::Views(vec![
+            "media".into(),
+            "replies".into(),
+            "media".into()
+        ]))
+    );
+    let merged = cfg.resolve("pixiv").unwrap().overlay(&Options {
+        include: Some(Include::Views(vec![])),
+        ..Default::default()
+    });
+    assert_eq!(merged.include, Some(Include::Views(vec![])));
+    let cfg = parse(
+        &json!({"include":"all","extractor":{"include":false,"pixiv":{"include":[]}}}).to_string(),
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().include, Some(Include::All));
+    for value in [
+        json!(true),
+        json!(3),
+        json!(["media", null]),
+        json!({"private":"include-secret"}),
+    ] {
+        let error = parse(&json!({"extractor":{"include":value}}).to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("include-secret"));
+        assert!(error.contains("include"));
+    }
+}

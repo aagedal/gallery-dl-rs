@@ -5652,3 +5652,476 @@ async fn explicit_timeline_is_root_and_ignores_child_selection() {
     assert_eq!(post_ids(&items), ["100"]);
     assert_eq!(server.count(), 2);
 }
+
+fn asset_user() -> Value {
+    let mut body = user();
+    body["data"]["user"]["result"]["avatar"] = json!({"image_url":"https://pbs.twimg.com/profile_images/1700000000000000000/fixture_normal.png"});
+    body["data"]["user"]["result"]["legacy"]["profile_banner_url"] =
+        json!("https://pbs.twimg.com/profile_banners/42/1700000000");
+    body["data"]["user"]["result"]["legacy"]["created_at"] =
+        json!("Thu Apr 06 15:28:43 +0000 2017");
+    body["data"]["user"]["result"]["legacy"]["description"] = json!("Public profile\n猫");
+    body["data"]["user"]["result"]["private_transport"] = json!("private");
+    body
+}
+
+#[test]
+fn profile_views_bind_public_assets_and_normalize_only_supported_info_fields() {
+    use crate::{event::ExtractionEvent, profile_asset::ProfileAssetKind};
+    use timeline::ProfileTab;
+    let body = serde_json::to_vec(&asset_user()).unwrap();
+    let avatar = profile::profile_view(&body, &input("fixture"), ProfileTab::Avatar).unwrap();
+    let ExtractionEvent::Media(avatar) = &avatar[1] else {
+        panic!("missing avatar")
+    };
+    assert_eq!(
+        avatar.url.as_str(),
+        "https://pbs.twimg.com/profile_images/1700000000000000000/fixture.png"
+    );
+    assert_eq!(avatar.filename, "avatar_42_1700000000000000000.png");
+    let metadata = avatar.metadata.as_ref().unwrap();
+    let asset = metadata.profile_asset.as_ref().unwrap();
+    assert_eq!(asset.kind, ProfileAssetKind::Avatar);
+    assert_eq!(asset.owner_id, "42");
+    assert_eq!(asset.version, "1700000000000000000");
+    assert_eq!(metadata.post_id, asset.version);
+    assert_eq!(metadata.username.as_deref(), Some("fixture"));
+    assert!(avatar.archive_key().is_some());
+    assert!(avatar.headers.is_empty());
+    let ordinary = parse_response(
+        &serde_json::to_vec(&post_response(tweet("1700000000000000000"))).unwrap(),
+        "1700000000000000000",
+    )
+    .unwrap();
+    assert_ne!(avatar.archive_key(), ordinary[0].archive_key());
+    let background = profile::profile_view(&body, &input("id:42"), ProfileTab::Background).unwrap();
+    let ExtractionEvent::Media(background) = &background[1] else {
+        panic!("missing background")
+    };
+    assert_eq!(
+        background.url.as_str(),
+        "https://pbs.twimg.com/profile_banners/42/1700000000"
+    );
+    assert_eq!(background.filename, "background_42_1700000000");
+    let metadata = background.metadata.as_ref().unwrap();
+    assert_eq!(
+        metadata.profile_asset.as_ref().unwrap().version,
+        "1700000000"
+    );
+    assert_eq!(metadata.post_id, "1724551110456246272"); // Python upstream integer formula.
+    assert_eq!(metadata.timestamp, Some(1700000000));
+    assert!(background.archive_key().is_some());
+    let info = profile::profile_view(&body, &input("fixture"), ProfileTab::Info).unwrap();
+    assert_eq!(info.len(), 2);
+    let ExtractionEvent::Post(info) = &info[0] else {
+        panic!("missing fileless profile info")
+    };
+    assert_eq!(info.count, Some(0));
+    let metadata = info.metadata.as_ref().unwrap();
+    assert_eq!(metadata.post_id, "42");
+    assert_eq!(metadata.caption.as_deref(), Some("Public profile\n猫"));
+    assert_eq!(
+        metadata.timestamp,
+        timestamp("Thu Apr 06 15:28:43 +0000 2017")
+    );
+    assert!(metadata.file.is_none());
+    assert!(metadata.profile_asset.is_none());
+    assert!(!serde_json::to_string(metadata).unwrap().contains("private"));
+    for (suffix, tab) in [
+        ("info", ProfileTab::Info),
+        ("photo", ProfileTab::Avatar),
+        ("header_photo", ProfileTab::Background),
+    ] {
+        let url = Url::parse(&format!("https://x.com/fixture/{suffix}")).unwrap();
+        assert_eq!(
+            timeline::profile_input(&url).unwrap(),
+            (input("fixture"), tab)
+        );
+        assert!(!timeline::is_user_dispatch(&url));
+    }
+}
+
+#[test]
+fn profile_assets_skip_absent_defaults_and_reject_untrusted_or_contradictory_sources_privately() {
+    use timeline::ProfileTab;
+    for tab in [ProfileTab::Avatar, ProfileTab::Background] {
+        assert!(
+            profile::profile_view(
+                &serde_json::to_vec(&user()).unwrap(),
+                &input("fixture"),
+                tab
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+    let mut body = asset_user();
+    body["data"]["user"]["result"]["avatar"]["image_url"] =
+        json!("https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png");
+    assert!(
+        profile::profile_view(
+            &serde_json::to_vec(&body).unwrap(),
+            &input("fixture"),
+            ProfileTab::Avatar
+        )
+        .unwrap()
+        .is_empty()
+    );
+    for (tab, source) in [
+        (
+            ProfileTab::Avatar,
+            "https://private.example/profile_images/1700000000000000000/private.png",
+        ),
+        (
+            ProfileTab::Avatar,
+            "https://pbs.twimg.com/profile_images/private/private.png?private=secret",
+        ),
+        (
+            ProfileTab::Avatar,
+            "https://pbs.twimg.com/profile_images/1700000000000000000/private.zip",
+        ),
+        (
+            ProfileTab::Background,
+            "https://pbs.twimg.com/profile_banners/99/1700000000",
+        ),
+        (
+            ProfileTab::Background,
+            "https://pbs.twimg.com/profile_banners/42/private",
+        ),
+    ] {
+        let mut body = asset_user();
+        if tab == ProfileTab::Avatar {
+            body["data"]["user"]["result"]["avatar"]["image_url"] = json!(source);
+        } else {
+            body["data"]["user"]["result"]["legacy"]["profile_banner_url"] = json!(source);
+        }
+        let message =
+            profile::profile_view(&serde_json::to_vec(&body).unwrap(), &input("fixture"), tab)
+                .unwrap_err()
+                .to_string();
+        assert!(!message.contains("private") && !message.contains("secret"));
+    }
+    assert!(
+        profile::profile_view(
+            &serde_json::to_vec(&asset_user()).unwrap(),
+            &input("id:99"),
+            ProfileTab::Avatar
+        )
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn include_preserves_order_duplicates_aliases_and_omits_unknown_views() {
+    use crate::dispatch::Include;
+    let server = Server::new(vec![
+        Response::json(page(vec![tweet("100")], None)),
+        Response::json(page(vec![tweet("101")], None)),
+        Response::json(page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_include(Some(Include::Views(vec![
+            "unknown".into(),
+            "media".into(),
+            "replies".into(),
+            "media".into(),
+        ])));
+    let events: Vec<_> = native
+        .user_events(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    let begins = events
+        .iter()
+        .filter(|event| matches!(event, crate::event::ExtractionEvent::BeginChild(_)))
+        .count();
+    let ends = events
+        .iter()
+        .filter(|event| matches!(event, crate::event::ExtractionEvent::EndChild(_)))
+        .count();
+    assert_eq!((begins, ends), (3, 3));
+    let media: Vec<_> = events
+        .into_iter()
+        .filter_map(|event| match event {
+            crate::event::ExtractionEvent::Media(media) => Some(*media),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(post_ids(&media), ["100", "101", "100"]);
+    let urls = server.urls();
+    assert_eq!(urls.len(), 3);
+    assert!(urls[0].path().ends_with("/UserMedia"));
+    assert!(urls[1].path().ends_with("/UserTweetsAndReplies"));
+    assert!(urls[2].path().ends_with("/UserMedia"));
+}
+
+#[tokio::test]
+async fn include_empty_has_no_requests_and_explicit_tabs_ignore_dispatch_setting() {
+    use crate::{dispatch::Include, event};
+    let server = Server::new(vec![Response::json(page(vec![tweet("100")], None))]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_include(Some(Include::Views(Vec::new())));
+    assert!(
+        native
+            .user_events(input("fixture"), server.base.clone())
+            .next()
+            .await
+            .is_none()
+    );
+    assert_eq!(server.count(), 0);
+    let events: Vec<_> = native
+        .profile_events(
+            input("id:42"),
+            timeline::ProfileTab::Media,
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(events.iter().all(|event| !matches!(
+        event,
+        event::ExtractionEvent::BeginChild(_) | event::ExtractionEvent::EndChild(_)
+    )));
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn include_child_and_post_ranges_reset_per_view_and_stop_later_pages() {
+    use crate::{
+        dispatch::Include, filter::FilterExpression, job_selection::JobSelection,
+        post_selection::PostSelection, selection::RangeSelection,
+    };
+    let server = Server::new(vec![
+        Response::json(page(
+            vec![tweet("100"), tweet("101")],
+            Some("must-not-fetch"),
+        )),
+        Response::json(page(
+            vec![tweet("200"), tweet("201")],
+            Some("must-not-fetch"),
+        )),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_include(Some(Include::Views(vec![
+            "likes".into(),
+            "media".into(),
+            "with-replies".into(),
+        ])));
+    let items: Vec<_> = JobSelection {
+        child_filter: Some(
+            FilterExpression::parse("category == 'twitter' and subcategory == 'user'").unwrap(),
+        ),
+        child_range: Some(RangeSelection::parse("2:").unwrap()),
+        post_selection: Some(PostSelection::new(
+            Some(RangeSelection::parse("1").unwrap()),
+            None,
+        )),
+        ..Default::default()
+    }
+    .apply(native.user_events(input("id:42"), server.base.clone()))
+    .try_collect()
+    .await
+    .unwrap();
+    assert_eq!(post_ids(&items), ["100", "200"]);
+    let urls = server.urls();
+    assert_eq!(urls.len(), 2);
+    assert!(urls[0].path().ends_with("/UserMedia"));
+    assert!(urls[1].path().ends_with("/UserTweetsAndReplies"));
+    assert!(
+        urls.iter()
+            .all(|url| variables(url).get("cursor").is_none())
+    );
+}
+
+#[tokio::test]
+async fn include_failed_asset_closes_scope_and_continues_selected_timeline_sibling() {
+    use crate::{dispatch::Include, event::ExtractionEvent};
+    let mut invalid = asset_user();
+    invalid["data"]["user"]["result"]["avatar"]["image_url"] =
+        json!("https://private.example/secret.png");
+    let server = Server::new(vec![
+        Response::json(invalid),
+        Response::json(page(vec![tweet("100")], None)),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_include(Some(Include::Views(vec!["avatar".into(), "media".into()])));
+    let events: Vec<_> = native
+        .user_events(input("id:42"), server.base.clone())
+        .collect()
+        .await;
+    assert_eq!(events.len(), 8);
+    let ExtractionEvent::BeginChild(first) = events[0].as_ref().unwrap() else {
+        panic!("missing first scope")
+    };
+    assert!(
+        !events[1]
+            .as_ref()
+            .unwrap_err()
+            .to_string()
+            .contains("secret")
+    );
+    let ExtractionEvent::EndChild(end) = events[2].as_ref().unwrap() else {
+        panic!("missing failed scope end")
+    };
+    assert!(first.control.same_scope(end));
+    assert!(matches!(events[4], Ok(ExtractionEvent::Post(_))));
+    assert!(matches!(events[5], Ok(ExtractionEvent::Media(_))));
+    assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn include_all_uses_complete_upstream_catalog_with_native_profile_assets() {
+    use crate::{dispatch::Include, event::ExtractionEvent};
+    let mut responses = vec![
+        Response::json(asset_user()),
+        Response::json(asset_user()),
+        Response::json(asset_user()),
+        Response::json(asset_user()),
+    ];
+    responses.extend((0..6).map(|_| Response::json(page(Vec::new(), None))));
+    let server = Server::new(responses);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_include(Some(Include::All));
+    let events: Vec<_> = native
+        .user_events(input("id:42"), server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ExtractionEvent::BeginChild(_)))
+            .count(),
+        9
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ExtractionEvent::EndChild(_)))
+            .count(),
+        9
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ExtractionEvent::Post(_)))
+            .count(),
+        3
+    );
+    let kinds: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            ExtractionEvent::Media(media) => Some(
+                media
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .profile_asset
+                    .as_ref()
+                    .unwrap()
+                    .kind
+                    .as_str(),
+            ),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kinds, ["avatar", "background"]);
+    let operations: Vec<_> = server
+        .urls()
+        .iter()
+        .map(|url| url.path().rsplit('/').next().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        operations,
+        [
+            "UserByRestId",
+            "UserByRestId",
+            "UserByRestId",
+            "UserByRestId",
+            "UserMedia",
+            "UserTweets",
+            "UserMedia",
+            "UserTweetsAndReplies",
+            "UserHighlightsTweets",
+            "Likes"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn native_profile_assets_match_compatibility_identity_and_keep_owner_version_scope() {
+    use crate::{dispatch::Include, event, extract};
+    let server = Server::new(vec![
+        Response::json(asset_user()),
+        Response::json(asset_user()),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_include(Some(Include::Views(vec![
+            "avatar".into(),
+            "background".into(),
+        ])));
+    let items: Vec<_> = event::media_only(native.user_events(input("id:42"), server.base.clone()))
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 2);
+    for item in &items {
+        let metadata = item.metadata.as_ref().unwrap();
+        let asset = metadata.profile_asset.as_ref().unwrap();
+        let mut data = json!({"subcategory":asset.kind.as_str(),"user":{"id":42,"name":"fixture"},"author":{"id":42,"name":"fixture"},"tweet_id":metadata.post_id,"num":1,"filename":"profile","date":metadata.timestamp});
+        if asset.kind == crate::profile_asset::ProfileAssetKind::Avatar {
+            data["extension"] = json!("png");
+        }
+        let compatibility = extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, item.url.as_str(), data.clone()]])).unwrap(),
+            "twitter",
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(item.url, compatibility.url);
+        assert_eq!(item.archive_key(), compatibility.archive_key());
+        assert_eq!(
+            serde_json::to_value(metadata).unwrap(),
+            serde_json::to_value(compatibility.metadata.as_ref().unwrap()).unwrap()
+        );
+        let mut bad = data.clone();
+        bad["user"]["id"] = json!("private/owner");
+        let bad = extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, item.url.as_str(), bad]])).unwrap(),
+            "twitter",
+        )
+        .unwrap()
+        .remove(0);
+        assert!(bad.metadata.as_ref().unwrap().profile_asset.is_none());
+        assert!(bad.archive_key().is_none());
+        let other_url = if asset.kind == crate::profile_asset::ProfileAssetKind::Avatar {
+            "https://pbs.twimg.com/profile_images/1700000000000000001/fixture.png"
+        } else {
+            "https://pbs.twimg.com/profile_banners/42/1700000001"
+        };
+        let next = extract::parse_messages(
+            &serde_json::to_vec(&json!([[3, other_url, data.clone()]])).unwrap(),
+            "twitter",
+        )
+        .unwrap()
+        .remove(0);
+        assert_ne!(item.archive_key(), next.archive_key());
+        if asset.kind == crate::profile_asset::ProfileAssetKind::Avatar {
+            data["user"]["id"] = json!(99);
+            let other = extract::parse_messages(
+                &serde_json::to_vec(&json!([[3, item.url.as_str(), data]])).unwrap(),
+                "twitter",
+            )
+            .unwrap()
+            .remove(0);
+            assert_ne!(item.archive_key(), other.archive_key());
+        }
+    }
+    assert_eq!(server.count(), 2);
+}

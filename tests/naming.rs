@@ -11,6 +11,7 @@ fn media() -> Media {
         category: "instagram".into(),
         filename: "native.photo.jpg".into(),
         metadata: Some(PostMetadata {
+            profile_asset: None,
             file: None,
             frames: None,
             rating: None,
