@@ -3,10 +3,10 @@
 //!
 //! Mirrors gallery_dl/extractor/danbooru.py (Danbooru and e621 dialects) and
 //! gelbooru.py / gelbooru_v02.py (Gelbooru and Safebooru) through their public
-//! JSON APIs. Single posts, tag searches and (Danbooru/e621) pools are
-//! supported. Posts without a file URL (deleted, banned or login-restricted)
-//! are skipped silently, and media URLs are only accepted from each site's own
-//! CDN hosts.
+//! JSON APIs. Single posts, tag searches, Danbooru/e621 pools and
+//! Danbooru favorite groups are supported. Posts without a file URL (deleted,
+//! banned or login-restricted) are skipped silently, and media URLs are only
+//! accepted from each site's own CDN hosts.
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordFeedback, KeywordObject, KeywordPolicy, group_with_keywords},
@@ -102,9 +102,20 @@ impl Site {
 /// A supported booru input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Post { id: u64 },
-    Tags { tags: String },
-    Pool { id: u64 },
+    Post {
+        id: u64,
+    },
+    Tags {
+        tags: String,
+    },
+    /// Exact decimal source capture, retaining leading zeroes.
+    Pool {
+        id: String,
+    },
+    /// Danbooru favorite group with its exact requested ID.
+    Favgroup {
+        id: String,
+    },
 }
 
 fn post_id(raw: &str) -> Option<u64> {
@@ -204,7 +215,10 @@ fn checked_source_search_tags(site: Site, url: &Url) -> Result<Option<String>> {
 pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     let unsupported = || {
         error(match site {
-            Site::Danbooru | Site::E621 => {
+            Site::Danbooru => {
+                "unsupported booru URL; expected a post, tag search, pool or favorite-group link"
+            }
+            Site::E621 => {
                 "unsupported booru URL; expected a post (/posts/ID), tag search (/posts?tags=...) or pool (/pools/ID) link"
             }
             Site::Gelbooru | Site::Safebooru => {
@@ -241,10 +255,14 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     // A matched invalid capture must fail; falling back could select a
     // different duplicate query and silently change the requested namespace.
     let source_tags = checked_source_search_tags(site, url)?;
-    let target = if site.danbooru_dialect() {
+    let target = if let Some((kind, id)) = collection_capture(site, url) {
+        Some(match kind {
+            CollectionKind::Pool => Target::Pool { id: id.to_owned() },
+            CollectionKind::Favgroup => Target::Favgroup { id: id.to_owned() },
+        })
+    } else if site.danbooru_dialect() {
         match segments.as_slice() {
             ["posts", id] => post_id(id).map(|id| Target::Post { id }),
-            ["pools", id] => post_id(id).map(|id| Target::Pool { id }),
             ["posts"] => source_tags
                 .clone()
                 .or_else(|| query("tags"))
@@ -508,8 +526,11 @@ pub fn posts(site: Site, bytes: &[u8]) -> Result<Vec<Value>> {
     Ok(list)
 }
 
-/// Parse the complete pool object while retaining its original member positions.
-fn pool(site: Site, bytes: &[u8]) -> Result<(serde_json::Map<String, Value>, Vec<u64>)> {
+/// Parse a collection while retaining its original member positions.
+fn collection_metadata(
+    site: Site,
+    bytes: &[u8],
+) -> Result<(serde_json::Map<String, Value>, Vec<u64>)> {
     let Value::Object(mut body) =
         serde_json::from_slice::<Value>(bytes).map_err(|_| invalid(site))?
     else {
@@ -608,13 +629,57 @@ struct PendingTagCursor {
     feedback: KeywordFeedback,
 }
 
-struct Pool {
+#[derive(Clone, Copy)]
+enum CollectionKind {
+    Pool,
+    Favgroup,
+}
+impl CollectionKind {
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::Pool => "pool",
+            Self::Favgroup => "favgroup",
+        }
+    }
+    fn endpoint(self) -> &'static str {
+        match self {
+            Self::Pool => "pools",
+            Self::Favgroup => "favorite_groups",
+        }
+    }
+}
+fn collection_capture(site: Site, url: &Url) -> Option<(CollectionKind, &str)> {
+    if !site.danbooru_dialect() {
+        return None;
+    }
+    let path = url.path();
+    for (prefix, kind) in [
+        ("/pools/", CollectionKind::Pool),
+        ("/pool/show/", CollectionKind::Pool),
+        ("/favorite_groups/", CollectionKind::Favgroup),
+        ("/favorite_group/show/", CollectionKind::Favgroup),
+    ] {
+        if matches!(kind, CollectionKind::Favgroup) && site != Site::Danbooru {
+            continue;
+        }
+        if let Some(rest) = path.strip_prefix(prefix) {
+            let end = rest.bytes().take_while(u8::is_ascii_digit).count();
+            if end != 0 {
+                return Some((kind, &rest[..end]));
+            }
+        }
+    }
+    None
+}
+
+struct Collection {
+    kind: CollectionKind,
     metadata: KeywordObject,
     positions: HashMap<u64, usize>,
 }
 
 struct State {
-    pool: Option<Pool>,
+    collection: Option<Collection>,
     root: Url,
     tags: String,
     search_tags: Option<Arc<str>>,
@@ -773,24 +838,29 @@ impl Booru {
     }
 
     fn emit(&self, state: &mut State, raw: &[Value]) {
-        let pool_snapshot = state
-            .pool
+        let collection_snapshot = state
+            .collection
             .as_ref()
-            .map(|pool| Arc::new(Value::Object(pool.metadata.snapshot())));
+            .map(|collection| Arc::new(Value::Object(collection.metadata.snapshot())));
         for (position, post) in raw.iter().enumerate() {
-            if let Some(pool) = &state.pool
-                && !number(post.get("id")).is_some_and(|id| pool.positions.contains_key(&id))
+            if let Some(collection) = &state.collection
+                && !number(post.get("id")).is_some_and(|id| collection.positions.contains_key(&id))
             {
-                state.pending_error = Some("invalid booru pool member");
+                state.pending_error = Some("invalid booru collection member");
                 break;
             }
             if let Some(mut media) = parse_post(self.site, post) {
                 if let Some(metadata) = &mut media.metadata {
                     metadata.search_tags = state.search_tags.clone();
-                    if let Some(pool) = &state.pool {
-                        metadata.pool = pool_snapshot.clone();
+                    if let Some(collection) = &state.collection {
+                        match collection.kind {
+                            CollectionKind::Pool => metadata.pool = collection_snapshot.clone(),
+                            CollectionKind::Favgroup => {
+                                metadata.favgroup = collection_snapshot.clone()
+                            }
+                        }
                         metadata.source_num = number(post.get("id"))
-                            .and_then(|id| pool.positions.get(&id))
+                            .and_then(|id| collection.positions.get(&id))
                             .map(|num| (*num).into());
                     }
                 }
@@ -800,20 +870,21 @@ impl Booru {
                 let fields: &[&str] =
                     if state.search_tags.is_some() && !self.site.danbooru_dialect() {
                         &["num", "index", "media_id", "search_tags"]
-                    } else if state.pool.is_some() {
+                    } else if state.collection.is_some() {
                         &["index", "media_id"]
                     } else {
                         &["num", "index", "media_id"]
                     };
-                let post_fields: &[&str] = if state.pool.is_some() {
+                let post_fields: &[&str] = if state.collection.is_some() {
                     &["filename", "name", "extension", "num"]
                 } else {
                     &["filename", "name", "extension"]
                 };
                 let mut keywords =
                     KeywordPolicy::shared(fields).with_post_fields(&media, post_fields);
-                if let Some(pool) = &state.pool {
-                    keywords = keywords.with_shared_object("pool", pool.metadata.clone());
+                if let Some(collection) = &state.collection {
+                    keywords = keywords
+                        .with_shared_object(collection.kind.keyword(), collection.metadata.clone());
                 }
                 if position + 1 == raw.len()
                     && let Some(cursor) = &state.pending_cursor
@@ -825,7 +896,7 @@ impl Booru {
                     .as_ref()
                     .and_then(|metadata| metadata.source_num.clone());
                 let mut events = group_with_keywords(vec![media], self.site.category(), keywords);
-                if state.pool.is_some() {
+                if state.collection.is_some() {
                     for event in &mut events {
                         if let ExtractionEvent::Post(post) = event
                             && let Some(metadata) = &mut post.metadata
@@ -929,7 +1000,7 @@ impl Booru {
                 return stream::once(async move {
                     let raw = self.post(&root, id).await?;
                     let mut state = State {
-                        pool: None,
+                        collection: None,
                         root,
                         tags: String::new(),
                         search_tags: None,
@@ -961,23 +1032,31 @@ impl Booru {
                 (tags, Cursor::Tags { order, page: None })
             }
             Target::Tags { tags } => (tags, Cursor::Page(0)),
-            Target::Pool { id } => {
+            collection @ (Target::Pool { .. } | Target::Favgroup { .. }) => {
+                let (kind, id) = match collection {
+                    Target::Pool { id } => (CollectionKind::Pool, id),
+                    Target::Favgroup { id } => (CollectionKind::Favgroup, id),
+                    _ => unreachable!(),
+                };
                 return stream::once(async move {
-                    let body = self.call(&root, &format!("pools/{id}.json"), &[]).await?;
-                    let (metadata, ids) = pool(self.site, &body)?;
+                    let body = self
+                        .call(&root, &format!("{}/{id}.json", kind.endpoint()), &[])
+                        .await?;
+                    let (metadata, ids) = collection_metadata(self.site, &body)?;
                     let positions = ids
                         .iter()
                         .enumerate()
                         .map(|(num, id)| (*id, num + 1))
                         .collect();
                     let mut state = State {
-                        pool: Some(Pool {
+                        collection: Some(Collection {
+                            kind,
                             metadata: KeywordObject::new(metadata),
                             positions,
                         }),
                         root,
                         tags: format!(
-                            "{}pool:{id}",
+                            "{}{}:{id}",
                             if self.site == Site::Danbooru
                                 && matches!(
                                     self.pool_order,
@@ -987,7 +1066,8 @@ impl Booru {
                                 "ord"
                             } else {
                                 ""
-                            }
+                            },
+                            kind.keyword()
                         ),
                         search_tags: None,
                         done: false,
@@ -1070,11 +1150,16 @@ impl Booru {
                         if self.site == Site::Danbooru
                             && ordered.iter().any(|post| {
                                 !number(post.get("id")).is_some_and(|id| {
-                                    state.pool.as_ref().unwrap().positions.contains_key(&id)
+                                    state
+                                        .collection
+                                        .as_ref()
+                                        .unwrap()
+                                        .positions
+                                        .contains_key(&id)
                                 })
                             })
                         {
-                            return Err(error("invalid booru pool member"));
+                            return Err(error("invalid booru collection member"));
                         }
                         state.done = true;
                         self.emit(&mut state, &ordered);
@@ -1099,7 +1184,7 @@ impl Booru {
             tags
         };
         self.listing(State {
-            pool: None,
+            collection: None,
             root,
             tags,
             search_tags,
@@ -1202,7 +1287,7 @@ impl Booru {
             ));
         }
         if matches!(status.as_u16(), 404 | 410) {
-            return Err(error(format!("{name} post or pool not found")).into());
+            return Err(error(format!("{name} post or collection not found")).into());
         }
         if matches!(status.as_u16(), 401 | 403) {
             return Err(error(format!(
@@ -1328,7 +1413,7 @@ mod tests {
             // ascending/non-ID source pagination remains a separate parity gap.
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
-                pool: None,
+                collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
                 tags: wire.into(),
                 search_tags: Some(Arc::from(source)),
@@ -1498,7 +1583,7 @@ mod tests {
             )]));
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
-                pool: None,
+                collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
                 tags: "Original".into(),
                 search_tags: Some(Arc::from("Original")),
@@ -1670,7 +1755,7 @@ mod tests {
         );
         assert_eq!(
             t(Site::E621, "https://e926.net/pools/42").unwrap(),
-            Target::Pool { id: 42 }
+            Target::Pool { id: "42".into() }
         );
         let (_, root) =
             target(Site::E621, &Url::parse("https://e926.net/posts/1").unwrap()).unwrap();

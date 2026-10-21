@@ -316,7 +316,9 @@ Experimental native booru extraction (`--extractor native`) covers categories
 `danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and
 `safebooru` (safebooru.org): single posts (`/posts/ID`,
 `index.php?page=post&s=view&id=ID`), tag searches (`/posts?tags=...`,
-`index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID`).
+`index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID` or
+`/pool/show/ID`). Danbooru favorite groups use `/favorite_groups/ID` or
+`/favorite_group/show/ID`.
 Danbooru/e621 use before/after ID cursors or numbered pages according to search
 tags, requesting 200/320 posts per page respectively. Ascending searches retain
 the first API page and reverse subsequent pages before selecting the next cursor.
@@ -325,15 +327,18 @@ cancellation, or on an API error. They have no fixed 100-page cutoff. The
 `threshold` configuration option accepts an integer, clamps values below one to
 one, and restores the default for other JSON types, including null and booleans.
 Gelbooru-style sites use `pid` (100 per page) and remain capped at 100 pages.
-Danbooru pools paginate `ordpool:` in API order; e621 pools buffer numbered
-`pool:` pages and restore member order. Both retain original member positions
-as `num`, including unavailable-member gaps, and expose the pool response as
-`pool` with a normalized name and without `post_ids`. Danbooru's category-scoped
-`order-posts` also accepts `pool`, `pool_desc`, `id`, and `id_asc` (and source
-aliases). Nested pool hook edits reach later posts; replacing or deleting the
-root pool keyword detaches the current post. Metadata postprocessor archives
-use the source default key `p_{pool[id]}_{id}`. Posts without a file URL (deleted,
-banned or restricted) are skipped. Files are accepted only from the site's own HTTPS
+Danbooru pools and favorite groups paginate `ordpool:`/`ordfavgroup:` in API
+order; e621 pools buffer numbered `pool:` pages and restore member order. Both
+retain original member positions as `num`, including unavailable-member gaps.
+Collection responses are exposed as `pool` or `favgroup`, with a normalized name
+and without `post_ids`. Danbooru's category-scoped `order-posts` also accepts
+`pool`, `pool_desc`, `id`, and `id_asc` (and source aliases). Nested collection
+hook edits reach later posts; replacing or deleting the root collection keyword
+detaches the current post. Metadata postprocessor archives use the source default
+keys `p_{pool[id]}_{id}` and `fg_{favgroup[id]}_{id}`. Collection requests preserve
+leading zeroes and the source URL digit capture. Posts without a file URL
+(deleted, banned or restricted) are skipped. Files are accepted only from the
+site's own HTTPS
 CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
 space-separated tag string, `username` the uploader name when the API provides
 one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{extension}`;

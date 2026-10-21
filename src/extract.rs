@@ -691,6 +691,9 @@ pub struct PostMetadata {
     /// Complete booru pool response without its member ID list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pool: Option<std::sync::Arc<Value>>,
+    /// Complete Danbooru favorite-group response without its member ID list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favgroup: Option<std::sync::Arc<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<crate::twitter::CommunityMetadata>,
     /// Community feeds use their own archive namespace; ordinary posts do not.
@@ -1968,11 +1971,22 @@ fn compatibility_metadata(
         tags_bookmark: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
             .flatten(),
-        pool: data
-            .get("pool")
-            .filter(|value| value.is_object())
-            .cloned()
-            .map(std::sync::Arc::new),
+        favgroup: if category == "danbooru" {
+            data.get("favgroup")
+                .filter(|value| value.is_object())
+                .cloned()
+                .map(std::sync::Arc::new)
+        } else {
+            None
+        },
+        pool: if matches!(category, "danbooru" | "e621" | "e926") {
+            data.get("pool")
+                .filter(|value| value.is_object())
+                .cloned()
+                .map(std::sync::Arc::new)
+        } else {
+            None
+        },
         search_tags: crate::booru::Site::from_category(category)
             .or_else(|| (category == "e926").then_some(crate::booru::Site::E621))
             .and_then(|_| data.get("search_tags").and_then(Value::as_str))
@@ -2281,4 +2295,37 @@ fn compatibility_discord(
         channel_type: data.get("channel_type").and_then(Value::as_u64),
         parent_id: id("parent_id"),
     })
+}
+
+#[cfg(test)]
+mod collection_metadata_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compatibility_collections_belong_only_to_their_booru_categories() {
+        let fields = json!({"id":42,"pool":{"id":99},"favgroup":{"id":77}});
+        for category in [
+            "danbooru",
+            "e621",
+            "gelbooru",
+            "safebooru",
+            "pixiv",
+            "pixiv-novel",
+            "twitter",
+            "kemono",
+        ] {
+            let metadata = compatibility_metadata(fields.as_object().unwrap(), category).unwrap();
+            assert_eq!(
+                metadata.pool.is_some(),
+                matches!(category, "danbooru" | "e621"),
+                "{category}"
+            );
+            assert_eq!(
+                metadata.favgroup.is_some(),
+                category == "danbooru",
+                "{category}"
+            );
+        }
+    }
 }

@@ -108,6 +108,7 @@ const FIELDS: &[&str] = &[
     "score",
     "search_tags",
     "pool",
+    "favgroup",
     "filesize",
     "revision",
     "revision_id",

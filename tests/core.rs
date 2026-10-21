@@ -49,6 +49,7 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
         source_suffix: None,
         search_tags: None,
         pool: None,
+        favgroup: None,
         keyword_updates: None,
         tags: None,
         sketch: None,

@@ -239,6 +239,7 @@ mod tests {
                 source_num: None,
                 source_suffix: None,
                 pool: None,
+                favgroup: None,
                 search_tags: None,
                 keyword_updates: None,
                 tags: None,

@@ -613,6 +613,9 @@ fn context_parts(
         if let Some(index) = post.num_series {
             metadata.insert("num_series".into(), Value::Int(index.into()));
         }
+        if let Some(group) = &post.favgroup {
+            metadata.insert("favgroup".into(), json_value(group));
+        }
         if let Some(pool) = &post.pool {
             metadata.insert("pool".into(), json_value(pool));
         }

@@ -70,6 +70,7 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "artstation" => format == "{asset[id]}",
         "twitter" => matches!(format, TWITTER | COMMUNITY),
         "kemono" | "coomer" => matches!(format, KEMONO | DISCORD),
+        "danbooru" if format == "fg_{favgroup[id]}_{id}" => true,
         "danbooru" | "e621" | "e926" => {
             matches!(
                 format,
@@ -270,6 +271,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                     "t_{search_tags}_{id}"
                 }
                 crate::booru::Target::Pool { .. } => "p_{pool[id]}_{id}",
+                crate::booru::Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
             };
             return Some(descriptor(category, format));
         }
@@ -579,6 +581,7 @@ mod tests {
             ("danbooru", "t_{search_tags}_{id}"),
             ("e926", "{id}"),
             ("danbooru", "p_{pool[id]}_{id}"),
+            ("danbooru", "fg_{favgroup[id]}_{id}"),
             ("e621", "p_{pool[id]}_{id}"),
             ("e926", "p_{pool[id]}_{id}"),
             ("flickr", "{id}"),

@@ -1,0 +1,7841 @@
+{
+  "version": "1.32.17",
+  "source_sha256": {
+    "extractor/__init__.py": "3f43750a664a799a7cb9ba75cd2f1f70a5d564fca40fbd8c100711706178c214",
+    "extractor/common.py": "70d1e0b895c0ccfef07cac0d7f02a92d90ec28d12567c80885c7c709ce0f2c75",
+    "extractor/danbooru.py": "61f14ebb644cf2f5889d5502d850fddb54389a192ed1f659ba1b00cf04c088fb",
+    "extractor/e621.py": "97ab705c292733645b9f794f43aa20b2bcf6f619e78c8fdaf4139efb9459690c",
+    "formatter.py": "c14d011952fe7502a5af97676c629c2b5258222a0e3486ca517b2b20f231b1e3"
+  },
+  "generator": "Offline genuine collection route oracle for gallery-dl 1.32.17.\n\nRegenerate from the repository root:\n/private/tmp/gdlvenv/bin/python -B tests/fixtures/source_archive/booru_collection_routes_generate.py\n\nOnly authentication discovery and request_json are stubbed. Actual extractor.find,\n_init, metadata, posts, pagination and archive formatting execute unmodified.\n",
+  "scope": "Canonical HTTPS Danbooru/e621/e926 hosts; ASCII digit collection captures. Source Unicode decimal digits are deliberately outside this native Url-normalized route unit. Constructor prefix matching is unmodified and suffixes are retained in input URLs. Metadata ID 99 intentionally differs from requested lexical ID; actual source does not bind response identity to request identity. No HTTP, files, or source edits.",
+  "cases": [
+    {
+      "name": "danbooru_pool_modern_ordinary",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/7",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_leading_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/0007",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/0",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_all_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/0000",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0000",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_beyond_u64",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/999999999999999999999999999999999999999999999",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:999999999999999999999999999999999999999999999",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_word_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/7tail",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_path_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/7/extra/path",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_json_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/7.json",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_encoded_digit_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/7%32",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_encoded_slash_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/7%2F999",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_leading_zero_encoded_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/0007%2ejson",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_query",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/0007?tags=cat&other=9",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/0007#suffix",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_query_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/0007?tags=cat&other=9#fragment",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_modern_encoded_initial_digit",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_modern_encoded_initial_zeros",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_modern_positive_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_modern_negative_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_modern_nonnumeric",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_modern_empty",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_legacy_ordinary",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/7",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_leading_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/0007",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/0",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_all_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/0000",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0000",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_beyond_u64",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/999999999999999999999999999999999999999999999",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:999999999999999999999999999999999999999999999",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_word_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/7tail",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_path_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/7/extra/path",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_json_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/7.json",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_encoded_digit_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/7%32",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_encoded_slash_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/7%2F999",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_leading_zero_encoded_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/0007%2ejson",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_query",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/0007?tags=cat&other=9",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/0007#suffix",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_query_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/0007?tags=cat&other=9#fragment",
+      "extractor": "DanbooruPoolExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordpool:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_pool_legacy_encoded_initial_digit",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_legacy_encoded_initial_zeros",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_legacy_positive_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_legacy_negative_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_legacy_nonnumeric",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_legacy_empty",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_double_initial_slash",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us//pools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_wrong_case",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/Pools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_missing_id_separator",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pools7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_encoded_route",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/%70ools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_wrong_singular",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_pool_legacy_missing_show",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/pool/show7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_modern_ordinary",
+      "family": "e621",
+      "url": "https://e621.net/pools/7",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_leading_zero",
+      "family": "e621",
+      "url": "https://e621.net/pools/0007",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_zero",
+      "family": "e621",
+      "url": "https://e621.net/pools/0",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_all_zero",
+      "family": "e621",
+      "url": "https://e621.net/pools/0000",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0000",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_beyond_u64",
+      "family": "e621",
+      "url": "https://e621.net/pools/999999999999999999999999999999999999999999999",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:999999999999999999999999999999999999999999999",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_word_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pools/7tail",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_path_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pools/7/extra/path",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_json_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pools/7.json",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_encoded_digit_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pools/7%32",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_encoded_slash_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pools/7%2F999",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_leading_zero_encoded_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pools/0007%2ejson",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_query",
+      "family": "e621",
+      "url": "https://e621.net/pools/0007?tags=cat&other=9",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_fragment",
+      "family": "e621",
+      "url": "https://e621.net/pools/0007#suffix",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_query_fragment",
+      "family": "e621",
+      "url": "https://e621.net/pools/0007?tags=cat&other=9#fragment",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_modern_encoded_initial_digit",
+      "family": "e621",
+      "url": "https://e621.net/pools/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_modern_encoded_initial_zeros",
+      "family": "e621",
+      "url": "https://e621.net/pools/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_modern_positive_sign",
+      "family": "e621",
+      "url": "https://e621.net/pools/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_modern_negative_sign",
+      "family": "e621",
+      "url": "https://e621.net/pools/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_modern_nonnumeric",
+      "family": "e621",
+      "url": "https://e621.net/pools/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_modern_empty",
+      "family": "e621",
+      "url": "https://e621.net/pools/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_legacy_ordinary",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/7",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_leading_zero",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/0007",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_zero",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/0",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_all_zero",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/0000",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0000",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_beyond_u64",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/999999999999999999999999999999999999999999999",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:999999999999999999999999999999999999999999999",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_word_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/7tail",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_path_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/7/extra/path",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_json_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/7.json",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_encoded_digit_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/7%32",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_encoded_slash_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/7%2F999",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_leading_zero_encoded_suffix",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/0007%2ejson",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_query",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/0007?tags=cat&other=9",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_fragment",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/0007#suffix",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_query_fragment",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/0007?tags=cat&other=9#fragment",
+      "extractor": "E621PoolExtractor",
+      "category": "e621",
+      "root": "https://e621.net",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e621.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e621.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e621_pool_legacy_encoded_initial_digit",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_legacy_encoded_initial_zeros",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_legacy_positive_sign",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_legacy_negative_sign",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_legacy_nonnumeric",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_legacy_empty",
+      "family": "e621",
+      "url": "https://e621.net/pool/show/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_double_initial_slash",
+      "family": "e621",
+      "url": "https://e621.net//pools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_wrong_case",
+      "family": "e621",
+      "url": "https://e621.net/Pools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_missing_id_separator",
+      "family": "e621",
+      "url": "https://e621.net/pools7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_encoded_route",
+      "family": "e621",
+      "url": "https://e621.net/%70ools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_wrong_singular",
+      "family": "e621",
+      "url": "https://e621.net/pool/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_pool_legacy_missing_show",
+      "family": "e621",
+      "url": "https://e621.net/pool/show7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_modern_ordinary",
+      "family": "e621",
+      "url": "https://e926.net/pools/7",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_leading_zero",
+      "family": "e621",
+      "url": "https://e926.net/pools/0007",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_zero",
+      "family": "e621",
+      "url": "https://e926.net/pools/0",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_all_zero",
+      "family": "e621",
+      "url": "https://e926.net/pools/0000",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0000",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_beyond_u64",
+      "family": "e621",
+      "url": "https://e926.net/pools/999999999999999999999999999999999999999999999",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:999999999999999999999999999999999999999999999",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_word_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pools/7tail",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_path_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pools/7/extra/path",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_json_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pools/7.json",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_encoded_digit_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pools/7%32",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_encoded_slash_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pools/7%2F999",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_leading_zero_encoded_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pools/0007%2ejson",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_query",
+      "family": "e621",
+      "url": "https://e926.net/pools/0007?tags=cat&other=9",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_fragment",
+      "family": "e621",
+      "url": "https://e926.net/pools/0007#suffix",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_query_fragment",
+      "family": "e621",
+      "url": "https://e926.net/pools/0007?tags=cat&other=9#fragment",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_modern_encoded_initial_digit",
+      "family": "e621",
+      "url": "https://e926.net/pools/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_modern_encoded_initial_zeros",
+      "family": "e621",
+      "url": "https://e926.net/pools/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_modern_positive_sign",
+      "family": "e621",
+      "url": "https://e926.net/pools/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_modern_negative_sign",
+      "family": "e621",
+      "url": "https://e926.net/pools/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_modern_nonnumeric",
+      "family": "e621",
+      "url": "https://e926.net/pools/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_modern_empty",
+      "family": "e621",
+      "url": "https://e926.net/pools/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_legacy_ordinary",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/7",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_leading_zero",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/0007",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_zero",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/0",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_all_zero",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/0000",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0000",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_beyond_u64",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/999999999999999999999999999999999999999999999",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:999999999999999999999999999999999999999999999",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_word_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/7tail",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_path_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/7/extra/path",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_json_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/7.json",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_encoded_digit_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/7%32",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_encoded_slash_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/7%2F999",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/7.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:7",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_leading_zero_encoded_suffix",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/0007%2ejson",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_query",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/0007?tags=cat&other=9",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_fragment",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/0007#suffix",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_query_fragment",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/0007?tags=cat&other=9#fragment",
+      "extractor": "E621PoolExtractor",
+      "category": "e926",
+      "root": "https://e926.net",
+      "groups": [
+        null,
+        null,
+        "",
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "p_{pool[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://e926.net/pools/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://e926.net/posts.json",
+          "params": {
+            "tags": "pool:0007",
+            "limit": 320,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "pool": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "p_99_42"
+      ],
+      "per_page": 320,
+      "threshold": 300
+    },
+    {
+      "name": "e926_pool_legacy_encoded_initial_digit",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_legacy_encoded_initial_zeros",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_legacy_positive_sign",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_legacy_negative_sign",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_legacy_nonnumeric",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_legacy_empty",
+      "family": "e621",
+      "url": "https://e926.net/pool/show/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_double_initial_slash",
+      "family": "e621",
+      "url": "https://e926.net//pools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_wrong_case",
+      "family": "e621",
+      "url": "https://e926.net/Pools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_missing_id_separator",
+      "family": "e621",
+      "url": "https://e926.net/pools7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_encoded_route",
+      "family": "e621",
+      "url": "https://e926.net/%70ools/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_wrong_singular",
+      "family": "e621",
+      "url": "https://e926.net/pool/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_pool_legacy_missing_show",
+      "family": "e621",
+      "url": "https://e926.net/pool/show7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_modern_ordinary",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/7",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_leading_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/0007",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/0",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_all_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/0000",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0000",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_beyond_u64",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/999999999999999999999999999999999999999999999",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:999999999999999999999999999999999999999999999",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_word_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/7tail",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_path_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/7/extra/path",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_json_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_encoded_digit_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/7%32",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_encoded_slash_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/7%2F999",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_leading_zero_encoded_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/0007%2ejson",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_query",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/0007?tags=cat&other=9",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/0007#suffix",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_query_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/0007?tags=cat&other=9#fragment",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_modern_encoded_initial_digit",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_modern_encoded_initial_zeros",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_modern_positive_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_modern_negative_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_modern_nonnumeric",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_modern_empty",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_groups/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_legacy_ordinary",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/7",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_leading_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/0007",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/0",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0"
+      ],
+      "captured_id": "0",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_all_zero",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/0000",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0000"
+      ],
+      "captured_id": "0000",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0000.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0000",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_beyond_u64",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/999999999999999999999999999999999999999999999",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "999999999999999999999999999999999999999999999"
+      ],
+      "captured_id": "999999999999999999999999999999999999999999999",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/999999999999999999999999999999999999999999999.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:999999999999999999999999999999999999999999999",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_word_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/7tail",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_path_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/7/extra/path",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_json_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/7.json",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_encoded_digit_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/7%32",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_encoded_slash_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/7%2F999",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "7"
+      ],
+      "captured_id": "7",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/7.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:7",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_leading_zero_encoded_suffix",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/0007%2ejson",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_query",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/0007?tags=cat&other=9",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/0007#suffix",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_query_fragment",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/0007?tags=cat&other=9#fragment",
+      "extractor": "DanbooruFavgroupExtractor",
+      "category": "danbooru",
+      "root": "https://danbooru.donmai.us",
+      "groups": [
+        null,
+        "",
+        null,
+        null,
+        null,
+        "0007"
+      ],
+      "captured_id": "0007",
+      "archive_format": "fg_{favgroup[id]}_{id}",
+      "error": null,
+      "calls": [
+        {
+          "url": "https://danbooru.donmai.us/favorite_groups/0007.json",
+          "params": null
+        },
+        {
+          "url": "https://danbooru.donmai.us/posts.json",
+          "params": {
+            "tags": "ordfavgroup:0007",
+            "limit": 200,
+            "page": null
+          }
+        }
+      ],
+      "metadata_response": {
+        "id": 99,
+        "name": "fixture_collection_name",
+        "description": "synthetic description",
+        "post_ids": [
+          42
+        ]
+      },
+      "metadata": {
+        "favgroup": {
+          "id": 99,
+          "name": "fixture collection name",
+          "description": "synthetic description"
+        }
+      },
+      "posts": [
+        {
+          "id": 42,
+          "num": 1
+        }
+      ],
+      "archive_keys": [
+        "fg_99_42"
+      ],
+      "per_page": 200,
+      "threshold": 180
+    },
+    {
+      "name": "danbooru_favgroup_legacy_encoded_initial_digit",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_legacy_encoded_initial_zeros",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/%30%30%37",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_legacy_positive_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/+7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_legacy_negative_sign",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/-7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_legacy_nonnumeric",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/word7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_legacy_empty",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show/",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_double_initial_slash",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us//favorite_groups/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_wrong_case",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/Favorite_groups/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_encoded_route",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_%67roups/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_wrong_singular",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "danbooru_favgroup_legacy_missing_show",
+      "family": "danbooru",
+      "url": "https://danbooru.donmai.us/favorite_group/show7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_unsupported_favorite_groups",
+      "family": "e621",
+      "url": "https://e621.net/favorite_groups/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e621_unsupported_favorite_group",
+      "family": "e621",
+      "url": "https://e621.net/favorite_group/show/0007",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_unsupported_favorite_groups",
+      "family": "e621",
+      "url": "https://e926.net/favorite_groups/7",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    },
+    {
+      "name": "e926_unsupported_favorite_group",
+      "family": "e621",
+      "url": "https://e926.net/favorite_group/show/0007",
+      "extractor": null,
+      "category": null,
+      "root": null,
+      "groups": null,
+      "captured_id": null,
+      "archive_format": null,
+      "error": "NoExtractor",
+      "calls": [],
+      "metadata_response": null,
+      "metadata": null,
+      "posts": [],
+      "archive_keys": []
+    }
+  ]
+}

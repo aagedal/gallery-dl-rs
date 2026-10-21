@@ -119,6 +119,8 @@ fn valid(fields: &Map<String, Value>) -> bool {
                 | "subcategory"
                 | "rating"
                 | "search_tags"
+                | "pool"
+                | "favgroup"
                 | "score"
                 | "community"
                 | "discord"
@@ -922,6 +924,8 @@ mod tests {
             "rating",
             "score",
             "search_tags",
+            "pool",
+            "favgroup",
             "community",
             "discord",
             "creator",
@@ -946,5 +950,32 @@ mod tests {
         // Native route validation excludes leading-zero IDs, so requested and
         // returned identities have one canonical decimal spelling.
         assert!(!super::super::valid_id("005"));
+    }
+    #[test]
+    fn collection_roots_are_rejected_and_valid_user_detail_serializes_without_duplicate_keys() {
+        for key in ["pool", "favgroup"] {
+            let mut raw = detail(5);
+            raw[key] = json!({"id":99,"name":"untrusted extra"});
+            assert!(UserDetail::parse(&raw).is_none());
+            assert!(serde_json::from_value::<UserDetail>(raw).is_err());
+        }
+        let metadata = crate::extract::PostMetadata {
+            pixiv_user_detail: Some(std::sync::Arc::new(UserDetail::parse(&detail(5)).unwrap())),
+            pool: Some(std::sync::Arc::new(json!({"id":7}))),
+            favgroup: Some(std::sync::Arc::new(json!({"id":8}))),
+            ..Default::default()
+        };
+        let encoded = serde_json::to_string(&metadata).unwrap();
+        for key in ["pool", "favgroup"] {
+            assert_eq!(
+                encoded.matches(&format!("\"{key}\":")).count(),
+                1,
+                "{encoded}"
+            );
+        }
+        let decoded: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded["pool"]["id"], 7);
+        assert_eq!(decoded["favgroup"]["id"], 8);
+        assert_eq!(decoded["extra_root"]["data"], json!([null, "value"]));
     }
 }

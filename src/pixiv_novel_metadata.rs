@@ -165,6 +165,8 @@ fn reserved(key: &str) -> bool {
                 | "subcategory"
                 | "rating"
                 | "score"
+                | "pool"
+                | "favgroup"
                 | "community"
                 | "discord"
                 | "creator"
@@ -192,4 +194,42 @@ fn reserved(key: &str) -> bool {
                 | "exts_video"
                 | "exts_archive"
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn collection_roots_are_filtered_before_flattened_post_serialization() {
+        let raw = json!({"title":"Novel","custom":{"public":true},"pool":{"id":99},"favgroup":{"id":100}});
+        let captured = NovelMetadata::parse(raw.as_object().unwrap()).unwrap();
+        for key in ["pool", "favgroup"] {
+            assert!(!captured.fields().contains_key(key));
+            assert!(
+                !NovelMetadata::queue_fields(raw.as_object().unwrap())
+                    .unwrap()
+                    .contains_key(key)
+            );
+        }
+        let metadata = crate::extract::PostMetadata {
+            pixiv_novel_metadata: Some(std::sync::Arc::new(captured)),
+            pool: Some(std::sync::Arc::new(json!({"id":7}))),
+            favgroup: Some(std::sync::Arc::new(json!({"id":8}))),
+            ..Default::default()
+        };
+        // JSON-to-Value would hide duplicate object keys; inspect actual bytes.
+        let encoded = serde_json::to_string(&metadata).unwrap();
+        for key in ["pool", "favgroup"] {
+            assert_eq!(
+                encoded.matches(&format!("\"{key}\":")).count(),
+                1,
+                "{encoded}"
+            );
+        }
+        let decoded: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded["pool"]["id"], 7);
+        assert_eq!(decoded["favgroup"]["id"], 8);
+        assert_eq!(decoded["custom"]["public"], true);
+    }
 }

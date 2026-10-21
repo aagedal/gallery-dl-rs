@@ -61,6 +61,7 @@ fn media() -> Media {
             source_suffix: None,
             search_tags: None,
             pool: None,
+            favgroup: None,
             keyword_updates: None,
         }),
         headers: BTreeMap::new(),

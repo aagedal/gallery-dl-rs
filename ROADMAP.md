@@ -621,7 +621,8 @@ to true; false preserves animated GIFs while leaving native video unchanged.
 Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
-Safebooru posts and tag searches, plus Danbooru/e621 pools. Danbooru/e621 support
+Safebooru posts and tag searches, plus Danbooru/e621 pools and Danbooru favorite
+groups. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru supports API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
@@ -1185,16 +1186,45 @@ different from upstream's MD5-based pool filenames. Generic root order settings
 retain the existing asc/desc/reverse grammar; extra pool aliases require the
 Danbooru category scope.
 
-**Next booru collection step (source audit):** Danbooru favorite groups
-(`/favorite_groups/ID` and `/favorite_group/show/ID`) reuse the pool collection
-methods with keyword `favgroup`, endpoint `/favorite_groups/ID.json`, and
-`ordfavgroup:`/`favgroup:` feeds. Preserve the response ID and shared nested
-object, and use default metadata archive key `fg_{favgroup[id]}_{id}`. E621
-favorites are a separate `/favorites.json` feed with numbered pagination and
-query-derived scalar `user_id`; its default key is `f_{user_id}_{id}`. Danbooru
-has no matching `/favorites` extractor in the audited source. Legacy collection
-URL aliases and lexical ID preservation (such as leading zeroes) still need
-route-level parity checks.
+**Implemented Danbooru favorite groups:** `/favorite_groups/ID` and
+`/favorite_group/show/ID` share collection traversal, ordering, member positions,
+and nested object ownership with pools. Metadata comes from
+`/favorite_groups/ID.json`, retains its response ID, and is projected as
+`favgroup`; metadata archives use `fg_{favgroup[id]}_{id}`. Pool and favorite-group
+routes preserve literal decimal IDs (including zero and leading zeroes), support
+legacy aliases, and capture only the source regex digit prefix before suffixes.
+Source replay covers requests, metadata, directories/format keys, live hooks,
+error checkpoints and cancellation. Collection compatibility capture is scoped
+to its booru categories; Pixiv user-detail and novel reserved-root guards reject
+`pool`/`favgroup` extras to prevent duplicate serialized JSON keys. Native
+logical filename defaults still
+differ from source MD5-based filenames. Alternate source hosts and raw Unicode
+URL digit captures remain unimplemented; URL parsing percent-encodes those raw
+digits, so their original spelling is unavailable from the typed URL.
+
+**Next booru filename fidelity step:** source `DanbooruExtractor.items()` calls
+`text.nameext_from_url(url, post)` before Directory: percent-decode the URL
+basename, split its final dot only when the name is nonempty and the extension
+has at most sixteen characters, and lowercase the extension. Current native
+`filename` keywords still use the logical native stem, so explicit source pool
+filename templates cannot yet match the full source result (replay checks the
+counter/ID prefix). Retain the original filename/extension independently of the
+logical download path, preserving Post-hook replacements through the shared
+file dictionary, then compare full filename outputs against the existing source
+fixtures. Source default naming remains a separate unfinished contract.
+
+**Next booru favorites step (source audit):** E621 favorites stream
+`/favorites.json` with numbered pages (no pool buffering). The constructor
+matches `/favorites` as a prefix; only an immediately following query is
+captured. Decode query keys/values once, skip bare pairs, and retain the first
+value for each decoded key, including blanks. URL `page`/`limit` are overwritten
+by native pagination defaults; other query parameters remain API-only and do
+not create `search_tags`. Retain `user_id` as an arbitrary string, including the
+empty default, and reapply it per Post only. Current Post/File mutations survive
+within the post; the next post and API request restore the constructor owner.
+ID mutations/deletion do not affect numbered cursors. The default metadata
+archive key is `f_{user_id}_{id}` using live file keywords; the source directory
+is category/Favorites/user_id. Danbooru has no matching `/favorites` extractor.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the
