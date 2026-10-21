@@ -254,6 +254,53 @@ fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
     }
 }
 
+fn booru_subcategory(url: &url::Url) -> Option<&'static str> {
+    let category = extract::social_site(url)?;
+    let site = gallery_dl_rs::booru::Site::from_category(category)?;
+    match gallery_dl_rs::booru::target(site, url).ok()?.0 {
+        gallery_dl_rs::booru::Target::Artist { .. } => Some("artist"),
+        gallery_dl_rs::booru::Target::ArtistSearch { .. } => Some("artist-search"),
+        gallery_dl_rs::booru::Target::Tags { .. } if matches!(category, "danbooru" | "e621") => {
+            Some("tag")
+        }
+        _ => None,
+    }
+}
+fn class_key(category: &str, subcategory: &str) -> Option<&'static str> {
+    match (category, subcategory) {
+        ("danbooru", "artist") => Some("danbooru.artist"),
+        ("danbooru", "artist-search") => Some("danbooru.artist-search"),
+        ("danbooru", "tag") => Some("danbooru.tag"),
+        ("e621", "artist") => Some("e621.artist"),
+        ("e621", "artist-search") => Some("e621.artist-search"),
+        ("e621", "tag") => Some("e621.tag"),
+        _ => None,
+    }
+}
+fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
+    let category = settings_category(url, extractor);
+    if matches!(extractor, Extractor::Native) {
+        booru_subcategory(url)
+            .and_then(|class| class_key(category, class))
+            .unwrap_or(category)
+    } else {
+        category
+    }
+}
+fn media_settings_key(media: &extract::Media, extractor: Extractor) -> &str {
+    if matches!(extractor, Extractor::Native)
+        && media.metadata.as_ref().is_some_and(|metadata| {
+            metadata.booru_artist_parent.is_some()
+                || gallery_dl_rs::source_archive::for_media(media)
+                    .is_some_and(|descriptor| descriptor.format == "t_{search_tags}_{id}")
+        })
+    {
+        class_key(&media.category, "tag").unwrap_or(&media.category)
+    } else {
+        &media.category
+    }
+}
+
 fn parse_sleep(value: &str) -> std::result::Result<gallery_dl_rs::sleep::SleepRange, String> {
     gallery_dl_rs::sleep::SleepRange::parse(value).map_err(|e| e.to_string())
 }
@@ -351,6 +398,16 @@ async fn run(args: Args) -> Result<()> {
                 .ok()
                 .and_then(|source| extract::http_url(source).ok())
                 .map(|url| settings_category(&url, args.extractor).to_owned());
+            let root_subcategory = if matches!(args.extractor, Extractor::Native) {
+                source
+                    .as_ref()
+                    .ok()
+                    .and_then(|source| extract::http_url(source).ok())
+                    .and_then(|url| booru_subcategory(&url))
+                    .map(str::to_owned)
+            } else {
+                None
+            };
             let archive_descriptor = source
                 .as_ref()
                 .ok()
@@ -398,7 +455,7 @@ async fn run(args: Args) -> Result<()> {
                     });
                     let selected_settings = extract::http_url(&source)
                         .ok()
-                        .map(|url| &settings[settings_category(&url, args.extractor)]);
+                        .map(|url| &settings[settings_key(&url, args.extractor)]);
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
@@ -429,10 +486,11 @@ async fn run(args: Args) -> Result<()> {
                     )
                 })
                 .boxed();
-            gallery_dl_rs::postprocess::jobs::apply_with_descriptor(
+            gallery_dl_rs::postprocess::jobs::apply_with_source_class(
                 input,
                 job_configurations.clone(),
                 root_category,
+                root_subcategory,
                 archive_descriptor,
             )
             .filter_map(move |result| {
@@ -447,7 +505,7 @@ async fn run(args: Args) -> Result<()> {
             })
         })
         .map(|(index, mut job)| {
-            settings[job.media.category.as_str()]
+            settings[media_settings_key(&job.media, args.extractor)]
                 .network
                 .apply_media(&mut job.media);
             (index, job)
@@ -521,7 +579,7 @@ async fn run(args: Args) -> Result<()> {
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
-                let settings = &settings[item.category.as_str()];
+                let settings = &settings[media_settings_key(&item, args.extractor)];
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap())
@@ -690,6 +748,8 @@ struct Extractors {
     bluesky: OnceCell<Result<gallery_dl_rs::bluesky::Bluesky>>,
     reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
+    booru_artist: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
+    booru_artist_search: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
     mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 3],
     kemono: [OnceCell<Result<gallery_dl_rs::kemono::Kemono>>; 2],
     imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
@@ -732,7 +792,7 @@ fn extract_input<'a>(
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
         {
-            let configured = &settings[settings_category(&url, extractor)];
+            let configured = &settings[settings_key(&url, extractor)];
             let options = &configured.options;
             match extractor {
                 Extractor::Native if category == "instagram" => {
@@ -1351,7 +1411,12 @@ fn extract_input<'a>(
                 Extractor::Native
                     if let Some(site) = gallery_dl_rs::booru::Site::from_category(category) =>
                 {
-                    let native = extractors.booru[site as usize]
+                    let cache = match booru_subcategory(&url) {
+                        Some("artist") => &extractors.booru_artist,
+                        Some("artist-search") => &extractors.booru_artist_search,
+                        _ => &extractors.booru,
+                    };
+                    let native = cache[site as usize]
                         .get_or_init(|| async {
                             gallery_dl_rs::booru::Booru::new(site, backend.timeout).and_then(
                                 |native| {
@@ -1364,6 +1429,9 @@ fn extract_input<'a>(
                                             options.user_id.as_deref(),
                                             options.api_key.as_deref(),
                                         )?
+                                        .with_artist_parent_metadata(
+                                            options.artist_parent_metadata().cloned(),
+                                        )
                                         .with_threshold(options.booru_threshold.flatten())
                                         .with_favorite_order(options.booru_favorite_order.clone())
                                         .with_pool_order(
@@ -1406,6 +1474,8 @@ fn extract_input<'a>(
                             expand: matches!(category, "twitter" | "kemono" | "coomer")
                                 .then_some(options.expand)
                                 .flatten(),
+                            parent_metadata: options.parent_metadata.as_deref().cloned(),
+                            metadata_parent: options.metadata_parent.as_deref().cloned(),
                             booru_threshold: matches!(category, "danbooru" | "e621")
                                 .then_some(options.booru_threshold)
                                 .flatten(),
@@ -1711,6 +1781,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         search_limit: None,
         search_stop: None,
         max_posts: None,
+        parent_metadata: None,
+        metadata_parent: None,
         booru_threshold: None,
         metadata: None,
         api_key: None,
@@ -1763,10 +1835,21 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "weasyl",
         "vsco",
         "direct",
+        "danbooru.artist",
+        "danbooru.artist-search",
+        "danbooru.tag",
+        "e621.artist",
+        "e621.artist-search",
+        "e621.tag",
     ] {
-        let options = defaults
-            .overlay(&config.resolve(category)?)
-            .overlay(&overrides);
+        let class = category
+            .split_once('.')
+            .filter(|(base, _)| matches!(*base, "danbooru" | "e621"));
+        let resolved = match class {
+            Some((base, class)) => config.resolve_class(base, class)?,
+            None => config.resolve(category)?,
+        };
+        let options = defaults.overlay(&resolved).overlay(&overrides);
         let browser_spec = args.cookies_from_browser.clone().or_else(|| {
             options.browser_cookies.as_ref().map(|profile| {
                 // Config parsing has already checked that this path is UTF-8.
@@ -1782,25 +1865,31 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             None
         };
         let filename = match &options.filename_conditions {
-            Some(conditions) => Some(FilenameTemplate::parse_conditional(
+            Some(conditions) => Some(FilenameTemplate::parse_conditional_with_keywords(
                 conditions,
                 options.filename.as_deref(),
+                config.parent_keywords(),
             )?),
             None => options
                 .filename
                 .as_deref()
-                .map(FilenameTemplate::parse)
+                .map(|template| {
+                    FilenameTemplate::parse_with_keywords(template, config.parent_keywords())
+                })
                 .transpose()?,
         };
         let directory = match &options.directory_conditions {
-            Some(conditions) => Some(DirectoryTemplate::parse_conditional(
+            Some(conditions) => Some(DirectoryTemplate::parse_conditional_with_keywords(
                 conditions,
                 options.directory.as_deref(),
+                config.parent_keywords(),
             )?),
             None => options
                 .directory
                 .as_deref()
-                .map(DirectoryTemplate::parse)
+                .map(|components| {
+                    DirectoryTemplate::parse_with_keywords(components, config.parent_keywords())
+                })
                 .transpose()?,
         };
         let selection = options

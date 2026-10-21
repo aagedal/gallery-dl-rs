@@ -160,17 +160,29 @@ impl FilenameTemplate {
         conditions: &[(String, String)],
         default: Option<&str>,
     ) -> Result<Self> {
+        Self::parse_conditional_with_keywords(conditions, default, &[])
+    }
+    pub fn parse_conditional_with_keywords(
+        conditions: &[(String, String)],
+        default: Option<&str>,
+        keywords: &[String],
+    ) -> Result<Self> {
         if conditions.len() > 32 {
             return Err(error("filename template has too many conditions"));
         }
         Ok(Self {
-            parts: default.map(Self::parse).transpose()?.and_then(|t| t.parts),
+            parts: default
+                .map(|value| Self::parse_with_keywords(value, keywords))
+                .transpose()?
+                .and_then(|t| t.parts),
             conditions: conditions
                 .iter()
                 .map(|(filter, template)| {
                     Ok((
                         crate::filter::FilterExpression::parse(filter)?,
-                        Self::parse(template)?.parts.unwrap_or_default(),
+                        Self::parse_with_keywords(template, keywords)?
+                            .parts
+                            .unwrap_or_default(),
                     ))
                 })
                 .collect::<Result<_>>()?,
@@ -178,6 +190,12 @@ impl FilenameTemplate {
     }
 
     pub fn parse(template: &str) -> Result<Self> {
+        Self::parse_with_keywords(template, &[])
+    }
+    pub fn parse_with_keywords(template: &str, keywords: &[String]) -> Result<Self> {
+        if keywords.len() > 4096 || keywords.iter().map(String::len).sum::<usize>() > 1024 * 1024 {
+            return Err(error("template keyword declarations exceed limits"));
+        }
         if template.is_empty() || matches!(template, "." | "..") {
             return Err(error("filename template must produce a basename"));
         }
@@ -220,7 +238,7 @@ impl FilenameTemplate {
                         return Err(error("filename template has too many fields"));
                     }
                     parts.push(Part::Field(Field::parse(&field, |name| {
-                        FIELDS.contains(&name)
+                        FIELDS.contains(&name) || keywords.iter().any(|key| key == name)
                     })?));
                 }
                 '}' => return Err(error("unmatched closing brace in filename template")),
@@ -267,7 +285,22 @@ impl FilenameTemplate {
         let mut context = Some(
             keywords
                 .iter()
-                .map(|(key, value)| (key.clone(), crate::filter::keyword_value(key, value)))
+                .map(|(key, value)| {
+                    let value = crate::filter::keyword_value(key, value);
+                    let inherited = media
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.booru_artist_parent.as_ref())
+                        .is_some_and(|inheritance| inheritance.has_keyword(key));
+                    (
+                        key.clone(),
+                        if inherited {
+                            crate::filter::Value::SourcePrimitive(std::sync::Arc::new(value))
+                        } else {
+                            value
+                        },
+                    )
+                })
                 .collect(),
         );
         let mut selected = self.parts.as_deref();
@@ -537,12 +570,19 @@ impl DirectoryTemplate {
         conditions: &[(String, Vec<String>)],
         default: Option<&[String]>,
     ) -> Result<Self> {
+        Self::parse_conditional_with_keywords(conditions, default, &[])
+    }
+    pub fn parse_conditional_with_keywords(
+        conditions: &[(String, Vec<String>)],
+        default: Option<&[String]>,
+        keywords: &[String],
+    ) -> Result<Self> {
         if conditions.len() > 32 {
             return Err(error("directory template has too many conditions"));
         }
         Ok(Self {
             components: default
-                .map(Self::parse)
+                .map(|value| Self::parse_with_keywords(value, keywords))
                 .transpose()?
                 .and_then(|t| t.components),
             conditions: conditions
@@ -550,7 +590,9 @@ impl DirectoryTemplate {
                 .map(|(filter, components)| {
                     Ok((
                         crate::filter::FilterExpression::parse(filter)?,
-                        Self::parse(components)?.components.unwrap_or_default(),
+                        Self::parse_with_keywords(components, keywords)?
+                            .components
+                            .unwrap_or_default(),
                     ))
                 })
                 .collect::<Result<_>>()?,
@@ -558,6 +600,9 @@ impl DirectoryTemplate {
     }
 
     pub fn parse(components: &[String]) -> Result<Self> {
+        Self::parse_with_keywords(components, &[])
+    }
+    pub fn parse_with_keywords(components: &[String], keywords: &[String]) -> Result<Self> {
         if components.len() > 32
             || components
                 .iter()
@@ -569,7 +614,7 @@ impl DirectoryTemplate {
             components: Some(
                 components
                     .iter()
-                    .map(|s| FilenameTemplate::parse(s))
+                    .map(|s| FilenameTemplate::parse_with_keywords(s, keywords))
                     .collect::<Result<_>>()?,
             ),
             conditions: Vec::new(),
@@ -690,6 +735,13 @@ fn lookup(
         .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
         .unwrap_or((&media.filename, ""));
     let metadata = media.metadata.as_ref();
+    if let Some(inheritance) = metadata.and_then(|metadata| metadata.booru_artist_parent.as_ref())
+        && inheritance.has_keyword(name)
+    {
+        return context
+            .get(name)
+            .map(|value| Value::SourcePrimitive(Box::new(convert_value(value, name, false))));
+    }
     if let Some(fields) = metadata.and_then(|metadata| metadata.booru_popular.as_ref())
         && matches!(name, "date" | "scale")
     {

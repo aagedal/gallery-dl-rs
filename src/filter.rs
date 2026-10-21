@@ -179,6 +179,18 @@ impl FilterExpression {
         if let Some(count) = post.count {
             context.insert("count".into(), Value::Int(count as i128));
         }
+        if let Some(inheritance) = post
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.booru_artist_parent.as_ref())
+        {
+            context.extend(
+                inheritance
+                    .keywords()
+                    .into_iter()
+                    .map(|(key, value)| (key, artist_value(&value))),
+            );
+        }
         for expression in self.expressions.iter() {
             if !eval::truthy(&eval::evaluate(expression, &context)?) {
                 return Ok(false);
@@ -340,6 +352,12 @@ pub(crate) fn json_value(value: &serde_json::Value) -> Value {
             }
             Value::Map(Arc::new(result))
         }
+    }
+}
+fn artist_value(value: &serde_json::Value) -> Value {
+    match json_value(value) {
+        value @ (Value::SourcePrimitive(_) | Value::SourceDate(_)) => value,
+        value => Value::SourcePrimitive(Arc::new(value)),
     }
 }
 const SOURCE_PRIMITIVE_KEY: &str = "$gallery_dl_source_primitive";
@@ -1141,12 +1159,9 @@ fn context_parts(
                 }
             }
         }
-        if let Some(parent) = &post.booru_artist_parent {
+        if post.booru_artist_parent.is_some() {
             values.insert("subcategory".into(), text("tag"));
             metadata.insert("subcategory".into(), text("tag"));
-            let parent = json_value(&serde_json::Value::Object(parent.snapshot()));
-            values.insert("_parent".into(), parent.clone());
-            metadata.insert("_parent".into(), parent);
             values.remove("name");
             metadata.remove("name");
             if let Some(name) = post.booru_keywords.as_ref().and_then(|v| v.get("name")) {
@@ -1183,7 +1198,32 @@ fn context_parts(
             values.insert("favorite_id".into(), owner.clone());
             metadata.insert("favorite_id".into(), owner);
         }
-        values.insert("metadata".into(), map(metadata));
+        if let Some(inheritance) = &post.booru_artist_parent {
+            for (key, value) in inheritance.keywords() {
+                let value = artist_value(&value);
+                values.insert(key.clone(), value.clone());
+                metadata.insert(key, value);
+            }
+        }
+        if post.booru_artist_parent.is_none() {
+            values.insert("metadata".into(), map(metadata));
+        } else {
+            values.remove("metadata");
+            if let Some(value) = post
+                .booru_keywords
+                .as_ref()
+                .and_then(|fields| fields.get("metadata"))
+            {
+                values.insert("metadata".into(), json_value(value));
+            }
+        }
+        if let Some(value) = post
+            .booru_artist_parent
+            .as_ref()
+            .and_then(|inheritance| inheritance.keywords().remove("metadata"))
+        {
+            values.insert("metadata".into(), artist_value(&value));
+        }
     }
     values
 }

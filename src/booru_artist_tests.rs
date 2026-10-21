@@ -23,7 +23,7 @@ use std::{
     path::Path,
 };
 
-const EVENTS: &[&str] = &[
+pub(super) const EVENTS: &[&str] = &[
     "post",
     "prepare",
     "file",
@@ -51,7 +51,7 @@ fn fixture() -> Value {
     ))
     .unwrap()
 }
-fn serve(case: &Value) -> (Url, std::thread::JoinHandle<Vec<String>>) {
+pub(super) fn serve(case: &Value) -> (Url, std::thread::JoinHandle<Vec<String>>) {
     use std::{
         io::{Read, Write},
         net::TcpListener,
@@ -116,7 +116,7 @@ fn serve(case: &Value) -> (Url, std::thread::JoinHandle<Vec<String>>) {
     });
     (root, task)
 }
-fn assert_requests(case: &Value, root: &Url, requests: Vec<String>) {
+pub(super) fn assert_requests(case: &Value, root: &Url, requests: Vec<String>) {
     let name = case["name"].as_str().unwrap();
     let calls = case["calls"].as_array().unwrap();
     assert_eq!(requests.len(), calls.len(), "{name}: request count");
@@ -160,13 +160,13 @@ fn assert_requests(case: &Value, root: &Url, requests: Vec<String>) {
         );
     }
 }
-fn native_category(case: &Value) -> &str {
+pub(super) fn native_category(case: &Value) -> &str {
     match case["family"].as_str().unwrap() {
         "e926" => "e621",
         family => family,
     }
 }
-fn client(case: &Value, root: Url) -> Booru {
+pub(super) fn client(case: &Value, root: Url) -> Booru {
     booru(Site::from_category(native_category(case)).unwrap(), root).with_threshold(
         case["options"]["threshold"]
             .as_u64()
@@ -174,7 +174,10 @@ fn client(case: &Value, root: Url) -> Booru {
     )
 }
 
-fn templates(case: &Value, root: &Path) -> (Option<FilenameTemplate>, Option<DirectoryTemplate>) {
+pub(super) fn templates(
+    case: &Value,
+    root: &Path,
+) -> (Option<FilenameTemplate>, Option<DirectoryTemplate>) {
     let family = native_category(case);
     // Only naming options belong to this helper. Source's separate root
     // DownloadArchive path-array configuration is not a native naming option.
@@ -211,7 +214,7 @@ fn templates(case: &Value, root: &Path) -> (Option<FilenameTemplate>, Option<Dir
     };
     (filename, directory)
 }
-fn artifacts(root: &Path) -> Value {
+pub(super) fn artifacts(root: &Path) -> Value {
     fn visit(root: &Path, directory: &Path, files: &mut Vec<Value>) {
         for entry in std::fs::read_dir(directory).unwrap() {
             let path = entry.unwrap().path();
@@ -252,7 +255,7 @@ fn artifacts(root: &Path) -> Value {
     files.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
     json!(files)
 }
-fn entries(path: &Path, query: &str) -> Vec<String> {
+pub(super) fn entries(path: &Path, query: &str) -> Vec<String> {
     let connection = rusqlite::Connection::open(path).unwrap();
     connection
         .prepare(query)
@@ -276,7 +279,7 @@ fn public_artist(value: &Value) -> Value {
         value => value.clone(),
     }
 }
-fn selection(case: &Value) -> JobSelection {
+pub(super) fn selection(case: &Value) -> JobSelection {
     JobSelection {
         child_filter: case["options"]["child-filter"]
             .as_str()

@@ -48,7 +48,14 @@ pub struct ChildMetadata {
     keyword_updates: Option<Arc<[KeywordUpdate]>>,
     target_category: Option<String>,
     source_archive: Option<Arc<crate::source_archive::ArchiveDescriptor>>,
-    booru_artist: Option<(Arc<str>, KeywordObject, KeywordObject)>,
+    booru_artist: Option<Arc<BooruArtistChild>>,
+}
+
+#[derive(Clone)]
+struct BooruArtistChild {
+    url: Arc<str>,
+    queue: KeywordObject,
+    inheritance: ArtistInheritance,
 }
 
 impl ChildMetadata {
@@ -248,7 +255,7 @@ impl ChildMetadata {
             .into(),
         );
         let queue = KeywordObject::new(fields.clone());
-        let parent = queue.shallow_copy();
+        let parent = ArtistInheritance::from(queue.shallow_copy());
         Ok(Self {
             category: category.into(),
             subcategory: subcategory.into(),
@@ -259,19 +266,41 @@ impl ChildMetadata {
                 category: category.into(),
                 format: "t_{search_tags}_{id}".into(),
             })),
-            booru_artist: Some((Arc::from(url.as_str()), queue, parent)),
+            booru_artist: Some(Arc::new(BooruArtistChild {
+                url: Arc::from(url.as_str()),
+                queue,
+                inheritance: parent,
+            })),
         })
     }
     pub fn booru_artist_url(&self) -> Option<&str> {
-        self.booru_artist.as_ref().map(|(url, _, _)| url.as_ref())
+        self.booru_artist.as_ref().map(|artist| artist.url.as_ref())
     }
     pub fn booru_artist_queue(&self) -> Option<&KeywordObject> {
-        self.booru_artist.as_ref().map(|(_, queue, _)| queue)
+        self.booru_artist.as_ref().map(|artist| &artist.queue)
     }
-    pub fn booru_artist_parent(&self) -> Option<&KeywordObject> {
-        self.booru_artist.as_ref().map(|(_, _, parent)| parent)
+    pub fn booru_artist_parent(&self) -> Option<&ArtistInheritance> {
+        self.booru_artist.as_ref().map(|artist| &artist.inheritance)
     }
 
+    pub fn with_booru_artist_inheritance(mut self, value: &serde_json::Value) -> Result<Self> {
+        let Some(artist) = self.booru_artist.as_mut() else {
+            return Err(crate::error(
+                "artist inheritance requires artist provenance",
+            ));
+        };
+        Arc::make_mut(artist).inheritance.mode = match value {
+            serde_json::Value::String(key) if !key.is_empty() => {
+                if key.len() > 4096 {
+                    return Err(crate::error("artist inheritance key exceeds limits"));
+                }
+                ArtistInheritanceMode::Nested(Arc::from(key.as_str()))
+            }
+            value if artist_truthy(value) => ArtistInheritanceMode::Flat,
+            _ => ArtistInheritanceMode::Disabled,
+        };
+        Ok(self)
+    }
     /// Explicit target extractor format; producer queue metadata may be ambiguous.
     pub fn with_source_archive(
         mut self,
@@ -405,6 +434,22 @@ impl KeywordObject {
             children: Default::default(),
         })))
     }
+    pub(crate) fn contains_key(&self, key: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .value
+            .contains_key(key)
+    }
+    fn keys(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .value
+            .keys()
+            .cloned()
+            .collect()
+    }
     pub fn snapshot(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let updates = state
@@ -487,6 +532,13 @@ impl KeywordObject {
         let state = source.shallow_state();
         *self.0.lock().unwrap_or_else(|e| e.into_inner()) = state;
     }
+    pub(crate) fn sync(&self, value: &serde_json::Map<String, serde_json::Value>) {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        state
+            .children
+            .retain(|key, _| value.get(key).is_some_and(serde_json::Value::is_object));
+        state.value = value.clone();
+    }
     pub(crate) fn replace(&self, value: &serde_json::Map<String, serde_json::Value>) {
         *self.0.lock().unwrap_or_else(|e| e.into_inner()) = KeywordObjectState {
             value: value.clone(),
@@ -512,6 +564,121 @@ impl KeywordObject {
 impl std::fmt::Debug for KeywordObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("KeywordObject { fields: [redacted] }")
+    }
+}
+
+/// A proven artist child job and its immutable parent-metadata policy.
+#[derive(Clone, Debug)]
+enum ArtistInheritanceMode {
+    Disabled,
+    Nested(Arc<str>),
+    Flat,
+}
+#[derive(Clone)]
+pub struct ArtistInheritance {
+    mode: ArtistInheritanceMode,
+    data: KeywordObject,
+}
+impl std::fmt::Debug for ArtistInheritance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArtistInheritance { fields: [redacted] }")
+    }
+}
+impl From<KeywordObject> for ArtistInheritance {
+    fn from(data: KeywordObject) -> Self {
+        Self {
+            mode: ArtistInheritanceMode::Nested(Arc::from("_parent")),
+            data,
+        }
+    }
+}
+fn artist_truthy(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::Bool(value) => *value,
+        serde_json::Value::Number(value) => value.as_f64().map_or_else(
+            || {
+                value
+                    .as_str()
+                    .bytes()
+                    .any(|byte| byte.is_ascii_digit() && byte != b'0')
+            },
+            |value| value != 0.0,
+        ),
+        serde_json::Value::String(value) => !value.is_empty(),
+        serde_json::Value::Array(value) => !value.is_empty(),
+        serde_json::Value::Object(value) => !value.is_empty(),
+    }
+}
+impl ArtistInheritance {
+    pub fn key(&self) -> Option<&str> {
+        match &self.mode {
+            ArtistInheritanceMode::Nested(key) => Some(key),
+            _ => None,
+        }
+    }
+    pub fn is_flat(&self) -> bool {
+        matches!(self.mode, ArtistInheritanceMode::Flat)
+    }
+    pub fn object(&self) -> &KeywordObject {
+        &self.data
+    }
+    pub fn snapshot(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.data.snapshot()
+    }
+    pub fn has_keyword(&self, name: &str) -> bool {
+        match &self.mode {
+            ArtistInheritanceMode::Disabled => false,
+            ArtistInheritanceMode::Nested(key) => key.as_ref() == name,
+            ArtistInheritanceMode::Flat => name != "_extractor" && self.data.contains_key(name),
+        }
+    }
+    pub(crate) fn keyword_names(&self) -> Vec<String> {
+        match &self.mode {
+            ArtistInheritanceMode::Disabled => vec![],
+            ArtistInheritanceMode::Nested(key) => vec![key.to_string()],
+            ArtistInheritanceMode::Flat => self
+                .data
+                .keys()
+                .into_iter()
+                .filter(|key| key != "_extractor")
+                .collect(),
+        }
+    }
+    pub fn keywords(&self) -> serde_json::Map<String, serde_json::Value> {
+        match &self.mode {
+            ArtistInheritanceMode::Disabled => serde_json::Map::new(),
+            ArtistInheritanceMode::Nested(key) => serde_json::Map::from_iter([(
+                key.to_string(),
+                serde_json::Value::Object(self.snapshot()),
+            )]),
+            ArtistInheritanceMode::Flat => {
+                let mut fields = self.snapshot();
+                fields.remove("_extractor");
+                fields
+            }
+        }
+    }
+    pub(crate) fn keyword_values(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.keywords()
+            .into_iter()
+            .map(|(key, value)| (key, crate::filter::source_primitive_json(value)))
+            .collect()
+    }
+    pub(crate) fn bindings(&self) -> Vec<(String, KeywordObject)> {
+        if let Some(key) = self.key() {
+            return vec![(key.into(), self.data.clone())];
+        }
+        if !self.is_flat() {
+            return vec![];
+        }
+        self.keywords()
+            .into_iter()
+            .filter_map(|(key, value)| {
+                value.as_object()?;
+                Some((key.clone(), self.data.object_at(&[key])?))
+            })
+            .collect()
     }
 }
 
@@ -638,7 +805,7 @@ pub fn child_job<'a>(
 ) -> BoxStream<'a, Result<ExtractionEvent>> {
     struct State<'a, F> {
         metadata: Option<ChildMetadata>,
-        artist_parent: Option<KeywordObject>,
+        artist_parent: Option<ArtistInheritance>,
         control: ChildControl,
         build: Option<F>,
         input: Option<BoxStream<'a, Result<ExtractionEvent>>>,
@@ -719,8 +886,10 @@ pub fn child_job<'a>(
                                 {
                                     let mut fields = file_fields.to_vec();
                                     fields.retain(|key| key != "num" && key != "name");
-                                    if !fields.iter().any(|key| key == "_parent") {
-                                        fields.push("_parent".into());
+                                    for key in parent.keywords().keys() {
+                                        if !fields.contains(key) {
+                                            fields.push(key.clone());
+                                        }
                                     }
                                     *file_fields = fields.into();
                                     let mut fields = post_fields.as_ref().clone();
@@ -732,12 +901,13 @@ pub fn child_job<'a>(
                                     {
                                         fields.remove("name");
                                     }
+                                    fields.extend(parent.keyword_values());
                                     *post_fields = Arc::new(fields);
                                 }
-                                post.keywords = post
-                                    .keywords
-                                    .clone()
-                                    .with_shared_object("_parent", parent.clone());
+                                for (key, object) in parent.bindings() {
+                                    post.keywords =
+                                        post.keywords.clone().with_shared_object(&key, object);
+                                }
                             }
                             Ok(ExtractionEvent::Media(media)) => {
                                 media
@@ -947,5 +1117,42 @@ mod budget_tests {
         assert_eq!(input.next().await.unwrap().unwrap(), 1);
         drop(input);
         assert!(dropped.load(Ordering::SeqCst));
+    }
+}
+
+#[cfg(test)]
+mod artist_metadata_tests {
+    use super::*;
+    #[test]
+    fn cloned_artist_metadata_keeps_independent_policy_and_shared_keyword_objects() {
+        let metadata = ChildMetadata::from_booru_artist(
+            "danbooru",
+            "artist",
+            serde_json::json!({"id":7,"name":"fixture"})
+                .as_object()
+                .unwrap(),
+            &"https://danbooru.donmai.us/posts?tags=fixture"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        let cloned = metadata
+            .clone()
+            .with_booru_artist_inheritance(&serde_json::json!(true))
+            .unwrap();
+        assert_eq!(
+            metadata.booru_artist_parent().unwrap().key(),
+            Some("_parent")
+        );
+        assert!(cloned.booru_artist_parent().unwrap().is_flat());
+        let queue = metadata.booru_artist_queue().unwrap();
+        let mut changed = queue.snapshot();
+        changed.insert("name".into(), "updated".into());
+        queue.record(&["name"], &changed);
+        assert_eq!(
+            cloned.booru_artist_queue().unwrap().snapshot()["name"],
+            "updated"
+        );
+        assert_eq!(metadata.booru_artist_url(), cloned.booru_artist_url());
     }
 }

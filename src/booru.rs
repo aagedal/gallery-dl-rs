@@ -486,6 +486,8 @@ pub(crate) fn prepare_filename_keywords(
     let extension = keywords
         .get("extension")
         .ok_or_else(|| error("booru extension keyword is missing"))?;
+    let primitive = crate::filter::source_primitive_from_json(extension);
+    let extension = primitive.unwrap_or(extension);
     let mapped = match extension {
         Value::String(value) => match value.as_str() {
             "jpeg" | "jpe" | "jfif" | "jif" | "jfi" => Some("jpg"),
@@ -498,7 +500,15 @@ pub(crate) fn prepare_filename_keywords(
         _ => None,
     };
     if let Some(extension) = mapped {
-        keywords.insert("extension".into(), extension.into());
+        let value = Value::String(extension.into());
+        keywords.insert(
+            "extension".into(),
+            if primitive.is_some() {
+                crate::filter::source_primitive_json(value)
+            } else {
+                value
+            },
+        );
     }
     Ok(())
 }
@@ -551,6 +561,34 @@ fn nameext_keywords(
                 ("extension".into(), extension.as_ref().into()),
             ])
         };
+    let source_tags = match site {
+        Site::Danbooru => post.get("tag_string").and_then(Value::as_str).map(|tags| {
+            Value::Array(if tags.is_empty() {
+                Vec::new()
+            } else {
+                tags.split(' ')
+                    .map(|tag| Value::String(tag.into()))
+                    .collect()
+            })
+        }),
+        Site::E621 => post
+            .get("tags")
+            .and_then(Value::as_object)
+            .and_then(|groups| {
+                let mut tags = Vec::new();
+                for group in groups.values() {
+                    for tag in group.as_array()? {
+                        tags.push(tag.as_str()?.to_owned());
+                    }
+                }
+                tags.sort();
+                Some(Value::Array(tags.into_iter().map(Value::String).collect()))
+            }),
+        _ => None,
+    };
+    if let Some(tags) = source_tags {
+        keywords.insert("tags".into(), tags);
+    }
     for key in ["md5", "name"] {
         if let Some(value) = post.get(key) {
             keywords.insert(key.into(), value.clone());
@@ -831,6 +869,7 @@ pub struct Booru {
     pool_order: PoolOrder,
     favorite_order: Option<Value>,
     popular_today: Option<time::Date>,
+    artist_parent_metadata: Option<Value>,
     site: Site,
     client: Client,
     network: NetworkOptions,
@@ -968,6 +1007,7 @@ impl Booru {
             pool_order: PoolOrder::Pool,
             favorite_order: None,
             popular_today: None,
+            artist_parent_metadata: None,
             site,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
@@ -1054,6 +1094,11 @@ impl Booru {
     /// Preserve Gelbooru's raw favorite ordering setting and source truthiness.
     pub fn with_favorite_order(mut self, order: Option<Value>) -> Self {
         self.favorite_order = order;
+        self
+    }
+    /// Configure artist child metadata inheritance using source JSON semantics.
+    pub fn with_artist_parent_metadata(mut self, value: Option<Value>) -> Self {
+        self.artist_parent_metadata = value;
         self
     }
     /// Override the local calendar day for deterministic popular extraction.
@@ -2894,3 +2939,7 @@ mod popular_tests;
 #[cfg(test)]
 #[path = "booru_artist_tests.rs"]
 mod artist_tests;
+
+#[cfg(test)]
+#[path = "booru_artist_parent_tests.rs"]
+mod artist_parent_tests;

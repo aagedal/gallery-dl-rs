@@ -139,11 +139,7 @@ impl ScopeLease {
                         &state.initial
                     };
                     inherit_keywords(&state.policy, &state.original, latest, context);
-                    if state.original.contains_key("_parent")
-                        && matches!(&state.policy, KeywordPolicy::Shared { file_fields, .. } if file_fields.iter().any(|key| key == "_parent"))
-                    {
-                        self.shared.objects.reattach("_parent");
-                    }
+                    self.shared.objects.reapply_artist();
                     self.shared.objects.refresh(context);
                     if shared {
                         // Remember fields introduced by this emission as well, so
@@ -409,6 +405,7 @@ impl Runtime {
                 filename.as_ref(),
             ))
             .await;
+        objects.sync_context(&self.context);
         if result.is_err() {
             self.failed.store(true, Ordering::Release);
             self.halt.store(true, Ordering::Release);
@@ -425,6 +422,7 @@ struct Frame {
     queue_shared: bool,
     eager_only: bool,
     artist_queue: Option<crate::event::KeywordObject>,
+    source_class: Option<String>,
     archive_descriptor: Option<crate::source_archive::ArchiveDescriptor>,
     infer_archive_descriptor: bool,
     post_after_pending: bool,
@@ -565,13 +563,26 @@ fn public_context(media: &Media) -> Map<String, Value> {
     for key in ["url", "_url", "filename", "name", "extension"] {
         context.remove(key);
     }
+    if let Some(inheritance) = media
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.booru_artist_parent.as_ref())
+    {
+        context.extend(inheritance.keyword_values());
+    }
     context
 }
 impl State<'_> {
+    fn configuration(&self, category: &str) -> Option<&JobConfiguration> {
+        self.frames
+            .last()
+            .and_then(|frame| frame.source_class.as_ref())
+            .and_then(|class| self.configurations.get(class))
+            .or_else(|| self.configurations.get(category))
+    }
     async fn initialize_eager(&mut self, category: &str) -> Result<()> {
         let Some(configuration) = self
-            .configurations
-            .get(category)
+            .configuration(category)
             .filter(|configuration| configuration.init)
             .cloned()
         else {
@@ -664,7 +675,7 @@ impl State<'_> {
                         .as_ref()
                         .map(crate::event::KeywordObject::snapshot)
                         .unwrap_or_else(|| frame.queue.take().unwrap_or_default());
-                    let result = if frame.queue_shared {
+                    let result = if frame.artist_queue.is_some() || frame.queue_shared {
                         runtime.hook(Hook::ChildAfter).await
                     } else {
                         runtime.hook_independent(Hook::ChildAfter).await
@@ -698,7 +709,17 @@ impl State<'_> {
                 }));
             }
             ExtractionEvent::Post(post) => {
+                if post
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.booru_artist_parent.is_some())
+                    && let Some(frame) = self.frames.last_mut()
+                    && frame.source_class.is_none()
+                {
+                    frame.source_class = Some(format!("{}.tag", post.category));
+                }
                 self.initialize_eager(&post.category).await?;
+                let configuration = self.configuration(&post.category).cloned();
                 let frame = self
                     .frames
                     .last_mut()
@@ -719,13 +740,18 @@ impl State<'_> {
                             .map(|(key, value)| (key.clone(), value.clone())),
                     );
                 }
-                let objects = crate::postprocess::objects::Bindings::new(&policy);
+                let objects = crate::postprocess::objects::Bindings::for_artist(
+                    &policy,
+                    media
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.booru_artist_parent.as_ref()),
+                );
                 objects.refresh(&mut original);
                 let mut initialized = false;
                 if frame.runtime.is_none()
-                    && let Some(configuration) = self.configurations.get(&media.category)
+                    && let Some(mut configuration) = configuration
                 {
-                    let mut configuration = configuration.clone();
                     configuration.processors = Arc::new(configuration.processors.for_job());
                     let runtime = Runtime {
                         configuration: configuration.clone(),
@@ -840,9 +866,13 @@ impl State<'_> {
                 let category = scope.metadata.target_category().to_owned();
                 let archive_descriptor = crate::source_archive::for_child(&scope.metadata);
                 let live = !scope.metadata.keyword_updates().is_empty();
+                let artist_queue = scope.metadata.booru_artist_queue().cloned();
                 let mut queue = scope.metadata.fields().clone();
                 queue.insert("category".into(), scope.metadata.category().into());
                 queue.insert("subcategory".into(), scope.metadata.subcategory().into());
+                if let Some(object) = &artist_queue {
+                    object.replace(&queue);
+                }
                 let parent = self
                     .frames
                     .last_mut()
@@ -866,7 +896,11 @@ impl State<'_> {
                     } else {
                         runtime.context = queue.clone();
                     }
-                    let result = if live {
+                    let result = if let Some(object) = &artist_queue {
+                        runtime.objects =
+                            crate::postprocess::objects::Bindings::artist_queue(object.clone());
+                        runtime.hook(Hook::Child).await
+                    } else if live {
                         runtime.hook(Hook::Child).await
                     } else {
                         runtime.hook_independent(Hook::Child).await
@@ -884,16 +918,20 @@ impl State<'_> {
                         post.checkpoint(&queue);
                     }
                 }
-                let artist_queue = scope.metadata.booru_artist_queue().cloned();
                 if let Some(object) = &artist_queue {
-                    object.replace(&queue);
+                    object.sync(&queue);
                     scope
                         .metadata
                         .booru_artist_parent()
                         .expect("artist parent")
+                        .object()
                         .reset_shallow_from(object);
                 }
                 self.frames.push(Frame {
+                    source_class: scope
+                        .metadata
+                        .booru_artist_url()
+                        .map(|_| format!("{}.tag", scope.metadata.target_category())),
                     artist_queue,
                     control: Some(scope.control),
                     queue: Some(queue),
@@ -950,7 +988,7 @@ impl State<'_> {
                         .as_ref()
                         .map(crate::event::KeywordObject::snapshot)
                         .unwrap_or_else(|| child.queue.take().unwrap_or_default());
-                    let result = if child.queue_shared {
+                    let result = if child.artist_queue.is_some() || child.queue_shared {
                         runtime.hook(Hook::ChildAfter).await
                     } else {
                         runtime.hook_independent(Hook::ChildAfter).await
@@ -978,7 +1016,7 @@ pub fn apply_with_category<'a>(
     configurations: Arc<BTreeMap<String, JobConfiguration>>,
     root_category: Option<String>,
 ) -> BoxStream<'a, Result<JobMedia>> {
-    apply_inner(input, configurations, root_category, None, true)
+    apply_inner(input, configurations, root_category, None, None, true)
 }
 /// Apply job hooks with the selected source extractor's archive identity format.
 pub fn apply_with_descriptor<'a>(
@@ -991,6 +1029,24 @@ pub fn apply_with_descriptor<'a>(
         input,
         configurations,
         root_category,
+        None,
+        archive_descriptor,
+        false,
+    )
+}
+/// Resolve job configuration using its immutable source extractor class.
+pub fn apply_with_source_class<'a>(
+    input: BoxStream<'a, Result<ExtractionEvent>>,
+    configurations: Arc<BTreeMap<String, JobConfiguration>>,
+    root_category: Option<String>,
+    root_subcategory: Option<String>,
+    archive_descriptor: Option<crate::source_archive::ArchiveDescriptor>,
+) -> BoxStream<'a, Result<JobMedia>> {
+    apply_inner(
+        input,
+        configurations,
+        root_category,
+        root_subcategory,
         archive_descriptor,
         false,
     )
@@ -999,6 +1055,7 @@ fn apply_inner<'a>(
     input: BoxStream<'a, Result<ExtractionEvent>>,
     configurations: Arc<BTreeMap<String, JobConfiguration>>,
     root_category: Option<String>,
+    root_subcategory: Option<String>,
     archive_descriptor: Option<crate::source_archive::ArchiveDescriptor>,
     infer_archive_descriptor: bool,
 ) -> BoxStream<'a, Result<JobMedia>> {
@@ -1006,6 +1063,10 @@ fn apply_inner<'a>(
         input: Some(input),
         configurations,
         frames: vec![Frame {
+            source_class: root_category
+                .as_ref()
+                .zip(root_subcategory.as_ref())
+                .map(|(category, subcategory)| format!("{category}.{subcategory}")),
             archive_descriptor,
             infer_archive_descriptor,
             ..Frame::default()

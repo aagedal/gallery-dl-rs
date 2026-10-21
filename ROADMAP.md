@@ -1373,13 +1373,39 @@ Native history retains canonical post identities independently of source metadat
 archives. Genuine source jobs cover 129 cases and 24 route probes, including
 request order, cancellation, filters/ranges/deduplication, malformed partial
 results, hook ownership, primitive date fields, publication bytes and SQLite keys.
-Extractor subcategory configuration and initialization, source download-archive
-path arrays, dynamic Python class/proxy keyword objects, and mutation of array
-elements remain broader parity work. The default `_parent` inheritance is
-implemented; source `parent-metadata`/legacy `metadata-parent` overrides still
-need false (no inheritance), custom string keys, and truthy non-string values
-(flattened inheritance), including their impact on live source archive keywords.
+**Implemented artist metadata inheritance options (source oracle, 1.32.17):**
+`parent-metadata` and legacy `metadata-parent` retain raw JSON and resolve each
+key across configuration layers before primary-key presence selects the result.
+Falsy values disable inheritance, nonempty strings select exact nested keys,
+and truthy non-strings flatten the artist fields. Shallow nested identities and
+hook-created aliases survive Child, child Post/File, ChildAfter and final parent
+hooks. Inherited fields reapply at every Directory and Url boundary, including
+colliding IDs, dates, category labels, tags, names, filename/extension and custom
+metadata keys. Original API identity remains separate for native history.
+Raw date strings stay primitive; explicit conversions retain datetime identity.
 
+Stable artist/artist-search/tag job configuration selects hooks and eager
+initialization independently of mutable public class labels. These class scopes
+support inheritance, job hooks/options, base directory, filename/directory
+and child selection; unsupported class extraction/selection options fail
+explicitly. Declared custom parent names work in templates across scopes.
+CLI artist classes keep independent cached inheritance settings, and tag children
+use their own job templates and output settings. Compatibility forwards both
+raw inheritance keys without collapsing absence or null. Compatibility jobs retain
+category-level native hook and output settings. Canonical booru tag keywords now
+retain source-normalized arrays. Genuine new source jobs cover
+168 cases (including 48 observed collision-path Skip events), all eight hook
+phases, complete publication bytes and actual metadata archive SQL. The original
+129 artist cases remain frozen and pass unchanged.
+
+Remaining: other class-scoped extraction/selection options, source download-archive
+path arrays, dynamic Python class/proxy keyword objects, and array-element
+mutation. Configurable parent inheritance for other native queue producers has
+not yet been implemented. Source date selection still needs to use live source
+keyword date types for Popular views and inherited date overrides rather than
+canonical native timestamps. Source probes confirm falsy dates bypass comparisons,
+truthy strings fail against datetime bounds, and post filters run before dates;
+these rules still need a frozen replay fixture and native implementation.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

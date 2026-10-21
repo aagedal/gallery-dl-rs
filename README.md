@@ -413,12 +413,24 @@ Danbooru/e621/e926 artist routes (`/artists/ID`, `/artists?QUERY`, and
 retain query parameters, normalize the initial page as a Python integer, and
 continue at twenty artists per page. Names are validated and quoted before
 child selection; selected children make tag requests lazily. Child filters and
-ranges run before URL deduplication. Metadata inheritance currently uses the
-source default: each child exposes the full artist JSON under `_parent`,
-including parent child-hook edits. Root edits to this shallow
-copy stay in the child; edits inside shared nested maps reach `child-after`.
-Tag children use ordinary tag paths and archives. Artist roots emit no files;
-parent hooks initialize only with `init: true`.
+ranges run before URL deduplication. Metadata inheritance defaults to the full
+artist JSON under `_parent`, including parent child-hook edits. Set
+`parent-metadata` to a nonempty string to choose another key, a falsy JSON value
+to disable inheritance, or a truthy non-string value to flatten those fields.
+The primary key wins over legacy `metadata-parent` by presence, including null.
+Root edits to the shallow copy stay in the child; shared nested-map edits reach
+`child-after`. Inherited fields are reapplied before each post and file, so flat
+IDs, dates, names, tags, and filename fields can override API keywords. Native
+history retains the original post identity.
+
+Native booru `artist`, `artist-search`, and `tag` configuration objects select job hooks
+by their actual class, even when inherited keywords change category labels.
+They support inheritance, `init`, postprocessors/options, base directory,
+filename/directory templates, and child filters/ranges. Custom parent keys can
+be used in templates, including templates declared in another scope. Tag
+children use ordinary tag paths and source metadata archives; artist roots emit
+no files and initialize parent hooks only with `init: true`.
+Compatibility jobs retain category-level native hook and output settings.
 
 Booru template keywords retain producer spelling independently of the native
 logical basename. Danbooru derives `filename` and `extension` from the raw URL;

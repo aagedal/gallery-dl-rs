@@ -451,6 +451,7 @@ impl MetadataOptions {
                         .identity_path()
                         .and_then(|path| super::objects::resolve_alias(&path));
                     let typed_dates = popular
+                        || super::objects::is_artist_context()
                         || media
                             .metadata
                             .as_ref()
@@ -461,16 +462,15 @@ impl MetadataOptions {
                         template.render_value(context)
                     };
                     if let Ok(mut value) = result {
-                        if key.split('[').next() == Some("_parent")
-                            && let Some(raw) = crate::filter::source_primitive_from_json(&value)
+                        if key.split('[').next().is_some_and(|root| {
+                            root == "_parent" || super::objects::is_artist_root(root)
+                        }) && let Some(raw) = crate::filter::source_primitive_from_json(&value)
                         {
                             value = raw.clone();
                         }
-                        if popular
-                            && matches!(
-                                key.as_str(),
-                                "date" | "scale" | "date_updated" | "date_url"
-                            )
+                        if typed_dates
+                            && matches!(key.as_str(), "date" | "date_updated" | "date_url")
+                            || popular && key == "scale"
                         {
                             value = crate::filter::source_primitive_json(value);
                         }
@@ -1516,7 +1516,7 @@ mod source_date_exports {
         let mut media =
             crate::extract::direct(&"https://fixture.invalid/image.jpg".parse().unwrap()).unwrap();
         media.metadata = Some(crate::extract::PostMetadata {
-            booru_artist_parent: Some(parent),
+            booru_artist_parent: Some(parent.into()),
             ..Default::default()
         });
         let mut context = crate::postprocess::context(&media);

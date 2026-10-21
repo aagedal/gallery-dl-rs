@@ -235,7 +235,7 @@ impl Field {
         {
             return Ok(value);
         }
-        if let Value::SourcePrimitive(inner) = value {
+        while let Value::SourcePrimitive(inner) = value {
             value = *inner;
         }
         if let Some(conversion) = self.conversion {
@@ -281,7 +281,7 @@ impl Field {
         lookup: impl Fn(&str) -> Option<Value>,
     ) -> Result<Option<String>> {
         let mut selected = self.select(lookup);
-        if let Value::SourcePrimitive(inner) = selected {
+        while let Value::SourcePrimitive(inner) = selected {
             selected = *inner;
         }
         if let Some(conversion) = self.conversion {
@@ -1087,7 +1087,7 @@ fn parse_source(text: &str, known: &impl Fn(&str) -> bool) -> Result<Source> {
     };
     let end = text.find(['.', '[']).unwrap_or(text.len());
     let name = &text[..end];
-    if !identifier(name) {
+    if !identifier(name) && !known(name) {
         return Err(error("invalid template field name"));
     }
     if !known(name) {

@@ -229,8 +229,11 @@ pub(super) fn events(
                 let url = public_root
                     .join(&format!("posts?tags={}", quote(name)))
                     .map_err(|_| error("invalid booru artist URL"))?;
-                let metadata =
+                let mut metadata =
                     ChildMetadata::from_booru_artist(category, subcategory, fields, &url)?;
+                if let Some(value) = &booru.artist_parent_metadata {
+                    metadata = metadata.with_booru_artist_inheritance(value)?;
+                }
                 Ok(child_job(metadata, move || booru.events(&url)))
             })();
             match child {

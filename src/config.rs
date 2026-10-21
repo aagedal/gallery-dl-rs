@@ -85,6 +85,9 @@ pub struct Options {
     pub booru_order_posts: Option<crate::booru::PoolOrder>,
     /// Gelbooru favorites retain source JSON types and first-element rules.
     pub booru_favorite_order: Option<Value>,
+    /// Raw common inheritance keys; the primary key wins by presence.
+    pub parent_metadata: Option<std::sync::Arc<Value>>,
+    pub metadata_parent: Option<std::sync::Arc<Value>>,
     pub favorites: Option<crate::kemono::Favorites>,
     pub username: Option<String>,
     pub password: Option<String>,
@@ -208,6 +211,19 @@ impl Options {
         }
     }
 
+    /// Select the primary inheritance key by presence, including explicit null.
+    pub fn artist_parent_metadata(&self) -> Option<&Value> {
+        self.parent_metadata
+            .as_deref()
+            .or(self.metadata_parent.as_deref())
+    }
+    pub fn artist_parent_keywords(&self) -> Vec<String> {
+        match self.artist_parent_metadata() {
+            Some(Value::String(key)) if !key.is_empty() => vec![key.clone()],
+            None => vec!["_parent".into()],
+            _ => Vec::new(),
+        }
+    }
     /// Return a copy with every present field in `overrides` taking precedence.
     /// This can apply explicit CLI values after configuration resolution.
     /// Reblog fields are one setting; an explicit Tumblr mode takes precedence
@@ -314,6 +330,14 @@ impl Options {
                     })
                 })
                 .or_else(|| self.booru_favorite_order.clone()),
+            parent_metadata: overrides
+                .parent_metadata
+                .clone()
+                .or_else(|| self.parent_metadata.clone()),
+            metadata_parent: overrides
+                .metadata_parent
+                .clone()
+                .or_else(|| self.metadata_parent.clone()),
             favorites: overrides.favorites.or(self.favorites),
             username: overrides.username.clone().or_else(|| self.username.clone()),
             password: overrides.password.clone().or_else(|| self.password.clone()),
@@ -416,6 +440,8 @@ pub struct Config {
     global: Options,
     extractor: Options,
     categories: BTreeMap<String, Options>,
+    classes: BTreeMap<(String, String), Options>,
+    parent_keywords: Vec<String>,
 }
 
 // Separate structs deliberately avoid serde flatten: duplicate and unknown
@@ -456,6 +482,8 @@ struct RawRoot {
     order_revisions: Field,
     endpoint: Field,
     order_posts: Field,
+    parent_metadata: Field,
+    metadata_parent: Field,
     favorites: Field,
     reposts: Field,
     ugoira: Field,
@@ -536,6 +564,8 @@ struct RawExtractor {
     order_revisions: Field,
     endpoint: Field,
     order_posts: Field,
+    parent_metadata: Field,
+    metadata_parent: Field,
     favorites: Field,
     reposts: Field,
     ugoira: Field,
@@ -617,6 +647,9 @@ struct RawExtractor {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawOptions {
+    tag: Option<Box<RawOptions>>,
+    artist: Option<Box<RawOptions>>,
+    artist_search: Option<Box<RawOptions>>,
     #[serde(skip)]
     postprocessor_definitions: Field,
     init: Field,
@@ -651,6 +684,8 @@ struct RawOptions {
     order_revisions: Field,
     endpoint: Field,
     order_posts: Field,
+    parent_metadata: Field,
+    metadata_parent: Field,
     favorites: Field,
     reposts: Field,
     ugoira: Field,
@@ -755,7 +790,7 @@ impl Config {
         // a malicious unknown key. Known setting failures are reported below.
         // serde's struct deserializer also accepts positional arrays. Restrict
         // every configuration scope to JSON objects before typed decoding.
-        let shape: Value = serde_json::from_slice(bytes)
+        let mut shape: Value = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let object = shape
             .as_object()
@@ -802,12 +837,93 @@ impl Config {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
+                if !matches!(name, "danbooru" | "e621")
+                    && extractor
+                        .get(name)
+                        .and_then(Value::as_object)
+                        .is_some_and(|settings| {
+                            ["tag", "artist", "artist-search"]
+                                .iter()
+                                .any(|key| settings.contains_key(*key))
+                        })
+                {
+                    return Err(error(
+                        "native class settings are only supported for danbooru and e621",
+                    ));
+                }
             }
         }
-        drop(shape);
+        let mut raw_classes = Vec::new();
+        if let Some(extractor) = shape.get_mut("extractor").and_then(Value::as_object_mut) {
+            for category in ["danbooru", "e621"] {
+                if let Some(settings) = extractor.get_mut(category).and_then(Value::as_object_mut) {
+                    for subcategory in ["artist", "artist-search", "tag"] {
+                        if let Some(value) = settings.remove(subcategory) {
+                            let fields = value.as_object().ok_or_else(|| {
+                                error("native configuration class must be a JSON object")
+                            })?;
+                            if fields.keys().any(|key| {
+                                !matches!(
+                                    key.as_str(),
+                                    "parent-metadata"
+                                        | "metadata-parent"
+                                        | "init"
+                                        | "postprocessors"
+                                        | "postprocessor-options"
+                                        | "base-directory"
+                                        | "filename"
+                                        | "directory"
+                                        | "child-filter"
+                                        | "child-range"
+                                )
+                            }) {
+                                return Err(error("unsupported native booru class option"));
+                            }
+                            let raw: RawOptions = serde_json::from_value(value)
+                                .map_err(|_| error("invalid native booru class settings"))?;
+                            raw_classes.push((category.to_owned(), subcategory.to_owned(), raw));
+                        }
+                    }
+                }
+            }
+        }
+        let mut parent_keywords = vec!["_parent".to_owned()];
+        fn parent_keys(value: &Value, keys: &mut Vec<String>) {
+            if let Some(fields) = value.as_object() {
+                for (key, value) in fields {
+                    if matches!(key.as_str(), "parent-metadata" | "metadata-parent")
+                        && let Some(key) = value.as_str().filter(|s| !s.is_empty())
+                    {
+                        keys.push(key.into());
+                    }
+                }
+            }
+        }
+        parent_keys(&shape, &mut parent_keywords);
+        if let Some(extractor) = shape.get("extractor") {
+            parent_keys(extractor, &mut parent_keywords);
+            for category in ["danbooru", "e621"] {
+                if let Some(settings) = extractor.get(category) {
+                    parent_keys(settings, &mut parent_keywords);
+                }
+            }
+        }
+        for (_, _, raw) in &raw_classes {
+            for field in [&raw.parent_metadata, &raw.metadata_parent] {
+                if let Some(Value::String(key)) = &field.0 {
+                    parent_keywords.push(key.clone());
+                }
+            }
+        }
+        parent_keywords.sort();
+        parent_keywords.dedup();
+        // Decode the original bytes to keep duplicate-key rejection intact.
         let root: RawRoot = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let global = RawOptions {
+            tag: None,
+            artist: None,
+            artist_search: None,
             init: root.init,
             postprocessors: root.postprocessors,
             postprocessor_options: root.postprocessor_options,
@@ -841,6 +957,8 @@ impl Config {
             order_revisions: root.order_revisions,
             endpoint: root.endpoint,
             order_posts: root.order_posts,
+            parent_metadata: root.parent_metadata,
+            metadata_parent: root.metadata_parent,
             favorites: root.favorites,
             reposts: root.reposts,
             ugoira: root.ugoira,
@@ -893,9 +1011,12 @@ impl Config {
             retries: root.retries,
             timeout: root.timeout,
         }
-        .resolve(directory)?;
+        .resolve(directory, &parent_keywords)?;
         let extractor = root.extractor;
         let defaults = RawOptions {
+            tag: None,
+            artist: None,
+            artist_search: None,
             init: extractor.init,
             postprocessors: extractor.postprocessors,
             postprocessor_options: extractor.postprocessor_options,
@@ -929,6 +1050,8 @@ impl Config {
             order_revisions: extractor.order_revisions,
             endpoint: extractor.endpoint,
             order_posts: extractor.order_posts,
+            parent_metadata: extractor.parent_metadata,
+            metadata_parent: extractor.metadata_parent,
             favorites: extractor.favorites,
             reposts: extractor.reposts,
             ugoira: extractor.ugoira,
@@ -981,7 +1104,7 @@ impl Config {
             retries: extractor.retries,
             timeout: extractor.timeout,
         }
-        .resolve(directory)?;
+        .resolve(directory, &parent_keywords)?;
         let mut categories = BTreeMap::new();
         for (name, mut settings) in [
             ("instagram", extractor.instagram),
@@ -1018,6 +1141,15 @@ impl Config {
             ("vsco", extractor.vsco),
             ("direct", extractor.direct),
         ] {
+            if !matches!(name, "danbooru" | "e621")
+                && (settings.tag.is_some()
+                    || settings.artist.is_some()
+                    || settings.artist_search.is_some())
+            {
+                return Err(error(
+                    "native class settings are only supported for danbooru and e621",
+                ));
+            }
             if !matches!(
                 name,
                 "tumblr"
@@ -1149,7 +1281,7 @@ impl Config {
                 None
             };
             // Boxed: unoptimized builds overflow the stack with inline settings.
-            let mut resolved = (*settings).resolve(directory)?;
+            let mut resolved = (*settings).resolve(directory, &parent_keywords)?;
             resolved.bluesky_endpoint = bluesky_endpoint;
             resolved.booru_order_posts = booru_order_posts;
             resolved.booru_favorite_order = booru_favorite_order;
@@ -1159,10 +1291,19 @@ impl Config {
             resolved.tumblr_reblogs = tumblr_reblogs;
             categories.insert(name.into(), resolved);
         }
+        let classes = raw_classes
+            .into_iter()
+            .map(|(category, subcategory, raw)| {
+                raw.resolve(directory, &parent_keywords)
+                    .map(|settings| ((category, subcategory), settings))
+            })
+            .collect::<Result<_>>()?;
         Ok(Self {
             global,
             extractor: defaults,
             categories,
+            classes,
+            parent_keywords,
         })
     }
 
@@ -1224,10 +1365,34 @@ impl Config {
         };
         Ok(resolved)
     }
+    pub fn parent_keywords(&self) -> &[String] {
+        &self.parent_keywords
+    }
+    pub fn resolve_class(&self, category: &str, subcategory: &str) -> Result<Options> {
+        let mut resolved = self.resolve(category)?;
+        if let Some(class) = self.classes.get(&(category.into(), subcategory.into())) {
+            resolved = resolved.overlay(class).overlay(&self.global);
+            let category_settings = self.categories.get(category);
+            let mut processors = self.extractor.postprocessors.clone();
+            for settings in [category_settings, Some(class)].into_iter().flatten() {
+                processors = match (processors, &settings.postprocessors) {
+                    (Some(base), Some(specific)) => Some(base.overlaid(specific)),
+                    (base, specific) => specific.clone().or(base),
+                };
+            }
+            resolved.postprocessors = match (&self.global.postprocessors, processors) {
+                (Some(global), Some(specific)) => {
+                    Some(global.overlaid(&specific).with_global_options(global))
+                }
+                (global, specific) => specific.or_else(|| global.clone()),
+            };
+        }
+        Ok(resolved)
+    }
 }
 
 impl RawOptions {
-    fn resolve(self, directory: &Path) -> Result<Options> {
+    fn resolve(self, directory: &Path, parent_keywords: &[String]) -> Result<Options> {
         let primary_filter = filter_clauses(self.file_filter, "file-filter")?;
         let alias_filter = filter_clauses(self.image_filter, "image-filter")?;
         let file_filter = match primary_filter {
@@ -1710,7 +1875,7 @@ impl RawOptions {
         let (filename, filename_conditions) = match self.filename.0 {
             None => (None, None),
             Some(Value::String(value)) => {
-                FilenameTemplate::parse(&value)
+                FilenameTemplate::parse_with_keywords(&value, parent_keywords)
                     .map_err(|_| error("unsupported native configuration filename template"))?;
                 (Some(value), None)
             }
@@ -1729,8 +1894,12 @@ impl RawOptions {
                         conditions.push((filter, template));
                     }
                 }
-                FilenameTemplate::parse_conditional(&conditions, default.as_deref())
-                    .map_err(|_| error("unsupported native configuration filename template"))?;
+                FilenameTemplate::parse_conditional_with_keywords(
+                    &conditions,
+                    default.as_deref(),
+                    parent_keywords,
+                )
+                .map_err(|_| error("unsupported native configuration filename template"))?;
                 (default, Some(conditions))
             }
             Some(_) => {
@@ -1763,13 +1932,17 @@ impl RawOptions {
                         conditions.push((filter, value));
                     }
                 }
-                DirectoryTemplate::parse_conditional(&conditions, default.as_deref())
-                    .map_err(|_| error("unsupported native configuration directory template"))?;
+                DirectoryTemplate::parse_conditional_with_keywords(
+                    &conditions,
+                    default.as_deref(),
+                    parent_keywords,
+                )
+                .map_err(|_| error("unsupported native configuration directory template"))?;
                 (default, Some(conditions))
             }
             Some(value) => {
                 let value = components(value)?;
-                DirectoryTemplate::parse(&value)
+                DirectoryTemplate::parse_with_keywords(&value, parent_keywords)
                     .map_err(|_| error("unsupported native configuration directory template"))?;
                 (Some(value), None)
             }
@@ -1878,6 +2051,8 @@ impl RawOptions {
             order_revisions,
             endpoint,
             booru_favorite_order,
+            parent_metadata: self.parent_metadata.0.map(std::sync::Arc::new),
+            metadata_parent: self.metadata_parent.0.map(std::sync::Arc::new),
             booru_order_posts: order_posts.map(|order| match order {
                 crate::kemono::PostOrder::Forward => crate::booru::PoolOrder::Pool,
                 crate::kemono::PostOrder::Reverse => crate::booru::PoolOrder::PoolReverse,

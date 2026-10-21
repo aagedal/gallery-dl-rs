@@ -156,7 +156,7 @@ fn convert_context(
         .map(|(key, value)| {
             Ok((
                 key.clone(),
-                if key == "_parent" {
+                if key == "_parent" || crate::postprocess::objects::is_artist_root(key) {
                     FormatValue::SourcePrimitive(Box::new(convert(
                         value,
                         key,

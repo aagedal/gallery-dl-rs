@@ -726,7 +726,7 @@ pub struct PostMetadata {
     pub booru_favorite_id: Option<Value>,
     /// Shared shallow artist queue copy inherited by a tag child.
     #[serde(skip_serializing)]
-    pub booru_artist_parent: Option<crate::event::KeywordObject>,
+    pub booru_artist_parent: Option<crate::event::ArtistInheritance>,
     /// Popular view keyword overrides, separate from canonical post creation date.
     #[serde(skip_serializing)]
     pub booru_popular: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
@@ -964,6 +964,8 @@ pub struct BackendOptions {
     pub order_posts: Option<crate::kemono::PostOrder>,
     pub booru_order_posts: Option<crate::booru::PoolOrder>,
     pub booru_favorite_order: Option<Value>,
+    pub parent_metadata: Option<Value>,
+    pub metadata_parent: Option<Value>,
     pub favorites: Option<crate::kemono::Favorites>,
 }
 impl std::fmt::Debug for BackendOptions {
@@ -1121,6 +1123,14 @@ impl Backend {
         ] {
             if let Some(value) = value {
                 command.arg("--option").arg(format!("{name}={value}"));
+            }
+        }
+        for (key, value) in [
+            ("parent-metadata", &options.parent_metadata),
+            ("metadata-parent", &options.metadata_parent),
+        ] {
+            if let Some(value) = value {
+                command.arg("--option").arg(format!("{key}={value}"));
             }
         }
         if let Some(threshold) = options.booru_threshold {
