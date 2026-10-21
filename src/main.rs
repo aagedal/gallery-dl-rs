@@ -311,14 +311,35 @@ fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
     Ok(timeout)
 }
 
-#[tokio::main]
-async fn main() {
+/// Stack for the thread that polls the top-level job future. Windows gives
+/// the main thread only 1 MiB, which the nested extractor/download futures
+/// exceed; this matches the common Unix main-thread default.
+const MAIN_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+fn main() {
     let args = Args::parse();
+    let worker = std::thread::Builder::new()
+        .name("main-runtime".into())
+        .stack_size(MAIN_STACK_SIZE)
+        .spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build the async runtime")
+                .block_on(async_main(args))
+        })
+        .expect("failed to start the main runtime thread");
+    if let Err(panic) = worker.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn async_main(args: Args) {
     // Leaving this scope drops the operation before exiting: temporary files
     // are removed and compatibility children use kill_on_drop(true).
     let (result, interrupted) = {
         tokio::select! {
-            result = run(args) => (result, false),
+            result = Box::pin(run(args)) => (result, false),
             signal = tokio::signal::ctrl_c() => (signal.map_err(Into::into), true),
         }
     };
