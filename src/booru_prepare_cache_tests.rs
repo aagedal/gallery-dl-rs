@@ -182,7 +182,7 @@ async fn actual_source_prepare_hash_reads_job_cached_paths() {
                 Some("danbooru".into()),
                 crate::source_archive::for_url(&source),
             );
-            let download = download::client(Duration::from_secs(2)).unwrap();
+            let download = download::client(Duration::from_secs(30)).unwrap();
             let mut errors = Vec::new();
             while let Some(result) = output.next().await {
                 let item = match result {

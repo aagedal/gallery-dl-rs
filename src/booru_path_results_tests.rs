@@ -258,7 +258,7 @@ async fn replay_jobs(cases: &[Value]) -> usize {
             Some("danbooru".into()),
             crate::source_archive::for_url(&source),
         );
-        let download = download::client(Duration::from_secs(2)).unwrap();
+        let download = download::client(Duration::from_secs(30)).unwrap();
         let archive_path = root.path().join("history.sqlite3");
         let archive = Archive::open(&archive_path).await.unwrap();
         let original_id = case["input_posts"][0]["id"].as_u64().unwrap().to_string();

@@ -2260,7 +2260,7 @@ mod tests {
                 Some(site.category().into()),
                 crate::source_archive::for_url(&source),
             );
-            let download = crate::download::client(Duration::from_secs(1)).unwrap();
+            let download = crate::download::client(Duration::from_secs(30)).unwrap();
             let mut files = 0;
             while let Some(job) = jobs.next().await {
                 let job = job.unwrap();

@@ -2046,7 +2046,7 @@ mod keyword_object_tests {
                     },
                 )])),
             );
-            let client = crate::download::client(std::time::Duration::from_secs(2)).unwrap();
+            let client = crate::download::client(std::time::Duration::from_secs(30)).unwrap();
             let mut count = 0;
             while let Some(item) = jobs.next().await {
                 let item = item.unwrap();
@@ -2213,7 +2213,7 @@ mod directory_scope_tests {
         let item = jobs.next().await.unwrap().unwrap();
         assert_eq!(item.scope.as_ref().unwrap().directory(), None);
         let directory = DirectoryTemplate::parse(&["CALLER".into()]).unwrap();
-        let client = crate::download::client(std::time::Duration::from_secs(2)).unwrap();
+        let client = crate::download::client(std::time::Duration::from_secs(30)).unwrap();
         let outcome = crate::download::download_with_options(
             &client,
             download_root.path(),

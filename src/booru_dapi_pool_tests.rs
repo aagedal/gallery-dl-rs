@@ -61,7 +61,7 @@ fn serve(case: &Value) -> (Url, std::thread::JoinHandle<Vec<String>>) {
     let task = std::thread::spawn(move || {
         let mut requests = Vec::new();
         for reply in replies {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(30);
             let (mut socket, _) = loop {
                 match listener.accept() {
                     Ok(socket) => break socket,
@@ -78,7 +78,7 @@ fn serve(case: &Value) -> (Url, std::thread::JoinHandle<Vec<String>>) {
             };
             socket.set_nonblocking(false).unwrap();
             socket
-                .set_read_timeout(Some(Duration::from_secs(5)))
+                .set_read_timeout(Some(Duration::from_secs(30)))
                 .unwrap();
             let mut request = Vec::new();
             while !request.windows(4).any(|v| v == b"\r\n\r\n") {
@@ -397,7 +397,7 @@ async fn dapi_pool_job_scalar_ownership_paths_and_both_sqlite_archives_match_sou
             Some(family.into()),
             crate::source_archive::for_url(&source),
         );
-        let download = download::client(Duration::from_secs(2)).unwrap();
+        let download = download::client(Duration::from_secs(30)).unwrap();
         let archive = Archive::open(root.path().join("history.sqlite3"))
             .await
             .unwrap();

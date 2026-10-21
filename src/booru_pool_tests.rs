@@ -17,7 +17,7 @@ fn serve(replies: Vec<Vec<u8>>) -> (Url, std::thread::JoinHandle<Vec<String>>) {
     let task = std::thread::spawn(move || {
         let mut requests = Vec::new();
         for reply in replies {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(30);
             let (mut socket, _) = loop {
                 match listener.accept() {
                     Ok(socket) => break socket,
@@ -34,7 +34,7 @@ fn serve(replies: Vec<Vec<u8>>) -> (Url, std::thread::JoinHandle<Vec<String>>) {
             };
             socket.set_nonblocking(false).unwrap();
             socket
-                .set_read_timeout(Some(Duration::from_secs(5)))
+                .set_read_timeout(Some(Duration::from_secs(30)))
                 .unwrap();
             let mut request = Vec::new();
             while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {

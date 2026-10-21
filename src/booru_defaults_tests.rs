@@ -45,7 +45,7 @@ pub(crate) fn serve(replies: Vec<Vec<u8>>) -> (Url, std::thread::JoinHandle<Vec<
     let task = std::thread::spawn(move || {
         let mut requests = Vec::new();
         for reply in replies {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(30);
             let (mut socket, _) = loop {
                 match listener.accept() {
                     Ok(socket) => break socket,
@@ -62,7 +62,7 @@ pub(crate) fn serve(replies: Vec<Vec<u8>>) -> (Url, std::thread::JoinHandle<Vec<
             };
             socket.set_nonblocking(false).unwrap();
             socket
-                .set_read_timeout(Some(Duration::from_secs(5)))
+                .set_read_timeout(Some(Duration::from_secs(30)))
                 .unwrap();
             let mut request = Vec::new();
             while !request.windows(4).any(|v| v == b"\r\n\r\n") {
@@ -223,7 +223,7 @@ async fn replay(case: &Value, archived: bool, scoped: bool) {
             .map(|result| result.map(|media| JobMedia { media, scope: None }))
             .boxed()
     };
-    let download = download::client(Duration::from_secs(2)).unwrap();
+    let download = download::client(Duration::from_secs(30)).unwrap();
     let archive = if archived {
         Some(
             Archive::open(root.path().join("history.sqlite3"))

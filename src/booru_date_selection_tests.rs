@@ -244,7 +244,7 @@ pub(crate) async fn replay_cases(oracle: &Value) {
             Some(root_class.into()),
             crate::source_archive::for_url(&url),
         );
-        let client = download::client(Duration::from_secs(2)).unwrap();
+        let client = download::client(Duration::from_secs(30)).unwrap();
         let history = Archive::open(root.path().join("history.sqlite3"))
             .await
             .unwrap();

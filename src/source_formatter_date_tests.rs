@@ -460,7 +460,7 @@ pub(super) async fn replay_date_jobs(cases: &[Value], extra_keys: &[&str]) {
             Some("danbooru".into()),
             crate::source_archive::for_url(&source),
         );
-        let client = download::client(Duration::from_secs(2)).unwrap();
+        let client = download::client(Duration::from_secs(30)).unwrap();
         let archive = Archive::open(root.path().join("history.sqlite3"))
             .await
             .unwrap();

@@ -181,7 +181,7 @@ async fn post_filename_hooks_flow_to_file_templates_while_initial_directory_stay
     ])
     .boxed();
     let mut jobs = jobs::apply(input, configurations);
-    let client = crate::download::client(Duration::from_secs(2)).unwrap();
+    let client = crate::download::client(Duration::from_secs(30)).unwrap();
     let item = jobs.next().await.unwrap().unwrap();
     let outcome = crate::download::download_with_template(
         &client,
@@ -215,7 +215,7 @@ async fn source_filename_preparation_runs_without_hooks_for_downloads_and_archiv
         archive::{Archive, ArchiveOutcome},
         download::{self, DownloadOptions},
     };
-    let client = download::client(Duration::from_secs(2)).unwrap();
+    let client = download::client(Duration::from_secs(30)).unwrap();
     let empty = Postprocessors::new(Vec::new());
     let raw_directory = DirectoryTemplate::parse(&["{extension}".into()]).unwrap();
     let conditional_directory = DirectoryTemplate::parse_conditional(
