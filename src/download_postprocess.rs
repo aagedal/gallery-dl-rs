@@ -450,7 +450,7 @@ fn publish(input: &Path, output: &Path, replace: bool) -> Result<()> {
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::File::open(input)?.sync_all()?;
+    postprocess::sync_file(input)?;
     if replace {
         postprocess::regular_file(output)?;
         std::fs::rename(input, output)?;

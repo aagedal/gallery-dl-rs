@@ -544,7 +544,7 @@ pub(crate) async fn convert(
     if !regular_file(&output)? {
         return Err(error("postprocessor produced no output"));
     }
-    std::fs::File::open(&output)?.sync_all()?;
+    sync_file(&output)?;
     if options.skip() {
         match std::fs::hard_link(&output, path) {
             Ok(()) => {}
@@ -791,6 +791,16 @@ impl Postprocessors {
         }
         Ok(rebuild)
     }
+}
+
+/// Flushes a finished file to disk. Windows `FlushFileBuffers` requires a
+/// handle with write access, so a read-only `File::open` handle is denied.
+pub(crate) fn sync_file(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let file = std::fs::OpenOptions::new().write(true).open(path)?;
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path)?;
+    file.sync_all()
 }
 
 #[cfg(test)]

@@ -717,7 +717,7 @@ fn timestamp_string(timestamp: i64) -> Result<String> {
     ))
 }
 fn set_mtime(path: &Path, time: SystemTime) -> Result<()> {
-    std::fs::File::open(path)
+    super::mtime::open_times_target(path)
         .and_then(|file| {
             file.set_times(
                 std::fs::FileTimes::new()
@@ -983,7 +983,19 @@ mod tests {
             assert_eq!(
                 plan.commands
                     .iter()
-                    .map(|args| strings(args))
+                    .map(|args| {
+                        // Joined paths use native separators, as in gallery-dl.
+                        strings(args)
+                            .into_iter()
+                            .map(|arg| {
+                                if cfg!(windows) {
+                                    arg.replace('\\', "/")
+                                } else {
+                                    arg
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
                     .collect::<Vec<_>>(),
                 expected,
                 "{}",

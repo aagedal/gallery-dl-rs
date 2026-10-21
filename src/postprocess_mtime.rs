@@ -110,8 +110,7 @@ impl MtimeOptions {
                 UNIX_EPOCH.checked_sub(Duration::from_secs(timestamp.unsigned_abs()))
             }
             .ok_or_else(|| error("mtime timestamp is out of range"))?;
-            let file =
-                std::fs::File::open(path).map_err(|_| error("could not open mtime target"))?;
+            let file = open_times_target(path).map_err(|_| error("could not open mtime target"))?;
             let metadata = file
                 .metadata()
                 .map_err(|_| error("could not inspect mtime target"))?;
@@ -122,6 +121,26 @@ impl MtimeOptions {
                 .map_err(|_| error("could not set modification time"))?;
         }
         Ok(())
+    }
+}
+/// Opens a file or directory with enough access to inspect and set its times.
+/// Windows needs explicit attribute-write access, and directories can only be
+/// opened with `FILE_FLAG_BACKUP_SEMANTICS`.
+pub(super) fn open_times_target(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        std::fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::File::open(path)
     }
 }
 fn truthy(value: &Value) -> bool {
@@ -281,7 +300,7 @@ mod tests {
             } else {
                 directory.path()
             };
-            std::fs::File::open(directory.path())
+            open_times_target(directory.path())
                 .unwrap()
                 .set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000_000))
                 .unwrap();

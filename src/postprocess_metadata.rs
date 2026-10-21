@@ -906,12 +906,23 @@ fn list(v: Option<&Value>) -> Result<Option<Vec<String>>> {
         _ => Err(fail()),
     }
 }
+/// Python's `os.path.expanduser`: `HOME` on POSIX; `USERPROFILE`, then
+/// `HOMEDRIVE` + `HOMEPATH` on Windows.
+fn home_directory() -> Option<String> {
+    if cfg!(windows) {
+        std::env::var("USERPROFILE")
+            .ok()
+            .or_else(|| Some(std::env::var("HOMEDRIVE").ok()? + &std::env::var("HOMEPATH").ok()?))
+    } else {
+        std::env::var("HOME").ok()
+    }
+}
 pub(crate) fn expand(s: &str) -> Result<PathBuf> {
     if s.len() > 4096 || s.contains('\0') {
         return Err(fail());
     }
-    let s = if s == "~" || s.starts_with("~/") {
-        let home = std::env::var("HOME").map_err(|_| fail())?;
+    let s = if s == "~" || s.starts_with("~/") || (cfg!(windows) && s.starts_with("~\\")) {
+        let home = home_directory().ok_or_else(fail)?;
         if s == "~" {
             home
         } else {
@@ -1172,7 +1183,7 @@ mod tests {
             json!({"mode":"custom","format":["{id}","{name}"],"directory":["sidecars","{name}"],"filename":"{id}.txt","newline":"\r\n","metadata-path":"sidecar"}),
         );
         o.run(&mut c, &media(), &path, temp.path()).await.unwrap();
-        let output = temp.path().join("sidecars/a_b/7.txt");
+        let output = temp.path().join("sidecars").join("a_b").join("7.txt");
         assert_eq!(std::fs::read_to_string(&output).unwrap(), "7\r\na/b\r\n");
         assert_eq!(c["sidecar"], output.to_string_lossy().as_ref());
         let o = options(
@@ -1319,16 +1330,23 @@ mod tests {
     }
     #[test]
     fn configured_paths_expand_home_and_environment_without_shell_execution() {
-        let home = std::env::var("HOME").unwrap();
-        assert_eq!(expand("~").unwrap(), PathBuf::from(&home));
         assert_eq!(
-            expand("${HOME}/sidecars").unwrap(),
-            PathBuf::from(&home).join("sidecars")
+            expand("~").unwrap(),
+            PathBuf::from(home_directory().unwrap())
         );
-        assert_eq!(
-            expand("$HOME/sidecars").unwrap(),
-            PathBuf::from(&home).join("sidecars")
-        );
+        // Windows runners do not necessarily define HOME.
+        if let Ok(home) = std::env::var("HOME") {
+            assert_eq!(
+                expand("${HOME}/sidecars").unwrap(),
+                PathBuf::from(&home).join("sidecars")
+            );
+            assert_eq!(
+                expand("$HOME/sidecars").unwrap(),
+                PathBuf::from(&home).join("sidecars")
+            );
+        } else if !cfg!(windows) {
+            panic!("HOME is not set");
+        }
         assert_eq!(
             expand("$(uname)/literal").unwrap(),
             PathBuf::from("$(uname)/literal")
