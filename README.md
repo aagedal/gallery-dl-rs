@@ -1927,15 +1927,19 @@ continues scanning. This avoids dropping newer items later in an ascending or
 mixed-order source. Library users can select the same behavior with
 `DateFilter::apply_unordered`. Date selection still runs before file ranges.
 
-Values accept signed integer Unix seconds, `YYYY-MM-DD` (midnight UTC), or
-`YYYY-MM-DDTHH:MM[:SS]` with an optional dot-separated fraction after seconds.
-A space can replace `T`. Naive date-times use UTC; `Z`, `+HH:MM`, `-HH:MM`, and
-compact `+HHMM`/`-HHMM` offsets normalize to UTC. Fractions are discarded to whole
-seconds, including before 1970. Inputs are limited to 128 ASCII bytes; calendar,
-clock, offset, and integer bounds are validated. Relative dates, week dates, and
-the full upstream ISO syntax are not supported. If `date-after` is later than
-`date-before`, only the after bound applies. Equal bounds exclude every dated
-post. CLI epoch zero is a real bound.
+Bounds follow the source's conversion order: strings try ISO dates first, then
+integer Unix seconds. Calendar and ISO week dates accept basic or extended
+spelling; times accept hours, minutes, seconds and fractions. `24:00` rolls to the
+next day. Any single character can separate the date and time. Naive values use
+UTC; timezone offsets can include hours, minutes, seconds and fractional seconds.
+UTC normalization precedes discarding microseconds, including before 1970.
+
+For example, `20240102` means January 2, 2024, while `" 20240102 "` falls back to
+Unix seconds. Calendar ISO strings do not trim surrounding whitespace. Integer
+fallback accepts Unicode decimal digits and single underscores between digits.
+Invalid values disable their bound; this also lets an explicit CLI value clear an
+inherited bound. If `date-after` is later than `date-before`, only the after bound
+applies. Equal bounds exclude every dated post. CLI `0` is a real epoch bound.
 
 Native configuration supports these bounds in the normal scopes and native booru
 artist/tag class scopes, followed by CLI overrides. Invalid or falsy configuration
@@ -1951,7 +1955,8 @@ a private error. A failed or stopped artist child leaves later artist children
 available. Native tag children use their own class predicates. Excluded media
 receives no files, sidecars, or archive entry. Compatibility formatted dates are
 normalized when recognized; invalid formats remain unknown. The standalone
-`DateFilter` library API retains its strict timestamp-based contract.
+`DateFilter` and `date::parse_date` library APIs retain their existing strict
+timestamp-based contracts. `date::source_date_bound` exposes source conversion.
 
 ## File-size limits
 

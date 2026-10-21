@@ -501,7 +501,7 @@ fn date_limits_disable_invalid_or_falsy_values_and_convert_source_numeric_bounds
             (serde_json::json!({"private":"PRIVATE_DATE"}), None),
             (serde_json::json!("private-date"), None),
             (serde_json::json!("2025-02-29"), None),
-            (serde_json::json!("2026-01-01T24:00:00"), None),
+            (serde_json::json!("2026-01-01T24:00:00"), Some(1767312000)),
             (serde_json::json!("18446744073709551615"), None),
         ] {
             for doc in [

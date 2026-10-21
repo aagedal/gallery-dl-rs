@@ -1414,8 +1414,25 @@ root settings. Invalid/falsy configuration bounds disable comparison by presence
 including clearing a less specific bound; numeric truthy values convert to integer
 Unix seconds. Native API history still records original post identities. Replay
 checks exact consumed messages, hook phases, paths, publication bytes and both
-SQLite archives. Broader ISO bound syntax, date precision beyond producer-normalized
-whole seconds, and source skip_date policies for other extractors remain to audit.
+SQLite archives. Source skip_date policies for other extractors and producer date precision remain
+to audit; source bound conversion is extended below.
+
+**Implemented source date-bound conversion (gallery-dl 1.32.17/Python 3.15):**
+Configuration and CLI share ISO-first conversion followed by Python-style decimal
+integer fallback. Basic/extended calendar and week dates, ambiguous week-date
+separators, arbitrary Unicode separators, 24:00 rollover, timezone seconds and
+fractions, long fractions, Unicode decimal digits and numeric underscores retain
+source behavior. UTC normalization happens before microsecond truncation; invalid
+or out-of-range conversions disable the bound by presence. Raw configuration
+accepts unpaired-surrogate date separators without changing unrelated JSON data,
+valid surrogate pairs or duplicate-key validation. The legacy strict date API is
+unchanged. Genuine source cases cover 328 conversions (including two raw
+surrogate inputs) and 66 complete DownloadJobs, verifying normalized dates, category/class resolution, clearing, predicates, publication
+bytes and SQLite identities. Broader source JSON decoding, including the global
+4,300-digit integer literal limit, remains separate configuration parity work.
+Template `!D`/`!d` conversions still need this coercion and the source's invalid
+datetime identity across formatting and metadata mutation paths.
+
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

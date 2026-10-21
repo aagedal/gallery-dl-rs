@@ -2946,4 +2946,4 @@ mod artist_parent_tests;
 
 #[cfg(test)]
 #[path = "booru_date_selection_tests.rs"]
-mod date_selection_tests;
+pub(crate) mod date_selection_tests;

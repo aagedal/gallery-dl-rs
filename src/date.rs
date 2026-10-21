@@ -3,6 +3,12 @@ use crate::{Result, error, extract::Media};
 use futures_util::{StreamExt, stream::BoxStream};
 use time::{Date, Month, PrimitiveDateTime, Time, UtcOffset};
 
+/// Convert a source configuration bound, trying ISO before Python integer coercion.
+/// Falsy values and failed conversions disable that bound.
+pub fn source_date_bound(value: &serde_json::Value) -> Option<i64> {
+    crate::source_date::convert(value)
+}
+
 /// Parse Unix seconds or an ISO calendar date/time. Naive values use UTC.
 /// Fractions are rounded down to whole seconds, including before the epoch.
 pub fn parse_date(input: &str) -> Result<i64> {
@@ -506,3 +512,7 @@ mod tests {
         assert!(dropped.load(Ordering::SeqCst));
     }
 }
+
+#[cfg(test)]
+#[path = "source_date_bound_tests.rs"]
+mod source_date_bound_tests;

@@ -6,7 +6,7 @@
 //! unsupported hooks, subcategories, and unsupported options are rejected.
 use crate::{
     Result,
-    date::parse_date,
+    date::source_date_bound,
     error,
     naming::{DirectoryTemplate, FilenameTemplate},
     network::NetworkOptions,
@@ -799,6 +799,8 @@ impl Config {
         if !directory.is_absolute() {
             return Err(error("native configuration directory must be absolute"));
         }
+        let normalized = crate::source_date_json::normalize(bytes);
+        let bytes = normalized.as_deref().unwrap_or(bytes);
         // Do not forward serde's diagnostics: they can quote private values or
         // a malicious unknown key. Known setting failures are reported below.
         // serde's struct deserializer also accepts positional arrays. Restrict
@@ -2314,21 +2316,7 @@ fn size(field: Field) -> Result<Option<u64>> {
 }
 
 fn date(field: Field) -> Option<i64> {
-    let value = field.0?;
-    let timestamp = match &value {
-        Value::String(value) => parse_date(value).ok(),
-        Value::Bool(true) => Some(1),
-        Value::Number(value) => value.as_i64().filter(|value| *value != 0).or_else(|| {
-            let number = value.as_f64()?;
-            (number != 0.0 && number >= i64::MIN as f64 && number < i64::MAX as f64)
-                .then_some(number.trunc() as i64)
-        }),
-        _ => None,
-    }?;
-    time::OffsetDateTime::from_unix_timestamp(timestamp)
-        .ok()
-        .filter(|date| (1..=9999).contains(&date.year()))
-        .map(|_| timestamp)
+    source_date_bound(field.0.as_ref()?)
 }
 
 fn network_string(field: Field) -> Result<Option<String>> {

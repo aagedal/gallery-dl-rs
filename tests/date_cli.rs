@@ -205,6 +205,48 @@ async fn strict_timestamp_boundaries_include_zero_and_negative_dates() {
 }
 
 #[tokio::test]
+async fn date_flags_use_source_iso_first_numeric_fallback_and_invalid_clearing() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = fixture(
+        root.path(),
+        &[
+            row("later", json!(1704240000)),
+            row("boundary", json!(1704153600)),
+            row("earlier", json!(1704110400)),
+            row("epoch", json!(0)),
+        ],
+        &[],
+    );
+    for (bound, expected) in [
+        ("20240102", vec!["earlier", "epoch"]),
+        (" 20240102 ", vec!["epoch"]),
+        ("2024-W01-2", vec!["earlier", "epoch"]),
+        ("2024-01-01T24", vec!["earlier", "epoch"]),
+        ("2024-01-02😀00:00:00", vec!["earlier", "epoch"]),
+        ("2024-01-02T00:00:00+00:00:00.5", vec!["earlier", "epoch"]),
+        ("2024-01-02 ", vec!["later", "boundary", "earlier", "epoch"]),
+        (
+            "PRIVATE_INVALID_BOUND",
+            vec!["later", "boundary", "earlier", "epoch"],
+        ),
+        ("１２３", vec!["epoch"]),
+    ] {
+        let result =
+            output(binary(root.path(), &backend).args(["-g", "--date-before", bound, FIRST])).await;
+        success(&result);
+        assert_eq!(
+            urls(&result),
+            expected
+                .into_iter()
+                .map(|name| format!("https://cdn.example/{name}.jpg"))
+                .collect::<Vec<_>>(),
+            "{bound:?}"
+        );
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("PRIVATE_INVALID_BOUND"));
+    }
+}
+
+#[tokio::test]
 async fn before_filter_precedes_range_and_unknown_dates_remain_in_source_order() {
     let root = tempfile::tempdir().unwrap();
     let backend = fixture(

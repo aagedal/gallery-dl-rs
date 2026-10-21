@@ -9,7 +9,7 @@ use gallery_dl_rs::{
     browser::FirefoxProfile,
     config::{Config, Options as ConfigOptions},
     cookies::CookieJar,
-    date::parse_date,
+    date::source_date_bound,
     download::{self, DownloadOptions, Outcome},
     error,
     event::{self, ExtractionEvent},
@@ -85,11 +85,11 @@ struct Args {
     #[arg(long, conflicts_with = "text_tweets")]
     no_text_tweets: bool,
     /// Process posts created before this UTC date or Unix timestamp (exclusive)
-    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
-    date_before: Option<i64>,
+    #[arg(long, value_name = "DATE", allow_hyphen_values = true)]
+    date_before: Option<String>,
     /// Stop this input at a post on or before this UTC date or Unix timestamp
-    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
-    date_after: Option<i64>,
+    #[arg(long, value_name = "DATE", allow_hyphen_values = true)]
+    date_after: Option<String>,
     /// Minimum media size in bytes or binary units, e.g. 500k or 2.5M
     #[arg(long, value_parser = parse_size)]
     filesize_min: Option<u64>,
@@ -182,10 +182,6 @@ struct Args {
 enum Extractor {
     Compatibility,
     Native,
-}
-
-fn parse_date_arg(value: &str) -> std::result::Result<i64, String> {
-    parse_date(value).map_err(|e| e.to_string())
 }
 
 fn parse_size(value: &str) -> std::result::Result<u64, String> {
@@ -1736,8 +1732,14 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         child_range: args.child_range.clone(),
         child_filter: (!args.child_filter.is_empty()).then(|| args.child_filter.clone()),
         include: None,
-        date_before: args.date_before,
-        date_after: args.date_after,
+        date_before: args
+            .date_before
+            .as_ref()
+            .and_then(|value| source_date_bound(&serde_json::Value::String(value.clone()))),
+        date_after: args
+            .date_after
+            .as_ref()
+            .and_then(|value| source_date_bound(&serde_json::Value::String(value.clone()))),
         date_before_set: args.date_before.is_some(),
         date_after_set: args.date_after.is_some(),
         directory: if args.exact_directory.is_some() {

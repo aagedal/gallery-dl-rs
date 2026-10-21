@@ -142,8 +142,12 @@ fn typed_public(value: &Value) -> Value {
 #[tokio::test]
 async fn source_date_selection_uses_live_values_before_range_and_stops_only_its_job() {
     let oracle = fixture();
+    assert!(oracle["cases"].as_array().unwrap().len() >= 141);
+    replay_cases(&oracle).await;
+}
+
+pub(crate) async fn replay_cases(oracle: &Value) {
     let cases = oracle["cases"].as_array().unwrap();
-    assert!(cases.len() >= 141);
     // Artificial helper skip callbacks are not a booru extractor setting.
     // Every actual booru construction in these jobs has skip_date=None.
     for wrapper in cases {
