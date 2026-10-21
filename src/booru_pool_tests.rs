@@ -234,17 +234,11 @@ async fn native_collection_traversal_matches_actual_source_order_context_and_req
                     "{name}"
                 );
                 assert_eq!(
-                    Template::parse("{num:>04}_{id}")
+                    Template::parse("{num:>04}_{id}_{filename}.{extension}")
                         .unwrap()
                         .render(context)
                         .unwrap(),
-                    expected["default_filename"]
-                        .as_str()
-                        .unwrap()
-                        .split('_')
-                        .take(2)
-                        .collect::<Vec<_>>()
-                        .join("_"),
+                    expected["default_filename"],
                     "{name}"
                 );
                 for (format, expected) in [
@@ -684,4 +678,264 @@ async fn collection_routes_and_wire_identities_match_actual_source_constructor_p
         }
     }
     assert_eq!(matched, 112);
+}
+
+#[test]
+fn source_filename_helper_matches_actual_unicode_url_and_extension_oracle() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/source_archive/booru_filename.json"
+    ))
+    .unwrap();
+    let cases = fixture["helper_cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 23);
+    for case in cases {
+        let (name, extension) = source_nameext(case["url"].as_str().unwrap());
+        assert_eq!(
+            name.as_ref(),
+            case["expected"]["filename"].as_str().unwrap(),
+            "{}",
+            case["name"]
+        );
+        assert_eq!(
+            extension.as_ref(),
+            case["expected"]["extension"].as_str().unwrap(),
+            "{}",
+            case["name"]
+        );
+    }
+}
+
+#[tokio::test]
+async fn source_filename_projection_and_live_hook_ownership_match_all_booru_families() {
+    use crate::postprocess::{
+        Postprocessors, Specification,
+        jobs::{self, JobConfiguration},
+        template::Template,
+    };
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/source_archive/booru_filename.json"
+    ))
+    .unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 172);
+    let mut families = std::collections::BTreeMap::<&str, usize>::new();
+    let keys = [
+        "filename",
+        "extension",
+        "id",
+        "md5",
+        "category",
+        "search_tags",
+    ];
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let family = case["family"].as_str().unwrap();
+        let site = Site::from_category(family).unwrap();
+        let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
+        let post = case["input_post"].clone();
+        let body = if site == Site::E621 {
+            json!({"posts":[post]})
+        } else if site == Site::Gelbooru {
+            json!({"post":[post]})
+        } else {
+            json!([post])
+        };
+        let (api_root, server) = serve(vec![response("200 OK", "", body.to_string().as_bytes())]);
+        let directory = tempfile::tempdir().unwrap();
+        let mut options = case["hook_options"].as_array().unwrap().clone();
+        for event in ["post", "file"] {
+            options.push(json!({"name":"metadata","mode":"json","event":event,"base-directory":directory.path(),"directory":[],"filename":format!("{event}.json"),"include":keys}));
+        }
+        let processors = Arc::new(Postprocessors::new(
+            options
+                .iter()
+                .map(|v| Specification::parse(v, directory.path()).unwrap())
+                .collect(),
+        ));
+        let configs = Arc::new(std::collections::BTreeMap::from([(
+            family.into(),
+            JobConfiguration {
+                processors: processors.clone(),
+                root: directory.path().into(),
+                filename: None,
+                directory: None,
+                init: false,
+            },
+        )]));
+        let client = booru(site, api_root);
+        let input = client
+            .events(&source)
+            .map(|event| {
+                event.map(|mut event| {
+                    if let ExtractionEvent::Post(post) = &event {
+                        // Directory precedes PathFormat's file-name preparation
+                        // and every post/file processor callback.
+                        let snapshot = Media {
+                            url: source.clone(),
+                            job: crate::extract::MediaJob::InlineText {
+                                data: String::new(),
+                            },
+                            category: post.category.clone(),
+                            filename: String::new(),
+                            metadata: post.metadata.clone(),
+                            headers: Default::default(),
+                            handoff: Default::default(),
+                        };
+                        let actual = crate::postprocess::context(&snapshot);
+                        let raw = case["extraction_events"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|v| v["kind"] == "post")
+                            .unwrap();
+                        for key in ["filename", "extension", "md5"] {
+                            assert_eq!(
+                                actual.get(key),
+                                raw["metadata"].get(key),
+                                "{name}: raw Directory {key}"
+                            );
+                        }
+                    }
+                    if let ExtractionEvent::Media(media) = &mut event {
+                        (media.url, media.job) =
+                            crate::extract::inline_text("source filename fixture".into()).unwrap();
+                    }
+                    event
+                })
+            })
+            .boxed();
+        let mut jobs = jobs::apply_with_descriptor(
+            input,
+            configs,
+            Some(family.into()),
+            crate::source_archive::for_url(&source),
+        );
+        let download = crate::download::client(Duration::from_secs(1)).unwrap();
+        let item = jobs
+            .next()
+            .await
+            .unwrap()
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        crate::download::download_with_options(
+            &download,
+            directory.path(),
+            &item.media,
+            crate::download::DownloadOptions {
+                postprocessors: Some(&processors),
+                postprocessor_scope: item.scope.as_ref(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let naming_media = item.media.clone();
+        drop(item);
+        assert!(
+            jobs.next().await.is_none(),
+            "{name}: exactly one source file"
+        );
+        for (event, kind) in [("post", "post"), ("file", "media")] {
+            let actual: Value = serde_json::from_slice(
+                &std::fs::read(directory.path().join(format!("{event}.json"))).unwrap(),
+            )
+            .unwrap();
+            let expected = case["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| v["kind"] == kind)
+                .unwrap();
+            for key in keys {
+                assert_eq!(
+                    actual.get(key),
+                    expected["metadata"].get(key),
+                    "{name} {event}: {key}"
+                );
+            }
+            assert_eq!(
+                Template::parse(case["filename_format"].as_str().unwrap())
+                    .unwrap()
+                    .render(actual.as_object().unwrap())
+                    .unwrap(),
+                expected["default_filename"],
+                "{name} {event}: entire source filename"
+            );
+            if !case["hook_options"].as_array().unwrap().is_empty() {
+                // Hook values are valid native basenames: verify the actual
+                // filename renderer consumes this live shared dictionary.
+                assert_eq!(
+                    crate::naming::FilenameTemplate::parse(
+                        case["filename_format"].as_str().unwrap()
+                    )
+                    .unwrap()
+                    .render_keywords(&naming_media, actual.as_object().unwrap())
+                    .unwrap()
+                    .unwrap(),
+                    expected["default_filename"],
+                    "{name} {event}: native explicit source template"
+                );
+            }
+            assert_eq!(
+                Template::parse(case["archive_format"].as_str().unwrap())
+                    .unwrap()
+                    .render(actual.as_object().unwrap())
+                    .unwrap(),
+                expected["archive_key"],
+                "{name} {event}: source archive unaffected by filename projection"
+            );
+        }
+        assert_eq!(
+            server.join().unwrap().len(),
+            1,
+            "{name}: no metadata or media-network requests"
+        );
+        *families.entry(family).or_default() += 1;
+    }
+    assert_eq!(
+        families,
+        std::collections::BTreeMap::from([
+            ("danbooru", 43),
+            ("e621", 43),
+            ("gelbooru", 43),
+            ("safebooru", 43)
+        ])
+    );
+}
+
+#[test]
+fn source_filename_preparation_matches_real_pathformat_types_and_aliases() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/source_archive/booru_filename.json"
+    ))
+    .unwrap();
+    let cases = fixture["prepare_cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 26);
+    let mut media =
+        crate::extract::direct(&Url::parse("https://fixture.invalid/file.jpg").unwrap()).unwrap();
+    media.metadata = Some(crate::extract::PostMetadata {
+        booru_keywords: Some(Arc::new(serde_json::Map::new())),
+        ..Default::default()
+    });
+    for case in cases {
+        let mut keywords = case["input"].as_object().unwrap().clone();
+        let result = prepare_filename_keywords(&media, &mut keywords);
+        assert_eq!(
+            result.is_err(),
+            !case["error"].is_null(),
+            "{}",
+            case["name"]
+        );
+        assert_eq!(Value::Object(keywords), case["output"], "{}", case["name"]);
+    }
+    media.metadata.as_mut().unwrap().booru_keywords = None;
+    for case in cases {
+        let mut keywords = case["input"].as_object().unwrap().clone();
+        prepare_filename_keywords(&media, &mut keywords).unwrap();
+        assert_eq!(
+            Value::Object(keywords),
+            case["input"],
+            "{}: ordinary media is unchanged",
+            case["name"]
+        );
+    }
 }

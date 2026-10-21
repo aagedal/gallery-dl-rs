@@ -58,6 +58,7 @@ fn media() -> Media {
             timestamp: Some(123456),
             index: 2,
             source_num: None,
+            booru_keywords: None,
             source_suffix: None,
             search_tags: None,
             pool: None,

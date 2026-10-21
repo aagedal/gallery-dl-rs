@@ -712,6 +712,9 @@ pub struct PostMetadata {
     /// Producer counter, which can be zero even though the native file index is one-based.
     #[serde(skip_serializing)]
     pub source_num: Option<Value>,
+    /// Exact booru filename, extension and root MD5 keywords, including absence/null.
+    #[serde(skip_serializing)]
+    pub booru_keywords: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     /// Exact producer suffix, retained independently of the native filename.
     #[serde(skip_serializing)]
     pub source_suffix: Option<Value>,
@@ -1703,7 +1706,7 @@ fn compatibility_metadata(
         .and_then(Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
         .unwrap_or(0);
-    let index = if crate::booru::Site::from_category(category).is_some() {
+    let index = if crate::booru::Site::from_category(category).is_some() || category == "e926" {
         1
     } else if matches!(category, "pixiv" | "pixiv-novel") {
         data.get("num")
@@ -1846,7 +1849,7 @@ fn compatibility_metadata(
                 },
             )
         }
-        "danbooru" | "e621" | "gelbooru" | "safebooru" => {
+        "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru" => {
             let post_id = id("id");
             (
                 post_id.clone(),
@@ -1992,6 +1995,20 @@ fn compatibility_metadata(
             .and_then(|_| data.get("search_tags").and_then(Value::as_str))
             .filter(|tags| tags.len() <= 1024)
             .map(std::sync::Arc::from),
+        booru_keywords: (matches!(
+            category,
+            "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru"
+        ) && (data.contains_key("filename")
+            || data.contains_key("extension")
+            || data.contains_key("md5")))
+        .then(|| {
+            std::sync::Arc::new(
+                ["filename", "extension", "md5"]
+                    .into_iter()
+                    .filter_map(|key| data.get(key).map(|value| (key.to_owned(), value.clone())))
+                    .collect(),
+            )
+        }),
         source_num: data.get("num").cloned(),
         source_suffix: data.get("suffix").cloned(),
         keyword_updates: None,

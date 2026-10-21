@@ -93,6 +93,16 @@ impl Archive {
     ) -> Result<ArchiveOutcome> {
         let effective_media = client.effective_media(media);
         let media = effective_media.as_ref();
+        let source_booru = media
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.booru_keywords.is_some());
+        let empty_processors = (source_booru && options.postprocessors.is_none())
+            .then(|| crate::postprocess::Postprocessors::new(Vec::new()));
+        let options = DownloadOptions {
+            postprocessors: options.postprocessors.or(empty_processors.as_ref()),
+            ..options
+        };
         if let Some(pp) = options.postprocessors
             && media
                 .metadata
@@ -105,11 +115,12 @@ impl Archive {
                 &download::destination_with_templates(root, media, template, options.directory)?,
             )?;
         }
-        let mut generic = if options.postprocessors.is_some_and(|pp| pp.has_generic()) {
-            Some(download::processing::prepare(client, root, media, options, template).await?)
-        } else {
-            None
-        };
+        let mut generic =
+            if source_booru || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
+                Some(download::processing::prepare(client, root, media, options, template).await?)
+            } else {
+                None
+            };
         let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
         let identity = generic
             .as_ref()

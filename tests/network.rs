@@ -268,6 +268,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
     social.category = "instagram".into();
     social.metadata = Some(PostMetadata {
         source_num: None,
+        booru_keywords: None,
         source_suffix: None,
         search_tags: None,
         pool: None,

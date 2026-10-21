@@ -17,6 +17,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
     media.category = "instagram".into();
     media.metadata = Some(PostMetadata {
         source_num: None,
+        booru_keywords: None,
         source_suffix: None,
         search_tags: None,
         pool: None,

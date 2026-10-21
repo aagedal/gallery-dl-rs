@@ -1202,16 +1202,32 @@ differ from source MD5-based filenames. Alternate source hosts and raw Unicode
 URL digit captures remain unimplemented; URL parsing percent-encodes those raw
 digits, so their original spelling is unavailable from the typed URL.
 
-**Next booru filename fidelity step:** source `DanbooruExtractor.items()` calls
-`text.nameext_from_url(url, post)` before Directory: percent-decode the URL
-basename, split its final dot only when the name is nonempty and the extension
-has at most sixteen characters, and lowercase the extension. Current native
-`filename` keywords still use the logical native stem, so explicit source pool
-filename templates cannot yet match the full source result (replay checks the
-counter/ID prefix). Retain the original filename/extension independently of the
-logical download path, preserving Post-hook replacements through the shared
-file dictionary, then compare full filename outputs against the existing source
-fixtures. Source default naming remains a separate unfinished contract.
+**Implemented booru filename keywords:** preserve raw producer `filename`,
+`extension`, and root `md5` independently of the native logical path in a private,
+nonserialized keyword snapshot. Danbooru applies `text.nameext_from_url` semantics
+before URL normalization (lossy percent decoding, final-dot split, sixteen
+Unicode-character extension limit, lowercase, no fragment stripping). E621 uses
+raw `file.md5`/`file.ext`; Gelbooru/Safebooru preserve API keys when extension is
+present. Safebooru prefers the actual API file URL and retains the validated
+image/directory fallback; unsupported logical suffixes use `.bin` without losing
+source keywords. Empty/missing/null/typed values stay distinct. Filter contexts,
+direct filename/directory templates, and real shared Post/File hooks use these
+values. The real source PathFormat checkpoint is replayed too: default extension
+alias mapping occurs once after Post inheritance and before Prepare/File hooks;
+raw extraction values remain untouched. The same preparation runs without
+configured postprocessors, for direct downloads and archive checks; explicit
+directories retain their pre-normalization values. File-hook replacements are
+not mapped again. E926 compatibility metadata now follows the booru identity
+path. Full filename replay replaces the earlier prefix-only assertions; helper and actual
+job oracles cover all four families, and compatibility tests cover scoping,
+serialization, raw field presence and stable initial directories.
+
+**Next booru default naming step:** logical native filenames and default category
+folders still differ from source collection filenames/directories. Apply source
+class defaults using the live per-post directory checkpoint and retained source
+keywords, respecting explicit CLI/configuration templates. Do not weaken the
+complete filename assertions already in place. E621 favorites remains the next
+unsupported booru feed after the default naming contract is closed.
 
 **Next booru favorites step (source audit):** E621 favorites stream
 `/favorites.json` with numbered pages (no pool buffering). The constructor

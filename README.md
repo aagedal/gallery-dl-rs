@@ -346,6 +346,21 @@ archive identity is (category, post ID). API-reported file size is exposed as
 `filesize`; `rating` and signed `score` are available to post filters and filename
 templates (e621 uses `score.total`). Per-category tags are not yet exposed.
 
+Booru template keywords retain producer spelling independently of the native
+logical basename. Danbooru derives `filename` and `extension` from the raw URL;
+e621 uses `file.md5` and `file.ext` verbatim. Gelbooru/Safebooru preserve explicit
+API filename/extension fields or derive them from the URL when extension is
+absent. Root `md5` is retained only when the source supplies it. URL names are
+percent-decoded with replacement for invalid UTF-8; empty extensions and `jpeg`
+remain distinct from native logical suffixes at extraction. Download preparation
+applies the source default extension mapping once before Prepare/File hooks
+(lowercase JPEG aliases become `jpg`, and `html` becomes `htm`). Post hooks can
+replace these keywords before that boundary; later File-hook replacements are
+not mapped again. Safebooru prefers its API `file_url`; supported CDN
+URLs without a recognized logical extension use `.bin` for the native basename.
+Explicit source filename templates can now reproduce the full source result;
+source default filename/directory selection remains unfinished.
+
 Tag searches expose `search_tags` to metadata, filters, and templates, preserving
 case, whitespace, empty values, and source query decoding. Danbooru selects the
 last `tags=` capture; the other sites select the first. Gelbooru/Safebooru send

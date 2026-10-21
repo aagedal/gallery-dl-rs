@@ -394,7 +394,18 @@ pub async fn download_with_template(
 ) -> Result<Outcome> {
     let effective_media = client.effective_media(media);
     let media = effective_media.as_ref();
-    if options.postprocessors.is_some_and(|pp| pp.has_generic()) {
+    let source_booru = media
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.booru_keywords.is_some());
+    // Source filename preparation also runs when no hooks are configured.
+    let empty_processors = (source_booru && options.postprocessors.is_none())
+        .then(|| crate::postprocess::Postprocessors::new(Vec::new()));
+    let options = DownloadOptions {
+        postprocessors: options.postprocessors.or(empty_processors.as_ref()),
+        ..options
+    };
+    if source_booru || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
         let prepared = processing::prepare(client, root, media, options, template).await?;
         return processing::download(client, root, media, options, template, prepared).await;
     }

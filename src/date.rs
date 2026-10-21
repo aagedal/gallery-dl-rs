@@ -237,6 +237,7 @@ mod tests {
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
                 source_num: None,
+                booru_keywords: None,
                 source_suffix: None,
                 pool: None,
                 favgroup: None,

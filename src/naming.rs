@@ -106,6 +106,7 @@ const FIELDS: &[&str] = &[
     "pixivision_title",
     "rating",
     "score",
+    "md5",
     "search_tags",
     "pool",
     "favgroup",
@@ -300,7 +301,7 @@ impl FilenameTemplate {
                 Part::Literal(value) => output.push_str(value),
                 Part::Field(field) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
-                    let value = field.render(|name| {
+                    let lookup = |name: &str| {
                         if keywords {
                             context.get(name).map(|value| {
                                 if matches!(name, "date" | "date_updated")
@@ -316,7 +317,19 @@ impl FilenameTemplate {
                         } else {
                             lookup(media, context, name)
                         }
-                    })?;
+                    };
+                    let source_nameext = media
+                        .metadata
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.booru_keywords.is_some())
+                        && field
+                            .names()
+                            .any(|name| matches!(name, "filename" | "extension" | "md5"));
+                    let value = if source_nameext {
+                        field.render_content(lookup)?
+                    } else {
+                        field.render(lookup)?
+                    };
                     let Some(value) = value else {
                         let name = field.names().next().unwrap_or("literal");
                         if media.metadata.is_none()
@@ -541,8 +554,15 @@ fn lookup(
         .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
         .unwrap_or((&media.filename, ""));
     let metadata = media.metadata.as_ref();
+    if matches!(name, "filename" | "extension" | "md5")
+        && let Some(fields) = metadata.and_then(|metadata| metadata.booru_keywords.as_deref())
+    {
+        return fields
+            .get(name)
+            .map(|value| convert(&crate::filter::json_value(value), name));
+    }
     Some(match name {
-        // Unlike upstream, `filename` includes the extension here.
+        // Legacy native filename includes its extension without a source snapshot.
         "filename" => Value::Str(media.filename.clone()),
         "name" => Value::Str(stem.into()),
         "extension" => Value::Str(extension.into()),

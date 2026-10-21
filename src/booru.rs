@@ -379,6 +379,127 @@ fn tags(site: Site, post: &Value) -> Option<String> {
     (!tags.is_empty()).then_some(tags)
 }
 
+/// Source URL keyword extraction, before URL normalization or native naming.
+fn source_nameext(raw: &str) -> (Arc<str>, Arc<str>) {
+    let basename = raw
+        .split('?')
+        .next()
+        .unwrap_or_default()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default();
+    let raw = basename.as_bytes();
+    let mut bytes = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < raw.len() {
+        if raw[index] == b'%'
+            && let Some(pair) = raw.get(index + 1..index + 3)
+            && pair.iter().all(u8::is_ascii_hexdigit)
+            && let Ok(pair) = std::str::from_utf8(pair)
+            && let Ok(byte) = u8::from_str_radix(pair, 16)
+        {
+            bytes.push(byte);
+            index += 3;
+            continue;
+        }
+        bytes.push(raw[index]);
+        index += 1;
+    }
+    let filename = String::from_utf8_lossy(&bytes);
+    match filename.rsplit_once('.') {
+        Some((name, extension)) if !name.is_empty() && extension.chars().count() <= 16 => {
+            (Arc::from(name), Arc::from(extension.to_lowercase()))
+        }
+        _ => (Arc::from(filename.as_ref()), Arc::from("")),
+    }
+}
+
+/// Source PathFormat.set_filename's default mapping, once before Prepare hooks.
+pub(crate) fn prepare_filename_keywords(
+    media: &Media,
+    keywords: &mut serde_json::Map<String, Value>,
+) -> Result<()> {
+    if !media
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.booru_keywords.is_some())
+    {
+        return Ok(());
+    }
+    let extension = keywords
+        .get("extension")
+        .ok_or_else(|| error("booru extension keyword is missing"))?;
+    let mapped = match extension {
+        Value::String(value) => match value.as_str() {
+            "jpeg" | "jpe" | "jfif" | "jif" | "jfi" => Some("jpg"),
+            "html" => Some("htm"),
+            _ => None,
+        },
+        Value::Array(_) | Value::Object(_) => {
+            return Err(error("invalid booru extension keyword type"));
+        }
+        _ => None,
+    };
+    if let Some(extension) = mapped {
+        keywords.insert("extension".into(), extension.into());
+    }
+    Ok(())
+}
+
+fn nameext_keywords(
+    site: Site,
+    post: &Value,
+    fallback_url: &Url,
+) -> serde_json::Map<String, Value> {
+    let fields = if site == Site::E621 {
+        post.get("file").unwrap_or(&Value::Null)
+    } else {
+        post
+    };
+    let mut keywords: serde_json::Map<String, Value> =
+        if site == Site::E621 || (!site.danbooru_dialect() && post.get("extension").is_some()) {
+            [
+                (
+                    "filename",
+                    if site == Site::E621 {
+                        "md5"
+                    } else {
+                        "filename"
+                    },
+                ),
+                (
+                    "extension",
+                    if site == Site::E621 {
+                        "ext"
+                    } else {
+                        "extension"
+                    },
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(key, source)| {
+                fields
+                    .get(source)
+                    .map(|value| (key.to_owned(), value.clone()))
+            })
+            .collect()
+        } else {
+            let raw = post
+                .get("file_url")
+                .and_then(Value::as_str)
+                .unwrap_or(fallback_url.as_str());
+            let (filename, extension) = source_nameext(raw);
+            serde_json::Map::from_iter([
+                ("filename".into(), filename.as_ref().into()),
+                ("extension".into(), extension.as_ref().into()),
+            ])
+        };
+    if let Some(md5) = post.get("md5") {
+        keywords.insert("md5".into(), md5.clone());
+    }
+    keywords
+}
+
 /// Parse one post object. Posts without a usable file yield `None`.
 pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     let id = number(post.get("id"))?;
@@ -411,23 +532,28 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             None,
         ),
         Site::Safebooru => {
-            let directory = string(post, "directory")?;
-            let image = string(post, "image")?;
-            let safe = |s: &str, dot: bool| {
-                s.len() <= 128
-                    && s.bytes().all(|b| {
-                        b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || dot && b == b'.'
-                    })
-                    && !s.starts_with('.')
-            };
-            if !safe(directory, false) || !safe(image, true) {
-                return None;
-            }
-            (
+            let url = if let Some(raw) = post.get("file_url").and_then(Value::as_str) {
+                media_url(site, raw)?
+            } else {
+                let directory = string(post, "directory")?;
+                let image = string(post, "image")?;
+                let safe = |s: &str, dot: bool| {
+                    s.len() <= 128
+                        && s.bytes().all(|b| {
+                            b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || dot && b == b'.'
+                        })
+                        && !s.starts_with('.')
+                };
+                if !safe(directory, false) || !safe(image, true) {
+                    return None;
+                }
                 media_url(
                     site,
                     &format!("https://safebooru.org/images/{directory}/{image}"),
-                )?,
+                )?
+            };
+            (
+                url,
                 string(post, "hash").or_else(|| string(post, "md5")),
                 None,
                 number(post.get("width")),
@@ -440,7 +566,8 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     let ext = ext
         .map(str::to_ascii_lowercase)
         .filter(|e| valid_extension(e))
-        .or_else(|| url_extension(&url))?;
+        .or_else(|| url_extension(&url))
+        .unwrap_or_else(|| "bin".into());
     let ext = if ext == "jpeg" { "jpg".into() } else { ext };
     let id = id.to_string();
     let media_id = md5.clone().unwrap_or_else(|| id.clone());
@@ -457,12 +584,14 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
         "mp4" | "webm" => Some(format!("video/{ext}")),
         _ => None,
     };
+    let booru_keywords = Some(Arc::new(nameext_keywords(site, post, &url)));
     Some(Media {
         url,
         job: MediaJob::DirectHttp,
         category: category.into(),
         filename: format!("{category}_{id}_{media_id}.{ext}"),
         metadata: Some(PostMetadata {
+            booru_keywords,
             file: Some(FileMetadata {
                 width,
                 height,
@@ -2303,3 +2432,7 @@ mod tests {
 #[cfg(test)]
 #[path = "booru_pool_tests.rs"]
 mod pool_tests;
+
+#[cfg(test)]
+#[path = "booru_nameext_compat_tests.rs"]
+mod nameext_compat_tests;

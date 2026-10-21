@@ -7,6 +7,7 @@ pub(crate) struct Prepared {
     pub media: Media,
     pub keywords: Map<String, Value>,
     pub path: PathBuf,
+    directory: Option<PathBuf>,
 }
 fn logical_path(
     root: &Path,
@@ -14,10 +15,13 @@ fn logical_path(
     keywords: &Map<String, Value>,
     options: DownloadOptions<'_>,
     template: Option<&FilenameTemplate>,
+    frozen_directory: Option<&Path>,
 ) -> Result<PathBuf> {
-    let directory = options
-        .postprocessor_scope
-        .and_then(|scope| scope.directory());
+    let directory = frozen_directory.map(Path::to_path_buf).or_else(|| {
+        options
+            .postprocessor_scope
+            .and_then(|scope| scope.directory())
+    });
     let mut path = destination_with_keyword_templates(
         root,
         media,
@@ -54,15 +58,62 @@ pub(crate) async fn prepare(
     let mut keywords = postprocess::context(&prepared);
     if let Some(scope) = options.postprocessor_scope {
         scope.inherit_for(&prepared, &mut keywords).await?;
+    }
+    // Without a job scope, freeze explicit booru directories before extension
+    // normalization, just as PathFormat.set_directory precedes set_filename.
+    let directory = if prepared
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.booru_keywords.is_some())
+        && options
+            .postprocessor_scope
+            .and_then(|scope| scope.directory())
+            .is_none()
+    {
+        options
+            .directory
+            .map(|template| {
+                destination_with_keyword_templates(
+                    root,
+                    &prepared,
+                    None,
+                    Some(template),
+                    &keywords,
+                )?
+                .parent()
+                .map(Path::to_owned)
+                .ok_or_else(|| error("invalid booru directory"))
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    crate::booru::prepare_filename_keywords(&prepared, &mut keywords)?;
+    if let Some(scope) = options.postprocessor_scope {
         scope.complete(&keywords);
     }
-    let path = logical_path(root, &prepared, &keywords, options, template).or_else(|failure| {
+    let path = logical_path(
+        root,
+        &prepared,
+        &keywords,
+        options,
+        template,
+        directory.as_deref(),
+    )
+    .or_else(|failure| {
         if pp
             .specifications
             .iter()
             .any(|spec| matches!(&spec.options,Processor::Hash(h) if h.rebuilds_filename()))
         {
-            logical_path(root, &prepared, &keywords, options, None)
+            logical_path(
+                root,
+                &prepared,
+                &keywords,
+                options,
+                None,
+                directory.as_deref(),
+            )
         } else {
             Err(failure)
         }
@@ -71,6 +122,7 @@ pub(crate) async fn prepare(
         media: prepared,
         keywords,
         path,
+        directory,
     };
     let input = result.path.clone();
     run_hook(
@@ -86,7 +138,14 @@ pub(crate) async fn prepare(
         &mut result,
     )
     .await?;
-    if let Ok(path) = logical_path(root, &result.media, &result.keywords, options, template) {
+    if let Ok(path) = logical_path(
+        root,
+        &result.media,
+        &result.keywords,
+        options,
+        template,
+        result.directory.as_deref(),
+    ) {
         result.path = path;
     }
     Ok(result)
@@ -223,6 +282,7 @@ async fn run_hook(
                                     &prepared.keywords,
                                     options,
                                     template,
+                                    prepared.directory.as_deref(),
                                 )?;
                             }
                         }
@@ -400,6 +460,7 @@ pub(crate) async fn download(
                     },
                     options,
                     template,
+                    prepared.directory.as_deref(),
                 )
                 .or_else(|failure| {
                     if pp.specifications.iter().any(
@@ -599,8 +660,14 @@ async fn run_single_file(
                 }
                 Processor::Hash(config) => {
                     if config.run(&mut prepared.keywords, input).await? {
-                        prepared.path =
-                            logical_path(root, media, &prepared.keywords, options, template)?;
+                        prepared.path = logical_path(
+                            root,
+                            media,
+                            &prepared.keywords,
+                            options,
+                            template,
+                            prepared.directory.as_deref(),
+                        )?;
                     }
                 }
                 Processor::Ugoira(_) => {}

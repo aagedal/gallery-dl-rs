@@ -1028,6 +1028,17 @@ fn context_parts(
                 metadata.remove("id");
             }
         }
+        if let Some(fields) = &post.booru_keywords {
+            for key in ["filename", "extension", "md5"] {
+                values.remove(key);
+                metadata.remove(key);
+                if let Some(value) = fields.get(key) {
+                    let value = json_value(value);
+                    values.insert(key.into(), value.clone());
+                    metadata.insert(key.into(), value);
+                }
+            }
+        }
         values.insert("metadata".into(), map(metadata));
     }
     values
