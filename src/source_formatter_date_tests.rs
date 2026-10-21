@@ -19,7 +19,14 @@ pub(super) fn decode(value: &Value) -> Value {
         "datetime" => {
             crate::filter::source_date_json(Some(value["epoch"].as_f64().unwrap() as i64))
         }
-        "NullDatetime" => crate::filter::source_date_json(None),
+        "NullDatetime" => {
+            let timestamp = value["epoch"].as_f64().unwrap() as i64;
+            if timestamp == -62_135_596_800 {
+                crate::filter::source_date_json(None)
+            } else {
+                crate::filter::source_null_date_json(timestamp)
+            }
+        }
         "list" => Value::Array(
             value["items"]
                 .as_array()
@@ -205,7 +212,7 @@ fn contains_python_string(value: &Value) -> bool {
 
 // The Field API accepts actual datetime values, so preexisting microseconds are
 // tested without rounding them through the whole-second JSON keyword wrapper.
-fn decode_field(value: &Value) -> super::format::Value {
+pub(super) fn decode_field(value: &Value) -> super::format::Value {
     use super::format::Value as F;
     match value["kind"].as_str().unwrap() {
         "datetime" => {
@@ -369,6 +376,13 @@ fn actual_source_preexisting_microsecond_dates_use_direct_field_values() {
 
 #[tokio::test]
 async fn actual_source_date_jobs_publish_exact_paths_bytes_and_metadata_archive_keys() {
+    let oracle = fixture();
+    let cases = oracle["job_cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 9);
+    replay_date_jobs(cases, &[]).await;
+}
+
+pub(super) async fn replay_date_jobs(cases: &[Value], extra_keys: &[&str]) {
     use crate::{
         archive::{Archive, ArchiveOutcome},
         booru::{
@@ -385,9 +399,7 @@ async fn actual_source_date_jobs_publish_exact_paths_bytes_and_metadata_archive_
     };
     use futures_util::StreamExt;
     use std::{collections::BTreeMap, sync::Arc, time::Duration};
-    let oracle = fixture();
-    assert_eq!(oracle["job_cases"].as_array().unwrap().len(), 9);
-    for case in oracle["job_cases"].as_array().unwrap() {
+    for case in cases {
         let name = case["name"].as_str().unwrap();
         assert!(case["error"].is_null(), "{name}: source job must succeed");
         let source = case["url"].as_str().unwrap().parse().unwrap();
@@ -395,7 +407,7 @@ async fn actual_source_date_jobs_publish_exact_paths_bytes_and_metadata_archive_
         let root = tempfile::tempdir().unwrap();
         let (filename, directory) = source_templates(case, root.path());
         let events = ["post", "prepare", "file", "after", "post-after"];
-        let keys = [
+        let mut keys = vec![
             "id",
             "category",
             "subcategory",
@@ -406,6 +418,7 @@ async fn actual_source_date_jobs_publish_exact_paths_bytes_and_metadata_archive_
             "copied",
             "year",
         ];
+        keys.extend_from_slice(extra_keys);
         let mut configs = case["hook_options"].as_array().unwrap().clone();
         for event in events {
             configs.push(json!({"name":"metadata","mode":"jsonl","event":event,"base-directory":root.path(),"directory":[],"filename":format!("oracle-{event}.jsonl"),"include":keys}));
@@ -513,8 +526,12 @@ async fn actual_source_date_jobs_publish_exact_paths_bytes_and_metadata_archive_
             for (actual, expected) in actual.iter().zip(expected) {
                 let expected = decode(&expected["metadata"]);
                 let expected = crate::postprocess::public_keywords(expected.as_object().unwrap());
-                for key in keys {
-                    assert_eq!(actual.get(key), expected.get(key), "{name}: {event} {key}");
+                for key in &keys {
+                    assert_eq!(
+                        actual.get(*key),
+                        expected.get(*key),
+                        "{name}: {event} {key}"
+                    );
                 }
             }
         }
@@ -677,7 +694,7 @@ pub(super) fn source_templates(
     (filename, directory)
 }
 
-fn check_offset_payload(actual: &Value, expected: &Value, label: &str) {
+pub(super) fn check_offset_payload(actual: &Value, expected: &Value, label: &str) {
     match expected["kind"].as_str().unwrap() {
         "datetime" | "NullDatetime" => {
             let context = Map::from_iter([("probe".into(), actual.clone())]);

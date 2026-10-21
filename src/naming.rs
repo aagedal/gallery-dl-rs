@@ -1026,3 +1026,7 @@ mod source_segment_limit_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "source_formatter_offset_tests.rs"]
+mod source_formatter_offset_tests;

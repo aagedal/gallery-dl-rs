@@ -66,3 +66,29 @@ string, repr, JSON and identity conversions, scalar attributes, and year-one /
 year-9999 overflow. The original 1,230/32/9 cases remain unchanged. Native replay
 retains the invalid sentinel's falsy value and public marker while checking its
 underlying shifted timestamp through copied values.
+
+`formatter_offsets.json` freezes the actual source `O` parser and formatter,
+MetadataPP copies, and booru DownloadJobs. It separates parse errors from render
+errors and records typed values, publication paths, bytes, and SQLite identities.
+Arguments cover Unicode decimal digits, underscore and whitespace syntax, minute
+sign rules, timedelta bounds, and arbitrary-size cancellation. Local offsets are
+recorded in isolated Python subprocesses with `TZ=UTC`, `Europe/Oslo`, and
+`Asia/Kathmandu`; the native replay also isolates each timezone in its own process.
+Each group embeds the exact TZif bytes, length and SHA used by the source.
+The generator verifies that copied files reproduce all source observations;
+native 64-bit Unix subprocesses use those files and verify their hashes, so historical
+expectations do not depend on the host timezone database. Other platforms remain explicit local-time replay boundaries; the captured dates
+require a timestamp range spanning years one through 9998. Regenerate using `formatter_offsets_generate.py`
+with gallery-dl 1.32.17 and Python 3.15; keep the adjacent date fixture generator
+and the `../source_archive` generators in their relative layout.
+
+The main offset corpus contains 594 direct evaluations, 100 modifications, and
+four publication jobs. Six direct cases and two modifications retain explicit
+aware-UTC representation boundaries; the rest are replayed. Each timezone group
+contains 90 direct evaluations and 22 modifications, with six direct and two
+modification awareness boundaries. Twenty-four direct cases per zone use typed
+datetime inputs to preserve microseconds around a late-year DST transition.
+
+An additional four numeric cases and two cases per timezone prove that `O`
+arguments do not require a trailing slash. The final frozen JSON SHA-256 is
+`d726fb2d565df2b3d444e0c1cb0a1745269e08de9a2db5467023ec9be9c67bf2`.

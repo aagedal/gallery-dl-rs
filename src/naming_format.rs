@@ -8,6 +8,9 @@
 use crate::{Result, error};
 use time::{OffsetDateTime, UtcOffset};
 
+#[path = "source_offset.rs"]
+mod source_offset;
+
 /// Intermediate text cannot grow past this many bytes during rendering.
 const MAX_TEXT: usize = 65536;
 const MAX_WIDTH: usize = 240;
@@ -168,7 +171,7 @@ enum Op {
     Arithmetic(Arithmetic, i128),
     Convert(Vec<char>),
     Sort { reverse: bool },
-    Offset(UtcOffset),
+    Offset(source_offset::Offset),
 }
 
 #[derive(Clone, Debug)]
@@ -720,7 +723,7 @@ fn datetime_repr(value: &OffsetDateTime, class: &str) -> String {
     output.push(')');
     output
 }
-fn offset_date(value: Value, offset: UtcOffset) -> Result<Value> {
+fn offset_date(value: Value, offset: source_offset::Offset) -> Result<Value> {
     let (date, invalid) = match value {
         Value::Date(date) | Value::SourceDate(date) => (date, false),
         Value::InvalidDate => (
@@ -730,8 +733,9 @@ fn offset_date(value: Value, offset: UtcOffset) -> Result<Value> {
         Value::NullDate(date) => (date, true),
         _ => return Err(error("template offsets require a date")),
     };
+    let seconds = offset.seconds(date)?;
     let date = date
-        .checked_add(time::Duration::seconds(offset.whole_seconds().into()))
+        .checked_add(time::Duration::seconds(seconds))
         .filter(|date| (1..=9999).contains(&date.year()))
         .ok_or_else(|| error("template date offset overflowed"))?;
     Ok(if invalid {
@@ -1488,14 +1492,9 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 },
             },
             'O' => {
-                let argument = take(&mut spec)?;
-                let offset = crate::date::parse_date(&format!("2000-01-01T00:00{argument}"))
-                    .ok()
-                    .filter(|_| argument.starts_with(['+', '-']))
-                    .ok_or_else(|| error("template offsets use +HH:MM or -HH:MM"))?;
-                UtcOffset::from_whole_seconds((946684800 - offset) as i32)
-                    .map(Op::Offset)
-                    .map_err(|_| error("invalid template offset"))?
+                let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
+                spec = rest;
+                Op::Offset(source_offset::Offset::parse(argument)?)
             }
             _ => unreachable!(),
         });

@@ -1454,9 +1454,19 @@ Four unpaired-surrogate string cases, two raw fractional-timezone renderings and
 four preexisting subsecond datetime modifications remain explicit representation
 boundaries in the frozen fixture. An additional 72 formatter evaluations and 12
 MetadataPP runs preserve shifted NullDatetime payloads and enforce calendar
-overflow at years one and 9999. The existing bounded offset argument parser still
-needs the source's zero-hour minute-sign quirk and broader/local offset grammar.
-Broader producer datetime precision and source JSON decoding remain parity work.
+overflow at years one and 9999. Broader producer datetime precision and source
+JSON decoding remain parity work.
+
+Source `O` arguments now use duration arithmetic, including unsigned hours,
+Unicode decimal integers, underscores, signed minutes, values beyond 24 hours,
+and the source's zero-hour minute-sign rule. Arbitrary-size operands can cancel
+before enforcing Python timedelta bounds. Empty and `local` arguments look up
+the host timezone at the input date, preserving historical second-level offsets
+and the float timestamp rounding used by Python. Numeric parse failures remain
+distinct from calendar overflow during rendering. Frozen source formatter,
+MetadataPP and DownloadJob replays cover these behaviors; timezone replays use
+isolated subprocesses. The epoch-only JSON date wrapper still cannot distinguish
+aware UTC dates from naive dates; source rejects aware dates for local offsets.
 
 **Implemented typed booru source path results (gallery-dl 1.32.17):** Source
 filename templates require text. Directory components accept text, expand flat
@@ -1480,9 +1490,11 @@ open/finalize fails later and may retain a partial file. Synthetic transfer
 artifacts in these cases are recorded separately from actual file-open evidence.
 First-file Prepare hashing uses the cleared input path rather than a provisional
 destination; the source fallback to a prior cached realpath across files/posts
-remains file-state parity work. Typed path handling remains gated by proven booru
-source defaults; other native
-extractors still need source path and class defaults.
+remains file-state parity work. That cache records the last built path, including
+archived, skipped or failed attempts, and a filename-rebuilding callback changes
+the input for subsequent callbacks in the same hook. Typed path handling remains
+gated by proven booru source defaults; other native extractors still need source
+path and class defaults.
 
 
 **Implemented directory step:** native configuration `directory` lists replace
