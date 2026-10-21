@@ -210,7 +210,7 @@ async fn post_range_resets_per_child_and_file_filter_precedes_file_counter() {
 }
 
 #[tokio::test]
-async fn ordered_dates_cancel_only_current_child_and_dates_use_late_media_without_post_selection() {
+async fn ordered_dates_cancel_only_current_child_and_directory_dates_control_all_files() {
     let a = scope(1);
     let control = a.control.clone();
     let input = child(
@@ -245,7 +245,7 @@ async fn ordered_dates_cancel_only_current_child_and_dates_use_late_media_withou
             stream::iter(late.into_iter().map(Ok)).boxed()
         )
         .await,
-        [1]
+        [1, 2]
     );
     let mut late = event::group(vec![file(3, Some(100))], "direct");
     if let ExtractionEvent::Post(post) = late.front_mut().unwrap() {

@@ -14,7 +14,7 @@ impl PostSelection {
     pub fn new(range: Option<RangeSelection>, filter: Option<FilterExpression>) -> Self {
         Self { range, filter }
     }
-    /// Post dates precede the filter and range. Nested jobs reset positions.
+    /// Post filters precede dates, followed by the range. Nested jobs reset positions.
     pub fn apply<'a>(
         &self,
         input: BoxStream<'a, Result<ExtractionEvent>>,

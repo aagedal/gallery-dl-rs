@@ -774,7 +774,9 @@ fn lookup(
             .get(name)
             .map(|value| convert(&crate::filter::json_value(value), name));
     }
-    if metadata.is_some_and(|m| m.booru_artist_parent.is_some()) && matches!(name, "name" | "num") {
+    if metadata.is_some_and(|m| m.booru_artist_parent.is_some() || m.booru_popular.is_some())
+        && matches!(name, "name" | "num")
+    {
         return context.get(name).map(|value| convert(value, name));
     }
     Some(match name {

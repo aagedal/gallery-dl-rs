@@ -576,8 +576,8 @@ metadata now normalizes recognized formatted dates without changing stable IDs.
 Local tests cover calendar/offset/fraction boundaries, range order, private
 configuration errors, native pagination and process cancellation, later inputs,
 and selected-only metadata/archive effects. Relative/week-date syntax,
-site-specific skip optimizations, pinned/out-of-order handling, and nested child
-boundaries remain.
+site-specific skip optimizations and pinned/out-of-order policies remain to audit.
+Nested job date boundaries and live booru keyword types are implemented below.
 
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and
@@ -1386,8 +1386,8 @@ Raw date strings stay primitive; explicit conversions retain datetime identity.
 
 Stable artist/artist-search/tag job configuration selects hooks and eager
 initialization independently of mutable public class labels. These class scopes
-support inheritance, job hooks/options, base directory, filename/directory
-and child selection; unsupported class extraction/selection options fail
+support inheritance, job hooks/options, base directory, filename/directory,
+child selection, post filters/ranges and date bounds; unsupported class extraction/selection options fail
 explicitly. Declared custom parent names work in templates across scopes.
 CLI artist classes keep independent cached inheritance settings, and tag children
 use their own job templates and output settings. Compatibility forwards both
@@ -1401,11 +1401,21 @@ phases, complete publication bytes and actual metadata archive SQL. The original
 Remaining: other class-scoped extraction/selection options, source download-archive
 path arrays, dynamic Python class/proxy keyword objects, and array-element
 mutation. Configurable parent inheritance for other native queue producers has
-not yet been implemented. Source date selection still needs to use live source
-keyword date types for Popular views and inherited date overrides rather than
-canonical native timestamps. Source probes confirm falsy dates bypass comparisons,
-truthy strings fail against datetime bounds, and post filters run before dates;
-these rules still need a frozen replay fixture and native implementation.
+not yet been implemented.
+
+**Implemented live booru date selection (source oracle, 1.32.17):** 141 genuine
+DownloadJob cases plus 12 separately labeled predicate helper vectors preserve
+Directory-only evaluation, post-filter/date/range order, source raw types,
+exclusive boundaries, inverted-window behavior, and child-local errors/stops.
+Falsy live dates bypass comparisons; truthy non-datetime values fail privately.
+The selector borrows live artist keyword objects instead of cloning their trees.
+Actual tag classes resolve their own date/post predicates independently of artist
+root settings. Invalid/falsy configuration bounds disable comparison by presence,
+including clearing a less specific bound; numeric truthy values convert to integer
+Unix seconds. Native API history still records original post identities. Replay
+checks exact consumed messages, hook phases, paths, publication bytes and both
+SQLite archives. Broader ISO bound syntax, date precision beyond producer-normalized
+whole seconds, and source skip_date policies for other extractors remain to audit.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

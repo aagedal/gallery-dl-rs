@@ -423,6 +423,10 @@ impl std::fmt::Debug for KeywordFeedback {
 /// Root assignment detaches a post; nested edits retain this object identity.
 #[derive(Clone)]
 pub struct KeywordObject(Arc<Mutex<KeywordObjectState>>);
+pub(crate) enum KeywordValue<'a> {
+    Json(&'a serde_json::Value),
+    Object(&'a serde_json::Map<String, serde_json::Value>),
+}
 struct KeywordObjectState {
     value: serde_json::Map<String, serde_json::Value>,
     children: std::collections::BTreeMap<String, KeywordObject>,
@@ -449,6 +453,28 @@ impl KeywordObject {
             .keys()
             .cloned()
             .collect()
+    }
+    /// Read a single current root value without cloning unrelated keywords.
+    /// Tracked maps retain their live identity rather than a stale JSON snapshot.
+    pub(crate) fn read_keyword<R>(
+        &self,
+        key: &str,
+        read: impl FnOnce(Option<KeywordValue<'_>>) -> R,
+    ) -> R {
+        let state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(child) = state.children.get(key) {
+            let child = child.0.lock().unwrap_or_else(|e| e.into_inner());
+            read(Some(KeywordValue::Object(&child.value)))
+        } else {
+            read(state.value.get(key).map(KeywordValue::Json))
+        }
+    }
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .value
+            .is_empty()
     }
     pub fn snapshot(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());

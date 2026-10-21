@@ -443,6 +443,97 @@ fn identifier(value: &str) -> Value {
         .map(Value::Int)
         .unwrap_or_else(|| text(value))
 }
+/// Project the Directory's source `date` keyword for the date predicate.
+/// Native canonical integer seconds represent a datetime (including epoch zero).
+/// Primitive provenance prevents inherited numbers/strings from becoming dates.
+/// This follows matches_post's override order without constructing its full context.
+pub(crate) fn source_selection_date(post: &crate::event::Post) -> Result<Option<i64>> {
+    fn invalid() -> crate::Error {
+        error("date predicate requires a datetime keyword")
+    }
+    fn object(fields: &serde_json::Map<String, serde_json::Value>) -> Result<Option<i64>> {
+        if fields.len() == 1 {
+            if let Some(value) = fields.get(SOURCE_PRIMITIVE_KEY) {
+                return json(value, false);
+            }
+            if let Some(value) = fields.get(SOURCE_DATE_KEY) {
+                if value.is_null() {
+                    return Ok(None);
+                }
+                return value
+                    .as_i64()
+                    .filter(|seconds| {
+                        time::OffsetDateTime::from_unix_timestamp(*seconds)
+                            .is_ok_and(|date| (1..=9999).contains(&date.year()))
+                    })
+                    .map(Some)
+                    .ok_or_else(invalid);
+            }
+        }
+        if fields.is_empty() {
+            Ok(None)
+        } else {
+            Err(invalid())
+        }
+    }
+    fn json(value: &serde_json::Value, native_integer: bool) -> Result<Option<i64>> {
+        match value {
+            serde_json::Value::Null | serde_json::Value::Bool(false) => Ok(None),
+            serde_json::Value::String(value) if value.is_empty() => Ok(None),
+            serde_json::Value::Array(value) if value.is_empty() => Ok(None),
+            serde_json::Value::Object(fields) => object(fields),
+            serde_json::Value::Number(value) if native_integer && value.as_i128().is_some() => {
+                value.as_i64().map(Some).ok_or_else(invalid)
+            }
+            serde_json::Value::Number(value) if value.as_f64() == Some(0.0) => Ok(None),
+            _ => Err(invalid()),
+        }
+    }
+    if let Some(inheritance) = post
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.booru_artist_parent.as_ref())
+    {
+        if inheritance.key() == Some("date") {
+            return if inheritance.object().is_empty() {
+                Ok(None)
+            } else {
+                Err(invalid())
+            };
+        }
+        if inheritance.is_flat() {
+            let inherited = inheritance
+                .object()
+                .read_keyword("date", |value| match value {
+                    Some(crate::event::KeywordValue::Json(value)) => Some(json(value, false)),
+                    Some(crate::event::KeywordValue::Object(fields)) => Some(object(fields)),
+                    None => None,
+                });
+            if let Some(value) = inherited {
+                return value;
+            }
+        }
+    }
+    if let crate::event::KeywordPolicy::Shared { post_fields, .. } = &post.keywords
+        && let Some(value) = post_fields.get("date")
+    {
+        return json(value, true);
+    }
+    if let Some(popular) = post
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.booru_popular.as_ref())
+    {
+        return popular
+            .get("date")
+            .map_or(Ok(None), |value| json(value, false));
+    }
+    Ok(post
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.timestamp))
+}
+
 pub(crate) fn context(media: &Media) -> BTreeMap<String, Value> {
     context_parts(&media.category, media.metadata.as_ref(), Some(media))
 }
@@ -1170,6 +1261,16 @@ fn context_parts(
             }
         }
         if let Some(fields) = &post.booru_popular {
+            values.remove("name");
+            if let Some(name) = post
+                .booru_keywords
+                .as_ref()
+                .and_then(|fields| fields.get("name"))
+            {
+                values.insert("name".into(), json_value(name));
+            }
+            values.insert("subcategory".into(), text("popular"));
+            metadata.insert("subcategory".into(), text("popular"));
             for key in ["date", "scale"] {
                 values.remove(key);
                 metadata.remove(key);
@@ -1364,5 +1465,131 @@ mod source_date_tests {
             keyword_value("date_favorited", &serde_json::Value::Null),
             Value::None
         );
+    }
+}
+
+#[cfg(test)]
+mod selection_date_tests {
+    use super::*;
+    use crate::{
+        event::{ChildMetadata, KeywordPolicy, Post},
+        extract::PostMetadata,
+    };
+    use serde_json::json;
+    fn post() -> Post {
+        Post {
+            category: "danbooru".into(),
+            metadata: Some(PostMetadata {
+                timestamp: Some(0),
+                ..Default::default()
+            }),
+            count: Some(1),
+            keywords: Default::default(),
+        }
+    }
+    fn shared_date(post: &mut Post, value: serde_json::Value) {
+        let mut policy = KeywordPolicy::shared(&[]);
+        if let KeywordPolicy::Shared { post_fields, .. } = &mut policy {
+            *post_fields = Arc::new(serde_json::Map::from_iter([("date".into(), value)]));
+        }
+        post.keywords = policy;
+    }
+    fn inheritance(
+        fields: serde_json::Value,
+        mode: serde_json::Value,
+    ) -> crate::event::ArtistInheritance {
+        ChildMetadata::from_booru_artist(
+            "danbooru",
+            "artist",
+            fields.as_object().unwrap(),
+            &"https://danbooru.donmai.us/posts?tags=fixture"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap()
+        .with_booru_artist_inheritance(&mode)
+        .unwrap()
+        .booru_artist_parent()
+        .unwrap()
+        .clone()
+    }
+    #[test]
+    fn source_datetime_epoch_and_falsy_primitive_values_are_distinct() {
+        assert_eq!(source_selection_date(&post()).unwrap(), Some(0));
+        for (value, expected) in [
+            (json!(0), Some(0)),
+            (source_date_json(Some(0)), Some(0)),
+            (source_date_json(Some(-1)), Some(-1)),
+            (source_date_json(None), None),
+            (source_primitive_json(json!(0)), None),
+            (source_primitive_json(json!(-0.0)), None),
+            (json!(null), None),
+            (json!(false), None),
+            (json!(""), None),
+            (json!([]), None),
+            (json!({}), None),
+        ] {
+            let mut post = post();
+            shared_date(&mut post, value);
+            assert_eq!(source_selection_date(&post).unwrap(), expected);
+        }
+        for value in [
+            json!(true),
+            json!("private-unparseable-date"),
+            json!("2024-01-01T00:00:00Z"),
+            json!([0]),
+            json!({"private":"payload"}),
+            source_primitive_json(json!(1)),
+            json!(1.5),
+        ] {
+            let mut post = post();
+            shared_date(&mut post, value);
+            let error = source_selection_date(&post).unwrap_err().to_string();
+            assert!(!error.contains("private"));
+            assert!(!error.contains("2024"));
+            assert!(!error.contains("payload"));
+        }
+    }
+    #[test]
+    fn popular_shared_and_artist_overrides_follow_directory_predicate_projection_order() {
+        let mut post = post();
+        post.metadata.as_mut().unwrap().timestamp = Some(50);
+        post.metadata.as_mut().unwrap().booru_popular = Some(Arc::new(
+            json!({"date":"2024-01-01"}).as_object().unwrap().clone(),
+        ));
+        assert!(source_selection_date(&post).is_err());
+        shared_date(&mut post, source_date_json(Some(60)));
+        assert_eq!(source_selection_date(&post).unwrap(), Some(60));
+        post.metadata.as_mut().unwrap().booru_artist_parent =
+            Some(inheritance(json!({"id":7,"date":0}), json!(true)));
+        assert_eq!(source_selection_date(&post).unwrap(), None);
+        post.metadata.as_mut().unwrap().booru_artist_parent =
+            Some(inheritance(json!({"id":7,"date":"string"}), json!(false)));
+        assert_eq!(source_selection_date(&post).unwrap(), Some(60));
+        post.metadata.as_mut().unwrap().booru_artist_parent =
+            Some(inheritance(json!({"id":7}), json!(true)));
+        assert_eq!(source_selection_date(&post).unwrap(), Some(60));
+        post.metadata.as_mut().unwrap().booru_artist_parent =
+            Some(inheritance(json!({"id":7}), json!("date")));
+        assert!(source_selection_date(&post).is_err());
+        post.metadata.as_mut().unwrap().booru_artist_parent = None;
+        post.keywords = Default::default();
+        post.metadata.as_mut().unwrap().booru_popular = Some(Arc::new(serde_json::Map::new()));
+        assert_eq!(source_selection_date(&post).unwrap(), None);
+    }
+    #[test]
+    fn inherited_date_reads_current_shared_map_identity_without_snapshotting_other_fields() {
+        let inherited = inheritance(
+            json!({"id":7,"date":{"member":1},"unrelated":{"rows":[1,2,3]}}),
+            json!(true),
+        );
+        let date = inherited.object().object_at(&["date".into()]).unwrap();
+        let mut post = post();
+        post.metadata.as_mut().unwrap().booru_artist_parent = Some(inherited);
+        assert!(source_selection_date(&post).is_err());
+        date.record(&["member"], &serde_json::Map::new());
+        assert_eq!(source_selection_date(&post).unwrap(), None);
+        date.record(&["member"], json!({"member":2}).as_object().unwrap());
+        assert!(source_selection_date(&post).is_err());
     }
 }

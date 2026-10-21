@@ -383,7 +383,7 @@ async fn filtered_downloads_create_neither_metadata_nor_archive_records() {
 }
 
 #[tokio::test]
-async fn date_configuration_precedence_and_invalid_settings_are_checked_before_extraction() {
+async fn date_configuration_preserves_source_bounds_precedence_and_private_schema_errors() {
     let root = tempfile::tempdir().unwrap();
     let backend = fixture(
         root.path(),
@@ -415,6 +415,22 @@ async fn date_configuration_precedence_and_invalid_settings_are_checked_before_e
             json!({"date-before":"1970-01-01T01:00:03+01:00"}),
             vec![],
             vec!["two", "one"],
+        ),
+        (
+            json!({"date-before":"PRIVATE_INVALID_DATE"}),
+            vec![],
+            vec!["three", "two", "one"],
+        ),
+        (
+            json!({"date-before":null,"extractor":{"date-before":"2"}}),
+            vec![],
+            vec!["three", "two", "one"],
+        ),
+        (json!({"date-before":"2","date-after":"2"}), vec![], vec![]),
+        (
+            json!({"date-before":"1","date-after":"2"}),
+            vec![],
+            vec!["three"],
         ),
     ] {
         std::fs::write(&config, serde_json::to_vec(&contents).unwrap()).unwrap();

@@ -51,6 +51,9 @@ pub struct Options {
     pub include: Option<crate::dispatch::Include>,
     pub date_before: Option<i64>,
     pub date_after: Option<i64>,
+    /// A present invalid/falsy source bound clears less specific settings.
+    pub date_before_set: bool,
+    pub date_after_set: bool,
     /// Whether to include reposts, optionally under the original author.
     pub retweets: Option<crate::twitter::RetweetMode>,
     /// Include media from quoted posts.
@@ -276,8 +279,18 @@ impl Options {
                 .clone()
                 .or_else(|| self.child_filter.clone()),
             include: overrides.include.clone().or_else(|| self.include.clone()),
-            date_before: overrides.date_before.or(self.date_before),
-            date_after: overrides.date_after.or(self.date_after),
+            date_before: if overrides.date_before_set {
+                overrides.date_before
+            } else {
+                overrides.date_before.or(self.date_before)
+            },
+            date_after: if overrides.date_after_set {
+                overrides.date_after
+            } else {
+                overrides.date_after.or(self.date_after)
+            },
+            date_before_set: self.date_before_set || overrides.date_before_set,
+            date_after_set: self.date_after_set || overrides.date_after_set,
             retweets: overrides.retweets.or(self.retweets),
             quoted: overrides.quoted.or(self.quoted),
             expand: overrides.expand.or(self.expand),
@@ -875,6 +888,10 @@ impl Config {
                                         | "directory"
                                         | "child-filter"
                                         | "child-range"
+                                        | "post-filter"
+                                        | "post-range"
+                                        | "date-before"
+                                        | "date-after"
                                 )
                             }) {
                                 return Err(error("unsupported native booru class option"));
@@ -2031,8 +2048,10 @@ impl RawOptions {
             child_range,
             child_filter,
             include,
-            date_before: date(self.date_before)?,
-            date_after: date(self.date_after)?,
+            date_before_set: self.date_before.0.is_some(),
+            date_after_set: self.date_after.0.is_some(),
+            date_before: date(self.date_before),
+            date_after: date(self.date_after),
             retweets,
             quoted,
             expand,
@@ -2294,20 +2313,22 @@ fn size(field: Field) -> Result<Option<u64>> {
     }
 }
 
-fn date(field: Field) -> Result<Option<i64>> {
-    let Some(value) = field.0 else {
-        return Ok(None);
-    };
-    let invalid = || {
-        error(
-            "native configuration date limit must be a supported ISO date or integer Unix timestamp",
-        )
-    };
-    match value {
-        Value::String(value) => parse_date(&value).map(Some).map_err(|_| invalid()),
-        Value::Number(value) => value.as_i64().map(Some).ok_or_else(invalid),
-        _ => Err(invalid()),
-    }
+fn date(field: Field) -> Option<i64> {
+    let value = field.0?;
+    let timestamp = match &value {
+        Value::String(value) => parse_date(value).ok(),
+        Value::Bool(true) => Some(1),
+        Value::Number(value) => value.as_i64().filter(|value| *value != 0).or_else(|| {
+            let number = value.as_f64()?;
+            (number != 0.0 && number >= i64::MIN as f64 && number < i64::MAX as f64)
+                .then_some(number.trunc() as i64)
+        }),
+        _ => None,
+    }?;
+    time::OffsetDateTime::from_unix_timestamp(timestamp)
+        .ok()
+        .filter(|date| (1..=9999).contains(&date.year()))
+        .map(|_| timestamp)
 }
 
 fn network_string(field: Field) -> Result<Option<String>> {

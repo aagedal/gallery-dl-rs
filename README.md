@@ -426,8 +426,8 @@ history retains the original post identity.
 Native booru `artist`, `artist-search`, and `tag` configuration objects select job hooks
 by their actual class, even when inherited keywords change category labels.
 They support inheritance, `init`, postprocessors/options, base directory,
-filename/directory templates, and child filters/ranges. Custom parent keys can
-be used in templates, including templates declared in another scope. Tag
+filename/directory templates, child filters/ranges, post filters/ranges, and date
+bounds. Custom parent keys can be used in templates, including templates declared in another scope. Tag
 children use ordinary tag paths and source metadata archives; artist roots emit
 no files and initialize parent hooks only with `init: true`.
 Compatibility jobs retain category-level native hook and output settings.
@@ -1933,18 +1933,25 @@ A space can replace `T`. Naive date-times use UTC; `Z`, `+HH:MM`, `-HH:MM`, and
 compact `+HHMM`/`-HHMM` offsets normalize to UTC. Fractions are discarded to whole
 seconds, including before 1970. Inputs are limited to 128 ASCII bytes; calendar,
 clock, offset, and integer bounds are validated. Relative dates, week dates, and
-the full upstream ISO syntax are not supported. An effective `date-after` at or
-later than `date-before` fails explicitly. Epoch zero is a real bound.
+the full upstream ISO syntax are not supported. If `date-after` is later than
+`date-before`, only the after bound applies. Equal bounds exclude every dated
+post. CLI epoch zero is a real bound.
 
-Native configuration supports `date-before` and `date-after` as strings or
-integer timestamps in the normal scopes, followed by CLI overrides. Date
-selection applies to downloads and inspection before file ranges, deduplication,
-and archive checks. Excluded media receives no files, sidecars, or archive entry.
-Media with missing or unparseable timestamps passes through unchanged, including
-direct links. Compatibility formatted dates are normalized into public numeric
-metadata when recognized; invalid formats remain unknown. Counters and cutoffs
-apply to each input's flattened stream; site-specific date skipping and nested
-child boundaries remain unimplemented.
+Native configuration supports these bounds in the normal scopes and native booru
+artist/tag class scopes, followed by CLI overrides. Invalid or falsy configuration
+bounds disable that comparison, including numeric zero; use `"0"` for the epoch.
+Truthy booleans and fractional numbers convert to integer Unix seconds. Explicit
+null or invalid bounds clear inherited settings.
+
+Post filters run before date checks, followed by post ranges. Dates are checked
+once per Directory event before post hooks; accepted posts keep all their files.
+Booru Popular's raw string date and flattened artist dates retain their source
+types: falsy values pass, datetime values compare, and truthy non-datetimes raise
+a private error. A failed or stopped artist child leaves later artist children
+available. Native tag children use their own class predicates. Excluded media
+receives no files, sidecars, or archive entry. Compatibility formatted dates are
+normalized when recognized; invalid formats remain unknown. The standalone
+`DateFilter` library API retains its strict timestamp-based contract.
 
 ## File-size limits
 

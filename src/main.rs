@@ -9,7 +9,7 @@ use gallery_dl_rs::{
     browser::FirefoxProfile,
     config::{Config, Options as ConfigOptions},
     cookies::CookieJar,
-    date::{DateFilter, parse_date},
+    date::parse_date,
     download::{self, DownloadOptions, Outcome},
     error,
     event::{self, ExtractionEvent},
@@ -459,17 +459,27 @@ async fn run(args: Args) -> Result<()> {
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
-                        Some(settings) => JobSelection {
-                            post_selection: settings.post_selection.clone(),
-                            file_range: settings.selection.clone(),
-                            file_filter: settings.filter.clone(),
-                            child_range: settings.child_range.clone(),
-                            child_filter: settings.child_filter.clone(),
-                            before: settings.options.date_before,
-                            after: settings.options.date_after,
-                            unordered: unordered_dates,
+                        Some(selected) => {
+                            let classes = if matches!(
+                                root_subcategory.as_deref(),
+                                Some("artist" | "artist-search")
+                            ) {
+                                settings
+                                    .iter()
+                                    .filter(|(key, _)| {
+                                        key.starts_with("danbooru.") || key.starts_with("e621.")
+                                    })
+                                    .map(|(key, settings)| {
+                                        ((*key).to_owned(), settings.job_selection(false))
+                                    })
+                                    .collect()
+                            } else {
+                                BTreeMap::new()
+                            };
+                            selected
+                                .job_selection(unordered_dates)
+                                .apply_events_with_classes(input, Arc::new(classes))
                         }
-                        .apply_events(input),
                         None => input,
                     }
                 }
@@ -1679,6 +1689,21 @@ struct Settings {
     limits: SizeLimits,
 }
 
+impl Settings {
+    fn job_selection(&self, unordered: bool) -> JobSelection {
+        JobSelection {
+            post_selection: self.post_selection.clone(),
+            file_range: self.selection.clone(),
+            file_filter: self.filter.clone(),
+            child_range: self.child_range.clone(),
+            child_filter: self.child_filter.clone(),
+            before: self.options.date_before,
+            after: self.options.date_after,
+            unordered,
+        }
+    }
+}
+
 async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
     let discovered = if args.native_config.is_none() && !args.native_config_ignore {
         default_native_config()
@@ -1713,6 +1738,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         include: None,
         date_before: args.date_before,
         date_after: args.date_after,
+        date_before_set: args.date_before.is_some(),
+        date_after_set: args.date_after.is_some(),
         directory: if args.exact_directory.is_some() {
             Some(Vec::new())
         } else {
@@ -1918,7 +1945,6 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .then(|| PostSelection::new(post_range, post_filter));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
-        DateFilter::new(options.date_before, options.date_after)?;
         let child_range = options
             .child_range
             .as_deref()

@@ -267,7 +267,7 @@ pub(super) fn entries(path: &Path, query: &str) -> Vec<String> {
 }
 // Source's queue carries a Python extractor class and live path/extractor
 // proxies; native public metadata retains the serializable artist values.
-fn public_artist(value: &Value) -> Value {
+pub(super) fn public_artist(value: &Value) -> Value {
     match value {
         Value::Object(map) => Value::Object(
             map.iter()

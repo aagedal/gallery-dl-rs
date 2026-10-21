@@ -8,7 +8,10 @@ use crate::{
     selection::RangeSelection,
 };
 use futures_util::{StreamExt, stream::BoxStream};
-use std::collections::{HashSet, VecDeque};
+use std::{
+    collections::{BTreeMap, HashSet, VecDeque},
+    sync::Arc,
+};
 
 const MAX_FRAMES: usize = 128;
 
@@ -27,6 +30,7 @@ pub struct JobSelection {
 #[derive(Default)]
 struct Frame {
     control: Option<ChildControl>,
+    selection: Option<Arc<JobSelection>>,
     posts: u64,
     files: u64,
     children: u64,
@@ -41,7 +45,8 @@ struct Frame {
 }
 struct State<'a> {
     input: Option<BoxStream<'a, Result<ExtractionEvent>>>,
-    selection: JobSelection,
+    selection: Arc<JobSelection>,
+    classes: Arc<BTreeMap<String, JobSelection>>,
     frames: Vec<Frame>,
     pending: VecDeque<ExtractionEvent>,
     visited: HashSet<String>,
@@ -119,7 +124,12 @@ fn date(timestamp: Option<i64>, selection: &JobSelection) -> DateDecision {
             DateDecision::Stop
         };
     }
-    if selection.before.is_some_and(|before| timestamp >= before) {
+    if selection.before.is_some_and(|before| timestamp >= before)
+        && !selection
+            .after
+            .zip(selection.before)
+            .is_some_and(|(after, before)| after > before)
+    {
         DateDecision::Skip
     } else {
         DateDecision::Keep
@@ -142,6 +152,16 @@ impl JobSelection {
         &self,
         input: BoxStream<'a, Result<ExtractionEvent>>,
     ) -> BoxStream<'a, Result<ExtractionEvent>> {
+        self.apply_events_with_classes(input, Arc::new(BTreeMap::new()))
+    }
+
+    /// Artist children resolve predicates by their immutable extractor class.
+    /// Unspecified classes inherit the parent job's predicates.
+    pub fn apply_events_with_classes<'a>(
+        &self,
+        input: BoxStream<'a, Result<ExtractionEvent>>,
+        classes: Arc<BTreeMap<String, JobSelection>>,
+    ) -> BoxStream<'a, Result<ExtractionEvent>> {
         let empty = self
             .file_range
             .as_ref()
@@ -151,7 +171,8 @@ impl JobSelection {
                 .as_ref()
                 .and_then(|selection| selection.range.as_ref())
                 .is_some_and(|range| range.last_index().is_none());
-        let input = if empty {
+        let input = if empty && classes.is_empty() && self.before.is_none() && self.after.is_none()
+        {
             drop(input);
             None
         } else {
@@ -159,7 +180,8 @@ impl JobSelection {
         };
         let state = State {
             input,
-            selection: self.clone(),
+            selection: Arc::new(self.clone()),
+            classes,
             frames: vec![Frame::default()],
             pending: VecDeque::new(),
             visited: HashSet::new(),
@@ -171,6 +193,11 @@ impl JobSelection {
                     return Some((Ok(event), state));
                 }
                 state.sync_cancelled();
+                let selection = state
+                    .frames
+                    .last()
+                    .and_then(|frame| frame.selection.clone())
+                    .unwrap_or_else(|| state.selection.clone());
                 if state.input.is_none() {
                     if state.frames[0].shown_post {
                         state.frames[0].shown_post = false;
@@ -222,7 +249,7 @@ impl JobSelection {
                         let rejected = parent.stopped
                             || parent.in_post && !parent.active
                             || scope.control.is_cancelled()
-                            || state.selection.child_filter.as_ref().is_some_and(|filter| {
+                            || selection.child_filter.as_ref().is_some_and(|filter| {
                                 !filter.matches_child(&scope.metadata).unwrap_or(false)
                             });
                         let (mut selected, last_for_parent) = if rejected {
@@ -236,12 +263,11 @@ impl JobSelection {
                             };
                             parent.children = index;
                             (
-                                state
-                                    .selection
+                                selection
                                     .child_range
                                     .as_ref()
                                     .is_none_or(|range| range.contains(index)),
-                                state.selection.child_range.as_ref().is_some_and(|range| {
+                                selection.child_range.as_ref().is_some_and(|range| {
                                     range.last_index().is_none_or(|last| index >= last)
                                 }),
                             )
@@ -252,7 +278,19 @@ impl JobSelection {
                         if !selected {
                             scope.control.cancel();
                         }
+                        let child_selection = scope
+                            .metadata
+                            .booru_artist_url()
+                            .and_then(|_| {
+                                state
+                                    .classes
+                                    .get(&format!("{}.tag", scope.metadata.target_category()))
+                                    .cloned()
+                                    .map(Arc::new)
+                            })
+                            .unwrap_or_else(|| selection.clone());
                         state.frames.push(Frame {
+                            selection: Some(child_selection),
                             control: Some(scope.control.clone()),
                             shown_child: selected,
                             stopped: !selected,
@@ -301,38 +339,60 @@ impl JobSelection {
                         frame.active = false;
                         frame.last_post = false;
                         if !stopped {
-                            if let Some(selection) = &state.selection.post_selection {
-                                match date(
-                                    post.metadata.as_ref().and_then(|post| post.timestamp),
-                                    &state.selection,
-                                ) {
+                            let selected =
+                                selection.post_selection.as_ref().is_none_or(|selection| {
+                                    selection.filter.as_ref().is_none_or(|filter| {
+                                        filter.matches_post(&post).unwrap_or(false)
+                                    })
+                                });
+                            if selected {
+                                let decision = if selection.before.is_some()
+                                    || selection.after.is_some()
+                                {
+                                    match crate::filter::source_selection_date(&post) {
+                                        Ok(timestamp) => date(timestamp, &selection),
+                                        Err(error) => {
+                                            state.frames.last_mut().expect("current job").failed =
+                                                true;
+                                            state.stop();
+                                            return Some((Err(error), state));
+                                        }
+                                    }
+                                } else {
+                                    DateDecision::Keep
+                                };
+                                match decision {
                                     DateDecision::Stop => state.stop(),
                                     DateDecision::Skip => {}
                                     DateDecision::Keep => {
-                                        if selection.filter.as_ref().is_none_or(|filter| {
-                                            filter.matches_post(&post).unwrap_or(false)
-                                        }) {
-                                            let frame =
-                                                state.frames.last_mut().expect("current job");
-                                            let Some(index) = frame.posts.checked_add(1) else {
-                                                let error =
-                                                    state.fail("post selection counter overflow");
-                                                return Some((Err(error), state));
-                                            };
-                                            frame.posts = index;
-                                            frame.active = selection
-                                                .range
-                                                .as_ref()
-                                                .is_none_or(|range| range.contains(index));
-                                            frame.last_post =
-                                                selection.range.as_ref().is_some_and(|range| {
-                                                    range.last_index() == Some(index)
-                                                });
+                                        if selection
+                                            .post_selection
+                                            .as_ref()
+                                            .and_then(|selection| selection.range.as_ref())
+                                            .is_some_and(|range| range.last_index().is_none())
+                                        {
+                                            state.stop();
+                                            continue;
                                         }
+                                        let frame = state.frames.last_mut().expect("current job");
+                                        let Some(index) = frame.posts.checked_add(1) else {
+                                            let error =
+                                                state.fail("post selection counter overflow");
+                                            return Some((Err(error), state));
+                                        };
+                                        frame.posts = index;
+                                        frame.active = selection
+                                            .post_selection
+                                            .as_ref()
+                                            .and_then(|s| s.range.as_ref())
+                                            .is_none_or(|range| range.contains(index));
+                                        frame.last_post = selection
+                                            .post_selection
+                                            .as_ref()
+                                            .and_then(|s| s.range.as_ref())
+                                            .is_some_and(|range| range.last_index() == Some(index));
                                     }
                                 }
-                            } else {
-                                frame.active = true;
                             }
                         }
                         let frame = state.frames.last_mut().expect("current job");
@@ -358,19 +418,16 @@ impl JobSelection {
                     }
                     Ok(ExtractionEvent::Media(media)) => {
                         let frame = state.frames.last().expect("current job");
-                        if state.selection.post_selection.is_some()
-                            && !frame.in_post
-                            && !frame.stopped
-                        {
+                        if selection.post_selection.is_some() && !frame.in_post && !frame.stopped {
                             let error =
                                 state.fail("post selection requires explicit post boundaries");
                             return Some((Err(error), state));
                         }
                         if !frame.stopped && (!frame.in_post || frame.active) {
-                            let date = if state.selection.post_selection.is_none() {
+                            let date = if !frame.in_post {
                                 date(
                                     media.metadata.as_ref().and_then(|post| post.timestamp),
-                                    &state.selection,
+                                    &selection,
                                 )
                             } else {
                                 DateDecision::Keep
@@ -378,25 +435,30 @@ impl JobSelection {
                             if date == DateDecision::Stop {
                                 state.stop();
                             } else if date == DateDecision::Keep
-                                && state
-                                    .selection
+                                && selection
                                     .file_filter
                                     .as_ref()
                                     .is_none_or(|filter| filter.matches(&media).unwrap_or(false))
                             {
+                                if selection
+                                    .file_range
+                                    .as_ref()
+                                    .is_some_and(|range| range.last_index().is_none())
+                                {
+                                    state.stop();
+                                    continue;
+                                }
                                 let frame = state.frames.last_mut().expect("current job");
                                 let Some(index) = frame.files.checked_add(1) else {
                                     let error = state.fail("file selection counter overflow");
                                     return Some((Err(error), state));
                                 };
                                 frame.files = index;
-                                let selected = state
-                                    .selection
+                                let selected = selection
                                     .file_range
                                     .as_ref()
                                     .is_none_or(|range| range.contains(index));
-                                let last = state
-                                    .selection
+                                let last = selection
                                     .file_range
                                     .as_ref()
                                     .is_some_and(|range| range.last_index() == Some(index));

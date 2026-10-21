@@ -465,9 +465,10 @@ fn invalid_size_configuration_fails_without_echoing_values() {
 }
 
 #[test]
-fn date_limits_resolve_scopes_and_preserve_epoch_zero() {
+fn date_limits_resolve_scopes_and_preserve_string_epoch_zero() {
     let config =
-        parse(r#"{"extractor":{"date-before":"2000-01-01","twitter":{"date-after":0}}}"#).unwrap();
+        parse(r#"{"extractor":{"date-before":"2000-01-01","twitter":{"date-after":"0"}}}"#)
+            .unwrap();
     let twitter = config.resolve("twitter").unwrap();
     assert_eq!(twitter.date_before, Some(946684800));
     assert_eq!(twitter.date_after, Some(0));
@@ -486,28 +487,55 @@ fn date_limits_resolve_scopes_and_preserve_epoch_zero() {
 }
 
 #[test]
-fn date_limits_reject_invalid_private_values_and_duplicate_keys() {
+fn date_limits_disable_invalid_or_falsy_values_and_convert_source_numeric_bounds() {
     for field in ["date-before", "date-after"] {
-        for value in [
-            serde_json::json!(null),
-            serde_json::json!(false),
-            serde_json::json!(1.5),
-            serde_json::json!([]),
-            serde_json::json!("private-date"),
-            serde_json::json!("2025-02-29"),
-            serde_json::json!("2026-01-01T24:00:00"),
-            serde_json::json!("18446744073709551615"),
+        for (value, expected) in [
+            (serde_json::json!(null), None),
+            (serde_json::json!(false), None),
+            (serde_json::json!(0), None),
+            (serde_json::json!(true), Some(1)),
+            (serde_json::json!(1.5), Some(1)),
+            (serde_json::json!(-1.5), Some(-1)),
+            (serde_json::json!(0.1), Some(0)),
+            (serde_json::json!([]), None),
+            (serde_json::json!({"private":"PRIVATE_DATE"}), None),
+            (serde_json::json!("private-date"), None),
+            (serde_json::json!("2025-02-29"), None),
+            (serde_json::json!("2026-01-01T24:00:00"), None),
+            (serde_json::json!("18446744073709551615"), None),
         ] {
             for doc in [
                 serde_json::json!({(field):value}),
                 serde_json::json!({"extractor":{(field):value}}),
                 serde_json::json!({"extractor":{"instagram":{(field):value}}}),
             ] {
-                let message = parse(&doc.to_string()).unwrap_err().to_string();
-                assert!(!message.contains("private-date"));
+                let config = parse(&doc.to_string()).unwrap();
+                let settings = config.resolve("instagram").unwrap();
+                assert_eq!(
+                    if field == "date-before" {
+                        settings.date_before
+                    } else {
+                        settings.date_after
+                    },
+                    expected
+                );
             }
         }
     }
+    let settings = parse(r#"{"date-after":null,"extractor":{"date-after":"2000-01-01"}}"#)
+        .unwrap()
+        .resolve("twitter")
+        .unwrap();
+    assert_eq!(settings.date_after, None);
+    assert_eq!(
+        settings
+            .overlay(&Options {
+                date_after: Some(0),
+                ..Default::default()
+            })
+            .date_after,
+        Some(0)
+    );
     assert!(parse(r#"{"date-before":1,"date-before":2}"#).is_err());
 }
 

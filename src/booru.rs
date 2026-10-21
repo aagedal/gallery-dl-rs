@@ -2943,3 +2943,7 @@ mod artist_tests;
 #[cfg(test)]
 #[path = "booru_artist_parent_tests.rs"]
 mod artist_parent_tests;
+
+#[cfg(test)]
+#[path = "booru_date_selection_tests.rs"]
+mod date_selection_tests;
