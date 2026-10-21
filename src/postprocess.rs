@@ -642,6 +642,7 @@ pub(crate) struct HookPaths {
     pub directory: PathBuf,
     pub filename: Option<std::ffi::OsString>,
     pub realpath: Option<PathBuf>,
+    pub temppath: Option<PathBuf>,
     pub extension: String,
     pub source_extension: Option<Value>,
 }
@@ -689,7 +690,22 @@ impl Postprocessors {
                         .realpath
                         .as_deref()
                         .ok_or_else(|| error("missing postprocessor hash input"))?;
-                    if options.run(context, path).await? {
+                    let source_paths = media
+                        .metadata
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.source_defaults.is_some());
+                    if options
+                        .run_with_fallback(
+                            context,
+                            if source_paths {
+                                paths.temppath.as_deref().unwrap_or(path)
+                            } else {
+                                path
+                            },
+                            Some(path),
+                        )
+                        .await?
+                    {
                         let name = match filename {
                             Some(template) => template.render_keywords(media, context)?,
                             None => None,
@@ -702,7 +718,11 @@ impl Postprocessors {
                                 .unwrap_or_else(|| media.filename.clone())
                         });
                         paths.filename = Some(name.clone().into());
-                        paths.realpath = Some(paths.directory.join(name));
+                        let path = paths.directory.join(name);
+                        if source_paths {
+                            paths.temppath.get_or_insert_with(|| path.clone());
+                        }
+                        paths.realpath = Some(path);
                     }
                 }
             }
@@ -804,6 +824,7 @@ mod job_mtime_path_tests {
             directory: directory.clone(),
             filename: None,
             realpath: Some(missing_file.clone()),
+            temppath: None,
             extension: String::new(),
             source_extension: None,
         };

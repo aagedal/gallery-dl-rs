@@ -160,6 +160,14 @@ impl HashOptions {
         self.filename
     }
     pub async fn run(&self, context: &mut Map<String, Value>, path: &Path) -> Result<bool> {
+        self.run_with_fallback(context, path, None).await
+    }
+    pub(crate) async fn run_with_fallback(
+        &self,
+        context: &mut Map<String, Value>,
+        path: &Path,
+        fallback: Option<&Path>,
+    ) -> Result<bool> {
         let flag = Arc::new(AtomicBool::new(false));
         struct Cancel(Arc<AtomicBool>);
         impl Drop for Cancel {
@@ -170,15 +178,31 @@ impl HashOptions {
         let _cancel = Cancel(flag.clone());
         let options = self.clone();
         let path = path.to_owned();
-        let values = tokio::task::spawn_blocking(move || options.compute(&path, &flag)).await??;
+        let fallback = fallback.map(Path::to_owned);
+        let values = tokio::task::spawn_blocking(move || {
+            options.compute_with_fallback(&path, fallback.as_deref(), &flag)
+        })
+        .await??;
         for (key, value) in values {
             context.insert(key.clone(), Value::String(value));
             super::objects::record(&[&key], context);
         }
         Ok(self.filename)
     }
+    #[cfg(test)]
     fn compute(&self, path: &Path, flag: &AtomicBool) -> Result<Vec<(String, String)>> {
-        let mut file = open_regular(path)?;
+        self.compute_with_fallback(path, None, flag)
+    }
+    fn compute_with_fallback(
+        &self,
+        path: &Path,
+        fallback: Option<&Path>,
+        flag: &AtomicBool,
+    ) -> Result<Vec<(String, String)>> {
+        let mut file = open_regular(path).or_else(|failure| match fallback {
+            Some(fallback) => open_regular(fallback),
+            None => Err(failure),
+        })?;
         let mut hashes = self
             .hashes
             .iter()

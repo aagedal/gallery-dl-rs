@@ -9,6 +9,7 @@ pub(crate) struct Prepared {
     pub path: PathBuf,
     directory: Option<PathBuf>,
     extension: Option<Value>,
+    source_temppath: Option<PathBuf>,
 }
 fn logical_path(
     root: &Path,
@@ -121,7 +122,11 @@ pub(crate) async fn prepare(
         path,
         directory,
         extension,
+        source_temppath: None,
     };
+    if source_filename && let Some(scope) = options.postprocessor_scope {
+        scope.source_begin(&source_prepare_paths(&result, root, options));
+    }
     let input = result.path.clone();
     run_hook(
         HookCall {
@@ -136,23 +141,48 @@ pub(crate) async fn prepare(
         &mut result,
     )
     .await?;
-    let final_path = logical_path(
-        root,
-        &result.media,
-        &result.keywords,
-        options,
-        template,
-        result.directory.as_deref(),
-    );
-    if source_filename {
-        // Source calls prepare hooks after setting extension data and before
-        // building the filename. A hook may repair an initially invalid value;
-        // a remaining format error must fail before file hooks or publication.
-        result.path = final_path?;
-    } else if let Ok(path) = final_path {
+    if !source_filename
+        && let Ok(path) = logical_path(
+            root,
+            &result.media,
+            &result.keywords,
+            options,
+            template,
+            result.directory.as_deref(),
+        )
+    {
         result.path = path;
     }
     Ok(result)
+}
+
+// Archive hits call fix_extension, which keeps an existing Prepare-built path.
+// Ordinary downloads build again after Prepare even if a callback already did.
+fn build_source_path(
+    root: &Path,
+    options: DownloadOptions<'_>,
+    template: Option<&FilenameTemplate>,
+    prepared: &mut Prepared,
+    archive_hit: bool,
+) -> Result<()> {
+    if prepared
+        .media
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.source_defaults.is_some())
+        && (!archive_hit || prepared.source_temppath.is_none())
+    {
+        prepared.path = logical_path(
+            root,
+            &prepared.media,
+            &prepared.keywords,
+            options,
+            template,
+            prepared.directory.as_deref(),
+        )?;
+        source_built_path(prepared, options);
+    }
+    Ok(())
 }
 
 pub(crate) async fn skip(
@@ -163,6 +193,7 @@ pub(crate) async fn skip(
     template: Option<&FilenameTemplate>,
     prepared: &mut Prepared,
 ) -> Result<Option<Outcome>> {
+    build_source_path(root, options, template, prepared, true)?;
     let input = prepared.path.clone();
     run_hook(
         HookCall {
@@ -177,7 +208,9 @@ pub(crate) async fn skip(
         prepared,
     )
     .await?;
-    prepared.path = input;
+    if !is_source(prepared) {
+        prepared.path = input;
+    }
     let mut converted = None;
     if media
         .metadata
@@ -205,6 +238,63 @@ pub(crate) async fn skip(
         scope.complete_at(&prepared.keywords, &prepared.path);
     }
     Ok(converted)
+}
+fn is_source(prepared: &Prepared) -> bool {
+    prepared
+        .media
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.source_defaults.is_some())
+}
+fn source_realpath(prepared: &Prepared, options: DownloadOptions<'_>) -> Option<PathBuf> {
+    prepared
+        .source_temppath
+        .as_ref()
+        .map(|_| prepared.path.clone())
+        .or_else(|| {
+            options
+                .postprocessor_scope
+                .and_then(|scope| scope.source_paths().realpath)
+        })
+}
+// build_path replaces realpath but only initializes temppath once per URL.
+fn source_built_path(prepared: &mut Prepared, options: DownloadOptions<'_>) {
+    prepared
+        .source_temppath
+        .get_or_insert_with(|| prepared.path.clone());
+    if let Some(scope) = options.postprocessor_scope {
+        scope.source_built_path(&prepared.path);
+    }
+}
+fn source_prepare_paths(
+    prepared: &Prepared,
+    root: &Path,
+    options: DownloadOptions<'_>,
+) -> postprocess::HookPaths {
+    postprocess::HookPaths {
+        directory: prepared
+            .directory
+            .clone()
+            .or_else(|| {
+                options
+                    .postprocessor_scope
+                    .and_then(|scope| scope.directory())
+            })
+            .unwrap_or_else(|| prepared.path.parent().unwrap_or(root).to_owned()),
+        filename: prepared
+            .source_temppath
+            .as_ref()
+            .and_then(|_| prepared.path.file_name().map(|name| name.to_owned())),
+        realpath: source_realpath(prepared, options),
+        temppath: prepared.source_temppath.clone(),
+        extension: prepared
+            .extension
+            .as_ref()
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .into(),
+        source_extension: prepared.extension.clone(),
+    }
 }
 struct HookCall<'a, 'b> {
     client: &'a DownloadClient,
@@ -243,29 +333,19 @@ async fn run_hook(
             .metadata
             .as_ref()
             .is_some_and(|metadata| metadata.source_defaults.is_some());
-    let prepare_paths = source_prepare.then(|| postprocess::HookPaths {
-        directory: prepared
-            .directory
-            .clone()
-            .or_else(|| {
-                options
-                    .postprocessor_scope
-                    .and_then(|scope| scope.directory())
-            })
-            .unwrap_or_else(|| prepared.path.parent().unwrap_or(root).to_owned()),
-        filename: None,
-        realpath: None,
-        extension: prepared
-            .extension
-            .as_ref()
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .into(),
-        source_extension: prepared.extension.clone(),
-    });
-    // Source clears temppath in set_filename before prepare callbacks. A hash
-    // callback must not read an old file at a provisional destination.
-    let input = if source_prepare { Path::new("") } else { input };
+    let source_pending = source_prepare
+        || (hook == Hook::PrepareAfter
+            && prepared
+                .media
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.source_defaults.is_some()));
+    if hook == Hook::File
+        && is_source(prepared)
+        && let Some(scope) = options.postprocessor_scope
+    {
+        scope.source_input(input);
+    }
     let result = tokio::time::timeout(
         client.wait_limit,
         objects.observe(async {
@@ -279,9 +359,10 @@ async fn run_hook(
                         Processor::Ugoira(_) => {}
                         Processor::Metadata(config) => {
                             let config = config.clone().with_filename_template(template.cloned());
-                            if let Some(paths) = &prepare_paths {
+                            if source_prepare {
+                                let paths = source_prepare_paths(prepared, root, options);
                                 config
-                                    .run_job(&mut prepared.keywords, &prepared.media, paths, root)
+                                    .run_job(&mut prepared.keywords, &prepared.media, &paths, root)
                                     .await?;
                             } else {
                                 config
@@ -314,7 +395,22 @@ async fn run_hook(
                             }
                         }
                         Processor::Hash(config) => {
-                            if config.run(&mut prepared.keywords, input).await? {
+                            let rebuilt = if source_pending {
+                                let cached = source_realpath(prepared, options);
+                                config
+                                    .run_with_fallback(
+                                        &mut prepared.keywords,
+                                        prepared
+                                            .source_temppath
+                                            .as_deref()
+                                            .unwrap_or_else(|| Path::new("")),
+                                        cached.as_deref(),
+                                    )
+                                    .await?
+                            } else {
+                                config.run(&mut prepared.keywords, input).await?
+                            };
+                            if rebuilt {
                                 prepared.path = logical_path(
                                     root,
                                     &prepared.media,
@@ -323,6 +419,9 @@ async fn run_hook(
                                     template,
                                     prepared.directory.as_deref(),
                                 )?;
+                                if is_source(prepared) {
+                                    source_built_path(prepared, options);
+                                }
                             }
                         }
                     }
@@ -374,6 +473,7 @@ pub(crate) async fn download(
     template: Option<&FilenameTemplate>,
     mut prepared: Prepared,
 ) -> Result<Outcome> {
+    build_source_path(root, options, template, &mut prepared, false)?;
     if postprocess::regular_file(&prepared.path)? {
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
@@ -627,6 +727,9 @@ pub(crate) async fn download(
             }
         }
         outcome = Outcome::Downloaded(path);
+    }
+    if is_source(&prepared) {
+        source_built_path(&mut prepared, options);
     }
     let path = prepared.path.clone();
     run_hook(

@@ -1448,6 +1448,7 @@ mod job_path_oracle {
                     .as_str()
                     .map(std::ffi::OsString::from),
                 realpath: case["paths"]["realpath"].as_str().map(expand),
+                temppath: None,
                 extension: case["paths"]["extension"].as_str().unwrap().into(),
                 source_extension: None,
             };

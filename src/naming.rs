@@ -1000,6 +1000,10 @@ fn lookup(
 mod source_formatter_date_tests;
 
 #[cfg(test)]
+#[path = "booru_prepare_cache_tests.rs"]
+mod booru_prepare_cache_tests;
+
+#[cfg(test)]
 #[path = "booru_path_results_tests.rs"]
 mod booru_path_results_tests;
 

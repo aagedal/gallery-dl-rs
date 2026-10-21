@@ -53,6 +53,7 @@ struct Shared {
     objects: crate::postprocess::objects::Bindings,
     directory: Mutex<Option<PathBuf>>,
     source_extension: Mutex<Option<Value>>,
+    source_path: Arc<Mutex<HookPaths>>,
     halt: Mutex<Option<Arc<AtomicBool>>>,
 }
 /// One emitted file's participation in its owning post. Drop on every outcome,
@@ -68,6 +69,42 @@ impl std::fmt::Debug for ScopeLease {
     }
 }
 impl ScopeLease {
+    pub(crate) fn source_paths(&self) -> HookPaths {
+        self.shared
+            .source_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+    pub(crate) fn source_begin(&self, paths: &HookPaths) {
+        let mut state = self
+            .shared
+            .source_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        state.directory = paths.directory.clone();
+        state.extension = paths.extension.clone();
+        state.source_extension = paths.source_extension.clone();
+        state.filename = None;
+        state.temppath = None;
+    }
+    pub(crate) fn source_built_path(&self, path: &Path) {
+        let mut state = self
+            .shared
+            .source_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        state.filename = path.file_name().map(|name| name.to_owned());
+        state.realpath = Some(path.to_owned());
+        state.temppath.get_or_insert_with(|| path.to_owned());
+    }
+    pub(crate) fn source_input(&self, path: &Path) {
+        self.shared
+            .source_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .temppath = Some(path.to_owned());
+    }
     pub(crate) fn set_source_extension(&self, extension: Option<Value>) {
         *self
             .shared
@@ -245,10 +282,20 @@ impl Shared {
     }
     fn new_with_objects(
         original: Map<String, Value>,
+        context: Map<String, Value>,
+        policy: KeywordPolicy,
+        failed: Arc<AtomicBool>,
+        objects: crate::postprocess::objects::Bindings,
+    ) -> Arc<Self> {
+        Self::with_source_path(original, context, policy, failed, objects, Arc::default())
+    }
+    fn with_source_path(
+        original: Map<String, Value>,
         mut context: Map<String, Value>,
         policy: KeywordPolicy,
         failed: Arc<AtomicBool>,
         objects: crate::postprocess::objects::Bindings,
+        source_path: Arc<Mutex<HookPaths>>,
     ) -> Arc<Self> {
         if let KeywordPolicy::CopiedAfterPost { removed_fields, .. } = &policy {
             for key in removed_fields.iter() {
@@ -272,6 +319,7 @@ impl Shared {
             objects,
             directory: Mutex::new(None),
             source_extension: Mutex::new(None),
+            source_path,
             halt: Mutex::new(None),
         })
     }
@@ -376,6 +424,7 @@ struct Runtime {
     media: Media,
     context: Map<String, Value>,
     paths: HookPaths,
+    source_path: Arc<Mutex<HookPaths>>,
     failed: Arc<AtomicBool>,
     halt: Arc<AtomicBool>,
     objects: crate::postprocess::objects::Bindings,
@@ -392,6 +441,19 @@ impl Runtime {
         hook: Hook,
         objects: crate::postprocess::objects::Bindings,
     ) -> Result<()> {
+        let source_paths = self
+            .media
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.source_defaults.is_some());
+        if source_paths {
+            let cached = self.source_path.lock().unwrap_or_else(|e| e.into_inner());
+            self.paths.filename = cached.filename.clone();
+            self.paths.temppath = cached.temppath.clone();
+            self.paths.realpath = cached.realpath.clone();
+            self.paths.extension = cached.extension.clone();
+            self.paths.source_extension = cached.source_extension.clone();
+        }
         objects.refresh(&mut self.context);
         let filename =
             crate::naming::effective_filename(&self.media, self.configuration.filename.as_ref());
@@ -406,6 +468,9 @@ impl Runtime {
             ))
             .await;
         objects.sync_context(&self.context);
+        if source_paths {
+            *self.source_path.lock().unwrap_or_else(|e| e.into_inner()) = self.paths.clone();
+        }
         if result.is_err() {
             self.failed.store(true, Ordering::Release);
             self.halt.store(true, Ordering::Release);
@@ -451,7 +516,19 @@ impl Frame {
             let (context, path) = post.finish().await;
             if let Some(runtime) = &mut self.runtime {
                 runtime.context = context;
-                if let Some(path) = path {
+                let source_paths = runtime
+                    .media
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.source_defaults.is_some());
+                if source_paths {
+                    runtime.paths = post
+                        .source_path
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                }
+                if let Some(path) = path.filter(|_| !source_paths) {
                     runtime.paths.source_extension = post
                         .source_extension
                         .lock()
@@ -607,6 +684,7 @@ impl State<'_> {
             }),
             context: Map::new(),
             paths: HookPaths::default(),
+            source_path: Arc::default(),
             failed: Arc::new(AtomicBool::new(frame.failed)),
             halt: Arc::new(AtomicBool::new(false)),
             objects: Default::default(),
@@ -760,9 +838,11 @@ impl State<'_> {
                             directory: post_directory(&configuration, &media, &original)?,
                             filename: None,
                             realpath: None,
+                            temppath: None,
                             extension: String::new(),
                             source_extension: None,
                         },
+                        source_path: Arc::default(),
                         media: media.clone(),
                         failed: Arc::new(AtomicBool::new(frame.failed)),
                         halt: Arc::new(AtomicBool::new(false)),
@@ -801,12 +881,13 @@ impl State<'_> {
                     }
                     runtime.media = media;
                     runtime.hook(Hook::Post).await?;
-                    frame.post = Some(Shared::new_with_objects(
+                    frame.post = Some(Shared::with_source_path(
                         original,
                         runtime.context.clone(),
                         policy,
                         runtime.failed.clone(),
                         runtime.objects.clone(),
+                        runtime.source_path.clone(),
                     ));
                     *frame
                         .post
