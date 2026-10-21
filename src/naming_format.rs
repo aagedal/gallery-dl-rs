@@ -191,6 +191,14 @@ impl Field {
     }
     fn parse_mode(text: &str, known: impl Fn(&str) -> bool, source: bool) -> Result<Self> {
         let (head, conversion, spec) = split_field(text)?;
+        if source && head.is_empty() {
+            return Ok(Self {
+                alternatives: vec![Source::Literal(String::new())],
+                conversion: None,
+                ops: Vec::new(),
+                spec: String::new(),
+            });
+        }
         let mut alternatives = Vec::new();
         for alternative in split_outside(head, '|') {
             alternatives.push(parse_source(alternative, &known)?);
@@ -328,17 +336,19 @@ impl Field {
                 value = *inner;
             }
             if let Some(conversion) = self.conversion {
-                value = convert(value, conversion)?;
+                value = convert_source(value, conversion)?;
             }
             return apply_identity(&self.ops, &self.spec, value);
         }
-        if matches!(self.conversion, Some('D' | 'd')) && self.ops.is_empty() && self.spec.is_empty()
+        if let Some(conversion) = self.conversion
+            && self.ops.is_empty()
+            && self.spec.is_empty()
         {
             let mut value = self.select_with_default(lookup, Value::Missing);
             while let Value::SourcePrimitive(inner) = value {
                 value = *inner;
             }
-            return convert(value, self.conversion.expect("date conversion"));
+            return convert_source(value, conversion);
         }
         Ok(Value::Str(
             self.render_content(lookup)?
@@ -358,12 +368,17 @@ impl Field {
         lookup: impl Fn(&str) -> Option<Value>,
         default: Value,
     ) -> Result<Option<String>> {
+        let source = default == Value::Missing;
         let mut selected = self.select_with_default(lookup, default);
         while let Value::SourcePrimitive(inner) = selected {
             selected = *inner;
         }
         if let Some(conversion) = self.conversion {
-            selected = convert(selected, conversion)?;
+            selected = if source {
+                convert_source(selected, conversion)?
+            } else {
+                convert(selected, conversion)?
+            };
         }
         apply(&self.ops, &self.spec, selected)
     }
@@ -444,7 +459,7 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
         Op::Convert(conversions) => {
             let mut value = value;
             for conversion in conversions {
-                value = convert(value, *conversion)?;
+                value = convert_source(value, *conversion)?;
             }
             value
         }
@@ -804,19 +819,8 @@ fn identity_int(value: &Value) -> Option<i128> {
     }
 }
 fn convert_identity(value: Value, conversion: char) -> Result<Value> {
-    let invalid = || error("template conversion does not support this value");
     Ok(match conversion {
-        'i' => Value::Int(identity_int(&value).ok_or_else(invalid)?),
-        'f' => {
-            let number = match value {
-                Value::Int(value) => Some(value as f64),
-                Value::Float(value) => Some(value),
-                Value::Bool(value) => Some(f64::from(value)),
-                Value::Str(value) => value.trim().parse().ok(),
-                _ => None,
-            };
-            Value::Float(number.filter(|n| n.is_finite()).ok_or_else(invalid)?)
-        }
+        'i' | 'f' => convert_source(value, conversion)?,
         's' => Value::Str(bounded(identity_text(&value))?),
         'r' => Value::Str(bounded(identity_repr(&value))?),
         'S' => {
@@ -857,12 +861,7 @@ fn convert_identity(value: Value, conversion: char) -> Result<Value> {
             Value::NullDate(date) => date.unix_timestamp().to_string(),
             _ => String::new(),
         }),
-        'l' | 'u' | 'c' | 'C' | 't' | 'g' | 'U' | 'H' | 'W' => {
-            if !matches!(value, Value::Str(_)) {
-                return Err(invalid());
-            }
-            convert(value, conversion)?
-        }
+        'l' | 'u' | 'c' | 'C' | 't' | 'g' | 'U' | 'H' | 'W' => convert_source(value, conversion)?,
         _ => convert(value, conversion)?,
     })
 }
@@ -1048,6 +1047,128 @@ fn unescape_html(text: &str) -> String {
     output
 }
 
+fn convert_source(value: Value, conversion: char) -> Result<Value> {
+    let invalid = || error("template conversion does not support this value");
+    if matches!(value, Value::Missing) {
+        return Ok(match conversion {
+            'i' => Value::Int(0),
+            'f' => Value::Float(0.0),
+            'd' => source_timestamp(0),
+            'D' => Value::InvalidDate,
+            's' | 'r' | 'T' => Value::Str("None".into()),
+            'S' | 'C' | 'H' => Value::Str(String::new()),
+            'g' => Value::Str("none".into()),
+            'j' => Value::Str("null".into()),
+            'U' => Value::Missing,
+            _ => return Err(invalid()),
+        });
+    }
+    match conversion {
+        'i' => match &value {
+            Value::BigInt(_) => Ok(value),
+            Value::Str(text) => python_integer(text).ok_or_else(invalid),
+            _ => identity_int(&value).map(Value::Int).ok_or_else(invalid),
+        },
+        'f' => {
+            let number = match &value {
+                Value::Str(text) => {
+                    let text = python_float_text(text).ok_or_else(invalid)?;
+                    text.parse::<f64>().ok()
+                }
+                Value::Int(number) => Some(*number as f64),
+                Value::BigInt(number) => number
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|number| number.is_finite()),
+                Value::Float(number) => Some(*number),
+                Value::Bool(number) => Some(f64::from(*number)),
+                _ => None,
+            }
+            .ok_or_else(invalid)?;
+            Ok(Value::Float(number))
+        }
+        'l' | 'u' | 'c' | 'C' | 't' | 'U' | 'W' => {
+            if !matches!(value, Value::Str(_)) {
+                return Err(invalid());
+            }
+            convert(value, conversion)
+        }
+        'g' => convert(Value::Str(value.text()), conversion),
+        'H' if !value.truthy() => Ok(Value::Str(String::new())),
+        'H' => {
+            if !matches!(value, Value::Str(_)) {
+                return Err(invalid());
+            }
+            convert(value, conversion)
+        }
+        's' | 'S' | 'r' | 'j' | 'd' | 'D' | 'T' => convert_identity(value, conversion),
+        _ => Err(invalid()),
+    }
+}
+fn python_integer(text: &str) -> Option<Value> {
+    let text = text.trim_matches(char::is_whitespace);
+    let (sign, text) = match text.as_bytes().first() {
+        Some(b'+') => ("", &text[1..]),
+        Some(b'-') => ("-", &text[1..]),
+        _ => ("", text),
+    };
+    let mut digits = String::new();
+    let mut previous = false;
+    for character in text.chars() {
+        if character == '_' {
+            if !previous {
+                return None;
+            }
+            previous = false;
+        } else {
+            let digit = crate::python_unicode::decimal_digit(character)?;
+            digits.push(char::from(b'0' + digit));
+            if digits.len() > 4300 {
+                return None;
+            }
+            previous = true;
+        }
+    }
+    if !previous {
+        return None;
+    }
+    let digits = digits.trim_start_matches('0');
+    let number = if digits.is_empty() {
+        "0".into()
+    } else {
+        format!("{sign}{digits}")
+    };
+    Some(
+        number
+            .parse::<i128>()
+            .map_or_else(|_| Value::BigInt(number), Value::Int),
+    )
+}
+fn python_float_text(text: &str) -> Option<String> {
+    let text = text.trim_matches(char::is_whitespace);
+    let characters: Vec<_> = text.chars().collect();
+    let mut result = String::new();
+    for (index, character) in characters.iter().copied().enumerate() {
+        if character == '_' {
+            if index == 0
+                || index + 1 == characters.len()
+                || crate::python_unicode::decimal_digit(characters[index - 1]).is_none()
+                || crate::python_unicode::decimal_digit(characters[index + 1]).is_none()
+            {
+                return None;
+            }
+        } else if let Some(digit) = crate::python_unicode::decimal_digit(character) {
+            result.push(char::from(b'0' + digit));
+        } else {
+            result.push(character);
+        }
+    }
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
 fn convert(value: Value, conversion: char) -> Result<Value> {
     if value == Value::Missing {
         return Ok(match conversion {
@@ -1736,6 +1857,106 @@ mod strict_missing_tests {
                 .render_default_value(|_| Some(Value::None))
                 .unwrap(),
             Value::InvalidDate
+        );
+    }
+    #[test]
+    fn source_bare_conversions_retain_types_and_reject_private_invalid_values() {
+        assert_eq!(
+            Field::parse_source("value!i", |_| true)
+                .unwrap()
+                .render_default_value(|_| Some(Value::Str("١_２".into())))
+                .unwrap(),
+            Value::Int(12)
+        );
+        assert_eq!(
+            Field::parse_source("value!f", |_| true)
+                .unwrap()
+                .render_default_value(|_| Some(Value::Str("-１.２_５".into())))
+                .unwrap(),
+            Value::Float(-1.25)
+        );
+        for conversion in ['i', 'f'] {
+            let field = Field::parse_source(&format!("value!{conversion}"), |_| true).unwrap();
+            assert!(field.render_default_value(|_| Some(Value::None)).is_err());
+            let error = field
+                .render_default_value(|_| Some(Value::Str("PRIVATE_BAD_NUMBER".into())))
+                .unwrap_err();
+            assert!(!error.to_string().contains("PRIVATE_BAD_NUMBER"));
+        }
+        assert_eq!(
+            Field::parse_source("missing!i", |_| true)
+                .unwrap()
+                .render_default_value(|_| None)
+                .unwrap(),
+            Value::Int(0)
+        );
+        assert_eq!(
+            Field::parse_source("missing!f", |_| true)
+                .unwrap()
+                .render_default_value(|_| None)
+                .unwrap(),
+            Value::Float(0.0)
+        );
+        assert_eq!(
+            Field::parse_source("none!g", |_| true)
+                .unwrap()
+                .render_default_value(|_| Some(Value::None))
+                .unwrap(),
+            Value::Str("none".into())
+        );
+        assert_eq!(
+            Field::parse_source("none!j", |_| true)
+                .unwrap()
+                .render_default_value(|_| Some(Value::None))
+                .unwrap(),
+            Value::Str("null".into())
+        );
+        assert!(
+            Field::parse_source("none!l", |_| true)
+                .unwrap()
+                .render_default_value(|_| Some(Value::None))
+                .is_err()
+        );
+        assert_eq!(
+            Field::parse_source("value:Ci/", |_| true)
+                .unwrap()
+                .render_default_value(|_| Some(Value::Str("12".into())))
+                .unwrap(),
+            Value::Str("12".into())
+        );
+    }
+    #[test]
+    fn source_empty_fields_ignore_empty_key_and_conversions_but_strict_fields_reject() {
+        for field in ["", "!D", "!d", "!x", ":invalid"] {
+            assert_eq!(
+                Field::parse_source(field, |_| true)
+                    .unwrap()
+                    .render_default_value(|_| Some(Value::Int(99)))
+                    .unwrap(),
+                Value::Str(String::new())
+            );
+        }
+        assert!(Field::parse("", |_| false).is_err());
+    }
+    #[test]
+    fn source_formatted_conversions_and_conversion_chains_propagate_private_errors() {
+        for (text, value) in [
+            ("raw!i:03", Value::Str("PRIVATE_BAD_INT".into())),
+            ("raw!f:.2f", Value::Str("PRIVATE_BAD_FLOAT".into())),
+            ("raw!l:>8", Value::Int(1)),
+            ("raw:Ci/03", Value::Str("PRIVATE_BAD_INT".into())),
+            ("raw:Cf/.2f", Value::Str("PRIVATE_BAD_FLOAT".into())),
+        ] {
+            let field = Field::parse_source(text, |_| true).unwrap();
+            let error = field
+                .render_default_value(|_| Some(value.clone()))
+                .unwrap_err();
+            assert!(!error.to_string().contains("PRIVATE_"));
+        }
+        let strict = Field::parse("raw!i:03", |_| true).unwrap();
+        assert_eq!(
+            strict.render(|_| Some(Value::Str("bad".into()))).unwrap(),
+            None
         );
     }
 }

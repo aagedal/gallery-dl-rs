@@ -52,6 +52,10 @@ pub(crate) async fn prepare(
 ) -> Result<Prepared> {
     let pp = options.postprocessors.expect("generic processors");
     let prepared = pp.prepared_media(media);
+    let source_filename = prepared
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.source_defaults.is_some());
     let mut keywords = postprocess::context(&prepared);
     if let Some(scope) = options.postprocessor_scope {
         scope.inherit_for(&prepared, &mut keywords).await?;
@@ -93,10 +97,11 @@ pub(crate) async fn prepare(
         directory.as_deref(),
     )
     .or_else(|failure| {
-        if pp
-            .specifications
-            .iter()
-            .any(|spec| matches!(&spec.options,Processor::Hash(h) if h.rebuilds_filename()))
+        if source_filename
+            || pp
+                .specifications
+                .iter()
+                .any(|spec| matches!(&spec.options,Processor::Hash(h) if h.rebuilds_filename()))
         {
             logical_path(
                 root,
@@ -131,14 +136,20 @@ pub(crate) async fn prepare(
         &mut result,
     )
     .await?;
-    if let Ok(path) = logical_path(
+    let final_path = logical_path(
         root,
         &result.media,
         &result.keywords,
         options,
         template,
         result.directory.as_deref(),
-    ) {
+    );
+    if source_filename {
+        // Source calls prepare hooks after setting extension data and before
+        // building the filename. A hook may repair an initially invalid value;
+        // a remaining format error must fail before file hooks or publication.
+        result.path = final_path?;
+    } else if let Ok(path) = final_path {
         result.path = path;
     }
     Ok(result)
@@ -226,6 +237,35 @@ async fn run_hook(
         .map(|scope| scope.objects())
         .unwrap_or_default();
     objects.refresh(&mut prepared.keywords);
+    let source_prepare = hook == Hook::Prepare
+        && prepared
+            .media
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.source_defaults.is_some());
+    let prepare_paths = source_prepare.then(|| postprocess::HookPaths {
+        directory: prepared
+            .directory
+            .clone()
+            .or_else(|| {
+                options
+                    .postprocessor_scope
+                    .and_then(|scope| scope.directory())
+            })
+            .unwrap_or_else(|| prepared.path.parent().unwrap_or(root).to_owned()),
+        filename: None,
+        realpath: None,
+        extension: prepared
+            .extension
+            .as_ref()
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .into(),
+        source_extension: prepared.extension.clone(),
+    });
+    // Source clears temppath in set_filename before prepare callbacks. A hash
+    // callback must not read an old file at a provisional destination.
+    let input = if source_prepare { Path::new("") } else { input };
     let result = tokio::time::timeout(
         client.wait_limit,
         objects.observe(async {
@@ -238,17 +278,22 @@ async fn run_hook(
                     match &spec.options {
                         Processor::Ugoira(_) => {}
                         Processor::Metadata(config) => {
-                            config
-                                .clone()
-                                .with_filename_template(template.cloned())
-                                .run_with_source_extension(
-                                    &mut prepared.keywords,
-                                    &prepared.media,
-                                    &prepared.path,
-                                    root,
-                                    prepared.extension.as_ref(),
-                                )
-                                .await?
+                            let config = config.clone().with_filename_template(template.cloned());
+                            if let Some(paths) = &prepare_paths {
+                                config
+                                    .run_job(&mut prepared.keywords, &prepared.media, paths, root)
+                                    .await?;
+                            } else {
+                                config
+                                    .run_with_source_extension(
+                                        &mut prepared.keywords,
+                                        &prepared.media,
+                                        &prepared.path,
+                                        root,
+                                        prepared.extension.as_ref(),
+                                    )
+                                    .await?;
+                            }
                         }
                         Processor::Mtime(config) => {
                             if config.is_file() {

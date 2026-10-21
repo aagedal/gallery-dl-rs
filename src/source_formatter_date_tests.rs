@@ -13,7 +13,7 @@ fn fixture() -> Value {
     .unwrap()
 }
 
-fn decode(value: &Value) -> Value {
+pub(super) fn decode(value: &Value) -> Value {
     match value["kind"].as_str().unwrap() {
         "value" => value["value"].clone(),
         "datetime" => {
@@ -40,7 +40,7 @@ fn decode(value: &Value) -> Value {
     }
 }
 
-fn check_value(actual: &Value, expected: &Value, label: &str) {
+pub(super) fn check_value(actual: &Value, expected: &Value, label: &str) {
     let actual = crate::filter::source_primitive_from_json(actual).unwrap_or(actual);
     match expected["kind"].as_str().unwrap() {
         "datetime" | "NullDatetime" => {
@@ -639,7 +639,7 @@ fn source_only_string_and_fractional_offset_inputs_remain_explicit() {
     }
 }
 
-fn source_templates(
+pub(super) fn source_templates(
     case: &Value,
     root: &Path,
 ) -> (

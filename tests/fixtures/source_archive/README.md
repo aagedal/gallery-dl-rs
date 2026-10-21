@@ -54,3 +54,25 @@ Native replay constructs API posts from the same IDs and checks the complete
 request sequence, including traversal beyond 100 pages. Regenerate using the
 adjacent `booru_pagination_generate.py` in the installed source environment,
 using `python -B` to avoid writing bytecode caches beside the fixtures.
+
+`booru_path_results.json` records 74 genuine DownloadJobs for typed filename and
+directory results, plus six Prepare-phase jobs. Bare datetime and numeric
+conversions, identity strings/lists/maps, missing values, nested lists, ordinary
+string formatting and empty fields preserve their actual source result types.
+Direct formatter descriptors distinguish objects from text. Native replay checks
+callback phases, complete published bytes, retained failure sidecars and stable
+canonical SQLite history. Five additional direct conversion probes verify that
+invalid explicit and chained conversions propagate errors. Two first-file
+Prepare Hash jobs also ensure a provisional destination cannot become hash
+input, including when an earlier metadata callback created that file.
+
+Four actual `PathFormat.open`/`part_enable`/`finalize` probes qualify seven empty
+basename observations: the controlled transfer normalizes trailing separators,
+so its synthetic artifacts do not prove HTTP publication. Exact source path
+strings remain recorded. Real source opens/finalization fail with
+`IsADirectoryError`, sometimes retaining `.part`; native's existing safe-basename
+check rejects these earlier. This policy and phase difference is explicit in the
+replay rather than silently treating synthetic artifacts as expected publication.
+Regenerate using the adjacent `booru_path_results_generate.py` with gallery-dl
+1.32.17 and Python 3.15; it imports the frozen postprocessor and booru runners
+through relative fixture paths. Source module checksums are embedded.

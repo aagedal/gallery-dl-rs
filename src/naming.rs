@@ -308,27 +308,7 @@ impl FilenameTemplate {
         keywords: &serde_json::Map<String, serde_json::Value>,
         directory_component: bool,
     ) -> Result<Option<String>> {
-        let mut context = Some(
-            keywords
-                .iter()
-                .map(|(key, value)| {
-                    let value = crate::filter::keyword_value(key, value);
-                    let inherited = media
-                        .metadata
-                        .as_ref()
-                        .and_then(|metadata| metadata.booru_artist_parent.as_ref())
-                        .is_some_and(|inheritance| inheritance.has_keyword(key));
-                    (
-                        key.clone(),
-                        if inherited {
-                            crate::filter::Value::SourcePrimitive(std::sync::Arc::new(value))
-                        } else {
-                            value
-                        },
-                    )
-                })
-                .collect(),
-        );
+        let mut context = Some(keyword_context(media, keywords));
         let mut selected = self.parts.as_deref();
         for (filter, parts) in &self.conditions {
             if filter.matches_keywords(keywords)? {
@@ -352,15 +332,93 @@ impl FilenameTemplate {
         Ok(self.parts.as_deref())
     }
 
-    fn render_directory_component(
+    fn render_directory_segments(
         &self,
         media: &Media,
         context: &mut Option<BTreeMap<String, crate::filter::Value>>,
-    ) -> Result<String> {
-        let parts = self
-            .select(media)?
-            .ok_or_else(|| error("no filename template condition matched"))?;
-        Self::render_parts(parts, media, context, false, true)
+        keywords: Option<&serde_json::Map<String, serde_json::Value>>,
+        examined: &mut usize,
+    ) -> Result<Vec<String>> {
+        let mut parts = self.parts.as_deref();
+        if let Some(keywords) = keywords {
+            for (filter, candidate) in &self.conditions {
+                if filter.matches_keywords(keywords)? {
+                    parts = Some(candidate);
+                    break;
+                }
+            }
+        } else {
+            parts = self.select(media)?;
+        }
+        let parts = parts.ok_or_else(|| error("no directory template condition matched"))?;
+        if source_paths(media) {
+            source_directory_segments(
+                Self::render_source_parts(parts, media, context, keywords.is_some())?,
+                examined,
+            )
+        } else {
+            Ok(vec![Self::render_parts(
+                parts,
+                media,
+                context,
+                keywords.is_some(),
+                true,
+            )?])
+        }
+    }
+
+    fn lookup_value(
+        media: &Media,
+        context: &BTreeMap<String, crate::filter::Value>,
+        name: &str,
+        keywords: bool,
+    ) -> Option<Value> {
+        if keywords {
+            context.get(name).map(|value| {
+                if matches!(name, "date" | "date_updated")
+                    && let crate::filter::Value::String(value) = value
+                    && let Ok(date) = crate::postprocess::template::parse_date(value)
+                {
+                    Value::Date(date)
+                } else {
+                    convert(value, name)
+                }
+            })
+        } else {
+            lookup(media, context, name)
+        }
+    }
+
+    fn render_source_parts(
+        parts: &[Part],
+        media: &Media,
+        context: &mut Option<BTreeMap<String, crate::filter::Value>>,
+        keywords: bool,
+    ) -> Result<Value> {
+        let mut output = String::new();
+        for part in parts {
+            let text = match part {
+                Part::Literal(value) => value.clone(),
+                Part::Field(field) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    let value = unwrap_source_value(field.render_default_value(|name| {
+                        Self::lookup_value(media, context, name, keywords)
+                    })?);
+                    if parts.len() == 1 {
+                        return Ok(value);
+                    }
+                    let Value::Str(value) = value else {
+                        return Err(error("source path template field did not return text"));
+                    };
+                    value
+                }
+            };
+            if text.len() > 65536 - output.len() {
+                return Err(error("source path template output exceeds limits"));
+            }
+            output.push_str(&text);
+        }
+        Ok(Value::Str(output))
     }
 
     fn render_parts(
@@ -370,33 +428,20 @@ impl FilenameTemplate {
         keywords: bool,
         directory_component: bool,
     ) -> Result<String> {
-        let source = media
-            .metadata
-            .as_ref()
-            .is_some_and(|metadata| metadata.source_defaults.is_some());
+        if source_paths(media) {
+            let Value::Str(value) = Self::render_source_parts(parts, media, context, keywords)?
+            else {
+                return Err(error("source filename template must return text"));
+            };
+            return clean_source_segment(value, directory_component);
+        }
         let mut output = String::new();
         for part in parts {
             match part {
                 Part::Literal(value) => output.push_str(value),
                 Part::Field(field) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
-                    let lookup = |name: &str| {
-                        if keywords {
-                            context.get(name).map(|value| {
-                                if matches!(name, "date" | "date_updated")
-                                    && let crate::filter::Value::String(value) = value
-                                    && let Ok(date) =
-                                        crate::postprocess::template::parse_date(value)
-                                {
-                                    Value::Date(date)
-                                } else {
-                                    convert(value, name)
-                                }
-                            })
-                        } else {
-                            lookup(media, context, name)
-                        }
-                    };
+                    let lookup = |name: &str| Self::lookup_value(media, context, name, keywords);
                     let source_nameext = media
                         .metadata
                         .as_ref()
@@ -404,21 +449,10 @@ impl FilenameTemplate {
                         && field
                             .names()
                             .any(|name| matches!(name, "filename" | "extension" | "md5"));
-                    let value = if source {
-                        let value = field.render_default_value(lookup)?;
-                        if parts.len() > 1 && !matches!(value, Value::Str(_)) {
-                            return Err(error("filename template field did not return text"));
-                        }
-                        Some(value.identity_text()?)
-                    } else if source_nameext {
+                    let value = if source_nameext {
                         field.render_content(lookup)?
                     } else {
                         field.render(lookup)?
-                    };
-                    let value = if source {
-                        Some(value.unwrap_or_else(|| "None".into()))
-                    } else {
-                        value
                     };
                     let Some(value) = value else {
                         let name = field.names().next().unwrap_or("literal");
@@ -431,46 +465,12 @@ impl FilenameTemplate {
                         }
                         return Err(error(format!("filename field {name} is missing")));
                     };
-                    // Sanitize each substitution independently so metadata can
-                    // never introduce paths, drive prefixes, or control bytes.
-                    if source {
-                        output.push_str(&value);
-                    } else {
-                        output.extend(value.chars().map(safe_char));
-                    }
+                    output.extend(value.chars().map(safe_char));
                     if output.len() > 65536 {
                         return Err(error("filename template output exceeds limits"));
                     }
                 }
             }
-        }
-        if source {
-            if directory_component {
-                output = output.trim().to_owned();
-            }
-            let output: String = output
-                .chars()
-                .filter(|c| !matches!(*c, '\0'..='\u{1f}' | '\u{7f}'))
-                .map(|c| {
-                    if c == '/'
-                        || cfg!(windows)
-                            && matches!(c, '\\' | '|' | '<' | '>' | ':' | '"' | '?' | '*')
-                    {
-                        '_'
-                    } else {
-                        c
-                    }
-                })
-                .collect();
-            let output = if cfg!(windows) && directory_component {
-                output.trim_end_matches(['.', ' ']).to_owned()
-            } else {
-                output
-            };
-            if matches!(output.as_str(), "." | "..") || output.is_empty() && !directory_component {
-                return Err(error("source filename must produce a safe basename"));
-            }
-            return Ok(output);
         }
         let output: String = output.chars().map(safe_char).collect();
         let mut output = output.trim_matches('.').to_string();
@@ -516,6 +516,107 @@ fn safe_char(c: char) -> char {
     } else {
         '_'
     }
+}
+
+fn keyword_context(
+    media: &Media,
+    keywords: &serde_json::Map<String, serde_json::Value>,
+) -> BTreeMap<String, crate::filter::Value> {
+    keywords
+        .iter()
+        .map(|(key, value)| {
+            let value = crate::filter::keyword_value(key, value);
+            let inherited = media
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.booru_artist_parent.as_ref())
+                .is_some_and(|inheritance| inheritance.has_keyword(key));
+            (
+                key.clone(),
+                if inherited {
+                    crate::filter::Value::SourcePrimitive(std::sync::Arc::new(value))
+                } else {
+                    value
+                },
+            )
+        })
+        .collect()
+}
+
+fn source_paths(media: &Media) -> bool {
+    media
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.source_defaults.is_some())
+}
+fn unwrap_source_value(mut value: Value) -> Value {
+    while let Value::SourcePrimitive(inner) = value {
+        value = *inner;
+    }
+    value
+}
+fn clean_source_segment(mut output: String, directory_component: bool) -> Result<String> {
+    if output.len() > 65536 {
+        return Err(error("source path template output exceeds limits"));
+    }
+    if directory_component {
+        output = output.trim().to_owned();
+    }
+    let output: String = output
+        .chars()
+        .filter(|c| !matches!(*c, '\0'..='\u{1f}' | '\u{7f}'))
+        .map(|c| {
+            if c == '/'
+                || cfg!(windows) && matches!(c, '\\' | '|' | '<' | '>' | ':' | '"' | '?' | '*')
+            {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let output = if cfg!(windows) && directory_component {
+        output.trim_end_matches(['.', ' ']).to_owned()
+    } else {
+        output
+    };
+    if matches!(output.as_str(), "." | "..") || output.is_empty() && !directory_component {
+        return Err(error("source filename must produce a safe basename"));
+    }
+    Ok(output)
+}
+fn source_directory_segments(value: Value, examined: &mut usize) -> Result<Vec<String>> {
+    let value = unwrap_source_value(value);
+    let count = match &value {
+        Value::List(values) => values.len(),
+        Value::Map(values) => values.len(),
+        Value::Missing => 0,
+        _ => 1,
+    };
+    *examined = examined
+        .checked_add(count)
+        .filter(|count| *count <= 4096)
+        .ok_or_else(|| error("source directory template exceeds item limits"))?;
+    let values = match value {
+        Value::Str(value) => vec![Value::Str(value)],
+        Value::List(values) => values,
+        Value::Map(values) => values.into_iter().map(|(key, _)| Value::Str(key)).collect(),
+        Value::Missing => Vec::new(),
+        _ => {
+            return Err(error(
+                "source directory template must return text or an iterable",
+            ));
+        }
+    };
+    values
+        .into_iter()
+        .map(|value| {
+            let Value::Str(value) = unwrap_source_value(value) else {
+                return Err(error("source directory segments must be text"));
+            };
+            clean_source_segment(value, true)
+        })
+        .collect()
 }
 
 /// Ordered component templates relative to the configured base directory.
@@ -693,16 +794,20 @@ impl DirectoryTemplate {
         let mut output = PathBuf::new();
         let mut bytes = 0;
         let mut context = None;
+        let mut examined = 0;
         for component in components {
-            let component = component.render_directory_component(media, &mut context)?;
-            if component.is_empty() {
-                continue;
+            for segment in
+                component.render_directory_segments(media, &mut context, None, &mut examined)?
+            {
+                if segment.is_empty() {
+                    continue;
+                }
+                bytes += segment.len() + 1;
+                if bytes > 3072 {
+                    return Err(error("rendered directory exceeds 3072 bytes"));
+                }
+                output.push(segment);
             }
-            bytes += component.len() + 1;
-            if bytes > 3072 {
-                return Err(error("rendered directory exceeds 3072 bytes"));
-            }
-            output.push(component);
         }
         Ok(Some(output))
     }
@@ -723,18 +828,24 @@ impl DirectoryTemplate {
         };
         let mut output = PathBuf::new();
         let mut bytes = 0;
+        let mut context = Some(keyword_context(media, keywords));
+        let mut examined = 0;
         for component in components {
-            let value = component
-                .render_keywords_mode(media, keywords, true)?
-                .ok_or_else(|| error("invalid directory component"))?;
-            if value.is_empty() {
-                continue;
+            for segment in component.render_directory_segments(
+                media,
+                &mut context,
+                Some(keywords),
+                &mut examined,
+            )? {
+                if segment.is_empty() {
+                    continue;
+                }
+                bytes += segment.len() + 1;
+                if bytes > 3072 {
+                    return Err(error("rendered directory exceeds 3072 bytes"));
+                }
+                output.push(segment);
             }
-            bytes += value.len() + 1;
-            if bytes > 3072 {
-                return Err(error("rendered directory exceeds 3072 bytes"));
-            }
-            output.push(value);
         }
         Ok(Some(output))
     }
@@ -887,3 +998,31 @@ fn lookup(
 #[cfg(test)]
 #[path = "source_formatter_date_tests.rs"]
 mod source_formatter_date_tests;
+
+#[cfg(test)]
+#[path = "booru_path_results_tests.rs"]
+mod booru_path_results_tests;
+
+#[cfg(test)]
+mod source_segment_limit_tests {
+    use super::{Value, source_directory_segments};
+    #[test]
+    fn directory_iteration_counts_empty_items_and_rejects_nested_values() {
+        let mut examined = 0;
+        let empty = Value::List(vec![Value::Str(String::new()); 4096]);
+        assert!(
+            source_directory_segments(empty, &mut examined)
+                .unwrap()
+                .iter()
+                .all(String::is_empty)
+        );
+        assert!(source_directory_segments(Value::Str(String::new()), &mut examined).is_err());
+        assert!(source_directory_segments(Value::List(vec![Value::List(vec![])]), &mut 0).is_err());
+        assert!(source_directory_segments(Value::None, &mut 0).is_err());
+        assert!(
+            source_directory_segments(Value::Missing, &mut 0)
+                .unwrap()
+                .is_empty()
+        );
+    }
+}

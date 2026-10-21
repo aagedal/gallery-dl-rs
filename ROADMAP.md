@@ -1457,9 +1457,32 @@ MetadataPP runs preserve shifted NullDatetime payloads and enforce calendar
 overflow at years one and 9999. The existing bounded offset argument parser still
 needs the source's zero-hour minute-sign quirk and broader/local offset grammar.
 Broader producer datetime precision and source JSON decoding remain parity work.
-Source PathFormat handling of non-string sole-field results also remains work:
-actual source jobs reject bare converted-date filename and directory values,
-while the native string-rendering APIs currently stringify them.
+
+**Implemented typed booru source path results (gallery-dl 1.32.17):** Source
+filename templates require text. Directory components accept text, expand flat
+string lists and insertion-ordered map keys, and discard the missing-value
+sentinel. Numeric, null, datetime and nested non-string results fail privately.
+Bare conversions preserve their result types; explicit formatting converts them
+to text. Empty source fields ignore both conversions and an empty context key.
+The strict native naming APIs retain their required-field behavior. Dynamic
+directories share the existing segment cleanup and 3,072-byte path bound, with a
+4,096-item budget that also counts empty elements.
+
+Prepare hooks run before final filename validation and can repair or invalidate
+keyword values. Their metadata destinations use the frozen directory, cached
+extension and unset filename, so default sidecars are named `metadata.*`.
+A later filename error preserves completed sidecars and leaves canonical media
+history empty. Evidence includes 74 complete source jobs, six additional
+Prepare jobs, five direct conversion failures and four real PathFormat
+open/finalize probes. Seven empty-basename cases retain an explicit native
+policy difference: native rejects them before file hooks or publication; source
+open/finalize fails later and may retain a partial file. Synthetic transfer
+artifacts in these cases are recorded separately from actual file-open evidence.
+First-file Prepare hashing uses the cleared input path rather than a provisional
+destination; the source fallback to a prior cached realpath across files/posts
+remains file-state parity work. Typed path handling remains gated by proven booru
+source defaults; other native
+extractors still need source path and class defaults.
 
 
 **Implemented directory step:** native configuration `directory` lists replace
