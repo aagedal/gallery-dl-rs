@@ -139,6 +139,11 @@ impl ScopeLease {
                         &state.initial
                     };
                     inherit_keywords(&state.policy, &state.original, latest, context);
+                    if state.original.contains_key("_parent")
+                        && matches!(&state.policy, KeywordPolicy::Shared { file_fields, .. } if file_fields.iter().any(|key| key == "_parent"))
+                    {
+                        self.shared.objects.reattach("_parent");
+                    }
                     self.shared.objects.refresh(context);
                     if shared {
                         // Remember fields introduced by this emission as well, so
@@ -418,6 +423,8 @@ struct Frame {
     post: Option<Arc<Shared>>,
     queue: Option<Map<String, Value>>,
     queue_shared: bool,
+    eager_only: bool,
+    artist_queue: Option<crate::event::KeywordObject>,
     archive_descriptor: Option<crate::source_archive::ArchiveDescriptor>,
     infer_archive_descriptor: bool,
     post_after_pending: bool,
@@ -439,6 +446,9 @@ impl Frame {
         }
     }
     async fn sync_post(&mut self) -> Result<()> {
+        if self.eager_only {
+            return Ok(());
+        }
         if let Some(post) = &self.post {
             let (context, path) = post.finish().await;
             if let Some(runtime) = &mut self.runtime {
@@ -472,6 +482,7 @@ impl Frame {
     }
     async fn end_post(&mut self) -> Result<()> {
         let result = self.sync_post().await;
+        self.eager_only = false;
         let pending = std::mem::take(&mut self.post_after_pending);
         if self.post.take().is_some() || pending {
             if result.is_err() {
@@ -608,6 +619,7 @@ impl State<'_> {
             )
             .await;
         let result = runtime.hook(Hook::Init).await;
+        frame.eager_only = true;
         frame.post = Some(Shared::new(
             Map::new(),
             runtime.context.clone(),
@@ -647,7 +659,11 @@ impl State<'_> {
                     parent.mark_failed();
                 }
                 if let Some(runtime) = &mut parent.runtime {
-                    runtime.context = frame.queue.take().unwrap_or_default();
+                    runtime.context = frame
+                        .artist_queue
+                        .as_ref()
+                        .map(crate::event::KeywordObject::snapshot)
+                        .unwrap_or_else(|| frame.queue.take().unwrap_or_default());
                     let result = if frame.queue_shared {
                         runtime.hook(Hook::ChildAfter).await
                     } else {
@@ -868,7 +884,17 @@ impl State<'_> {
                         post.checkpoint(&queue);
                     }
                 }
+                let artist_queue = scope.metadata.booru_artist_queue().cloned();
+                if let Some(object) = &artist_queue {
+                    object.replace(&queue);
+                    scope
+                        .metadata
+                        .booru_artist_parent()
+                        .expect("artist parent")
+                        .reset_shallow_from(object);
+                }
                 self.frames.push(Frame {
+                    artist_queue,
                     control: Some(scope.control),
                     queue: Some(queue),
                     queue_shared: live,
@@ -919,7 +945,11 @@ impl State<'_> {
                     parent.mark_failed();
                 }
                 if let Some(runtime) = &mut parent.runtime {
-                    runtime.context = child.queue.take().unwrap_or_default();
+                    runtime.context = child
+                        .artist_queue
+                        .as_ref()
+                        .map(crate::event::KeywordObject::snapshot)
+                        .unwrap_or_else(|| child.queue.take().unwrap_or_default());
                     let result = if child.queue_shared {
                         runtime.hook(Hook::ChildAfter).await
                     } else {

@@ -918,6 +918,7 @@ fn source_filename_preparation_matches_real_pathformat_types_and_aliases() {
         booru_user_id: None,
         booru_pool_name: None,
         booru_favorite_id: None,
+        booru_artist_parent: None,
         booru_popular: None,
         ..Default::default()
     });

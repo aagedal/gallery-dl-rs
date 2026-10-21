@@ -273,6 +273,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
         booru_user_id: None,
         booru_pool_name: None,
         booru_favorite_id: None,
+        booru_artist_parent: None,
         booru_popular: None,
         source_suffix: None,
         search_tags: None,

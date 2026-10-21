@@ -220,7 +220,7 @@ impl FilterExpression {
             })
         }
         for (key, value) in child.fields() {
-            if child.category() == "pixiv-novel" {
+            if child.category() == "pixiv-novel" || child.booru_artist_url().is_some() {
                 context.insert(key.clone(), json_value(value));
                 continue;
             }
@@ -837,6 +837,7 @@ fn context_parts(
             values.insert("num".into(), json_value(num));
         } else if media.is_some()
             && post.booru_popular.is_none()
+            && post.booru_artist_parent.is_none()
             && !metadata.contains_key("num")
             && !post
                 .source_defaults
@@ -1138,6 +1139,19 @@ fn context_parts(
                     values.insert(key.into(), value.clone());
                     metadata.insert(key.into(), value);
                 }
+            }
+        }
+        if let Some(parent) = &post.booru_artist_parent {
+            values.insert("subcategory".into(), text("tag"));
+            metadata.insert("subcategory".into(), text("tag"));
+            let parent = json_value(&serde_json::Value::Object(parent.snapshot()));
+            values.insert("_parent".into(), parent.clone());
+            metadata.insert("_parent".into(), parent);
+            values.remove("name");
+            metadata.remove("name");
+            if let Some(name) = post.booru_keywords.as_ref().and_then(|v| v.get("name")) {
+                values.insert("name".into(), json_value(name));
+                metadata.insert("name".into(), json_value(name));
             }
         }
         if let Some(fields) = &post.booru_popular {

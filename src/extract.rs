@@ -724,6 +724,9 @@ pub struct PostMetadata {
     /// Exact scalar DAPI favorites owner keyword.
     #[serde(skip_serializing)]
     pub booru_favorite_id: Option<Value>,
+    /// Shared shallow artist queue copy inherited by a tag child.
+    #[serde(skip_serializing)]
+    pub booru_artist_parent: Option<crate::event::KeywordObject>,
     /// Popular view keyword overrides, separate from canonical post creation date.
     #[serde(skip_serializing)]
     pub booru_popular: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
@@ -2016,6 +2019,7 @@ fn compatibility_metadata(
             .filter(|tags| tags.len() <= 1024)
             .map(std::sync::Arc::from),
         source_defaults: None,
+        booru_artist_parent: None,
         booru_popular: matches!(category, "danbooru" | "e621" | "e926")
             .then(|| {
                 data.get("scale").map(|_| {

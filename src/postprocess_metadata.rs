@@ -447,12 +447,25 @@ impl MetadataOptions {
                         .metadata
                         .as_ref()
                         .is_some_and(|metadata| metadata.booru_popular.is_some());
-                    let result = if popular {
+                    let alias = template
+                        .identity_path()
+                        .and_then(|path| super::objects::resolve_alias(&path));
+                    let typed_dates = popular
+                        || media
+                            .metadata
+                            .as_ref()
+                            .is_some_and(|metadata| metadata.booru_artist_parent.is_some());
+                    let result = if typed_dates {
                         template.render_source_value(context)
                     } else {
                         template.render_value(context)
                     };
                     if let Ok(mut value) = result {
+                        if key.split('[').next() == Some("_parent")
+                            && let Some(raw) = crate::filter::source_primitive_from_json(&value)
+                        {
+                            value = raw.clone();
+                        }
                         if popular
                             && matches!(
                                 key.as_str(),
@@ -461,14 +474,21 @@ impl MetadataOptions {
                         {
                             value = crate::filter::source_primitive_json(value);
                         }
-                        mutate(context, key, Some(value));
+                        if mutate(context, key, Some(value)) {
+                            if let Some(alias) = alias {
+                                super::objects::assign_alias(key, alias);
+                            }
+                            super::objects::refresh_artist(context);
+                        }
                     }
                 }
                 return Ok(());
             }
             Mode::Delete(fields) => {
                 for key in fields {
-                    mutate(context, key, None);
+                    if mutate(context, key, None) {
+                        super::objects::refresh_artist(context);
+                    }
                 }
                 return Ok(());
             }
@@ -1039,12 +1059,12 @@ fn tags(context: &Map<String, Value>) -> Result<String> {
         Ok(tags.join("\n") + "\n")
     }
 }
-fn mutate(context: &mut Map<String, Value>, path: &str, value: Option<Value>) {
+fn mutate(context: &mut Map<String, Value>, path: &str, value: Option<Value>) -> bool {
     let mut keys = path
         .split('[')
         .map(|s| s.trim_end_matches(']').trim_matches(['\'', '"']));
     let Some(first) = keys.next() else {
-        return;
+        return false;
     };
     let keys = std::iter::once(first).chain(keys).collect::<Vec<_>>();
     fn apply(map: &mut Map<String, Value>, keys: &[&str], value: Option<Value>) -> bool {
@@ -1071,6 +1091,9 @@ fn mutate(context: &mut Map<String, Value>, path: &str, value: Option<Value>) {
     }
     if keys.len() <= 128 && apply(context, &keys, value) {
         super::objects::record(&keys, context);
+        true
+    } else {
+        false
     }
 }
 
@@ -1481,6 +1504,62 @@ mod job_path_oracle {
 mod source_date_exports {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn artist_parent_raw_dates_stay_strings_but_explicit_conversion_retains_datetime() {
+        let parent = crate::event::KeywordObject::new(
+            json!({"date":"2024-01-01T00:04:05+05:00"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        let mut media =
+            crate::extract::direct(&"https://fixture.invalid/image.jpg".parse().unwrap()).unwrap();
+        media.metadata = Some(crate::extract::PostMetadata {
+            booru_artist_parent: Some(parent),
+            ..Default::default()
+        });
+        let mut context = crate::postprocess::context(&media);
+        let options = MetadataOptions::parse(
+            json!({"mode":"modify","fields":{
+                "date":"{_parent[date]}",
+                "raw_copy":"{_parent[date]}",
+                "converted":"{_parent[date]!D}",
+                "year":"{converted:%Y}"
+            }})
+            .as_object()
+            .unwrap(),
+            Path::new("."),
+        )
+        .unwrap();
+        options
+            .run(&mut context, &media, Path::new("image.jpg"), Path::new("."))
+            .await
+            .unwrap();
+        assert_eq!(
+            crate::filter::source_date_from_json(&context["converted"]),
+            Some(Some(1704049445))
+        );
+        assert_eq!(context["year"], "2023");
+        let template = crate::postprocess::template::Template::parse("{date:%Y}").unwrap();
+        assert!(template.render(&context).is_err());
+        let public = crate::postprocess::public_keywords(&context);
+        assert_eq!(public["date"], "2024-01-01T00:04:05+05:00");
+        assert_eq!(public["raw_copy"], public["date"]);
+        assert_eq!(public["converted"], "2023-12-31 19:04:05");
+        let json_options = MetadataOptions::parse(
+            json!({"mode":"json","include":["date","raw_copy","converted","year"]})
+                .as_object()
+                .unwrap(),
+            Path::new("."),
+        )
+        .unwrap();
+        let encoded = json_options.content(&context).unwrap();
+        assert!(!encoded.contains("$gallery_dl_source"));
+        let exported: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(exported["converted"], "2023-12-31 19:04:05");
+        assert_eq!(exported["raw_copy"], "2024-01-01T00:04:05+05:00");
+    }
 
     #[tokio::test]
     async fn typed_dates_export_public_strings_and_hook_literal_strings_keep_their_type() {

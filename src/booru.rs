@@ -3,8 +3,8 @@
 //!
 //! Mirrors gallery_dl/extractor/danbooru.py (Danbooru and e621 dialects) and
 //! gelbooru.py / gelbooru_v02.py (Gelbooru and Safebooru) through their public
-//! JSON APIs. Single posts, tag searches, Danbooru/e621 pools,
-//! Danbooru favorite groups and e621/e926 favorites are supported. Posts without a file URL (deleted,
+//! JSON APIs. Single posts, tag searches, pools, favorites, popular views, and
+//! artist child jobs are supported where the source provides them. Posts without a file URL (deleted,
 //! banned or login-restricted) are skipped silently, and media URLs are only
 //! accepted from each site's own CDN hosts.
 use crate::{
@@ -39,6 +39,8 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const MAX_PAGES: usize = 100;
 const MAX_TAGS: usize = 1024;
 
+#[path = "booru_artist.rs"]
+mod artist;
 #[path = "booru_dapi_pool.rs"]
 mod dapi_listing;
 #[path = "booru_gel_favorite.rs"]
@@ -115,6 +117,12 @@ impl Site {
 /// A supported booru input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
+    Artist {
+        id: String,
+    },
+    ArtistSearch {
+        params: Vec<(String, String)>,
+    },
     Post {
         id: u64,
     },
@@ -278,7 +286,9 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     // A matched invalid capture must fail; falling back could select a
     // different duplicate query and silently change the requested namespace.
     let source_tags = checked_source_search_tags(site, url)?;
-    let target = if let Some(params) = popular::capture(site, url) {
+    let target = if let Some(target) = artist::capture(site, url) {
+        Some(target)
+    } else if let Some(params) = popular::capture(site, url) {
         Some(Target::Popular { params })
     } else if let Some(id) = dapi_listing::capture_favorites(site, url) {
         Some(Target::DapiFavorites { id })
@@ -541,8 +551,10 @@ fn nameext_keywords(
                 ("extension".into(), extension.as_ref().into()),
             ])
         };
-    if let Some(md5) = post.get("md5") {
-        keywords.insert("md5".into(), md5.clone());
+    for key in ["md5", "name"] {
+        if let Some(value) = post.get(key) {
+            keywords.insert(key.into(), value.clone());
+        }
     }
     keywords
 }
@@ -562,7 +574,9 @@ fn defaults(
         "{category}_{id}_{md5}.{extension}"
     };
     let directory: &[&str] = match target {
-        Target::Post { .. } => &["{category}"],
+        Target::Post { .. } | Target::Artist { .. } | Target::ArtistSearch { .. } => {
+            &["{category}"]
+        }
         Target::Tags { .. } => &["{category}", "{search_tags}"],
         Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
         Target::Popular { .. } => &["{category}", "popular", "{scale}", "{date}"],
@@ -577,6 +591,7 @@ fn defaults(
     };
     let archive = match target {
         Target::Post { .. } => "{id}",
+        Target::Artist { .. } | Target::ArtistSearch { .. } => "",
         Target::Tags { .. } => "t_{search_tags}_{id}",
         Target::Pool { .. } if !site.danbooru_dialect() => "p_{pool}_{id}",
         Target::Pool { .. } => "p_{pool[id]}_{id}",
@@ -704,6 +719,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             booru_user_id: None,
             booru_pool_name: None,
             booru_favorite_id: None,
+            booru_artist_parent: None,
             booru_popular: None,
             file: Some(FileMetadata {
                 width,
@@ -1375,7 +1391,13 @@ impl Booru {
 
     /// Emit one post boundary per booru post; listings paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
-        let defaults = defaults_for_url(url);
+        let defaults = if target(self.site, url).is_ok_and(|(target, _)| {
+            matches!(target, Target::Artist { .. } | Target::ArtistSearch { .. })
+        }) {
+            None
+        } else {
+            defaults_for_url(url)
+        };
         self.events_inner(url)
             .map(move |event| {
                 event.map(|mut event| {
@@ -1384,7 +1406,9 @@ impl Booru {
                         ExtractionEvent::Media(media) => media.metadata.as_mut(),
                         _ => None,
                     };
-                    if let Some(metadata) = metadata {
+                    if let Some(metadata) = metadata
+                        && defaults.is_some()
+                    {
                         metadata.source_defaults = defaults.clone();
                     }
                     event
@@ -1398,8 +1422,12 @@ impl Booru {
             Ok(parsed) => parsed,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
+        if matches!(target, Target::Artist { .. } | Target::ArtistSearch { .. }) {
+            return artist::events(self, target, root);
+        }
         let root = self.api_root.clone().unwrap_or(root);
         let (tags, cursor) = match target {
+            Target::Artist { .. } | Target::ArtistSearch { .. } => unreachable!(),
             Target::Popular { params } => {
                 return stream::once(async move {
                     let metadata = popular::metadata(&params, self.popular_today)?;
@@ -2862,3 +2890,7 @@ mod gel_favorite_tests;
 #[cfg(test)]
 #[path = "booru_popular_tests.rs"]
 mod popular_tests;
+
+#[cfg(test)]
+#[path = "booru_artist_tests.rs"]
+mod artist_tests;

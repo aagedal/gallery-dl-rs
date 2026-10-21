@@ -623,11 +623,11 @@ Not yet: user profiles, favorites, subreddits, searches and tag listings.
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite
 groups, e621/e926/Gelbooru/Safebooru favorites, and Danbooru/e621/e926 popular
-views. Danbooru/e621 support
+views and artist discovery. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: other favorites/artist views, notes,
+Remaining: other favorites, notes,
 `tags`/`metadata` options, per-category tags and authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
@@ -1358,16 +1358,28 @@ record fails. Genuine source replay covers 139 cases, twelve route probes and
 five formatter vectors, including API parameters, pagination, cancellation,
 six hook checkpoints, complete publication bytes and actual metadata archive SQL.
 
-**Remaining booru routes (source audit, 1.32.17):** artist routes queue
-sequential tag-search child jobs with the complete artist dictionary. Detail IDs
-retain lexical spelling; search requests retain original parameters, coerce page
-with source integer rules, and paginate at a fixed twenty rows. Artist names are
-validated and quoted before child selection; rejected valid children make no tag
-requests. Accepted URLs share root deduplication, and hook-mutated artist metadata
-is inherited under `_parent` rather than flattened into posts. Artist roots have
-no default archive key; tag children own their paths and `t_{search_tags}_{id}`
-keys. Implementation requires bounded full artist JSON in child contexts and
-source lifecycle handling for queue-only parents; they are not direct tag aliases.
+**Implemented Danbooru/e621/e926 artist routes (source oracle, 1.32.17):**
+Artist detail IDs retain lexical spelling; searches retain first-decoded query
+parameters, source integer page coercion and fixed twenty-row pagination.
+Artists queue lazy tag-search jobs with complete bounded artist JSON, fixed
+quoted URLs, selection before shared URL deduplication, and name validation
+before selection. Children inherit hook-mutated artist metadata under `_parent`
+as a shallow copy: root edits stay with the child, nested-map edits propagate to
+the parent's later callback, and replacements detach those objects. The source
+reapplies its original parent mapping at each post/file message. Tag children
+own paths and `t_{search_tags}_{id}` archives; queue-only roots use their inherited
+empty archive format and initialize hooks only when eager initialization is set.
+Native history retains canonical post identities independently of source metadata
+archives. Genuine source jobs cover 129 cases and 24 route probes, including
+request order, cancellation, filters/ranges/deduplication, malformed partial
+results, hook ownership, primitive date fields, publication bytes and SQLite keys.
+Extractor subcategory configuration and initialization, source download-archive
+path arrays, dynamic Python class/proxy keyword objects, and mutation of array
+elements remain broader parity work. The default `_parent` inheritance is
+implemented; source `parent-metadata`/legacy `metadata-parent` overrides still
+need false (no inheritance), custom string keys, and truthy non-string values
+(flattened inheritance), including their impact on live source archive keywords.
+
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

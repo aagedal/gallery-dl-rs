@@ -8,7 +8,7 @@ use crate::{
     selection::RangeSelection,
 };
 use futures_util::{StreamExt, stream::BoxStream};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 const MAX_FRAMES: usize = 128;
 
@@ -44,6 +44,7 @@ struct State<'a> {
     selection: JobSelection,
     frames: Vec<Frame>,
     pending: VecDeque<ExtractionEvent>,
+    visited: HashSet<String>,
 }
 impl State<'_> {
     fn sync_cancelled(&mut self) {
@@ -161,6 +162,7 @@ impl JobSelection {
             selection: self.clone(),
             frames: vec![Frame::default()],
             pending: VecDeque::new(),
+            visited: HashSet::new(),
         };
         futures_util::stream::unfold(state, |mut state| async move {
             let mut skipped = 0u8;
@@ -223,7 +225,7 @@ impl JobSelection {
                             || state.selection.child_filter.as_ref().is_some_and(|filter| {
                                 !filter.matches_child(&scope.metadata).unwrap_or(false)
                             });
-                        let (selected, last_for_parent) = if rejected {
+                        let (mut selected, last_for_parent) = if rejected {
                             (false, false)
                         } else {
                             let parent = state.frames.last_mut().expect("parent job");
@@ -244,6 +246,9 @@ impl JobSelection {
                                 }),
                             )
                         };
+                        if selected && let Some(url) = scope.metadata.booru_artist_url() {
+                            selected = state.visited.insert(url.to_owned());
+                        }
                         if !selected {
                             scope.control.cancel();
                         }

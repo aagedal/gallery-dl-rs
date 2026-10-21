@@ -198,6 +198,23 @@ impl Field {
         })
     }
 
+    pub(crate) fn identity_path(&self) -> Option<Vec<String>> {
+        if self.conversion.is_some() || !self.ops.is_empty() || !self.spec.is_empty() {
+            return None;
+        }
+        let [Source::Path { name, accessors }] = self.alternatives.as_slice() else {
+            return None;
+        };
+        let mut path = vec![name.clone()];
+        for accessor in accessors {
+            match accessor {
+                Accessor::Key(key) => path.push(key.clone()),
+                _ => return None,
+            }
+        }
+        Some(path)
+    }
+
     /// Preserve the source value for a single unformatted replacement field.
     pub(crate) fn render_value(&self, lookup: impl Fn(&str) -> Option<Value>) -> Result<Value> {
         // Python's outer formatter parser treats these as field delimiters

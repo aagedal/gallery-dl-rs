@@ -11,6 +11,7 @@ const MAX_TEMPLATE: usize = 8192;
 /// Names a template may reference. Signed transport URLs are deliberately
 /// unavailable so credentials cannot leak into paths.
 const FIELDS: &[&str] = &[
+    "_parent",
     "md5",
     "sha1",
     "sha224",
@@ -639,7 +640,7 @@ impl DirectoryTemplate {
 }
 
 fn convert(value: &crate::filter::Value, key: &str) -> Value {
-    convert_value(value, key, key != "tags")
+    convert_value(value, key, key != "tags" && key != "_parent")
 }
 
 fn convert_value(value: &crate::filter::Value, key: &str, dates: bool) -> Value {
@@ -670,7 +671,7 @@ fn convert_value(value: &crate::filter::Value, key: &str, dates: bool) -> Value 
                 .map(|(key, value)| {
                     (
                         key.clone(),
-                        convert_value(value, key, dates && key != "tags"),
+                        convert_value(value, key, dates && key != "tags" && key != "_parent"),
                     )
                 })
                 .collect(),
@@ -720,6 +721,9 @@ fn lookup(
         return fields
             .get(name)
             .map(|value| convert(&crate::filter::json_value(value), name));
+    }
+    if metadata.is_some_and(|m| m.booru_artist_parent.is_some()) && matches!(name, "name" | "num") {
+        return context.get(name).map(|value| convert(value, name));
     }
     Some(match name {
         // Legacy native filename includes its extension without a source snapshot.

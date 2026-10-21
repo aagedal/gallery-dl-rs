@@ -13,6 +13,16 @@ struct Binding {
     name: String,
     object: KeywordObject,
     attached: AtomicBool,
+    alias: std::sync::Mutex<Option<KeywordObject>>,
+}
+impl Binding {
+    fn current(&self) -> KeywordObject {
+        self.alias
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| self.object.clone())
+    }
 }
 tokio::task_local! { static OBSERVER: Bindings; }
 impl Bindings {
@@ -27,16 +37,23 @@ impl Bindings {
                     name: name.clone(),
                     object: object.clone(),
                     attached: AtomicBool::new(true),
+                    alias: Default::default(),
                 })
                 .collect(),
         )
+    }
+    pub(crate) fn reattach(&self, name: &str) {
+        for binding in self.0.iter().filter(|binding| binding.name == name) {
+            binding.attached.store(true, Ordering::Release);
+            *binding.alias.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
     }
     pub(crate) fn refresh(&self, context: &mut Map<String, Value>) {
         for binding in self.0.iter() {
             if binding.attached.load(Ordering::Acquire) {
                 context.insert(
                     binding.name.clone(),
-                    Value::Object(binding.object.snapshot()),
+                    Value::Object(binding.current().snapshot()),
                 );
             }
         }
@@ -54,10 +71,54 @@ impl Bindings {
             } else if binding.attached.load(Ordering::Acquire)
                 && let Some(Value::Object(value)) = context.get(*root)
             {
-                binding.object.replace(value);
+                binding.current().record(&keys[1..], value);
             }
         }
     }
+}
+pub(crate) fn refresh_artist(context: &mut Map<String, Value>) {
+    let _ =
+        OBSERVER.try_with(|observer| {
+            for binding in observer.0.iter().filter(|binding| {
+                binding.name == "_parent" && binding.attached.load(Ordering::Acquire)
+            }) {
+                context.insert(
+                    binding.name.clone(),
+                    Value::Object(binding.current().snapshot()),
+                );
+            }
+        });
+}
+pub(crate) fn resolve_alias(path: &[String]) -> Option<KeywordObject> {
+    OBSERVER
+        .try_with(|observer| {
+            let binding = observer.0.iter().find(|binding| {
+                binding.name == "_parent"
+                    && path.first().is_some_and(|key| key == &binding.name)
+                    && binding.attached.load(Ordering::Acquire)
+            })?;
+            binding.current().object_at(&path[1..])
+        })
+        .ok()
+        .flatten()
+}
+pub(crate) fn assign_alias(path: &str, alias: KeywordObject) {
+    let keys = path
+        .split('[')
+        .map(|s| s.trim_end_matches(']').trim_matches(['\'', '"']))
+        .collect::<Vec<_>>();
+    let _ = OBSERVER.try_with(|observer| {
+        for binding in observer.0.iter().filter(|binding| {
+            binding.name == "_parent" && keys.first().is_some_and(|key| *key == binding.name)
+        }) {
+            if keys.len() == 1 {
+                *binding.alias.lock().unwrap_or_else(|e| e.into_inner()) = Some(alias.clone());
+                binding.attached.store(true, Ordering::Release);
+            } else if binding.attached.load(Ordering::Acquire) {
+                binding.current().alias_at(&keys[1..], &alias);
+            }
+        }
+    });
 }
 pub(crate) fn record(keys: &[&str], context: &Map<String, Value>) {
     let _ = OBSERVER.try_with(|observer| observer.record(keys, context));
@@ -155,6 +216,92 @@ mod tests {
         let mut next = Map::new();
         Bindings::new(&policy).refresh(&mut next);
         assert_eq!(next["pool"]["name"], "PUBLISHED");
+    }
+    #[tokio::test]
+    async fn shallow_parent_copy_keeps_roots_separate_and_nested_identity_until_assignment() {
+        for detach in [false, true] {
+            let queue = KeywordObject::new(
+                json!({"name":"QUEUE","nested":{"value":"OLD","deeper":{"x":1}}})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            );
+            let parent = queue.shallow_copy();
+            let bindings = Bindings::new(
+                &KeywordPolicy::shared(&[]).with_shared_object("_parent", parent.clone()),
+            );
+            let mut context = Map::new();
+            bindings.refresh(&mut context);
+            run(
+                &bindings,
+                &mut context,
+                json!({"mode":"modify","fields":{"_parent[name]":"CHILD"}}),
+            )
+            .await;
+            assert_eq!(queue.snapshot()["name"], "QUEUE");
+            assert_eq!(parent.snapshot()["name"], "CHILD");
+            if detach {
+                context.insert("replacement".into(), context["_parent"]["nested"].clone());
+                run(
+                    &bindings,
+                    &mut context,
+                    json!({"mode":"modify","fields":{"_parent[nested]":"{replacement}"}}),
+                )
+                .await;
+            }
+            context.insert("two".into(), json!(2));
+            run(&bindings,&mut context,json!({"mode":"modify","fields":{"_parent[nested][value]":"NEW","_parent[nested][deeper][x]":"{two}"}})).await;
+            assert_eq!(parent.snapshot()["nested"]["value"], "NEW");
+            assert_eq!(
+                queue.snapshot()["nested"]["value"],
+                if detach { "OLD" } else { "NEW" }
+            );
+            assert_eq!(
+                queue.snapshot()["nested"]["deeper"]["x"],
+                if detach { 1 } else { 2 }
+            );
+            context.insert("rootreplacement".into(), context["_parent"].clone());
+            run(
+                &bindings,
+                &mut context,
+                json!({"mode":"modify","fields":{"_parent":"{rootreplacement}"}}),
+            )
+            .await;
+            run(
+                &bindings,
+                &mut context,
+                json!({"mode":"modify","fields":{"_parent[name]":"DETACHED"}}),
+            )
+            .await;
+            assert_eq!(parent.snapshot()["name"], "CHILD");
+            bindings.reattach("_parent");
+            bindings.refresh(&mut context);
+            assert_eq!(context["_parent"]["name"], "CHILD");
+        }
+    }
+    #[tokio::test]
+    async fn artist_identity_assignments_alias_existing_nested_objects_until_next_file() {
+        let queue = KeywordObject::new(
+            json!({"name":"Q","nested":{"x":1},"replacement":{"nested":{"x":7}}})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        let parent = queue.shallow_copy();
+        let bindings = Bindings::new(
+            &KeywordPolicy::shared(&[]).with_shared_object("_parent", parent.clone()),
+        );
+        let mut context = Map::new();
+        bindings.refresh(&mut context);
+        run(&bindings,&mut context,json!({"mode":"modify","fields":{"_parent[nested]":"{_parent[replacement][nested]}","_parent[nested][x]":"{_parent[nested][x]!i:A+1/}"}})).await;
+        assert_eq!(queue.snapshot()["nested"]["x"], 1);
+        assert_eq!(queue.snapshot()["replacement"]["nested"]["x"], 8);
+        run(&bindings,&mut context,json!({"mode":"modify","fields":{"_parent":"{_parent[replacement]}","_parent[nested][x]":"{_parent[nested][x]!i:A+1/}"}})).await;
+        assert_eq!(queue.snapshot()["replacement"]["nested"]["x"], 9);
+        bindings.reattach("_parent");
+        bindings.refresh(&mut context);
+        assert_eq!(context["_parent"]["name"], "Q");
+        assert_eq!(context["_parent"]["nested"]["x"], 9);
     }
     #[tokio::test]
     async fn task_scoped_observers_do_not_cross_concurrent_jobs_or_survive_cancellation() {

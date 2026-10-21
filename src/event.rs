@@ -48,6 +48,7 @@ pub struct ChildMetadata {
     keyword_updates: Option<Arc<[KeywordUpdate]>>,
     target_category: Option<String>,
     source_archive: Option<Arc<crate::source_archive::ArchiveDescriptor>>,
+    booru_artist: Option<(Arc<str>, KeywordObject, KeywordObject)>,
 }
 
 impl ChildMetadata {
@@ -142,6 +143,7 @@ impl ChildMetadata {
             }
         }
         Self {
+            booru_artist: None,
             keyword_updates: None,
             source_archive: None,
             target_category: None,
@@ -167,6 +169,7 @@ impl ChildMetadata {
             ""
         };
         Self {
+            booru_artist: None,
             keyword_updates: None,
             source_archive: None,
             target_category: Some("pixiv".into()),
@@ -174,6 +177,99 @@ impl ChildMetadata {
             subcategory: subcategory.to_owned(),
             fields,
         }
+    }
+
+    /// Preserve bounded complete artist API metadata for a forced tag queue.
+    pub fn from_booru_artist(
+        category: &str,
+        subcategory: &str,
+        raw: &serde_json::Map<String, serde_json::Value>,
+        url: &url::Url,
+    ) -> Result<Self> {
+        if !matches!(category, "danbooru" | "e621" | "e926")
+            || !matches!(subcategory, "artist" | "artist-search")
+            || url.as_str().len() > 16 * 1024
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(crate::error("invalid booru artist child metadata"));
+        }
+        fn scan(
+            value: &serde_json::Value,
+            depth: usize,
+            nodes: &mut usize,
+            bytes: &mut usize,
+        ) -> Result<()> {
+            *nodes += 1;
+            if depth > 64 || *nodes > 262_144 {
+                return Err(crate::error("booru artist metadata exceeds limits"));
+            }
+            *bytes = bytes.saturating_add(match value {
+                serde_json::Value::String(s) => s.len().saturating_mul(6),
+                serde_json::Value::Number(n) => n.as_str().len(),
+                _ => 8,
+            });
+            match value {
+                serde_json::Value::Array(values) => {
+                    for value in values {
+                        scan(value, depth + 1, nodes, bytes)?;
+                    }
+                }
+                serde_json::Value::Object(values) => {
+                    for (key, value) in values {
+                        *bytes = bytes.saturating_add(key.len().saturating_mul(6));
+                        scan(value, depth + 1, nodes, bytes)?;
+                    }
+                }
+                _ => {}
+            }
+            if *bytes > 32 * 1024 * 1024 {
+                return Err(crate::error("booru artist metadata exceeds limits"));
+            }
+            Ok(())
+        }
+        let mut nodes: usize = 0;
+        let mut bytes: usize = 0;
+        for (key, value) in raw {
+            bytes = bytes.saturating_add(key.len().saturating_mul(6));
+            scan(value, 0, &mut nodes, &mut bytes)?;
+        }
+        let mut fields = raw.clone();
+        fields.insert("category".into(), category.into());
+        fields.insert("subcategory".into(), subcategory.into());
+        fields.insert("_url".into(), url.as_str().into());
+        fields.insert(
+            "_extractor".into(),
+            if category == "danbooru" {
+                "DanbooruTagExtractor"
+            } else {
+                "E621TagExtractor"
+            }
+            .into(),
+        );
+        let queue = KeywordObject::new(fields.clone());
+        let parent = queue.shallow_copy();
+        Ok(Self {
+            category: category.into(),
+            subcategory: subcategory.into(),
+            fields,
+            keyword_updates: None,
+            target_category: Some(if category == "e926" { "e621" } else { category }.into()),
+            source_archive: Some(Arc::new(crate::source_archive::ArchiveDescriptor {
+                category: category.into(),
+                format: "t_{search_tags}_{id}".into(),
+            })),
+            booru_artist: Some((Arc::from(url.as_str()), queue, parent)),
+        })
+    }
+    pub fn booru_artist_url(&self) -> Option<&str> {
+        self.booru_artist.as_ref().map(|(url, _, _)| url.as_ref())
+    }
+    pub fn booru_artist_queue(&self) -> Option<&KeywordObject> {
+        self.booru_artist.as_ref().map(|(_, queue, _)| queue)
+    }
+    pub fn booru_artist_parent(&self) -> Option<&KeywordObject> {
+        self.booru_artist.as_ref().map(|(_, _, parent)| parent)
     }
 
     /// Explicit target extractor format; producer queue metadata may be ambiguous.
@@ -297,16 +393,120 @@ impl std::fmt::Debug for KeywordFeedback {
 /// A producer-owned nested dictionary shared by distinct post dictionaries.
 /// Root assignment detaches a post; nested edits retain this object identity.
 #[derive(Clone)]
-pub struct KeywordObject(Arc<Mutex<serde_json::Map<String, serde_json::Value>>>);
+pub struct KeywordObject(Arc<Mutex<KeywordObjectState>>);
+struct KeywordObjectState {
+    value: serde_json::Map<String, serde_json::Value>,
+    children: std::collections::BTreeMap<String, KeywordObject>,
+}
 impl KeywordObject {
     pub fn new(value: serde_json::Map<String, serde_json::Value>) -> Self {
-        Self(Arc::new(Mutex::new(value)))
+        Self(Arc::new(Mutex::new(KeywordObjectState {
+            value,
+            children: Default::default(),
+        })))
     }
     pub fn snapshot(&self) -> serde_json::Map<String, serde_json::Value> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let updates = state
+            .children
+            .iter()
+            .map(|(key, child)| (key.clone(), serde_json::Value::Object(child.snapshot())))
+            .collect::<Vec<_>>();
+        state.value.extend(updates);
+        state.value.clone()
+    }
+    fn shallow_state(&self) -> KeywordObjectState {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let children = state
+            .value
+            .iter()
+            .filter_map(|(key, value)| value.as_object().map(|value| (key.clone(), value.clone())))
+            .collect::<Vec<_>>();
+        for (key, value) in children {
+            state
+                .children
+                .entry(key)
+                .or_insert_with(|| Self::new(value));
+        }
+        KeywordObjectState {
+            value: state.value.clone(),
+            children: state.children.clone(),
+        }
+    }
+    pub(crate) fn object_at(&self, path: &[String]) -> Option<Self> {
+        let Some(key) = path.first() else {
+            return Some(self.clone());
+        };
+        let child = {
+            let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            if !state.children.contains_key(key) {
+                let value = state.value.get(key)?.as_object()?.clone();
+                state.children.insert(key.clone(), Self::new(value));
+            }
+            state.children.get(key)?.clone()
+        };
+        child.object_at(&path[1..])
+    }
+    fn contains_object(&self, other: &Self, depth: usize) -> bool {
+        if Arc::ptr_eq(&self.0, &other.0) || depth >= 128 {
+            return true;
+        }
+        let children = self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .children
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        children
+            .iter()
+            .any(|child| child.contains_object(other, depth + 1))
+    }
+    pub(crate) fn alias_at(&self, path: &[&str], alias: &Self) {
+        if path.len() == 1 {
+            // JSON-backed keyword objects cannot represent cycles safely.
+            if alias.contains_object(self, 0) {
+                return;
+            }
+            self.0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .children
+                .insert(path[0].to_owned(), alias.clone());
+        } else if !path.is_empty()
+            && let Some(child) = self.object_at(&[path[0].to_owned()])
+        {
+            child.alias_at(&path[1..], alias);
+        }
+    }
+    pub fn shallow_copy(&self) -> Self {
+        Self(Arc::new(Mutex::new(self.shallow_state())))
+    }
+    pub(crate) fn reset_shallow_from(&self, source: &Self) {
+        let state = source.shallow_state();
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = state;
     }
     pub(crate) fn replace(&self, value: &serde_json::Map<String, serde_json::Value>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = value.clone();
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = KeywordObjectState {
+            value: value.clone(),
+            children: Default::default(),
+        };
+    }
+    pub(crate) fn record(&self, keys: &[&str], value: &serde_json::Map<String, serde_json::Value>) {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(key) = keys.first() {
+            if keys.len() > 1 {
+                if let Some(child) = state.children.get(*key)
+                    && let Some(nested) = value.get(*key).and_then(serde_json::Value::as_object)
+                {
+                    child.record(&keys[1..], nested);
+                }
+            } else {
+                state.children.remove(*key);
+            }
+        }
+        state.value = value.clone();
     }
 }
 impl std::fmt::Debug for KeywordObject {
@@ -438,6 +638,7 @@ pub fn child_job<'a>(
 ) -> BoxStream<'a, Result<ExtractionEvent>> {
     struct State<'a, F> {
         metadata: Option<ChildMetadata>,
+        artist_parent: Option<KeywordObject>,
         control: ChildControl,
         build: Option<F>,
         input: Option<BoxStream<'a, Result<ExtractionEvent>>>,
@@ -454,7 +655,9 @@ pub fn child_job<'a>(
             }
         }
     }
+    let artist_parent = metadata.booru_artist_parent().cloned();
     let state = State {
+        artist_parent,
         metadata: Some(metadata),
         control: ChildControl::default(),
         build: Some(build),
@@ -499,7 +702,52 @@ pub fn child_job<'a>(
                 continue;
             }
             match event {
-                Some(event) => {
+                Some(mut event) => {
+                    if state.descendants.is_empty()
+                        && let Some(parent) = &state.artist_parent
+                    {
+                        match &mut event {
+                            Ok(ExtractionEvent::Post(post)) => {
+                                post.metadata
+                                    .get_or_insert_with(Default::default)
+                                    .booru_artist_parent = Some(parent.clone());
+                                if let KeywordPolicy::Shared {
+                                    file_fields,
+                                    post_fields,
+                                    ..
+                                } = &mut post.keywords
+                                {
+                                    let mut fields = file_fields.to_vec();
+                                    fields.retain(|key| key != "num" && key != "name");
+                                    if !fields.iter().any(|key| key == "_parent") {
+                                        fields.push("_parent".into());
+                                    }
+                                    *file_fields = fields.into();
+                                    let mut fields = post_fields.as_ref().clone();
+                                    if !post
+                                        .metadata
+                                        .as_ref()
+                                        .and_then(|m| m.booru_keywords.as_ref())
+                                        .is_some_and(|v| v.contains_key("name"))
+                                    {
+                                        fields.remove("name");
+                                    }
+                                    *post_fields = Arc::new(fields);
+                                }
+                                post.keywords = post
+                                    .keywords
+                                    .clone()
+                                    .with_shared_object("_parent", parent.clone());
+                            }
+                            Ok(ExtractionEvent::Media(media)) => {
+                                media
+                                    .metadata
+                                    .get_or_insert_with(Default::default)
+                                    .booru_artist_parent = Some(parent.clone());
+                            }
+                            _ => {}
+                        }
+                    }
                     match &event {
                         Ok(ExtractionEvent::BeginChild(scope)) => {
                             state.descendants.push(scope.control.clone());

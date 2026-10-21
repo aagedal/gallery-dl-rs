@@ -288,6 +288,9 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 crate::booru::Target::Favorites { .. } => "f_{user_id}_{id}",
                 crate::booru::Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
                 crate::booru::Target::Popular { .. } => "P_{scale[0]}_{date}_{id}",
+                crate::booru::Target::Artist { .. } | crate::booru::Target::ArtistSearch { .. } => {
+                    ""
+                }
             };
             return Some(descriptor(category, format));
         }

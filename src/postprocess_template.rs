@@ -106,6 +106,12 @@ impl Template {
             _ => None,
         }
     }
+    pub(crate) fn identity_path(&self) -> Option<Vec<String>> {
+        let [Part::Field(field)] = self.parts.as_slice() else {
+            return None;
+        };
+        field.identity_path()
+    }
     pub fn render_value(&self, context: &Map<String, Value>) -> Result<Value> {
         self.render_value_mode(context, false)
     }
@@ -150,7 +156,18 @@ fn convert_context(
         .map(|(key, value)| {
             Ok((
                 key.clone(),
-                convert(value, key, true, 0, &mut budget, &mut nodes)?,
+                if key == "_parent" {
+                    FormatValue::SourcePrimitive(Box::new(convert(
+                        value,
+                        key,
+                        false,
+                        0,
+                        &mut budget,
+                        &mut nodes,
+                    )?))
+                } else {
+                    convert(value, key, true, 0, &mut budget, &mut nodes)?
+                },
             ))
         })
         .collect()

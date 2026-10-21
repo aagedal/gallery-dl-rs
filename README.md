@@ -408,6 +408,18 @@ conversion such as `{date!D:%Y}`. Defaults use
 Post hook changes remain local to each post; creation timestamps and native
 history retain the original post identity.
 
+Danbooru/e621/e926 artist routes (`/artists/ID`, `/artists?QUERY`, and
+`/artists/?QUERY`) discover independent tag-search child jobs. Artist searches
+retain query parameters, normalize the initial page as a Python integer, and
+continue at twenty artists per page. Names are validated and quoted before
+child selection; selected children make tag requests lazily. Child filters and
+ranges run before URL deduplication. Metadata inheritance currently uses the
+source default: each child exposes the full artist JSON under `_parent`,
+including parent child-hook edits. Root edits to this shallow
+copy stay in the child; edits inside shared nested maps reach `child-after`.
+Tag children use ordinary tag paths and archives. Artist roots emit no files;
+parent hooks initialize only with `init: true`.
+
 Booru template keywords retain producer spelling independently of the native
 logical basename. Danbooru derives `filename` and `extension` from the raw URL;
 e621 uses `file.md5` and `file.ext` verbatim. Gelbooru/Safebooru preserve explicit
