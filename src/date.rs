@@ -238,6 +238,7 @@ mod tests {
             metadata: Some(PostMetadata {
                 source_num: None,
                 source_suffix: None,
+                search_tags: None,
                 keyword_updates: None,
                 tags: None,
                 sketch: None,

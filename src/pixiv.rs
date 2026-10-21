@@ -701,6 +701,7 @@ pub fn parse_profile(bytes: &[u8], owner: &str, kind: ProfileKind) -> Result<Vec
             index: 1,
             source_num: Some(0.into()),
             source_suffix: None,
+            search_tags: None,
             profile_asset: profile_asset_identity(label, owner, timestamp),
             pixiv_user_detail: UserDetail::parse_compat(&serde_json::Map::from_iter([(
                 "user".to_owned(),

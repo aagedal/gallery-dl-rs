@@ -685,6 +685,9 @@ pub struct PostMetadata {
     pub rating: Option<std::sync::Arc<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<i64>,
+    /// Exact booru constructor search text, separate from API wire sentinels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_tags: Option<std::sync::Arc<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<crate::twitter::CommunityMetadata>,
     /// Community feeds use their own archive namespace; ordinary posts do not.
@@ -1945,6 +1948,11 @@ fn compatibility_metadata(
         tags_bookmark: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
             .flatten(),
+        search_tags: crate::booru::Site::from_category(category)
+            .or_else(|| (category == "e926").then_some(crate::booru::Site::E621))
+            .and_then(|_| data.get("search_tags").and_then(Value::as_str))
+            .filter(|tags| tags.len() <= 1024)
+            .map(std::sync::Arc::from),
         source_num: data.get("num").cloned(),
         source_suffix: data.get("suffix").cloned(),
         keyword_updates: None,

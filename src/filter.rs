@@ -613,6 +613,9 @@ fn context_parts(
         if let Some(index) = post.num_series {
             metadata.insert("num_series".into(), Value::Int(index.into()));
         }
+        if let Some(tags) = &post.search_tags {
+            metadata.insert("search_tags".into(), text(tags.clone()));
+        }
         if let Some(score) = post.score {
             metadata.insert("score".into(), Value::Int(score.into()));
         }

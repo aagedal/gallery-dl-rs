@@ -70,7 +70,9 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "artstation" => format == "{asset[id]}",
         "twitter" => matches!(format, TWITTER | COMMUNITY),
         "kemono" | "coomer" => matches!(format, KEMONO | DISCORD),
-        "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru" => format == "{id}",
+        "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru" => {
+            matches!(format, "{id}" | "t_{search_tags}_{id}")
+        }
         "flickr" | "wallhaven" | "imgur" | "furaffinity" | "vsco" | "pixeldrain" => {
             format == "{id}"
         }
@@ -259,7 +261,10 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 };
             let format = match target {
                 crate::booru::Target::Post { .. } => "{id}",
-                crate::booru::Target::Tags { .. } => "t_{search_tags}_{id}",
+                crate::booru::Target::Tags { .. } => {
+                    crate::booru::source_search_tags(site, url)?;
+                    "t_{search_tags}_{id}"
+                }
                 crate::booru::Target::Pool { .. } => "p_{pool[id]}_{id}",
             };
             return Some(descriptor(category, format));
@@ -410,6 +415,31 @@ mod tests {
     use serde_json::{Value, json};
 
     #[test]
+    fn booru_tag_descriptors_require_an_actual_source_match() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/source_archive/booru_search.json"
+        ))
+        .unwrap();
+        let mut matched = 0;
+        let mut unmatched = 0;
+        for case in fixture["cases"].as_array().unwrap() {
+            let url = Url::parse(case["url"].as_str().unwrap()).unwrap();
+            let actual = for_url(&url);
+            if !case["error"].is_null() {
+                assert!(actual.is_none(), "{}", case["name"]);
+                unmatched += 1;
+                continue;
+            }
+            let actual = actual.unwrap_or_else(|| panic!("{}", case["name"]));
+            assert_eq!(actual.category, case["category"], "{}", case["name"]);
+            assert_eq!(actual.format, case["archive_format"], "{}", case["name"]);
+            assert!(default_keywords_supported(&actual), "{}", case["name"]);
+            matched += 1;
+        }
+        assert_eq!((matched, unmatched), (87, 23));
+    }
+
+    #[test]
     fn root_descriptors_match_installed_source_classes() {
         let fixture: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/source_archive/descriptors.json"
@@ -542,6 +572,7 @@ mod tests {
             ("kemono", KEMONO),
             ("coomer", DISCORD),
             ("danbooru", "{id}"),
+            ("danbooru", "t_{search_tags}_{id}"),
             ("e926", "{id}"),
             ("flickr", "{id}"),
             ("wallhaven", "{id}"),
@@ -567,7 +598,6 @@ mod tests {
             ("newgrounds", "{_type}{_index}"),
             ("flickr", "a_{album[id]}_{id}"),
             ("imgur", "{album[id]}_{id}"),
-            ("danbooru", "t_{search_tags}_{id}"),
             ("e621", "p_{pool[id]}_{id}"),
             ("pinterest", "{board[id]}_{id}"),
             ("twitter", "AV_{user[id]}_{date}"),

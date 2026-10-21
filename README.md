@@ -319,7 +319,8 @@ Experimental native booru extraction (`--extractor native`) covers categories
 `index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID`).
 Danbooru/e621 page with an id cursor (`page=bID`, 200 per page) and Gelbooru-style
 sites with `pid` (100 per page), both capped at 100 pages; pools are fetched in
-pool order, up to 10,000 posts. Posts without a file URL (deleted, banned,
+pool order, up to 10,000 posts. Source-specific ascending and non-ID cursor
+strategies remain unfinished. Posts without a file URL (deleted, banned,
 restricted) are skipped, and files are accepted only from the site's own HTTPS
 CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
 space-separated tag string, `username` the uploader name when the API provides
@@ -327,6 +328,15 @@ one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{exten
 archive identity is (category, post ID). API-reported file size is exposed as
 `filesize`; `rating` and signed `score` are available to post filters and filename
 templates (e621 uses `score.total`). Per-category tags are not yet exposed.
+
+Tag searches expose `search_tags` to metadata, filters, and templates, preserving
+case, whitespace, empty values, and source query decoding. Danbooru selects the
+last `tags=` capture; the other sites select the first. Gelbooru/Safebooru send
+an empty API search for literal `all` while retaining `search_tags: "all"`.
+Source-matched search URLs support default metadata archive keys
+`t_{search_tags}_{id}`. Broader native URL aliases retain extraction support;
+use an explicit `archive-format` when Python has no matching extractor.
+
 Danbooru/e621 accept category-scoped `username` and `password` (the account's API
 key) for HTTP Basic authentication. Gelbooru accepts category-scoped `user-id` and
 `api-key`; both must be nonempty to authenticate. Credentials are sent only to the
@@ -2028,6 +2038,10 @@ other file contexts can still run concurrently. Twitter/Tumblr copy post fields
 into prepared files; Instagram lets prepared file fields take precedence.
 ArtStation emits a post boundary per supported asset, retaining source asset
 positions and the project's declared asset count.
+
+Booru search keywords follow their producer ownership: Danbooru/e621 retain
+post-hook changes to `search_tags`, while Gelbooru/Safebooru reassign it before
+each file, matching the source's extractor keyword updates.
 
 `num` preserves the producer's counter separately from the native file `index`.
 Ordinary Pixiv artwork and original ugoira frames start `num` at zero while

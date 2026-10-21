@@ -26,7 +26,7 @@ return `None` instead of selecting a category default.
 Format descriptors do not supply absent source keywords. Native context still
 lacks several source fields: Flickr `user[nsid]`/`album[id]`, Pinterest `board[id]`,
 Imgur `album[id]`, Imgbox `gallery_key`/`image_key`, DeviantArt `_username` and
-`folder[uuid]`, booru `search_tags`/`pool`, and some source-specific Newgrounds,
+`folder[uuid]`, booru `pool`, and some source-specific Newgrounds,
 Postimg and Tumblr aliases. A descriptor for these routes does not imply
 full default-key parity. Only proven aliases are projected: real ArtStation
 asset IDs, Weasyl submission IDs, Mastodon attachment IDs, and Pixiv work IDs,
@@ -35,3 +35,13 @@ because preview-card keys are not yet proven. Empty Imgur gallery and bare
 DeviantArt descriptors also remain gated until native child framing matches.
 Projection is for initial snapshots before hooks, never live contexts mutated
 by earlier hooks. Existing complete raw novel/Sketch snapshots stay authoritative.
+
+`booru_search.json` contains 110 actual-source cases: 87 matched tag searches and
+23 unmatched URLs. Its adjacent generator exercises the constructors, real
+`items()`, job keyword merging, archive formatting and default filenames with
+synthetic API posts. It records duplicate parameters, decoding, whitespace,
+empty searches, DAPI `all` wire sentinels, query-order differences and source
+pagination arguments. Four additional cases apply the real MetadataPP modify
+hook between source post/file yields, retaining dictionary identity and real
+job keyword updates. Native tests replay keys and keyword ownership. Pool
+metadata and ascending/non-ID pagination policies remain separate gaps.

@@ -118,6 +118,7 @@ fn valid(fields: &Map<String, Value>) -> bool {
                 | "category"
                 | "subcategory"
                 | "rating"
+                | "search_tags"
                 | "score"
                 | "community"
                 | "discord"
@@ -920,6 +921,7 @@ mod tests {
             "subcategory",
             "rating",
             "score",
+            "search_tags",
             "community",
             "discord",
             "creator",

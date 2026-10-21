@@ -47,6 +47,7 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
     item.metadata = Some(gallery_dl_rs::extract::PostMetadata {
         source_num: None,
         source_suffix: None,
+        search_tags: None,
         keyword_updates: None,
         tags: None,
         sketch: None,

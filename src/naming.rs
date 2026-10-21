@@ -106,6 +106,7 @@ const FIELDS: &[&str] = &[
     "pixivision_title",
     "rating",
     "score",
+    "search_tags",
     "filesize",
     "revision",
     "revision_id",

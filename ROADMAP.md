@@ -1141,6 +1141,17 @@ backend. See upstream
 `postprocessor/common.py:24`, `postprocessor/metadata.py:111`, `archive.py:19`,
 and `job.py:817` for initialization and lifecycle order.
 
+**Implemented booru search archive context:** native tag searches retain
+`search_tags` separately from request tags, expose it to filters/templates, and
+enable default `t_{search_tags}_{id}` metadata archive keys for source-matched
+routes. Constructor decoding, duplicate-query rules, empty searches, whitespace,
+and Gelbooru/Safebooru `all` request sentinels follow source fixtures. Shared
+Danbooru/e621 keywords retain post-hook mutations; DAPI extractors reapply their
+search keyword before each file. The source oracle includes 110 URL cases
+(23 unmatched) and four live mutation traces. Broader native
+aliases remain usable with explicit archive formats. Pool metadata/default keys
+and ascending/non-ID source cursor policies remain unfinished.
+
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the
 base directory. Scopes and explicit CLI overrides share the filename precedence.

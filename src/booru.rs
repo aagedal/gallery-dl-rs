@@ -121,7 +121,82 @@ pub fn valid_id(raw: &str) -> bool {
 }
 
 fn valid_tags(tags: &str) -> bool {
-    !tags.trim().is_empty() && tags.len() <= MAX_TAGS && !tags.chars().any(char::is_control)
+    tags.len() <= MAX_TAGS
+}
+
+/// Bounded, exact source constructor capture for native-supported tag routes.
+/// `Some("")` is a matched empty search; `None` is not a source match (or
+/// exceeds the native size bound). Host/query aliases accepted by `target`
+/// remain supported independently and use its ordinary query fallback.
+pub fn source_search_tags(site: Site, url: &Url) -> Option<String> {
+    checked_source_search_tags(site, url).ok().flatten()
+}
+
+fn source_search_tags_raw(site: Site, url: &Url) -> Option<&str> {
+    if !matches!(url.scheme(), "http" | "https")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    let query = url.query()?;
+    Some(match site {
+        Site::Danbooru
+            if url.host_str() == Some("danbooru.donmai.us") && url.path() == "/posts" =>
+        {
+            // The source's greedy repeated query prefix selects the last pair.
+            query
+                .split('&')
+                .filter_map(|pair| pair.strip_prefix("tags="))
+                .next_back()?
+        }
+        Site::E621
+            if matches!(url.host_str(), Some("e621.net" | "e926.net"))
+                && matches!(url.path(), "/post" | "/posts") =>
+        {
+            // Its lazy regex accepts the first literal substring, even notags=.
+            query.get(query.find("tags=")? + 5..)?.split('&').next()?
+        }
+        Site::Gelbooru
+            if matches!(url.host_str(), Some("gelbooru.com" | "www.gelbooru.com"))
+                && matches!(url.path(), "/" | "/index.php") =>
+        {
+            query
+                .strip_prefix("page=post&s=list&tags=")?
+                .split('&')
+                .next()?
+        }
+        Site::Safebooru
+            if url.host_str() == Some("safebooru.org") && url.path() == "/index.php" =>
+        {
+            query
+                .strip_prefix("page=post&s=list&tags=")?
+                .split('&')
+                .next()?
+        }
+        _ => return None,
+    })
+}
+
+fn checked_source_search_tags(site: Site, url: &Url) -> Result<Option<String>> {
+    let Some(raw) = source_search_tags_raw(site, url) else {
+        return Ok(None);
+    };
+    // A UTF-8 byte can occupy at most three bytes in percent-encoded form.
+    if raw.len() > MAX_TAGS * 3 {
+        return Err(error("booru search tags exceed the size limit"));
+    }
+    let encoded = format!("value={raw}");
+    let decoded = url::form_urlencoded::parse(encoded.as_bytes())
+        .next()
+        .expect("fixed query key")
+        .1
+        .into_owned();
+    if !valid_tags(&decoded) {
+        return Err(error("booru search tags exceed the size limit"));
+    }
+    Ok(Some(decoded))
 }
 
 /// Classify a booru URL for `site`, returning the target and API origin.
@@ -162,11 +237,16 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         .path_segments()
         .map(|s| s.filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
+    // A matched invalid capture must fail; falling back could select a
+    // different duplicate query and silently change the requested namespace.
+    let source_tags = checked_source_search_tags(site, url)?;
     let target = if site.danbooru_dialect() {
         match segments.as_slice() {
             ["posts", id] => post_id(id).map(|id| Target::Post { id }),
             ["pools", id] => post_id(id).map(|id| Target::Pool { id }),
-            ["posts"] => query("tags")
+            ["posts"] => source_tags
+                .clone()
+                .or_else(|| query("tags"))
                 .filter(|t| valid_tags(t))
                 .map(|tags| Target::Tags { tags }),
             _ => None,
@@ -180,7 +260,9 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
             (["index.php"] | [], Some("post"), Some("view")) => query("id")
                 .and_then(|id| post_id(&id))
                 .map(|id| Target::Post { id }),
-            (["index.php"] | [], Some("post"), Some("list")) => query("tags")
+            (["index.php"] | [], Some("post"), Some("list")) => source_tags
+                .clone()
+                .or_else(|| query("tags"))
                 .filter(|t| valid_tags(t))
                 .map(|tags| Target::Tags { tags }),
             _ => None,
@@ -464,6 +546,7 @@ enum Cursor {
 struct State {
     root: Url,
     tags: String,
+    search_tags: Option<Arc<str>>,
     cursor: Cursor,
     pages: usize,
     done: bool,
@@ -604,8 +687,19 @@ impl Booru {
     fn emit(&self, state: &mut State, raw: &[Value]) {
         for post in raw {
             if let Some(mut media) = parse_post(self.site, post) {
+                if let Some(metadata) = &mut media.metadata {
+                    metadata.search_tags = state.search_tags.clone();
+                }
                 self.network.apply_media(&mut media);
-                let keywords = KeywordPolicy::shared(&["num", "index", "media_id"])
+                // DAPI search metadata lives in extractor.kwdict and the source
+                // Job reapplies it before every message, including each file.
+                let fields: &[&str] =
+                    if state.search_tags.is_some() && !self.site.danbooru_dialect() {
+                        &["num", "index", "media_id", "search_tags"]
+                    } else {
+                        &["num", "index", "media_id"]
+                    };
+                let keywords = KeywordPolicy::shared(fields)
                     .with_post_fields(&media, &["filename", "name", "extension"]);
                 state.pending.extend(group_with_keywords(
                     vec![media],
@@ -701,6 +795,7 @@ impl Booru {
                     let mut state = State {
                         root,
                         tags: String::new(),
+                        search_tags: None,
                         cursor: Cursor::Page(0),
                         pages: 0,
                         done: true,
@@ -731,6 +826,7 @@ impl Booru {
                     Ok::<_, crate::Error>(self.listing(State {
                         root,
                         tags: String::new(),
+                        search_tags: None,
                         done: ids.is_empty(),
                         cursor: Cursor::Pool(ids.into()),
                         pages: 0,
@@ -745,9 +841,16 @@ impl Booru {
                 .boxed();
             }
         };
+        let search_tags = Some(Arc::from(tags.as_str()));
+        let tags = if !self.site.danbooru_dialect() && tags == "all" {
+            String::new()
+        } else {
+            tags
+        };
         self.listing(State {
             root,
             tags,
+            search_tags,
             cursor,
             pages: 0,
             done: false,
@@ -922,6 +1025,289 @@ mod tests {
                "tags": {"general": ["a", "b"], "artist": ["c"]}})
     }
 
+    fn fixture_site(family: &str) -> Site {
+        Site::from_category(family).unwrap()
+    }
+
+    #[test]
+    fn source_search_constructor_and_emitted_keys_match_all_recorded_cases() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/source_archive/booru_search.json"
+        ))
+        .unwrap();
+        let mut matched = 0;
+        for case in fixture["cases"].as_array().unwrap() {
+            let site = fixture_site(case["family"].as_str().unwrap());
+            let url = Url::parse(case["url"].as_str().unwrap()).unwrap();
+            let capture = source_search_tags(site, &url);
+            if case["error"] == "NoExtractor" {
+                assert!(capture.is_none(), "{}", case["name"]);
+                continue;
+            }
+            assert!(case["error"].is_null(), "{}", case["name"]);
+            let source = case["events"][1]["metadata"]["search_tags"]
+                .as_str()
+                .unwrap();
+            assert_eq!(capture.as_deref(), Some(source), "{}", case["name"]);
+            assert_eq!(
+                target(site, &url).unwrap().0,
+                Target::Tags {
+                    tags: source.into()
+                },
+                "{}",
+                case["name"]
+            );
+            let wire = if !site.danbooru_dialect() && source == "all" {
+                ""
+            } else {
+                source
+            };
+            assert_eq!(wire, case["calls"][0]["params"]["tags"], "{}", case["name"]);
+            // Prefix selection is recorded, not asserted as implemented:
+            // ascending/non-ID source pagination remains a separate parity gap.
+            let client = Booru::new(site, Duration::from_secs(1)).unwrap();
+            let mut state = State {
+                root: Url::parse("https://example.invalid/").unwrap(),
+                tags: wire.into(),
+                search_tags: Some(Arc::from(source)),
+                cursor: Cursor::Page(0),
+                pages: 0,
+                done: false,
+                pending: VecDeque::new(),
+            };
+            client.emit(&mut state, std::slice::from_ref(&case["input_post"]));
+            let ExtractionEvent::Post(post) = state.pending.pop_front().unwrap() else {
+                panic!()
+            };
+            assert_eq!(
+                post.metadata.as_ref().unwrap().search_tags.as_deref(),
+                Some(source)
+            );
+            let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+                panic!()
+            };
+            assert_eq!(
+                file_fields.iter().any(|field| field == "search_tags"),
+                !site.danbooru_dialect()
+            );
+            let ExtractionEvent::Media(media) = state.pending.pop_front().unwrap() else {
+                panic!()
+            };
+            let context = crate::postprocess::context(&media);
+            assert_eq!(context["search_tags"], source);
+            assert_eq!(context["metadata"]["search_tags"], source);
+            if case["name"].as_str().unwrap().ends_with("_plain") {
+                let filter = crate::filter::FilterExpression::parse(
+                    "search_tags == metadata['search_tags'] and search_tags == 'Cat'",
+                )
+                .unwrap();
+                assert!(filter.matches(&media).unwrap());
+                assert!(filter.matches_post(&post).unwrap());
+                assert_eq!(
+                    crate::naming::FilenameTemplate::parse("{search_tags}")
+                        .unwrap()
+                        .render(&media)
+                        .unwrap(),
+                    "Cat"
+                );
+            }
+            let template = crate::postprocess::template::Template::parse(
+                case["archive_format"].as_str().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                template.render(&context).unwrap(),
+                case["events"][1]["archive_key"],
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                media.filename, case["events"][1]["default_filename"],
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                serde_json::to_value(&media.metadata).unwrap()["search_tags"],
+                source
+            );
+            assert!(matches!(
+                state.pending.pop_front(),
+                Some(ExtractionEvent::EndPost)
+            ));
+            matched += 1;
+        }
+        assert_eq!(matched, 87);
+    }
+
+    #[test]
+    fn search_source_matching_preserves_native_alias_fallback_and_bounds() {
+        for (site, raw) in [
+            (Site::Danbooru, "https://donmai.us/posts?tags=Cat+Dog"),
+            (Site::E621, "https://www.e621.net/posts?tags=Cat+Dog"),
+            (
+                Site::Gelbooru,
+                "https://gelbooru.com/index.php?s=list&page=post&tags=Cat+Dog",
+            ),
+            (
+                Site::Safebooru,
+                "https://www.safebooru.org/index.php?page=post&s=list&tags=Cat+Dog",
+            ),
+        ] {
+            let url = Url::parse(raw).unwrap();
+            assert!(source_search_tags(site, &url).is_none());
+            assert_eq!(
+                target(site, &url).unwrap().0,
+                Target::Tags {
+                    tags: "Cat Dog".into()
+                }
+            );
+        }
+        let empty = Url::parse("https://danbooru.donmai.us/posts?tags=").unwrap();
+        assert_eq!(
+            source_search_tags(Site::Danbooru, &empty),
+            Some(String::new())
+        );
+        assert!(
+            source_search_tags(
+                Site::Danbooru,
+                &Url::parse("https://danbooru.donmai.us/posts").unwrap()
+            )
+            .is_none()
+        );
+        let oversized = Url::parse(&format!(
+            "https://danbooru.donmai.us/posts?tags={}",
+            "a".repeat(MAX_TAGS + 1)
+        ))
+        .unwrap();
+        assert!(source_search_tags(Site::Danbooru, &oversized).is_none());
+        assert!(target(Site::Danbooru, &oversized).is_err());
+        for (site, raw) in [
+            (
+                Site::Danbooru,
+                format!(
+                    "https://danbooru.donmai.us/posts?tags=First&tags={}",
+                    "a".repeat(MAX_TAGS + 1)
+                ),
+            ),
+            (
+                Site::E621,
+                format!(
+                    "https://e621.net/posts?notags={}&tags=First",
+                    "a".repeat(MAX_TAGS + 1)
+                ),
+            ),
+        ] {
+            let url = Url::parse(&raw).unwrap();
+            assert!(source_search_tags(site, &url).is_none());
+            let failure = target(site, &url).unwrap_err().to_string();
+            assert_eq!(failure, "booru search tags exceed the size limit");
+        }
+    }
+
+    #[tokio::test]
+    async fn real_post_and_file_hooks_follow_source_search_keyword_ownership() {
+        use crate::postprocess::{
+            Postprocessors, Specification,
+            jobs::{self, JobConfiguration},
+        };
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/source_archive/booru_search.json"
+        ))
+        .unwrap();
+        for case in fixture["ownership_cases"].as_array().unwrap() {
+            let site = fixture_site(case["family"].as_str().unwrap());
+            let root = tempfile::tempdir().unwrap();
+            let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
+            let processors = Arc::new(Postprocessors::new([
+                json!({"name":"metadata","mode":"modify","event":"post","fields":{"search_tags":"HOOK"}}),
+                json!({"name":"metadata","mode":"custom","event":"file","base-directory":root.path(),"directory":[],"filename":"seen.txt","format":"{search_tags}","archive":root.path().join("archive.sqlite")}),
+            ].iter().map(|value| Specification::parse(value, root.path()).unwrap()).collect()));
+            let configurations = Arc::new(std::collections::BTreeMap::from([(
+                site.category().into(),
+                JobConfiguration {
+                    processors: processors.clone(),
+                    root: root.path().into(),
+                    filename: None,
+                    directory: None,
+                    init: false,
+                },
+            )]));
+            let client = Booru::new(site, Duration::from_secs(1)).unwrap();
+            let mut state = State {
+                root: Url::parse("https://example.invalid/").unwrap(),
+                tags: "Original".into(),
+                search_tags: Some(Arc::from("Original")),
+                cursor: Cursor::Page(0),
+                pages: 0,
+                done: false,
+                pending: VecDeque::new(),
+            };
+            client.emit(&mut state, std::slice::from_ref(&case["input_post"]));
+            // Exercise publication and file hooks without any HTTP. The native
+            // producer snapshots/policy remain the ones just emitted above.
+            for event in &mut state.pending {
+                if let ExtractionEvent::Media(media) = event {
+                    (media.url, media.job) =
+                        crate::extract::inline_text("fixture bytes".into()).unwrap();
+                }
+            }
+            let input = stream::iter(state.pending.into_iter().map(Ok)).boxed();
+            let mut jobs = jobs::apply_with_descriptor(
+                input,
+                configurations,
+                Some(site.category().into()),
+                crate::source_archive::for_url(&source),
+            );
+            let download = crate::download::client(Duration::from_secs(1)).unwrap();
+            let mut files = 0;
+            while let Some(job) = jobs.next().await {
+                let job = job.unwrap();
+                assert_eq!(
+                    job.scope.as_ref().unwrap().keywords()["search_tags"],
+                    case["trace"][1]["search_tags"]
+                );
+                crate::download::download_with_options(
+                    &download,
+                    root.path(),
+                    &job.media,
+                    crate::download::DownloadOptions {
+                        postprocessors: Some(&processors),
+                        postprocessor_scope: job.scope.as_ref(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                files += 1;
+            }
+            assert_eq!(files, 1);
+            let connection =
+                rusqlite::Connection::open(root.path().join("archive.sqlite")).unwrap();
+            let entries: Vec<String> = connection
+                .prepare("SELECT entry FROM archive ORDER BY entry")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<std::result::Result<_, _>>()
+                .unwrap();
+            assert_eq!(
+                entries,
+                [format!(
+                    "{}_MD_{}",
+                    site.category(),
+                    case["file_archive_key"].as_str().unwrap()
+                )]
+            );
+            assert!(case["shared_reference"].as_bool().unwrap());
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("seen.txt")).unwrap(),
+                case["trace"][2]["search_tags"].as_str().unwrap(),
+                "{}",
+                case["family"]
+            );
+        }
+    }
+
     #[test]
     fn parses_danbooru_post() {
         let media = parse_post(Site::Danbooru, &danbooru_post(123)).unwrap();
@@ -1052,10 +1438,6 @@ mod tests {
                 Site::Gelbooru,
                 "https://gelbooru.com/index.php?page=post&s=view&id=0",
             ),
-            (
-                Site::Safebooru,
-                "https://safebooru.org/index.php?page=post&s=list&tags=",
-            ),
         ] {
             assert!(t(site, raw).is_err(), "{raw}");
         }
@@ -1149,6 +1531,90 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /posts.json?tags=cat&limit=200 "));
         assert!(requests[1].contains("&page=b801 "));
+    }
+
+    #[tokio::test]
+    async fn search_tags_survive_pages_and_requests_stay_lazy_and_isolated() {
+        for site in [Site::Danbooru, Site::E621] {
+            let raw = if site == Site::Danbooru {
+                danbooru_post(42)
+            } else {
+                e621_post(42)
+            };
+            let page = if site == Site::Danbooru {
+                json!([raw])
+            } else {
+                json!({"posts":[raw]})
+            };
+            let empty = if site == Site::Danbooru {
+                "[]"
+            } else {
+                "{\"posts\":[]}"
+            };
+            let (root, server) = serve(vec![
+                response("200 OK", "", page.to_string().as_bytes()),
+                response("200 OK", "", empty.as_bytes()),
+            ]);
+            let client = booru(site, root);
+            let url = Url::parse(&format!(
+                "https://{}/posts?tags=First&tags=Last",
+                if site == Site::Danbooru {
+                    "danbooru.donmai.us"
+                } else {
+                    "e621.net"
+                }
+            ))
+            .unwrap();
+            let expected = if site == Site::Danbooru {
+                "Last"
+            } else {
+                "First"
+            };
+            let mut events = client.events(&url);
+            let ExtractionEvent::Post(post) = events.next().await.unwrap().unwrap() else {
+                panic!()
+            };
+            assert_eq!(
+                post.metadata.unwrap().search_tags.as_deref(),
+                Some(expected)
+            );
+            let ExtractionEvent::Media(media) = events.next().await.unwrap().unwrap() else {
+                panic!()
+            };
+            assert_eq!(
+                media.metadata.as_ref().unwrap().search_tags.as_deref(),
+                Some(expected)
+            );
+            assert!(media.headers.values().all(|v| !v.contains("tags=")));
+            assert!(matches!(
+                events.next().await.unwrap().unwrap(),
+                ExtractionEvent::EndPost
+            ));
+            assert!(events.next().await.is_none());
+            let requests = server.join().unwrap();
+            for request in requests {
+                assert!(request.contains(&format!("tags={expected}")));
+            }
+        }
+        // DAPI 'all' is only a wire sentinel. Its public source context persists.
+        let raw =
+            json!({"id":42,"directory":"1","image":format!("{MD5}.jpg"),"hash":MD5,"tags":"cat"});
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            "",
+            json!([raw]).to_string().as_bytes(),
+        )]);
+        let client = booru(Site::Safebooru, root);
+        let url = Url::parse("https://safebooru.org/index.php?page=post&s=list&tags=all").unwrap();
+        let mut events = client.events(&url);
+        let ExtractionEvent::Post(post) = events.next().await.unwrap().unwrap() else {
+            panic!()
+        };
+        assert_eq!(post.metadata.unwrap().search_tags.as_deref(), Some("all"));
+        drop(events); // No next-page work or selected file is required.
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].contains("&tags=&limit=100&pid=0 "));
     }
 
     #[tokio::test]
