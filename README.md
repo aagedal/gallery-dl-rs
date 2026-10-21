@@ -318,7 +318,8 @@ Experimental native booru extraction (`--extractor native`) covers categories
 `index.php?page=post&s=view&id=ID`), tag searches (`/posts?tags=...`,
 `index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID` or
 `/pool/show/ID`). Danbooru favorite groups use `/favorite_groups/ID` or
-`/favorite_group/show/ID`.
+`/favorite_group/show/ID`. E621/e926 favorites use `/favorites?user_id=OWNER`;
+the owner is an arbitrary query string, with an empty default.
 Danbooru/e621 use before/after ID cursors or numbered pages according to search
 tags, requesting 200/320 posts per page respectively. Ascending searches retain
 the first API page and reverse subsequent pages before selecting the next cursor.
@@ -344,6 +345,21 @@ space-separated tag string, `username` the uploader name when the API provides
 one (Gelbooru `owner`). Archive identity is (category, post ID). API-reported file size is exposed as
 `filesize`; `rating` and signed `score` are available to post filters and filename
 templates (e621 uses `score.total`). Per-category tags are not yet exposed.
+
+Favorites stream `/favorites.json` using numbered pages (initial page absent,
+then 2, 3, ...), 320 posts per request, and the source page-length threshold.
+They do not buffer a pool or interpret tag-order parameters. Query keys and
+values are decoded once; the first decoded key wins, blank values are retained,
+and entries without `=` are ignored. Supplied `page`/`limit` are replaced by the
+pagination defaults; other parameters remain API-only. Only a query immediately
+after `/favorites` is captured: the source prefix also matches suffix paths,
+whose later query is ignored. No authenticated-owner lookup is performed.
+The `user_id` keyword resets from the constructor for each post; Post/File hook
+edits reach the current file but cannot change later posts or API requests.
+Default directories are `{category}/Favorites/{user_id}` (empty owner segments
+are omitted); filenames use the ordinary e621 format. Metadata postprocessor
+archives use live `f_{user_id}_{id}` keys. Retained class descriptors also select
+the correct default metadata archive for media-only library downloads.
 
 Booru template keywords retain producer spelling independently of the native
 logical basename. Danbooru derives `filename` and `extension` from the raw URL;

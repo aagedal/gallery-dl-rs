@@ -1042,6 +1042,11 @@ fn context_parts(
         if let Some(defaults) = &post.source_defaults {
             values.insert("category".into(), Value::String(defaults.category.into()));
         }
+        if let Some(user_id) = &post.booru_user_id {
+            let user_id = json_value(user_id);
+            values.insert("user_id".into(), user_id.clone());
+            metadata.insert("user_id".into(), user_id);
+        }
         values.insert("metadata".into(), map(metadata));
     }
     values

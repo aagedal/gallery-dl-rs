@@ -71,6 +71,7 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "twitter" => matches!(format, TWITTER | COMMUNITY),
         "kemono" | "coomer" => matches!(format, KEMONO | DISCORD),
         "danbooru" if format == "fg_{favgroup[id]}_{id}" => true,
+        "e621" | "e926" if format == "f_{user_id}_{id}" => true,
         "danbooru" | "e621" | "e926" => {
             matches!(
                 format,
@@ -272,6 +273,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 }
                 crate::booru::Target::Pool { .. } => "p_{pool[id]}_{id}",
                 crate::booru::Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
+                crate::booru::Target::Favorites { .. } => "f_{user_id}_{id}",
             };
             return Some(descriptor(category, format));
         }
@@ -279,9 +281,16 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     None
 }
 
-/// Media fallback is deliberately conservative: album/folder/list/search
-/// ownership cannot generally be recovered from an ordinary media identity.
+/// Retained source classes take priority. Otherwise media fallback is
+/// conservative: collection ownership cannot be recovered from a file identity.
 pub fn for_media(media: &Media) -> Option<ArchiveDescriptor> {
+    if let Some(defaults) = media
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.source_defaults.as_ref())
+    {
+        return Some(descriptor(defaults.category, defaults.archive));
+    }
     let category = media.category.as_str();
     let format = match category {
         "pixiv" => {

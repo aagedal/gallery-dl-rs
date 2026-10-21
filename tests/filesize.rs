@@ -218,6 +218,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
         source_num: None,
         booru_keywords: None,
         source_defaults: None,
+        booru_user_id: None,
         source_suffix: None,
         search_tags: None,
         pool: None,

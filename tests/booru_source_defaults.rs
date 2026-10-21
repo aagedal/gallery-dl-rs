@@ -91,6 +91,9 @@ async fn backend_root_provenance_retains_private_defaults_and_publishes_source_p
                 }
                 ExtractionEvent::Media(mut media) => {
                     assert_eq!(media.category, typed_category);
+                    let descriptor = gallery_dl_rs::source_archive::for_media(&media).unwrap();
+                    assert_eq!(descriptor.category, category);
+                    assert_eq!(descriptor.format, case["archive_format"].as_str().unwrap());
                     assert_eq!(
                         gallery_dl_rs::postprocess::context(&media)["category"],
                         category

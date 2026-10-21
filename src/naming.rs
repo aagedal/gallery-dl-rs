@@ -34,6 +34,7 @@ const FIELDS: &[&str] = &[
     "shortcode",
     "username",
     "user",
+    "user_id",
     "service",
     "instance",
     "index",
@@ -460,13 +461,20 @@ pub struct DirectoryTemplate {
 #[derive(Clone, Debug)]
 pub struct SourceDefaults {
     pub(crate) category: &'static str,
+    pub(crate) archive: &'static str,
     filename: FilenameTemplate,
     directory: DirectoryTemplate,
 }
 impl SourceDefaults {
-    pub(crate) fn new(category: &'static str, filename: &str, directory: &[&str]) -> Self {
+    pub(crate) fn new(
+        category: &'static str,
+        archive: &'static str,
+        filename: &str,
+        directory: &[&str],
+    ) -> Self {
         Self {
             category,
+            archive,
             filename: FilenameTemplate::parse(filename).expect("static source filename"),
             directory: DirectoryTemplate::parse(
                 &directory.iter().map(|s| (*s).into()).collect::<Vec<_>>(),

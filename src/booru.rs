@@ -3,8 +3,8 @@
 //!
 //! Mirrors gallery_dl/extractor/danbooru.py (Danbooru and e621 dialects) and
 //! gelbooru.py / gelbooru_v02.py (Gelbooru and Safebooru) through their public
-//! JSON APIs. Single posts, tag searches, Danbooru/e621 pools and
-//! Danbooru favorite groups are supported. Posts without a file URL (deleted,
+//! JSON APIs. Single posts, tag searches, Danbooru/e621 pools,
+//! Danbooru favorite groups and e621/e926 favorites are supported. Posts without a file URL (deleted,
 //! banned or login-restricted) are skipped silently, and media URLs are only
 //! accepted from each site's own CDN hosts.
 use crate::{
@@ -107,6 +107,9 @@ pub enum Target {
     },
     Tags {
         tags: String,
+    },
+    Favorites {
+        params: Vec<(String, String)>,
     },
     /// Exact decimal source capture, retaining leading zeroes.
     Pool {
@@ -219,7 +222,7 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
                 "unsupported booru URL; expected a post, tag search, pool or favorite-group link"
             }
             Site::E621 => {
-                "unsupported booru URL; expected a post (/posts/ID), tag search (/posts?tags=...) or pool (/pools/ID) link"
+                "unsupported booru URL; expected a post (/posts/ID), tag search (/posts?tags=...), pool (/pools/ID), or favorites link"
             }
             Site::Gelbooru | Site::Safebooru => {
                 "unsupported booru URL; expected index.php?page=post&s=view&id=ID or index.php?page=post&s=list&tags=..."
@@ -255,7 +258,25 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     // A matched invalid capture must fail; falling back could select a
     // different duplicate query and silently change the requested namespace.
     let source_tags = checked_source_search_tags(site, url)?;
-    let target = if let Some((kind, id)) = collection_capture(site, url) {
+    let target = if site == Site::E621 && url.path().starts_with("/favorites") {
+        let mut params = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        if url.path() == "/favorites" {
+            for pair in url
+                .query()
+                .unwrap_or_default()
+                .split('&')
+                .filter(|pair| pair.contains('='))
+            {
+                if let Some((key, value)) = url::form_urlencoded::parse(pair.as_bytes()).next()
+                    && seen.insert(key.clone().into_owned())
+                {
+                    params.push((key.into_owned(), value.into_owned()));
+                }
+            }
+        }
+        Some(Target::Favorites { params })
+    } else if let Some((kind, id)) = collection_capture(site, url) {
         Some(match kind {
             CollectionKind::Pool => Target::Pool { id: id.to_owned() },
             CollectionKind::Favgroup => Target::Favgroup { id: id.to_owned() },
@@ -516,6 +537,7 @@ fn defaults(
     let directory: &[&str] = match target {
         Target::Post { .. } => &["{category}"],
         Target::Tags { .. } => &["{category}", "{search_tags}"],
+        Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
         Target::Pool { .. } => &["{category}", "pool", "{pool[id]} {pool[name]}"],
         Target::Favgroup { .. } => &[
             "{category}",
@@ -523,8 +545,15 @@ fn defaults(
             "{favgroup[id]} {favgroup[name]}",
         ],
     };
+    let archive = match target {
+        Target::Post { .. } => "{id}",
+        Target::Tags { .. } => "t_{search_tags}_{id}",
+        Target::Pool { .. } => "p_{pool[id]}_{id}",
+        Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
+        Target::Favorites { .. } => "f_{user_id}_{id}",
+    };
     Arc::new(crate::naming::SourceDefaults::new(
-        category, filename, directory,
+        category, archive, filename, directory,
     ))
 }
 
@@ -639,6 +668,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
         metadata: Some(PostMetadata {
             booru_keywords,
             source_defaults: Some(defaults(site, site.category(), &Target::Post { id: 0 })),
+            booru_user_id: None,
             file: Some(FileMetadata {
                 width,
                 height,
@@ -791,6 +821,10 @@ impl TagOrder {
     }
 }
 enum Cursor {
+    Favorites {
+        params: Vec<(String, String)>,
+        page: Option<usize>,
+    },
     /// Source tag ordering selects before/after IDs or numbered API pages.
     Tags {
         order: TagOrder,
@@ -855,6 +889,7 @@ struct Collection {
 }
 
 struct State {
+    favorite_user_id: Option<Arc<str>>,
     collection: Option<Collection>,
     root: Url,
     tags: String,
@@ -1028,6 +1063,7 @@ impl Booru {
             if let Some(mut media) = parse_post(self.site, post) {
                 if let Some(metadata) = &mut media.metadata {
                     metadata.search_tags = state.search_tags.clone();
+                    metadata.booru_user_id = state.favorite_user_id.as_deref().map(Value::from);
                     if let Some(collection) = &state.collection {
                         match collection.kind {
                             CollectionKind::Pool => metadata.pool = collection_snapshot.clone(),
@@ -1053,6 +1089,8 @@ impl Booru {
                     };
                 let post_fields: &[&str] = if state.collection.is_some() {
                     &["filename", "name", "extension", "num"]
+                } else if state.favorite_user_id.is_some() {
+                    &["filename", "name", "extension", "user_id"]
                 } else {
                     &["filename", "name", "extension"]
                 };
@@ -1089,13 +1127,42 @@ impl Booru {
     async fn next_page(&self, state: &mut State) -> Result<()> {
         let limit = self.site.page_limit();
         let limit_text = limit.to_string();
-        if !matches!(state.cursor, Cursor::Tags { .. }) {
+        if !matches!(state.cursor, Cursor::Tags { .. } | Cursor::Favorites { .. }) {
             state.pages += 1;
             if state.pages >= MAX_PAGES {
                 state.done = true;
             }
         }
         match &mut state.cursor {
+            Cursor::Favorites { params, page } => {
+                let page_text = page.map(|page| page.to_string());
+                let mut query = params
+                    .iter()
+                    .filter_map(|(key, value)| match key.as_str() {
+                        "limit" => Some((key.as_str(), limit_text.as_str())),
+                        "page" => page_text.as_deref().map(|page| (key.as_str(), page)),
+                        _ => Some((key.as_str(), value.as_str())),
+                    })
+                    .collect::<Vec<_>>();
+                if !params.iter().any(|(key, _)| key == "limit") {
+                    query.push(("limit", &limit_text));
+                }
+                if !params.iter().any(|(key, _)| key == "page")
+                    && let Some(page) = &page_text
+                {
+                    query.push(("page", page));
+                }
+                let body = self.call(&state.root, "favorites.json", &query).await?;
+                let raw = posts(self.site, &body)?;
+                state.done = raw.len() < self.threshold.unwrap_or(limit - 20);
+                *page = Some(match *page {
+                    None => 2,
+                    Some(page) => page
+                        .checked_add(1)
+                        .ok_or_else(|| error("booru favorites pagination page overflow"))?,
+                });
+                self.emit(state, &raw);
+            }
             Cursor::Tags { order, page } => {
                 if let Some(cursor) = state.pending_cursor.take() {
                     *page = Some(match order {
@@ -1191,10 +1258,31 @@ impl Booru {
         };
         let root = self.api_root.clone().unwrap_or(root);
         let (tags, cursor) = match target {
+            Target::Favorites { params } => {
+                let user_id = params
+                    .iter()
+                    .find(|(key, _)| key == "user_id")
+                    .map(|(_, value)| value.as_str())
+                    .unwrap_or_default();
+                return self.listing(State {
+                    favorite_user_id: Some(Arc::from(user_id)),
+                    collection: None,
+                    root,
+                    tags: String::new(),
+                    search_tags: None,
+                    cursor: Cursor::Favorites { params, page: None },
+                    pages: 0,
+                    done: false,
+                    pending: VecDeque::new(),
+                    pending_cursor: None,
+                    pending_error: None,
+                });
+            }
             Target::Post { id } => {
                 return stream::once(async move {
                     let raw = self.post(&root, id).await?;
                     let mut state = State {
+                        favorite_user_id: None,
                         collection: None,
                         root,
                         tags: String::new(),
@@ -1244,6 +1332,7 @@ impl Booru {
                         .map(|(num, id)| (*id, num + 1))
                         .collect();
                     let mut state = State {
+                        favorite_user_id: None,
                         collection: Some(Collection {
                             kind,
                             metadata: KeywordObject::new(metadata),
@@ -1379,6 +1468,7 @@ impl Booru {
             tags
         };
         self.listing(State {
+            favorite_user_id: None,
             collection: None,
             root,
             tags,
@@ -1608,6 +1698,7 @@ mod tests {
             // ascending/non-ID source pagination remains a separate parity gap.
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
+                favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
                 tags: wire.into(),
@@ -1778,6 +1869,7 @@ mod tests {
             )]));
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
+                favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
                 tags: "Original".into(),
@@ -2506,3 +2598,7 @@ mod nameext_compat_tests;
 #[cfg(test)]
 #[path = "booru_defaults_tests.rs"]
 mod defaults_tests;
+
+#[cfg(test)]
+#[path = "booru_favorites_tests.rs"]
+mod favorites_tests;

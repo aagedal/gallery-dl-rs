@@ -1245,9 +1245,9 @@ and multi-post directory checkpoints across all fourteen supported route classes
 **Remaining booru paths/options:** custom path restriction/replacement/conversion,
 strip/substitution settings, extension-map overrides, unsupported routes and
 alternate source hosts still need their source contracts. Gelbooru/Safebooru
-pools and E621 favorites are not implemented. E621 favorites is the next feed.
+pools remain unimplemented.
 
-**Next booru favorites step (source audit):** E621 favorites stream
+**Implemented E621/e926 favorites:** E621 favorites stream
 `/favorites.json` with numbered pages (no pool buffering). The constructor
 matches `/favorites` as a prefix; only an immediately following query is
 captured. Decode query keys/values once, skip bare pairs, and retain the first
@@ -1259,6 +1259,32 @@ within the post; the next post and API request restore the constructor owner.
 ID mutations/deletion do not affect numbered cursors. The default metadata
 archive key is `f_{user_id}_{id}` using live file keywords; the source directory
 is category/Favorites/user_id. Danbooru has no matching `/favorites` extractor.
+Native traversal is lazy, has no 100-page cutoff, and does not buffer, reorder,
+or deduplicate API pages. User IDs remain exact strings (including blanks) and
+compatibility owner keywords preserve raw types without leaking private schema
+fields into inspection JSON. Retained source class descriptors now include
+archive formats, allowing `for_media` to recover proven booru post/tag/pool/
+favorite-group/favorite defaults without inferring classes from mutable owner or
+collection keywords. Genuine source replay covers constructor parsing, API
+parameters, pages, cancellation, later-page failures, five hook checkpoints,
+complete published paths/bytes, live metadata archive keys, and unchanged native
+SQLite identity. Compatibility tests cover typed owner presence, category scope,
+E926 keyword category, unknown-route rejection, and media-only default archives.
+
+**Next DAPI pool step (source audit):** Gelbooru matches the ordered
+`page=pool&s=show&id=ID` query on `/` or `/index.php`; Safebooru requires
+`/index.php`. Preserve lexical digit captures, then expose scalar integer `pool`
+and HTML-decoded `pool_name`. Missing/empty titles fail before post requests.
+Gelbooru fetches the title HTML, fetches the listing again with `pid=0`, then
+requests JSON DAPI records for each HTML ID in order; continue at 45 HTML IDs
+with offsets increasing by 45, preserving duplicates and counting IDs rather
+than API results. Safebooru retains thumbnail IDs from its initial HTML and
+fetches XML DAPI records lazily, without HTML pagination. Reapply the two pool
+keywords per post, without Danbooru shared-object semantics or synthetic `num`.
+Defaults are `{category}/pool/{pool}`, the ordinary DAPI filename, and metadata
+archive key `p_{pool}_{id}`. Replay title failures/decoding, repeated HTML reads,
+45-ID boundaries, duplicate/zero/multiple API results, cancellation before later
+ID requests, and per-post keyword restoration.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

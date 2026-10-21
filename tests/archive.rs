@@ -20,6 +20,7 @@ fn item(url: &str) -> Media {
         source_num: None,
         booru_keywords: None,
         source_defaults: None,
+        booru_user_id: None,
         source_suffix: None,
         search_tags: None,
         pool: None,

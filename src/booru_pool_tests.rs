@@ -915,6 +915,7 @@ fn source_filename_preparation_matches_real_pathformat_types_and_aliases() {
     media.metadata = Some(crate::extract::PostMetadata {
         booru_keywords: Some(Arc::new(serde_json::Map::new())),
         source_defaults: None,
+        booru_user_id: None,
         ..Default::default()
     });
     for case in cases {
