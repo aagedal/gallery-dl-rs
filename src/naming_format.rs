@@ -15,6 +15,8 @@ const MAX_WIDTH: usize = 240;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Value {
     None,
+    Missing,
+    BigInt(String),
     Bool(bool),
     Int(i128),
     Float(f64),
@@ -23,6 +25,7 @@ pub(crate) enum Value {
     Map(Vec<(String, Value)>),
     Date(OffsetDateTime),
     InvalidDate,
+    NullDate(OffsetDateTime),
     SourceDate(OffsetDateTime),
     SourcePrimitive(Box<Value>),
 }
@@ -30,7 +33,8 @@ pub(crate) enum Value {
 impl Value {
     fn truthy(&self) -> bool {
         match self {
-            Value::None | Value::InvalidDate => false,
+            Value::None | Value::Missing | Value::InvalidDate | Value::NullDate(_) => false,
+            Value::BigInt(value) => value.bytes().any(|byte| matches!(byte, b'1'..=b'9')),
             Value::SourcePrimitive(value) => value.truthy(),
             Value::Bool(value) => *value,
             Value::Int(value) => *value != 0,
@@ -47,9 +51,22 @@ impl Value {
         match self {
             Value::Str(value) => value.clone(),
             Value::SourcePrimitive(value) => value.text(),
-            Value::InvalidDate => "[Invalid DateTime]".into(),
+            Value::InvalidDate | Value::NullDate(_) => "[Invalid DateTime]".into(),
             Value::Date(value) | Value::SourceDate(value) => {
-                strftime(value, "%Y-%m-%d %H:%M:%S").unwrap_or_default()
+                let mut text = strftime(value, "%Y-%m-%d %H:%M:%S").unwrap_or_default();
+                if value.microsecond() != 0 {
+                    text.push_str(&format!(".{:06}", value.microsecond()));
+                }
+                if value.offset() != UtcOffset::UTC {
+                    let seconds = value.offset().whole_seconds();
+                    text.push(if seconds < 0 { '-' } else { '+' });
+                    let seconds = seconds.unsigned_abs();
+                    text.push_str(&format!("{:02}:{:02}", seconds / 3600, seconds / 60 % 60));
+                    if seconds % 60 != 0 {
+                        text.push_str(&format!(":{:02}", seconds % 60));
+                    }
+                }
+                text
             }
             value => repr(value),
         }
@@ -69,9 +86,11 @@ pub(crate) fn source_timestamp(seconds: i64) -> Value {
 
 fn repr(value: &Value) -> String {
     match value {
-        Value::None => "None".into(),
+        Value::None | Value::Missing => "None".into(),
+        Value::BigInt(value) => value.clone(),
         Value::SourcePrimitive(value) => repr(value),
         Value::InvalidDate => "NullDatetime(1, 1, 1, 0, 0)".into(),
+        Value::NullDate(date) => datetime_repr(date, "NullDatetime"),
         Value::Bool(true) => "True".into(),
         Value::Bool(false) => "False".into(),
         Value::Int(value) => value.to_string(),
@@ -111,12 +130,13 @@ fn repr(value: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Value::Date(value) | Value::SourceDate(value) => value.unix_timestamp().to_string(),
+        Value::Date(_) | Value::SourceDate(_) => identity_repr(value),
     }
 }
 
 #[derive(Clone, Debug)]
 enum Accessor {
+    Attribute(String),
     Key(String),
     Index(i64),
     Slice(Option<i64>, Option<i64>),
@@ -140,6 +160,7 @@ enum Arithmetic {
 
 #[derive(Clone, Debug)]
 enum Op {
+    Identity,
     Optional { before: String, after: String },
     Limit { max: usize, replacement: String },
     Join(String),
@@ -163,6 +184,12 @@ const CONVERSIONS: &str = "lucCtsSrjdDTifgUHW";
 impl Field {
     /// Parse the text between braces. `known` validates top-level names.
     pub(crate) fn parse(text: &str, known: impl Fn(&str) -> bool) -> Result<Self> {
+        Self::parse_mode(text, known, false)
+    }
+    pub(crate) fn parse_source(text: &str, known: impl Fn(&str) -> bool) -> Result<Self> {
+        Self::parse_mode(text, known, true)
+    }
+    fn parse_mode(text: &str, known: impl Fn(&str) -> bool, source: bool) -> Result<Self> {
         let (head, conversion, spec) = split_field(text)?;
         let mut alternatives = Vec::new();
         for alternative in split_outside(head, '|') {
@@ -174,7 +201,8 @@ impl Field {
             return Err(error(format!("unknown template conversion: !{c}")));
         }
         let (ops, spec) = parse_ops(spec)?;
-        if !spec.contains('%')
+        if !source
+            && !spec.contains('%')
             && !alternatives.iter().any(
                 |source| matches!(source, Source::Path { name, .. } if name == "date_favorited"),
             )
@@ -208,7 +236,7 @@ impl Field {
         let mut path = vec![name.clone()];
         for accessor in accessors {
             match accessor {
-                Accessor::Key(key) => path.push(key.clone()),
+                Accessor::Key(key) | Accessor::Attribute(key) => path.push(key.clone()),
                 _ => return None,
             }
         }
@@ -245,16 +273,32 @@ impl Field {
     }
 
     fn select(&self, lookup: impl Fn(&str) -> Option<Value>) -> Value {
-        let mut selected = Value::None;
+        self.select_with_default(lookup, Value::None)
+    }
+    fn select_with_default(&self, lookup: impl Fn(&str) -> Option<Value>, default: Value) -> Value {
+        let mut selected = default.clone();
         for source in &self.alternatives {
             let value = match source {
                 Source::Literal(value) => Value::Str(value.clone()),
                 Source::Path { name, accessors } => {
-                    let mut value = lookup(name).unwrap_or(Value::None);
+                    let mut value = lookup(name).unwrap_or_else(|| default.clone());
                     for accessor in accessors {
                         value = access(value, accessor);
                     }
-                    value
+                    if default == Value::None {
+                        fn normalize_missing(value: Value) -> Value {
+                            match value {
+                                Value::Missing => Value::None,
+                                Value::SourcePrimitive(value) => {
+                                    Value::SourcePrimitive(Box::new(normalize_missing(*value)))
+                                }
+                                value => value,
+                            }
+                        }
+                        normalize_missing(value)
+                    } else {
+                        value
+                    }
                 }
             };
             let found = value.truthy();
@@ -268,11 +312,38 @@ impl Field {
     /// Render the field. `Ok(None)` reports a missing or empty required value.
     pub(crate) fn render(&self, lookup: impl Fn(&str) -> Option<Value>) -> Result<Option<String>> {
         let optional = self.ops.iter().any(|op| matches!(op, Op::Optional { .. }));
-        let output = self.render_content(lookup)?;
+        let output = self.render_content_with_default(lookup, Value::None)?;
         Ok(match output {
             Some(output) if output.is_empty() && !optional => None,
             output => output,
         })
+    }
+    pub(crate) fn render_default_value(
+        &self,
+        lookup: impl Fn(&str) -> Option<Value>,
+    ) -> Result<Value> {
+        if self.ops.iter().any(|op| matches!(op, Op::Identity)) {
+            let mut value = self.select_with_default(lookup, Value::Missing);
+            while let Value::SourcePrimitive(inner) = value {
+                value = *inner;
+            }
+            if let Some(conversion) = self.conversion {
+                value = convert(value, conversion)?;
+            }
+            return apply_identity(&self.ops, &self.spec, value);
+        }
+        if matches!(self.conversion, Some('D' | 'd')) && self.ops.is_empty() && self.spec.is_empty()
+        {
+            let mut value = self.select_with_default(lookup, Value::Missing);
+            while let Value::SourcePrimitive(inner) = value {
+                value = *inner;
+            }
+            return convert(value, self.conversion.expect("date conversion"));
+        }
+        Ok(Value::Str(
+            self.render_content(lookup)?
+                .unwrap_or_else(|| "None".into()),
+        ))
     }
     /// Content formatting retains present empty strings; filename rendering
     /// separately rejects an empty required field.
@@ -280,7 +351,14 @@ impl Field {
         &self,
         lookup: impl Fn(&str) -> Option<Value>,
     ) -> Result<Option<String>> {
-        let mut selected = self.select(lookup);
+        self.render_content_with_default(lookup, Value::Missing)
+    }
+    fn render_content_with_default(
+        &self,
+        lookup: impl Fn(&str) -> Option<Value>,
+        default: Value,
+    ) -> Result<Option<String>> {
+        let mut selected = self.select_with_default(lookup, default);
         while let Value::SourcePrimitive(inner) = selected {
             selected = *inner;
         }
@@ -306,6 +384,7 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
         return format_value(&value, spec).and_then(bounded).map(Some);
     };
     let value = match op {
+        Op::Identity => return bounded(value.text()).map(Some),
         Op::Optional { before, after } => {
             if !value.truthy() {
                 return Ok(Some(String::new()));
@@ -325,7 +404,7 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
             let text = replacement.clone();
             return Ok(Some(text));
         }
-        _ if value == Value::None => return Ok(None),
+        _ if value == Value::None && !matches!(op, Op::Convert(_)) => return Ok(None),
         Op::Join(separator) => match value {
             Value::List(values) => Value::Str(bounded(
                 values
@@ -382,10 +461,7 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
             }
             value => value,
         },
-        Op::Offset(offset) => match value {
-            Value::Date(date) => Value::Date(date.to_offset(*offset)),
-            _ => return Err(error("template offsets require a date")),
-        },
+        Op::Offset(offset) => offset_date(value, *offset)?,
     };
     apply(rest, spec, value)
 }
@@ -401,6 +477,7 @@ fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
         };
     };
     let value = match op {
+        Op::Identity => return Ok(value),
         Op::Optional { before, after } => {
             if !value.truthy() {
                 return Ok(Value::Str(String::new()));
@@ -555,23 +632,14 @@ fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
             });
             Value::List(values)
         }
-        Op::Offset(offset) => {
-            let Value::Date(value) = value else {
-                return Err(error("template offsets require a date"));
-            };
-            Value::Date(
-                value
-                    .checked_add(time::Duration::seconds(offset.whole_seconds().into()))
-                    .ok_or_else(|| error("template date offset overflowed"))?,
-            )
-        }
+        Op::Offset(offset) => offset_date(value, *offset)?,
     };
     apply_identity(rest, spec, value)
 }
 fn identity_size(value: &Value) -> Option<usize> {
     match value {
         Value::SourcePrimitive(value) => identity_size(value),
-        Value::Str(value) => Some(value.len() + 1),
+        Value::Str(value) | Value::BigInt(value) => Some(value.len() + 1),
         Value::List(values) => values.iter().try_fold(1usize, |total, value| {
             total.checked_add(identity_size(value)?)
         }),
@@ -613,18 +681,55 @@ fn identity_int_float_cmp(integer: i128, float: f64) -> Option<std::cmp::Orderin
     })
 }
 
+fn datetime_repr(value: &OffsetDateTime, class: &str) -> String {
+    let mut output = format!(
+        "{class}({}, {}, {}, {}, {}",
+        value.year(),
+        u8::from(value.month()),
+        value.day(),
+        value.hour(),
+        value.minute()
+    );
+    if value.second() != 0 || value.microsecond() != 0 {
+        output.push_str(&format!(", {}", value.second()));
+    }
+    if value.microsecond() != 0 {
+        output.push_str(&format!(", {}", value.microsecond()));
+    }
+    if value.offset() != UtcOffset::UTC {
+        output.push_str(&format!(
+            ", tzinfo=datetime.timezone(datetime.timedelta(seconds={}))",
+            value.offset().whole_seconds()
+        ));
+    }
+    output.push(')');
+    output
+}
+fn offset_date(value: Value, offset: UtcOffset) -> Result<Value> {
+    let (date, invalid) = match value {
+        Value::Date(date) | Value::SourceDate(date) => (date, false),
+        Value::InvalidDate => (
+            OffsetDateTime::from_unix_timestamp(-62_135_596_800).expect("year one"),
+            true,
+        ),
+        Value::NullDate(date) => (date, true),
+        _ => return Err(error("template offsets require a date")),
+    };
+    let date = date
+        .checked_add(time::Duration::seconds(offset.whole_seconds().into()))
+        .filter(|date| (1..=9999).contains(&date.year()))
+        .ok_or_else(|| error("template date offset overflowed"))?;
+    Ok(if invalid {
+        Value::NullDate(date)
+    } else {
+        Value::SourceDate(date)
+    })
+}
 fn identity_repr(value: &Value) -> String {
     match value {
         Value::SourcePrimitive(value) => identity_repr(value),
-        Value::Date(value) | Value::SourceDate(value) => format!(
-            "datetime.datetime({}, {}, {}, {}, {}, {})",
-            value.year(),
-            u8::from(value.month()),
-            value.day(),
-            value.hour(),
-            value.minute(),
-            value.second()
-        ),
+        Value::Date(value) | Value::SourceDate(value) => datetime_repr(value, "datetime.datetime"),
+        Value::NullDate(value) => datetime_repr(value, "NullDatetime"),
         Value::List(values) => format!(
             "[{}]",
             values
@@ -656,7 +761,7 @@ fn identity_text(value: &Value) -> String {
 }
 fn identity_json(value: &Value) -> serde_json::Value {
     match value {
-        Value::Date(_) | Value::SourceDate(_) | Value::InvalidDate => {
+        Value::Date(_) | Value::SourceDate(_) | Value::InvalidDate | Value::NullDate(_) => {
             serde_json::Value::String(identity_text(value))
         }
         Value::List(values) => values.iter().map(identity_json).collect(),
@@ -745,22 +850,11 @@ fn convert_identity(value: Value, conversion: char) -> Result<Value> {
             }
             Value::Str(output)
         }
-        'd' => identity_int(&value).map_or(Value::None, timestamp),
-        'D' => {
-            if !value.truthy() {
-                Value::None
-            } else {
-                match value {
-                    Value::Date(value) => Value::Date(value),
-                    Value::SourceDate(value) => Value::SourceDate(value),
-                    Value::Str(value) => crate::date::parse_date(&value)
-                        .map_or(Value::None, |seconds| timestamp(seconds.into())),
-                    value => identity_int(&value).map_or(Value::None, timestamp),
-                }
-            }
-        }
+        'd' | 'D' => convert_date(value, conversion == 'D'),
         'T' => Value::Str(match value {
             Value::Date(value) | Value::SourceDate(value) => value.unix_timestamp().to_string(),
+            Value::InvalidDate => "-62135596800".into(),
+            Value::NullDate(date) => date.unix_timestamp().to_string(),
             _ => String::new(),
         }),
         'l' | 'u' | 'c' | 'C' | 't' | 'g' | 'U' | 'H' | 'W' => {
@@ -773,8 +867,46 @@ fn convert_identity(value: Value, conversion: char) -> Result<Value> {
     })
 }
 
+fn convert_date(value: Value, iso: bool) -> Value {
+    use serde_json::Value as Json;
+    let value = match value {
+        Value::SourcePrimitive(value) => return convert_date(*value, iso),
+        Value::Date(value) | Value::SourceDate(value) if iso => {
+            return crate::source_date::parse_timestamp(&Json::from(value.unix_timestamp()))
+                .map_or(Value::InvalidDate, source_timestamp);
+        }
+        Value::Str(value) => Json::String(value),
+        Value::Int(value) => match serde_json::Number::from_i128(value) {
+            Some(value) => Json::Number(value),
+            None => return Value::InvalidDate,
+        },
+        Value::Float(value) => match serde_json::Number::from_f64(value) {
+            Some(value) => Json::Number(value),
+            None => return Value::InvalidDate,
+        },
+        Value::Bool(value) => Json::Bool(value),
+        _ => return Value::InvalidDate,
+    };
+    let seconds = if iso {
+        crate::source_date::convert(&value)
+    } else {
+        crate::source_date::parse_timestamp(&value)
+    };
+    seconds.map_or(Value::InvalidDate, source_timestamp)
+}
+
 impl Value {
     fn partial_cmp_value(&self, other: &Value) -> Option<std::cmp::Ordering> {
+        let datetime = |value: &Value| match value {
+            Value::Date(value) | Value::SourceDate(value) | Value::NullDate(value) => {
+                Some(value.unix_timestamp_nanos())
+            }
+            Value::InvalidDate => Some(-62_135_596_800i128 * 1_000_000_000),
+            _ => None,
+        };
+        if let (Some(a), Some(b)) = (datetime(self), datetime(other)) {
+            return Some(a.cmp(&b));
+        }
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => Some(a.cmp(b)),
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
@@ -815,21 +947,42 @@ fn access(value: Value, accessor: &Accessor) -> Value {
         (start, stop.max(start))
     };
     match (value, accessor) {
-        (Value::Map(values), Accessor::Key(key)) => values
+        (
+            Value::Date(date) | Value::SourceDate(date) | Value::NullDate(date),
+            Accessor::Attribute(name),
+        ) => match name.as_str() {
+            "year" => Value::Int(date.year().into()),
+            "month" => Value::Int(u8::from(date.month()).into()),
+            "day" => Value::Int(date.day().into()),
+            "hour" => Value::Int(date.hour().into()),
+            "minute" => Value::Int(date.minute().into()),
+            "second" => Value::Int(date.second().into()),
+            "microsecond" => Value::Int(date.microsecond().into()),
+            "fold" => Value::Int(0),
+            "tzinfo" => Value::None,
+            _ => Value::Missing,
+        },
+        (Value::InvalidDate, Accessor::Attribute(name)) => match name.as_str() {
+            "year" | "month" | "day" => Value::Int(1),
+            "hour" | "minute" | "second" | "microsecond" | "fold" => Value::Int(0),
+            "tzinfo" => Value::None,
+            _ => Value::Missing,
+        },
+        (Value::Map(values), Accessor::Key(key) | Accessor::Attribute(key)) => values
             .into_iter()
             .find(|(name, _)| name == key)
-            .map_or(Value::None, |(_, value)| value),
+            .map_or(Value::Missing, |(_, value)| value),
         (Value::Map(values), Accessor::Index(index)) => values
             .into_iter()
             .find(|(name, _)| name == &index.to_string())
-            .map_or(Value::None, |(_, value)| value),
+            .map_or(Value::Missing, |(_, value)| value),
         (Value::List(values), Accessor::Index(index)) => {
-            position(*index, values.len()).map_or(Value::None, |index| values[index].clone())
+            position(*index, values.len()).map_or(Value::Missing, |index| values[index].clone())
         }
         (Value::Str(text), Accessor::Index(index)) => {
             let chars: Vec<char> = text.chars().collect();
             position(*index, chars.len())
-                .map_or(Value::None, |index| Value::Str(chars[index].to_string()))
+                .map_or(Value::Missing, |index| Value::Str(chars[index].to_string()))
         }
         (Value::List(values), Accessor::Slice(start, stop)) => {
             let (start, stop) = bounds(*start, *stop, values.len());
@@ -840,7 +993,7 @@ fn access(value: Value, accessor: &Accessor) -> Value {
             let (start, stop) = bounds(*start, *stop, chars.len());
             Value::Str(chars[start..stop].iter().collect())
         }
-        _ => Value::None,
+        _ => Value::Missing,
     }
 }
 
@@ -896,9 +1049,20 @@ fn unescape_html(text: &str) -> String {
 }
 
 fn convert(value: Value, conversion: char) -> Result<Value> {
+    if value == Value::Missing {
+        return Ok(match conversion {
+            'd' => source_timestamp(0),
+            'D' => Value::InvalidDate,
+            'T' => Value::Str("None".into()),
+            'S' => Value::Str(String::new()),
+            _ => Value::None,
+        });
+    }
     if value == Value::None {
         return Ok(match conversion {
             'S' => Value::Str(String::new()),
+            'd' | 'D' => Value::InvalidDate,
+            'T' => Value::Str(String::new()),
             _ => Value::None,
         });
     }
@@ -926,19 +1090,13 @@ fn convert(value: Value, conversion: char) -> Result<Value> {
         }),
         'r' => Value::Str(repr(&value)),
         'j' => Value::Str(serde_json::to_string(&json(&value))?),
-        'd' | 'D' => match value {
-            Value::Date(date) => Value::Date(date),
-            Value::SourceDate(date) => Value::SourceDate(date),
-            Value::Int(seconds) => timestamp(seconds),
-            Value::Float(seconds) if seconds.is_finite() => timestamp(seconds.floor() as i128),
-            Value::Str(text) => crate::date::parse_date(&text)
-                .map_or(Value::None, |seconds| timestamp(seconds.into())),
-            _ => Value::None,
-        },
+        'd' | 'D' => convert_date(value, conversion == 'D'),
         'T' => match value {
             Value::Date(date) | Value::SourceDate(date) => {
                 Value::Str(date.unix_timestamp().to_string())
             }
+            Value::InvalidDate => Value::Str("-62135596800".into()),
+            Value::NullDate(date) => Value::Str(date.unix_timestamp().to_string()),
             _ => Value::None,
         },
         'i' => match value {
@@ -997,7 +1155,8 @@ fn convert(value: Value, conversion: char) -> Result<Value> {
 fn json(value: &Value) -> serde_json::Value {
     use serde_json::Value as Json;
     match value {
-        Value::None => Json::Null,
+        Value::None | Value::Missing => Json::Null,
+        Value::BigInt(value) => serde_json::from_str(value).unwrap_or(Json::Null),
         Value::SourcePrimitive(value) => json(value),
         Value::Bool(value) => Json::Bool(*value),
         Value::Int(value) => serde_json::Number::from_i128(*value)
@@ -1013,7 +1172,9 @@ fn json(value: &Value) -> serde_json::Value {
                 .map(|(key, value)| (key.clone(), json(value)))
                 .collect(),
         ),
-        Value::Date(_) | Value::SourceDate(_) | Value::InvalidDate => Json::String(value.text()),
+        Value::Date(_) | Value::SourceDate(_) | Value::InvalidDate | Value::NullDate(_) => {
+            Json::String(value.text())
+        }
     }
 }
 
@@ -1101,10 +1262,13 @@ fn parse_source(text: &str, known: &impl Fn(&str) -> bool) -> Result<Source> {
         }
         if let Some(after) = rest.strip_prefix('.') {
             let end = after.find(['.', '[']).unwrap_or(after.len());
-            if !identifier(&after[..end]) {
+            if !identifier(&after[..end]) && after[..end].parse::<i64>().is_err() {
                 return Err(error("invalid template attribute"));
             }
-            accessors.push(Accessor::Key(after[..end].into()));
+            accessors.push(match after[..end].parse::<i64>() {
+                Ok(index) => Accessor::Index(index),
+                Err(_) => Accessor::Attribute(after[..end].into()),
+            });
             rest = &after[end..];
         } else if let Some(after) = rest.strip_prefix('[') {
             let end = after
@@ -1146,11 +1310,15 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
         *spec = rest;
         Ok(argument.into())
     };
-    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSO".contains(*c)) {
+    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI".contains(*c)) {
         if ops.len() >= 16 {
             return Err(error("template field has too many specifiers"));
         }
         spec = &spec[1..];
+        if kind == 'I' {
+            ops.push(Op::Identity);
+            return Ok((ops, String::new()));
+        }
         ops.push(match kind {
             '?' => Op::Optional {
                 before: take(&mut spec)?,
@@ -1364,7 +1532,7 @@ fn format_float(value: f64, kind: char, precision: usize) -> String {
 }
 
 fn format_value(value: &Value, spec: &str) -> Result<String> {
-    if matches!(value, Value::InvalidDate) {
+    if matches!(value, Value::InvalidDate | Value::NullDate(_)) {
         return Ok("[Invalid DateTime]".into());
     }
     if let Value::Date(date) | Value::SourceDate(date) = value {
@@ -1532,9 +1700,13 @@ fn strftime(date: &OffsetDateTime, pattern: &str) -> Result<String> {
             Some('w') => output.push_str(&((weekday + 1) % 7).to_string()),
             Some('y') => output.push_str(&format!("{:02}", date.year().rem_euclid(100))),
             Some('Y') => output.push_str(&format!("{:04}", date.year())),
-            Some('z') => output.push_str(&offset_text(false)),
-            Some(':') if chars.next() == Some('z') => output.push_str(&offset_text(true)),
-            Some('Z') if offset.is_utc() => output.push_str("UTC"),
+            Some('z') if !offset.is_utc() => output.push_str(&offset_text(false)),
+            Some('z') => {}
+            Some(':') if chars.next() == Some('z') => {
+                if !offset.is_utc() {
+                    output.push_str(&offset_text(true));
+                }
+            }
             Some('Z') => {}
             Some('%') => output.push('%'),
             _ => return Err(error("unsupported template date directive")),
@@ -1544,4 +1716,26 @@ fn strftime(date: &OffsetDateTime, pattern: &str) -> Result<String> {
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod strict_missing_tests {
+    use super::{Field, Value};
+    #[test]
+    fn strict_required_fields_keep_missing_errors_while_source_content_uses_default() {
+        let field = Field::parse("user[name]", |_| true).unwrap();
+        assert_eq!(field.render(|_| None).unwrap(), None);
+        assert_eq!(field.render_content(|_| None).unwrap(), Some("None".into()));
+        let date = Field::parse_source("missing!d", |_| true).unwrap();
+        assert!(
+            matches!(date.render_default_value(|_| None).unwrap(), Value::SourceDate(value) if value.unix_timestamp() == 0)
+        );
+        let present_null = Field::parse_source("value!d", |_| true).unwrap();
+        assert_eq!(
+            present_null
+                .render_default_value(|_| Some(Value::None))
+                .unwrap(),
+            Value::InvalidDate
+        );
+    }
 }

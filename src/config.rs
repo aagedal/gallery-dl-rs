@@ -1411,7 +1411,7 @@ impl Config {
 }
 
 impl RawOptions {
-    fn resolve(self, directory: &Path, parent_keywords: &[String]) -> Result<Options> {
+    fn resolve(self, directory: &Path, _parent_keywords: &[String]) -> Result<Options> {
         let primary_filter = filter_clauses(self.file_filter, "file-filter")?;
         let alias_filter = filter_clauses(self.image_filter, "image-filter")?;
         let file_filter = match primary_filter {
@@ -1894,7 +1894,7 @@ impl RawOptions {
         let (filename, filename_conditions) = match self.filename.0 {
             None => (None, None),
             Some(Value::String(value)) => {
-                FilenameTemplate::parse_with_keywords(&value, parent_keywords)
+                FilenameTemplate::parse_source(&value)
                     .map_err(|_| error("unsupported native configuration filename template"))?;
                 (Some(value), None)
             }
@@ -1913,12 +1913,8 @@ impl RawOptions {
                         conditions.push((filter, template));
                     }
                 }
-                FilenameTemplate::parse_conditional_with_keywords(
-                    &conditions,
-                    default.as_deref(),
-                    parent_keywords,
-                )
-                .map_err(|_| error("unsupported native configuration filename template"))?;
+                FilenameTemplate::parse_source_conditional(&conditions, default.as_deref())
+                    .map_err(|_| error("unsupported native configuration filename template"))?;
                 (default, Some(conditions))
             }
             Some(_) => {
@@ -1951,17 +1947,13 @@ impl RawOptions {
                         conditions.push((filter, value));
                     }
                 }
-                DirectoryTemplate::parse_conditional_with_keywords(
-                    &conditions,
-                    default.as_deref(),
-                    parent_keywords,
-                )
-                .map_err(|_| error("unsupported native configuration directory template"))?;
+                DirectoryTemplate::parse_source_conditional(&conditions, default.as_deref())
+                    .map_err(|_| error("unsupported native configuration directory template"))?;
                 (default, Some(conditions))
             }
             Some(value) => {
                 let value = components(value)?;
-                DirectoryTemplate::parse_with_keywords(&value, parent_keywords)
+                DirectoryTemplate::parse_source(&value)
                     .map_err(|_| error("unsupported native configuration directory template"))?;
                 (Some(value), None)
             }

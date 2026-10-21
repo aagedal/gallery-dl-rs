@@ -177,7 +177,7 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
         r#"{"extractor":{"filename":{"1":["secret-value"]}}}"#,
-        r#"{"extractor":{"filename":"{secret-value}"}}"#,
+        r#"{"extractor":{"filename":"{secret-value[}"}}"#,
         r#"{"extractor":{"filename":"secret-value/{filename}"}}"#,
         r#"{"extractor":{"postprocessors":["ugoira", {"secret-value": true}, 1]}}"#,
         r#"{"extractor":{"archive":"postgresql://secret-value"}}"#,
@@ -200,6 +200,24 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         assert!(!message.contains("secret-key"), "{message}");
         assert!(!message.contains("secret-value"), "{message}");
     }
+}
+
+#[test]
+fn source_templates_accept_dynamic_api_fields_before_extraction() {
+    // Source formatter resolves these API dictionary keys at rendering time,
+    // including keys that are not Python identifiers.
+    let filename = "{private-field!D:%Y}.{extension}";
+    let directory = vec!["{category}".to_owned(), "{private-field!d:%Y}".to_owned()];
+    let config = parse(
+        &serde_json::json!({
+            "extractor": {"filename": filename, "directory": directory}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let settings = config.resolve("danbooru").unwrap();
+    assert_eq!(settings.filename.as_deref(), Some(filename));
+    assert_eq!(settings.directory.as_ref(), Some(&directory));
 }
 
 #[test]
@@ -315,7 +333,7 @@ fn directory_templates_resolve_scopes_and_preserve_explicit_empty_overrides() {
 }
 
 #[test]
-fn directory_templates_reject_invalid_types_paths_and_unknown_fields_privately() {
+fn directory_templates_reject_invalid_types_paths_and_malformed_fields_privately() {
     for value in [
         serde_json::json!(null),
         serde_json::json!("secret-value"),
@@ -326,7 +344,7 @@ fn directory_templates_reject_invalid_types_paths_and_unknown_fields_privately()
         serde_json::json!([".."]),
         serde_json::json!(["/secret-value"]),
         serde_json::json!(["secret-value/child"]),
-        serde_json::json!(["{secret-value}"]),
+        serde_json::json!(["{secret-value[}"]),
         serde_json::json!(["secret-value\0"]),
         serde_json::json!(vec!["secret-value"; 33]),
         serde_json::json!(["secret-value".repeat(8193)]),

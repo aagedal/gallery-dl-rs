@@ -1430,8 +1430,36 @@ unchanged. Genuine source cases cover 328 conversions (including two raw
 surrogate inputs) and 66 complete DownloadJobs, verifying normalized dates, category/class resolution, clearing, predicates, publication
 bytes and SQLite identities. Broader source JSON decoding, including the global
 4,300-digit integer literal limit, remains separate configuration parity work.
-Template `!D`/`!d` conversions still need this coercion and the source's invalid
-datetime identity across formatting and metadata mutation paths.
+
+**Implemented source template date conversion (gallery-dl 1.32.17/Python 3.15):**
+`!D` shares ISO-first conversion while `!d` uses timestamp coercion, including
+numeric zero and truncation toward zero. Invalid conversions retain the source's
+falsy NullDatetime identity, formatting marker, scalar attributes, and epoch
+conversion. Missing values and explicit null values preserve their different
+default-formatter behavior. Metadata modify preserves datetime values copied to
+arbitrary keys; assigning primitive values to date-named keys does not infer a
+new datetime. Default multi-part formatting rejects object-valued fields, while
+identity-mode formatting safely converts them to text; the `I` specifier retains
+object identity. Source templates validate final format specifications against
+the actual value, allowing literal datetime formats.
+
+Booru keyword contexts now retain arbitrary API fields and nested primitive
+types, with source filename/extension, tag groups, dates and immutable job class
+labels taking precedence. Configuration and CLI templates accept dynamically
+provided fields; native history identities retain canonical post IDs. Genuine
+source evidence includes 1,230 direct cases, 32 modifications and nine complete
+DownloadJobs with exact paths, bytes, typed callbacks and SQLite identities.
+Native replay covers 1,224 direct cases and 28 modifications plus all nine jobs.
+Four unpaired-surrogate string cases, two raw fractional-timezone renderings and
+four preexisting subsecond datetime modifications remain explicit representation
+boundaries in the frozen fixture. An additional 72 formatter evaluations and 12
+MetadataPP runs preserve shifted NullDatetime payloads and enforce calendar
+overflow at years one and 9999. The existing bounded offset argument parser still
+needs the source's zero-hour minute-sign quirk and broader/local offset grammar.
+Broader producer datetime precision and source JSON decoding remain parity work.
+Source PathFormat handling of non-string sole-field results also remains work:
+actual source jobs reject bare converted-date filename and directory values,
+while the native string-rendering APIs currently stringify them.
 
 
 **Implemented directory step:** native configuration `directory` lists replace

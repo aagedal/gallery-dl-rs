@@ -42,3 +42,27 @@ remain native work; the fixture preserves that evidence independently.
 `init.json` contains 16 actual `Job._init()` truthiness cases. `metadata_paths.json`
 contains 13 actual MetadataPP/PathFormat destination cases. Both embed source
 checksums and replay scripts.
+
+`formatter_dates.json` calls the actual source formatter in default and identity
+modes for 1,230 cases, runs 32 actual MetadataPP modifications, and publishes
+nine genuine Danbooru DownloadJobs. `formatter_dates_generate.py` imports the
+frozen date-bound and booru job generators under `../source_archive`; regenerate
+with gallery-dl 1.32.17 and Python 3.15. Typed descriptors distinguish ordinary
+strings and numbers from datetime objects and the falsy NullDatetime sentinel.
+The jobs assert paths, published bytes, five hook phases, and SQLite identities;
+45 additional typed callback snapshots preserve datetime identity before export.
+
+The native replay covers 1,144 cases through the JSON-backed Template APIs and
+80 preexisting datetime cases through the same renderer with typed values. It
+also replays 28 modifications and all nine jobs. Explicit remaining boundaries
+are four Python strings containing unpaired surrogates, two raw renderings with
+fractional-second timezone offsets, and four preexisting subsecond datetime
+modifications that the current whole-second JSON identity cannot represent.
+These cases stay in the source fixture and are counted separately.
+
+A separate `offset_cases` supplement contains 72 actual formatter evaluations
+and 12 MetadataPP runs. It records shifted NullDatetime payloads, chained epoch,
+string, repr, JSON and identity conversions, scalar attributes, and year-one /
+year-9999 overflow. The original 1,230/32/9 cases remain unchanged. Native replay
+retains the invalid sentinel's falsy value and public marker while checking its
+underlying shifted timestamp through copied values.

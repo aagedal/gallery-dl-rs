@@ -141,11 +141,6 @@ pub(crate) fn is_artist_root(key: &str) -> bool {
         })
         .unwrap_or(false)
 }
-pub(crate) fn is_artist_context() -> bool {
-    OBSERVER
-        .try_with(|observer| observer.2.is_some() || !observer.1.is_empty())
-        .unwrap_or(false)
-}
 pub(crate) fn refresh_artist(context: &mut Map<String, Value>) {
     let _ = OBSERVER.try_with(|observer| {
         if let Some(root) = &observer.2 {

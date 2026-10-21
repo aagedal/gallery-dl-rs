@@ -1894,31 +1894,25 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             None
         };
         let filename = match &options.filename_conditions {
-            Some(conditions) => Some(FilenameTemplate::parse_conditional_with_keywords(
+            Some(conditions) => Some(FilenameTemplate::parse_source_conditional(
                 conditions,
                 options.filename.as_deref(),
-                config.parent_keywords(),
             )?),
             None => options
                 .filename
                 .as_deref()
-                .map(|template| {
-                    FilenameTemplate::parse_with_keywords(template, config.parent_keywords())
-                })
+                .map(|template| FilenameTemplate::parse_source(template))
                 .transpose()?,
         };
         let directory = match &options.directory_conditions {
-            Some(conditions) => Some(DirectoryTemplate::parse_conditional_with_keywords(
+            Some(conditions) => Some(DirectoryTemplate::parse_source_conditional(
                 conditions,
                 options.directory.as_deref(),
-                config.parent_keywords(),
             )?),
             None => options
                 .directory
                 .as_deref()
-                .map(|components| {
-                    DirectoryTemplate::parse_with_keywords(components, config.parent_keywords())
-                })
+                .map(|components| DirectoryTemplate::parse_source(components))
                 .transpose()?,
         };
         let selection = options

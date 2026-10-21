@@ -450,17 +450,9 @@ impl MetadataOptions {
                     let alias = template
                         .identity_path()
                         .and_then(|path| super::objects::resolve_alias(&path));
-                    let typed_dates = popular
-                        || super::objects::is_artist_context()
-                        || media
-                            .metadata
-                            .as_ref()
-                            .is_some_and(|metadata| metadata.booru_artist_parent.is_some());
-                    let result = if typed_dates {
-                        template.render_source_value(context)
-                    } else {
-                        template.render_value(context)
-                    };
+                    // Source modify retains the value's type, including an
+                    // existing producer datetime copied to an arbitrary key.
+                    let result = template.render_source_value(context);
                     if let Ok(mut value) = result {
                         if key.split('[').next().is_some_and(|root| {
                             root == "_parent" || super::objects::is_artist_root(root)
@@ -468,8 +460,7 @@ impl MetadataOptions {
                         {
                             value = raw.clone();
                         }
-                        if typed_dates
-                            && matches!(key.as_str(), "date" | "date_updated" | "date_url")
+                        if matches!(key.as_str(), "date" | "date_updated" | "date_url")
                             || popular && key == "scale"
                         {
                             value = crate::filter::source_primitive_json(value);

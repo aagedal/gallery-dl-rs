@@ -64,7 +64,7 @@ impl Template {
                             Some(c) => field.push(c),
                         }
                     }
-                    parts.push(Part::Field(Field::parse(&field, |_| true)?));
+                    parts.push(Part::Field(Field::parse_source(&field, |_| true)?));
                 }
                 '}' => return Err(error("unmatched postprocessor template brace")),
                 c => text.push(c),
@@ -76,14 +76,24 @@ impl Template {
         Ok(Self { parts })
     }
     pub fn render(&self, context: &Map<String, Value>) -> Result<String> {
-        let context = convert_context(context)?;
+        self.render_format_context(&convert_context(context)?)
+    }
+    pub(crate) fn render_format_context(
+        &self,
+        context: &std::collections::BTreeMap<String, FormatValue>,
+    ) -> Result<String> {
+        let single = self.parts.len() == 1;
         let mut output = String::new();
         for part in &self.parts {
             let text = match part {
                 Part::Text(text) => text.clone(),
-                Part::Field(field) => field
-                    .render_content(|name| context.get(name).cloned())?
-                    .unwrap_or_else(|| "None".into()),
+                Part::Field(field) => {
+                    let value = field.render_default_value(|name| context.get(name).cloned())?;
+                    if !single && !matches!(value, FormatValue::Str(_)) {
+                        return Err(error("template field did not return text"));
+                    }
+                    value.identity_text()?
+                }
             };
             if text.len() > MAX_OUTPUT - output.len() {
                 return Err(error(
@@ -116,17 +126,28 @@ impl Template {
         self.render_value_mode(context, false)
     }
     pub(crate) fn render_source_value(&self, context: &Map<String, Value>) -> Result<Value> {
-        self.render_value_mode(context, true)
+        self.render_source_format_context(&convert_context(context)?)
     }
     fn render_value_mode(&self, context: &Map<String, Value>, typed_dates: bool) -> Result<Value> {
+        self.render_value_format_context(&convert_context(context)?, typed_dates)
+    }
+    pub(crate) fn render_source_format_context(
+        &self,
+        context: &std::collections::BTreeMap<String, FormatValue>,
+    ) -> Result<Value> {
+        self.render_value_format_context(context, true)
+    }
+    fn render_value_format_context(
+        &self,
+        context: &std::collections::BTreeMap<String, FormatValue>,
+        typed_dates: bool,
+    ) -> Result<Value> {
         if let [Part::Field(field)] = self.parts.as_slice() {
-            let context = convert_context(context)?;
             json_value(
                 field.render_value(|name| context.get(name).cloned())?,
                 typed_dates,
             )
         } else {
-            let context = convert_context(context)?;
             let mut output = String::new();
             for part in &self.parts {
                 let text = match part {
@@ -203,6 +224,12 @@ fn convert(
             nodes,
         )?)));
     }
+    if let Some(seconds) = crate::filter::source_null_date_from_json(value) {
+        return Ok(FormatValue::NullDate(
+            time::OffsetDateTime::from_unix_timestamp(seconds)
+                .map_err(|_| error("unsupported template date"))?,
+        ));
+    }
     if let Some(value) = crate::filter::source_date_from_json(value) {
         return Ok(value.map_or(
             FormatValue::InvalidDate,
@@ -221,7 +248,7 @@ fn convert(
                 FormatValue::Int(v)
             } else {
                 if !n.to_string().contains(['.', 'e', 'E']) {
-                    return Err(error("unsupported postprocessor context integer"));
+                    return Ok(FormatValue::BigInt(n.to_string()));
                 }
                 FormatValue::Float(
                     n.as_f64()
@@ -262,11 +289,14 @@ pub(crate) fn parse_date(value: &str) -> std::result::Result<time::OffsetDateTim
 
 fn json_value(value: FormatValue, typed_dates: bool) -> Result<Value> {
     Ok(match value {
-        FormatValue::None => Value::Null,
+        FormatValue::None | FormatValue::Missing => Value::Null,
+        FormatValue::BigInt(value) => serde_json::from_str(&value)
+            .map_err(|_| error("unsupported postprocessor context integer"))?,
         FormatValue::SourcePrimitive(value) => {
             crate::filter::source_primitive_json(json_value(*value, typed_dates)?)
         }
         FormatValue::InvalidDate => crate::filter::source_date_json(None),
+        FormatValue::NullDate(date) => crate::filter::source_null_date_json(date.unix_timestamp()),
         FormatValue::SourceDate(value) => {
             crate::filter::source_date_json(Some(value.unix_timestamp()))
         }
@@ -324,26 +354,34 @@ mod tests {
                 result.is_err()
             } else {
                 match case["type"].as_str().unwrap() {
-                    // JSON contexts have no runtime datetime/sentinel type.
-                    // A valid date retains an ISO representation and timestamp;
-                    // upstream's false NullDatetime sentinel maps to null.
+                    // Source conversions retain typed datetimes/sentinels, while
+                    // an unconverted legacy date keeps its existing ISO output.
                     "datetime" => {
                         let expected = parse_date(case["value"]["$datetime"].as_str().unwrap())
                             .unwrap()
                             .unix_timestamp();
-                        result
-                            .as_ref()
-                            .ok()
-                            .and_then(Value::as_str)
-                            .and_then(|value| parse_date(value).ok())
-                            .map(|date| date.unix_timestamp())
-                            == Some(expected)
+                        result.as_ref().ok().and_then(|value| {
+                            crate::filter::source_date_from_json(value)
+                                .flatten()
+                                .or_else(|| {
+                                    value
+                                        .as_str()
+                                        .and_then(|value| parse_date(value).ok())
+                                        .map(|date| date.unix_timestamp())
+                                })
+                        }) == Some(expected)
                             && Template::parse(source)
                                 .ok()
                                 .and_then(|template| template.timestamp(&context))
                                 == Some(expected)
                     }
-                    "NullDatetime" => result.as_ref().ok() == Some(&Value::Null),
+                    "NullDatetime" => {
+                        result
+                            .as_ref()
+                            .ok()
+                            .and_then(crate::filter::source_date_from_json)
+                            == Some(None)
+                    }
                     _ => result.as_ref().ok() == Some(&case["value"]),
                 }
             };
@@ -465,5 +503,200 @@ mod tests {
         let context = json!({"x":"x".repeat(60000)});
         assert!(template.render(context.as_object().unwrap()).is_err());
         assert!(!format!("{:?}", Template::parse("PRIVATE").unwrap()).contains("PRIVATE"));
+    }
+    #[tokio::test]
+    async fn converted_dates_survive_ordinary_modify_copy_filter_and_public_export() {
+        use crate::postprocess::metadata::MetadataOptions;
+        use std::path::Path;
+        let media =
+            crate::extract::direct(&url::Url::parse("https://example.invalid/frame.jpg").unwrap())
+                .unwrap();
+        assert!(media.metadata.is_none());
+        let mut context = json!({
+            "raw":"20240102T03040512", "zero":0, "none":null,
+            "date":"2024-01-02 03:04:05", "literal":"2024-01-02T03:04:05Z",
+            "negative":-0.9, "unicode":"١_７００_０００_０００"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let options = MetadataOptions::parse(
+            json!({"mode":"modify","fields":{
+                "original_copy":"{date}", "original_year":"{original_copy:%Y}",
+                "date":"{literal}", "literal_copy":"{date}",
+                "date_updated":"{zero}", "number_copy":"{date_updated}",
+                "date_url":"{none}",
+                "converted":"{raw!D}", "copied":"{converted}",
+                "year":"{copied:%Y}", "raw_copy":"{raw}",
+                "invalid":"{none!D}", "false_date":"{zero!D}",
+                "epoch":"{zero!d}", "truncated":"{negative!d}",
+                "unicode_date":"{unicode!d}"
+            }})
+            .as_object()
+            .unwrap(),
+            Path::new("."),
+        )
+        .unwrap();
+        options
+            .run(&mut context, &media, Path::new("frame.jpg"), Path::new("."))
+            .await
+            .unwrap();
+        assert_eq!(context["raw_copy"], context["raw"]);
+        assert_eq!(context["original_year"], "2024");
+        assert_eq!(
+            crate::filter::source_date_from_json(&context["original_copy"]),
+            Some(Some(1704164645))
+        );
+        assert_eq!(
+            crate::filter::source_primitive_from_json(&context["date"]),
+            Some(&context["literal"])
+        );
+        for key in ["date", "literal_copy"] {
+            assert!(
+                Template::parse(&format!("{{{key}:%Y}}"))
+                    .unwrap()
+                    .render(&context)
+                    .is_err()
+            );
+        }
+        assert!(crate::filter::FilterExpression::parse(
+            "bool(date) and not bool(date_updated) and not bool(date_url) and not bool(number_copy)"
+        ).unwrap().matches_keywords(&context).unwrap());
+        assert!(
+            Template::parse("{raw_copy:%Y}")
+                .unwrap()
+                .render(&context)
+                .is_err()
+        );
+        assert_eq!(context["year"], "2024");
+        for key in ["converted", "copied"] {
+            assert_eq!(
+                crate::filter::source_date_from_json(&context[key]),
+                Some(Some(1704164645))
+            );
+        }
+        for key in ["epoch", "truncated"] {
+            assert_eq!(
+                crate::filter::source_date_from_json(&context[key]),
+                Some(Some(0))
+            );
+        }
+        for key in ["invalid", "false_date"] {
+            assert_eq!(
+                crate::filter::source_date_from_json(&context[key]),
+                Some(None)
+            );
+            assert_eq!(
+                Template::parse(&format!("{{{key}:%Y}}"))
+                    .unwrap()
+                    .render(&context)
+                    .unwrap(),
+                "[Invalid DateTime]"
+            );
+        }
+        assert!(
+            crate::filter::FilterExpression::parse(
+                "bool(copied) and bool(epoch) and not bool(invalid) and not bool(false_date)"
+            )
+            .unwrap()
+            .matches_keywords(&context)
+            .unwrap()
+        );
+        let public = crate::postprocess::public_keywords(&context);
+        assert_eq!(public["copied"], "2024-01-02 03:04:05");
+        assert_eq!(public["unicode_date"], "2023-11-14 22:13:20");
+        assert_eq!(public["invalid"], "[Invalid DateTime]");
+        let json_options =
+            MetadataOptions::parse(json!({"mode":"json"}).as_object().unwrap(), Path::new("."))
+                .unwrap();
+        // Exercise the actual JSON sidecar renderer, including nested typed aliases.
+        context.insert(
+            "nested".into(),
+            json!([context["copied"], context["invalid"]]),
+        );
+        let root = tempfile::tempdir().unwrap();
+        json_options
+            .run(
+                &mut context,
+                &media,
+                &root.path().join("frame.jpg"),
+                root.path(),
+            )
+            .await
+            .unwrap();
+        let encoded = std::fs::read_to_string(root.path().join("frame.jpg.json")).unwrap();
+        assert!(!encoded.contains("$gallery_dl_source"));
+        let exported: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            exported["nested"],
+            json!(["2024-01-02 03:04:05", "[Invalid DateTime]"])
+        );
+    }
+    #[test]
+    fn shifted_null_datetime_keeps_false_identity_calendar_and_private_payload() {
+        let mut context = json!({"value":null,"first":"0001-01-01"})
+            .as_object()
+            .unwrap()
+            .clone();
+        let shifted = Template::parse("{value!D:O+02:00/I/}")
+            .unwrap()
+            .render_source_value(&context)
+            .unwrap();
+        assert_eq!(
+            crate::filter::source_null_date_from_json(&shifted),
+            Some(-62_135_589_600)
+        );
+        context.insert("shifted".into(), shifted.clone());
+        context.insert("base".into(), crate::filter::source_date_json(None));
+        assert_eq!(
+            Template::parse("{shifted}")
+                .unwrap()
+                .render_source_value(&context)
+                .unwrap(),
+            shifted
+        );
+        assert_eq!(
+            Template::parse("{shifted!T}")
+                .unwrap()
+                .render(&context)
+                .unwrap(),
+            "-62135589600"
+        );
+        assert_eq!(
+            Template::parse("{shifted.hour}")
+                .unwrap()
+                .render_source_value(&context)
+                .unwrap(),
+            json!(2)
+        );
+        assert_eq!(
+            Template::parse("{shifted:%Y}")
+                .unwrap()
+                .render(&context)
+                .unwrap(),
+            "[Invalid DateTime]"
+        );
+        assert!(
+            crate::filter::FilterExpression::parse("not bool(shifted) and shifted > base")
+                .unwrap()
+                .matches_keywords(&context)
+                .unwrap()
+        );
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["shifted"],
+            "[Invalid DateTime]"
+        );
+        assert!(
+            Template::parse("{value!D:O-01:00/}")
+                .unwrap()
+                .render(&context)
+                .is_err()
+        );
+        assert!(
+            Template::parse("{first!D:O-01:00/}")
+                .unwrap()
+                .render(&context)
+                .is_err()
+        );
     }
 }

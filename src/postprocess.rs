@@ -593,6 +593,7 @@ pub fn context(media: &Media) -> Map<String, Value> {
         match value {
             V::None => Value::Null,
             V::SourceDate(v) => crate::filter::source_date_json(*v),
+            V::SourceNullDate(v) => crate::filter::source_null_date_json(*v),
             V::SourcePrimitive(v) => crate::filter::source_primitive_json(json(v)),
             V::Bool(v) => (*v).into(),
             V::Int(v) => serde_json::Number::from_i128(*v).map_or(Value::Null, Value::Number),

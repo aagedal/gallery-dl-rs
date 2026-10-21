@@ -12,6 +12,7 @@ pub(crate) use eval::float_repr;
 pub(super) enum Value {
     None,
     SourceDate(Option<i64>),
+    SourceNullDate(i64),
     SourcePrimitive(Arc<Value>),
     Bool(bool),
     Int(i128),
@@ -332,6 +333,9 @@ pub(crate) fn json_value(value: &serde_json::Value) -> Value {
     if let Some(value) = source_primitive_from_json(value) {
         return Value::SourcePrimitive(Arc::new(json_value(value)));
     }
+    if let Some(value) = source_null_date_from_json(value) {
+        return Value::SourceNullDate(value);
+    }
     if let Some(value) = source_date_from_json(value) {
         return Value::SourceDate(value);
     }
@@ -356,13 +360,18 @@ pub(crate) fn json_value(value: &serde_json::Value) -> Value {
 }
 fn artist_value(value: &serde_json::Value) -> Value {
     match json_value(value) {
-        value @ (Value::SourcePrimitive(_) | Value::SourceDate(_)) => value,
+        value @ (Value::SourcePrimitive(_) | Value::SourceDate(_) | Value::SourceNullDate(_)) => {
+            value
+        }
         value => Value::SourcePrimitive(Arc::new(value)),
     }
 }
 const SOURCE_PRIMITIVE_KEY: &str = "$gallery_dl_source_primitive";
 pub(crate) fn source_primitive_json(value: serde_json::Value) -> serde_json::Value {
-    if source_date_from_json(&value).is_some() || source_primitive_from_json(&value).is_some() {
+    if source_date_from_json(&value).is_some()
+        || source_null_date_from_json(&value).is_some()
+        || source_primitive_from_json(&value).is_some()
+    {
         return value;
     }
     serde_json::Value::Object(serde_json::Map::from_iter([(
@@ -378,6 +387,24 @@ pub(crate) fn source_primitive_from_json(value: &serde_json::Value) -> Option<&s
         None
     }
 }
+const SOURCE_NULL_DATE_KEY: &str = "$gallery_dl_null_date";
+pub(crate) fn source_null_date_json(seconds: i64) -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::from_iter([(
+        SOURCE_NULL_DATE_KEY.into(),
+        seconds.into(),
+    )]))
+}
+pub(crate) fn source_null_date_from_json(value: &serde_json::Value) -> Option<i64> {
+    let fields = value.as_object()?;
+    if fields.len() != 1 {
+        return None;
+    }
+    let seconds = fields.get(SOURCE_NULL_DATE_KEY)?.as_i64()?;
+    time::OffsetDateTime::from_unix_timestamp(seconds)
+        .ok()
+        .filter(|date| (1..=9999).contains(&date.year()))
+        .map(|_| seconds)
+}
 const SOURCE_DATE_KEY: &str = "$gallery_dl_source_date";
 pub(crate) fn source_date_json(value: Option<i64>) -> serde_json::Value {
     serde_json::Value::Object(serde_json::Map::from_iter([(
@@ -386,6 +413,9 @@ pub(crate) fn source_date_json(value: Option<i64>) -> serde_json::Value {
     )]))
 }
 pub(crate) fn source_date_from_json(value: &serde_json::Value) -> Option<Option<i64>> {
+    if source_null_date_from_json(value).is_some() {
+        return Some(None);
+    }
     let map = value.as_object()?;
     if map.len() != 1 {
         return None;
@@ -453,6 +483,9 @@ pub(crate) fn source_selection_date(post: &crate::event::Post) -> Result<Option<
     }
     fn object(fields: &serde_json::Map<String, serde_json::Value>) -> Result<Option<i64>> {
         if fields.len() == 1 {
+            if fields.contains_key(SOURCE_NULL_DATE_KEY) {
+                return Ok(None);
+            }
             if let Some(value) = fields.get(SOURCE_PRIMITIVE_KEY) {
                 return json(value, false);
             }
@@ -1229,6 +1262,20 @@ fn context_parts(
             }
         }
         if let Some(fields) = &post.booru_keywords {
+            for (key, value) in fields.iter() {
+                // Source transforms creation date and job/class metadata after
+                // reading the raw API dictionary. Those projections win below.
+                if matches!(key.as_str(), "date" | "category" | "subcategory")
+                    || key == "search_tags" && post.search_tags.is_some()
+                    || key == "pool" && post.pool.is_some()
+                    || key == "favgroup" && post.favgroup.is_some()
+                {
+                    continue;
+                }
+                let value = artist_value(value);
+                values.insert(key.clone(), value.clone());
+                metadata.insert(key.clone(), value);
+            }
             for key in ["filename", "extension", "md5"] {
                 values.remove(key);
                 metadata.remove(key);
@@ -1282,7 +1329,14 @@ fn context_parts(
             }
         }
         if let Some(defaults) = &post.source_defaults {
-            values.insert("category".into(), Value::String(defaults.category.into()));
+            for (key, value) in [
+                ("category", defaults.category),
+                ("subcategory", defaults.subcategory),
+            ] {
+                let value = Value::String(value.into());
+                values.insert(key.into(), value.clone());
+                metadata.insert(key.into(), value);
+            }
         }
         if let Some(user_id) = &post.booru_user_id {
             let user_id = json_value(user_id);
@@ -1307,7 +1361,15 @@ fn context_parts(
             }
         }
         if post.booru_artist_parent.is_none() {
-            values.insert("metadata".into(), map(metadata));
+            if let Some(value) = post
+                .booru_keywords
+                .as_ref()
+                .and_then(|fields| fields.get("metadata"))
+            {
+                values.insert("metadata".into(), artist_value(value));
+            } else {
+                values.insert("metadata".into(), map(metadata));
+            }
         } else {
             values.remove("metadata");
             if let Some(value) = post

@@ -167,12 +167,26 @@ impl FilenameTemplate {
         default: Option<&str>,
         keywords: &[String],
     ) -> Result<Self> {
+        Self::parse_conditional_mode(conditions, default, keywords, false)
+    }
+    pub fn parse_source_conditional(
+        conditions: &[(String, String)],
+        default: Option<&str>,
+    ) -> Result<Self> {
+        Self::parse_conditional_mode(conditions, default, &[], true)
+    }
+    fn parse_conditional_mode(
+        conditions: &[(String, String)],
+        default: Option<&str>,
+        keywords: &[String],
+        source: bool,
+    ) -> Result<Self> {
         if conditions.len() > 32 {
             return Err(error("filename template has too many conditions"));
         }
         Ok(Self {
             parts: default
-                .map(|value| Self::parse_with_keywords(value, keywords))
+                .map(|value| Self::parse_mode(value, keywords, source))
                 .transpose()?
                 .and_then(|t| t.parts),
             conditions: conditions
@@ -180,7 +194,7 @@ impl FilenameTemplate {
                 .map(|(filter, template)| {
                     Ok((
                         crate::filter::FilterExpression::parse(filter)?,
-                        Self::parse_with_keywords(template, keywords)?
+                        Self::parse_mode(template, keywords, source)?
                             .parts
                             .unwrap_or_default(),
                     ))
@@ -193,6 +207,13 @@ impl FilenameTemplate {
         Self::parse_with_keywords(template, &[])
     }
     pub fn parse_with_keywords(template: &str, keywords: &[String]) -> Result<Self> {
+        Self::parse_mode(template, keywords, false)
+    }
+    /// Parse fields supplied dynamically by a source extractor.
+    pub fn parse_source(template: &str) -> Result<Self> {
+        Self::parse_mode(template, &[], true)
+    }
+    fn parse_mode(template: &str, keywords: &[String], source: bool) -> Result<Self> {
         if keywords.len() > 4096 || keywords.iter().map(String::len).sum::<usize>() > 1024 * 1024 {
             return Err(error("template keyword declarations exceed limits"));
         }
@@ -237,9 +258,14 @@ impl FilenameTemplate {
                     if parts.len() >= 256 {
                         return Err(error("filename template has too many fields"));
                     }
-                    parts.push(Part::Field(Field::parse(&field, |name| {
-                        FIELDS.contains(&name) || keywords.iter().any(|key| key == name)
-                    })?));
+                    let known = |name: &str| {
+                        source || FIELDS.contains(&name) || keywords.iter().any(|key| key == name)
+                    };
+                    parts.push(Part::Field(if source {
+                        Field::parse_source(&field, known)?
+                    } else {
+                        Field::parse(&field, known)?
+                    }));
                 }
                 '}' => return Err(error("unmatched closing brace in filename template")),
                 c => literal.push(c),
@@ -378,7 +404,13 @@ impl FilenameTemplate {
                         && field
                             .names()
                             .any(|name| matches!(name, "filename" | "extension" | "md5"));
-                    let value = if source || source_nameext {
+                    let value = if source {
+                        let value = field.render_default_value(lookup)?;
+                        if parts.len() > 1 && !matches!(value, Value::Str(_)) {
+                            return Err(error("filename template field did not return text"));
+                        }
+                        Some(value.identity_text()?)
+                    } else if source_nameext {
                         field.render_content(lookup)?
                     } else {
                         field.render(lookup)?
@@ -499,6 +531,7 @@ pub struct DirectoryTemplate {
 #[derive(Clone, Debug)]
 pub struct SourceDefaults {
     pub(crate) category: &'static str,
+    pub(crate) subcategory: &'static str,
     pub(crate) archive: &'static str,
     filename: FilenameTemplate,
     directory: DirectoryTemplate,
@@ -506,12 +539,14 @@ pub struct SourceDefaults {
 impl SourceDefaults {
     pub(crate) fn new(
         category: &'static str,
+        subcategory: &'static str,
         archive: &'static str,
         filename: &str,
         directory: &[&str],
     ) -> Self {
         Self {
             category,
+            subcategory,
             archive,
             filename: FilenameTemplate::parse(filename).expect("static source filename"),
             directory: DirectoryTemplate::parse(
@@ -577,12 +612,26 @@ impl DirectoryTemplate {
         default: Option<&[String]>,
         keywords: &[String],
     ) -> Result<Self> {
+        Self::parse_conditional_mode(conditions, default, keywords, false)
+    }
+    pub fn parse_source_conditional(
+        conditions: &[(String, Vec<String>)],
+        default: Option<&[String]>,
+    ) -> Result<Self> {
+        Self::parse_conditional_mode(conditions, default, &[], true)
+    }
+    fn parse_conditional_mode(
+        conditions: &[(String, Vec<String>)],
+        default: Option<&[String]>,
+        keywords: &[String],
+        source: bool,
+    ) -> Result<Self> {
         if conditions.len() > 32 {
             return Err(error("directory template has too many conditions"));
         }
         Ok(Self {
             components: default
-                .map(|value| Self::parse_with_keywords(value, keywords))
+                .map(|value| Self::parse_mode(value, keywords, source))
                 .transpose()?
                 .and_then(|t| t.components),
             conditions: conditions
@@ -590,7 +639,7 @@ impl DirectoryTemplate {
                 .map(|(filter, components)| {
                     Ok((
                         crate::filter::FilterExpression::parse(filter)?,
-                        Self::parse_with_keywords(components, keywords)?
+                        Self::parse_mode(components, keywords, source)?
                             .components
                             .unwrap_or_default(),
                     ))
@@ -603,6 +652,13 @@ impl DirectoryTemplate {
         Self::parse_with_keywords(components, &[])
     }
     pub fn parse_with_keywords(components: &[String], keywords: &[String]) -> Result<Self> {
+        Self::parse_mode(components, keywords, false)
+    }
+    /// Parse fields supplied dynamically by a source extractor.
+    pub fn parse_source(components: &[String]) -> Result<Self> {
+        Self::parse_mode(components, &[], true)
+    }
+    fn parse_mode(components: &[String], keywords: &[String], source: bool) -> Result<Self> {
         if components.len() > 32
             || components
                 .iter()
@@ -614,7 +670,7 @@ impl DirectoryTemplate {
             components: Some(
                 components
                     .iter()
-                    .map(|s| FilenameTemplate::parse_with_keywords(s, keywords))
+                    .map(|s| FilenameTemplate::parse_mode(s, keywords, source))
                     .collect::<Result<_>>()?,
             ),
             conditions: Vec::new(),
@@ -696,6 +752,8 @@ fn convert_value(value: &crate::filter::Value, key: &str, dates: bool) -> Value 
             Value::SourcePrimitive(Box::new(convert_value(value, key, false)))
         }
         Source::SourceDate(value) => value.map_or(Value::InvalidDate, format::source_timestamp),
+        Source::SourceNullDate(value) => time::OffsetDateTime::from_unix_timestamp(*value)
+            .map_or(Value::InvalidDate, Value::NullDate),
         Source::Bool(value) => Value::Bool(*value),
         // Upstream exposes these as datetimes; native metadata stores seconds.
         Source::Int(value) if dates && matches!(key, "date" | "date_updated") => {
@@ -779,6 +837,12 @@ fn lookup(
     {
         return context.get(name).map(|value| convert(value, name));
     }
+    if metadata
+        .and_then(|metadata| metadata.booru_keywords.as_ref())
+        .is_some_and(|fields| fields.contains_key(name))
+    {
+        return context.get(name).map(|value| convert(value, name));
+    }
     Some(match name {
         // Legacy native filename includes its extension without a source snapshot.
         "filename" => Value::Str(media.filename.clone()),
@@ -819,3 +883,7 @@ fn lookup(
         }
     })
 }
+
+#[cfg(test)]
+#[path = "source_formatter_date_tests.rs"]
+mod source_formatter_date_tests;

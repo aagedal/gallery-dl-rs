@@ -443,8 +443,9 @@ fn dates_use_upstream_datetime_formatting() {
             "{date:%a_%A_%b_%B_%j_%y_%I%p_%w_%%}",
             "Fri_Friday_Feb_February_044_09_11PM_5__",
         ),
-        ("{date:%z_%Z}", "_0000_UTC"),
-        ("{date:O+02:00/%H%z}", "01_0200"),
+        // Source producer dates are naive UTC, including after O offsets.
+        ("{date:%z_%Z}", "_"),
+        ("{date:O+02:00/%H%z}", "01"),
         ("{date:O-05:30/%d_%H%M}", "13_1801"),
         ("{timestamp!d:%Y}", "2009"),
         ("{date!T}", "1234567890"),

@@ -33,7 +33,7 @@ fn fixture() -> Value {
     ))
     .unwrap()
 }
-fn serve(replies: Vec<Vec<u8>>) -> (Url, std::thread::JoinHandle<Vec<String>>) {
+pub(crate) fn serve(replies: Vec<Vec<u8>>) -> (Url, std::thread::JoinHandle<Vec<String>>) {
     use std::{
         io::{Read, Write},
         net::TcpListener,
@@ -107,7 +107,7 @@ fn templates(case: &Value, root: &Path) -> (Option<FilenameTemplate>, Option<Dir
     };
     (filename, directory)
 }
-fn replies(case: &Value, site: Site, source: &Url) -> Vec<Vec<u8>> {
+pub(crate) fn replies(case: &Value, site: Site, source: &Url) -> Vec<Vec<u8>> {
     let target = target(site, source).unwrap().0;
     let posts = case["input_posts"].as_array().unwrap();
     let body = match (&target, site) {

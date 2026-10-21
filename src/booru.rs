@@ -523,7 +523,7 @@ fn nameext_keywords(
     } else {
         post
     };
-    let mut keywords: serde_json::Map<String, Value> =
+    let normalized_nameext: serde_json::Map<String, Value> =
         if site == Site::E621 || (!site.danbooru_dialect() && post.get("extension").is_some()) {
             [
                 (
@@ -561,6 +561,42 @@ fn nameext_keywords(
                 ("extension".into(), extension.as_ref().into()),
             ])
         };
+    // Source extractors mutate and emit the complete API dictionary. Retain
+    // arbitrary public fields without exposing native transport credentials.
+    let mut keywords = post.as_object().cloned().unwrap_or_default();
+    keywords.extend(normalized_nameext);
+    if site == Site::E621 {
+        if let Some(file) = keywords.get_mut("file").and_then(Value::as_object_mut)
+            && file
+                .get("url")
+                .is_none_or(|value| value.is_null() || value.as_str() == Some(""))
+        {
+            file.insert("url".into(), fallback_url.as_str().into());
+        }
+        if let Some(groups) = post.get("tags").and_then(Value::as_object) {
+            for (category, tags) in groups {
+                keywords.insert(format!("tags_{category}"), tags.clone());
+            }
+        }
+    } else if site == Site::Danbooru {
+        for category in ["artist", "character", "copyright", "general", "meta"] {
+            if let Some(tags) = post
+                .get(format!("tag_string_{category}"))
+                .and_then(Value::as_str)
+            {
+                keywords.insert(
+                    format!("tags_{category}"),
+                    Value::Array(if tags.is_empty() {
+                        Vec::new()
+                    } else {
+                        tags.split(' ')
+                            .map(|tag| Value::String(tag.into()))
+                            .collect()
+                    }),
+                );
+            }
+        }
+    }
     let source_tags = match site {
         Site::Danbooru => post.get("tag_string").and_then(Value::as_str).map(|tags| {
             Value::Array(if tags.is_empty() {
@@ -638,8 +674,22 @@ fn defaults(
         Target::Popular { .. } => "P_{scale[0]}_{date}_{id}",
         Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
     };
+    let subcategory = match target {
+        Target::Post { .. } => "post",
+        Target::Tags { .. } => "tag",
+        Target::Pool { .. } => "pool",
+        Target::Favgroup { .. } => "favgroup",
+        Target::Favorites { .. } | Target::DapiFavorites { .. } => "favorite",
+        Target::Popular { .. } => "popular",
+        Target::Artist { .. } => "artist",
+        Target::ArtistSearch { .. } => "artist-search",
+    };
     Arc::new(crate::naming::SourceDefaults::new(
-        category, archive, filename, directory,
+        category,
+        subcategory,
+        archive,
+        filename,
+        directory,
     ))
 }
 
@@ -2914,7 +2964,7 @@ mod nameext_compat_tests;
 
 #[cfg(test)]
 #[path = "booru_defaults_tests.rs"]
-mod defaults_tests;
+pub(crate) mod defaults_tests;
 
 #[cfg(test)]
 #[path = "booru_favorites_tests.rs"]
@@ -2947,3 +2997,108 @@ mod artist_parent_tests;
 #[cfg(test)]
 #[path = "booru_date_selection_tests.rs"]
 pub(crate) mod date_selection_tests;
+
+#[cfg(test)]
+mod source_raw_keywords_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn raw_api_fields_keep_types_and_source_transforms_win_without_changing_identity() {
+        let post = json!({
+            "id":42,"file_url":"https://cdn.donmai.us/original/ab/cd/example.jpg",
+            "md5":"0123456789abcdef0123456789abcdef","created_at":"2024-01-02T03:04:05Z",
+            "tag_string":"cat  dog","tag_string_artist":"artist_one artist_two",
+            "date":"untrusted raw date","filename":"wrong","extension":"wrong",
+            "raw":"2024W012T030405","nested":{"date":"2024-01-01T00:00:00Z","items":[1,false,null]},
+            "metadata":{"custom":true},"category":"wrong","subcategory":"wrong"
+        });
+        let media = parse_post(Site::Danbooru, &post).unwrap();
+        let key = media.archive_key();
+        let context = crate::postprocess::context(&media);
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["raw"],
+            post["raw"]
+        );
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["nested"],
+            post["nested"]
+        );
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["metadata"],
+            post["metadata"]
+        );
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["filename"],
+            "example"
+        );
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["extension"],
+            "jpg"
+        );
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["tags"],
+            json!(["cat", "", "dog"])
+        );
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["tags_artist"],
+            json!(["artist_one", "artist_two"])
+        );
+        assert_eq!(context["category"], "danbooru");
+        assert_ne!(
+            crate::postprocess::public_keywords(&context)["date"],
+            post["date"]
+        );
+        let template = crate::postprocess::template::Template::parse("{raw!D:%Y}").unwrap();
+        assert_eq!(template.render(&context).unwrap(), "2024");
+        assert!(
+            crate::postprocess::template::Template::parse("{nested[date]:%Y}")
+                .unwrap()
+                .render(&context)
+                .is_err()
+        );
+        assert!(
+            crate::filter::FilterExpression::parse(
+                "nested['items'][0] == 1 and metadata['custom']"
+            )
+            .unwrap()
+            .matches(&media)
+            .unwrap()
+        );
+        assert_eq!(media.archive_key(), key);
+        assert!(
+            !serde_json::to_string(media.metadata.as_ref().unwrap())
+                .unwrap()
+                .contains("untrusted raw date")
+        );
+    }
+
+    #[test]
+    fn e621_tag_groups_and_raw_name_num_remain_source_keywords() {
+        let post = json!({
+            "id":42,"created_at":"2024-01-02T03:04:05Z",
+            "file":{"url":"https://static1.e621.net/data/ab/cd/example.jpg","md5":"0123456789abcdef0123456789abcdef","ext":"jpg"},
+            "tags":{"artist":["z"],"general":["a","z"]},
+            "name":"api name","num":7,"date_updated":"20240102"
+        });
+        let media = parse_post(Site::E621, &post).unwrap();
+        assert_eq!(
+            crate::naming::FilenameTemplate::parse("{name}")
+                .unwrap()
+                .render(&media)
+                .unwrap(),
+            "api name"
+        );
+        assert_eq!(
+            crate::naming::FilenameTemplate::parse("{num}")
+                .unwrap()
+                .render(&media)
+                .unwrap(),
+            "7"
+        );
+        let public = crate::postprocess::public_keywords(&crate::postprocess::context(&media));
+        assert_eq!(public["tags"], json!(["a", "z", "z"]));
+        assert_eq!(public["tags_artist"], json!(["z"]));
+        assert_eq!(public["date_updated"], "20240102");
+    }
+}

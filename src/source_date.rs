@@ -12,19 +12,26 @@ fn checked_timestamp(value: i64) -> Option<i64> {
 }
 
 pub(crate) fn convert(value: &Value) -> Option<i64> {
+    if matches!(value, Value::Bool(false)) || value.as_f64() == Some(0.0) {
+        return None;
+    }
     match value {
         Value::String(value) => parse_string(value),
-        Value::Bool(true) => Some(1),
+        value => parse_timestamp(value),
+    }
+}
+
+/// Source `dt.parse_ts`: int-only coercion, including falsy numeric zero.
+pub(crate) fn parse_timestamp(value: &Value) -> Option<i64> {
+    match value {
+        Value::String(value) => integer(value),
+        Value::Bool(value) => Some(i64::from(*value)),
         Value::Number(value) => {
             if let Some(value) = value.as_i64() {
-                (value != 0).then(|| checked_timestamp(value)).flatten()
+                checked_timestamp(value)
             } else {
                 let value = value.as_f64()?;
-                if !value.is_finite()
-                    || value == 0.0
-                    || value < i64::MIN as f64
-                    || value >= i64::MAX as f64
-                {
+                if !value.is_finite() || value < i64::MIN as f64 || value >= i64::MAX as f64 {
                     return None;
                 }
                 checked_timestamp(value.trunc() as i64)

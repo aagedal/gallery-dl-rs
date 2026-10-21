@@ -240,7 +240,7 @@ async fn unsupported_config_fails_before_output_and_does_not_echo_private_input(
     let root = tempfile::tempdir().unwrap();
     for value in [
         serde_json::json!({"PRIVATE_KEY":"PRIVATE_VALUE"}),
-        serde_json::json!({"extractor":{"filename":"{PRIVATE_VALUE}"}}),
+        serde_json::json!({"extractor":{"filename":"{PRIVATE_VALUE[}"}}),
     ] {
         let cfg = config(root.path(), value);
         let mut command = binary(root.path(), &cfg);
