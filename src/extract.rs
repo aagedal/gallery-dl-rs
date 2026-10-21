@@ -724,6 +724,9 @@ pub struct PostMetadata {
     /// Exact scalar DAPI favorites owner keyword.
     #[serde(skip_serializing)]
     pub booru_favorite_id: Option<Value>,
+    /// Popular view keyword overrides, separate from canonical post creation date.
+    #[serde(skip_serializing)]
+    pub booru_popular: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     /// Immutable source class path defaults, separate from live keywords.
     #[serde(skip_serializing)]
     pub source_defaults: Option<std::sync::Arc<crate::naming::SourceDefaults>>,
@@ -2013,6 +2016,18 @@ fn compatibility_metadata(
             .filter(|tags| tags.len() <= 1024)
             .map(std::sync::Arc::from),
         source_defaults: None,
+        booru_popular: matches!(category, "danbooru" | "e621" | "e926")
+            .then(|| {
+                data.get("scale").map(|_| {
+                    std::sync::Arc::new(
+                        ["date", "scale"]
+                            .into_iter()
+                            .filter_map(|key| data.get(key).map(|v| (key.into(), v.clone())))
+                            .collect(),
+                    )
+                })
+            })
+            .flatten(),
         booru_favorite_id: matches!(category, "gelbooru" | "safebooru")
             .then(|| data.get("favorite_id").cloned())
             .flatten(),

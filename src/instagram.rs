@@ -665,6 +665,7 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                     booru_user_id: None,
                     booru_pool_name: None,
                     booru_favorite_id: None,
+                    booru_popular: None,
                     source_suffix: None,
                     pool: None,
                     favgroup: None,

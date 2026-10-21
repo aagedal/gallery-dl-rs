@@ -83,6 +83,30 @@ struct Process {
 }
 
 impl Process {
+    fn message_fields(
+        message: &serde_json::Value,
+    ) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        match message.as_array()?.as_slice() {
+            [kind, data] if kind.as_i64() == Some(2) => data.as_object(),
+            [_, _, data] => data.as_object(),
+            _ => None,
+        }
+    }
+    fn popular_metadata(
+        &self,
+        message: &serde_json::Value,
+    ) -> Option<std::sync::Arc<serde_json::Map<String, serde_json::Value>>> {
+        if self.source_defaults.as_ref()?.archive != "P_{scale[0]}_{date}_{id}" {
+            return None;
+        }
+        let fields = Self::message_fields(message)?;
+        Some(std::sync::Arc::new(
+            ["date", "scale"]
+                .into_iter()
+                .filter_map(|key| fields.get(key).map(|value| (key.into(), value.clone())))
+                .collect(),
+        ))
+    }
     fn start(
         backend: Backend,
         url: Url,
@@ -199,6 +223,17 @@ impl Process {
             let (count, message) = self.decoder.feed(bytes)?;
             self.stdout.consume(count);
             if let Some(message) = message {
+                let popular = self.popular_metadata(&message);
+                let popular_timestamp = popular.as_ref().and_then(|_| {
+                    Self::message_fields(&message)?
+                        .get("created_at")
+                        .and_then(|value| {
+                            value
+                                .as_str()
+                                .and_then(|raw| crate::date::parse_date(raw).ok())
+                                .or_else(|| value.as_i64())
+                        })
+                });
                 if message
                     .as_array()
                     .and_then(|row| row.first())
@@ -208,6 +243,10 @@ impl Process {
                     let mut post = extract::parse_post_message(&message, self.category)?;
                     if let Some(metadata) = &mut post.metadata {
                         metadata.source_defaults = self.source_defaults.clone();
+                        if popular.is_some() {
+                            metadata.booru_popular = popular.clone();
+                            metadata.timestamp = popular_timestamp;
+                        }
                     }
                     self.had_post = true;
                     if self.in_post {
@@ -221,6 +260,10 @@ impl Process {
                 if let Some(mut media) = extract::parse_message(message, self.category)? {
                     if let Some(metadata) = &mut media.metadata {
                         metadata.source_defaults = self.source_defaults.clone();
+                        if popular.is_some() {
+                            metadata.booru_popular = popular;
+                            metadata.timestamp = popular_timestamp;
+                        }
                     }
                     self.had_media = true;
                     return Ok(Some(ExtractionEvent::Media(Box::new(media))));

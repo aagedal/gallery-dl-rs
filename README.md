@@ -396,6 +396,18 @@ such as `{date_favorited:%Y-%m-%d}`; invalid timestamps retain the source's fals
 `[Invalid DateTime]` value. Hook-written strings remain strings, and metadata
 JSON emits date strings without internal type markers.
 
+Danbooru popular views use `/popular` or `/explore/posts/popular`; e621/e926
+use `/explore/posts/popular`. These paginate numerically using the configured
+threshold. API requests retain the original query parameters. Source keywords
+`date` and `scale` default to the local calendar date and `day`; `week` normalizes
+to Monday and `month` removes the date's final three characters. The date remains
+a string: `{date!u}` works, while datetime formatting requires an explicit
+conversion such as `{date!D:%Y}`. Defaults use
+`{category}/popular/{scale}/{date}`, the ordinary filename, and metadata archive
+`P_{scale[0]}_{date}_{id}` (an empty scale formats as `None` in the archive).
+Post hook changes remain local to each post; creation timestamps and native
+history retain the original post identity.
+
 Booru template keywords retain producer spelling independently of the native
 logical basename. Danbooru derives `filename` and `extension` from the raw URL;
 e621 uses `file.md5` and `file.ext` verbatim. Gelbooru/Safebooru preserve explicit

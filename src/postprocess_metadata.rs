@@ -15,6 +15,12 @@ fn fail() -> crate::Error {
     error("invalid metadata postprocessor configuration")
 }
 fn truthy(v: &Value) -> bool {
+    if let Some(value) = crate::filter::source_primitive_from_json(v) {
+        return truthy(value);
+    }
+    if let Some(value) = crate::filter::source_date_from_json(v) {
+        return value.is_some();
+    }
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -437,7 +443,24 @@ impl MetadataOptions {
         match &self.mode {
             Mode::Modify(fields) => {
                 for (key, template) in fields {
-                    if let Ok(value) = template.render_value(context) {
+                    let popular = media
+                        .metadata
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.booru_popular.is_some());
+                    let result = if popular {
+                        template.render_source_value(context)
+                    } else {
+                        template.render_value(context)
+                    };
+                    if let Ok(mut value) = result {
+                        if popular
+                            && matches!(
+                                key.as_str(),
+                                "date" | "scale" | "date_updated" | "date_url"
+                            )
+                        {
+                            value = crate::filter::source_primitive_json(value);
+                        }
                         mutate(context, key, Some(value));
                     }
                 }
@@ -979,6 +1002,7 @@ fn tags(context: &Map<String, Value>) -> Result<String> {
     else {
         return Ok(String::new());
     };
+    let value = crate::filter::source_primitive_from_json(value).unwrap_or(value);
     let tags = match value {
         Value::String(s) => {
             let comma = s.split(", ").collect::<Vec<_>>();
@@ -1031,8 +1055,16 @@ fn mutate(context: &mut Map<String, Value>, path: &str, value: Option<Value>) {
             } else {
                 map.remove(keys[0]).is_some()
             }
-        } else if let Some(Value::Object(inner)) = map.get_mut(keys[0]) {
-            apply(inner, &keys[1..], value)
+        } else if let Some(inner) = map.get_mut(keys[0]) {
+            let inner = if crate::filter::source_primitive_from_json(inner).is_some() {
+                inner
+                    .as_object_mut()
+                    .and_then(|map| map.values_mut().next())
+                    .and_then(Value::as_object_mut)
+            } else {
+                inner.as_object_mut()
+            };
+            inner.is_some_and(|inner| apply(inner, &keys[1..], value))
         } else {
             false
         }
@@ -1499,5 +1531,136 @@ mod source_date_exports {
                 if truthy { "1970" } else { "[Invalid DateTime]" }
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod source_primitive_tests {
+    use super::*;
+    use crate::{filter::FilterExpression, postprocess::template::Template};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn popular_strings_survive_copy_delete_and_iso_literal_replacement_until_explicit_conversion()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let mut media=crate::booru::parse_post(crate::booru::Site::Danbooru,&json!({"id":42,"file_url":"https://cdn.donmai.us/original/raw.jpg","md5":"0123456789abcdef0123456789abcdef"})).unwrap();
+        let date = "2024-02-03T04:05:06+00:00";
+        media.metadata.as_mut().unwrap().timestamp = Some(0);
+        media.metadata.as_mut().unwrap().booru_popular = Some(Arc::new(Map::from_iter([
+            ("date".into(), json!(date)),
+            ("scale".into(), json!("day")),
+        ])));
+        let mut context = crate::postprocess::context(&media);
+        assert_eq!(crate::postprocess::public_keywords(&context)["date"], date);
+        assert!(!context.contains_key("num"));
+        assert!(
+            FilterExpression::parse("date.startswith('2024') and date[0] == '2'")
+                .unwrap()
+                .matches(&media)
+                .unwrap()
+        );
+        assert_eq!(
+            Template::parse("{date!s}")
+                .unwrap()
+                .render(&context)
+                .unwrap(),
+            date
+        );
+        assert_eq!(
+            Template::parse("{date!r}")
+                .unwrap()
+                .render(&context)
+                .unwrap(),
+            format!("'{date}'")
+        );
+        assert_eq!(
+            Template::parse("{scale[0]}")
+                .unwrap()
+                .render(&context)
+                .unwrap(),
+            "d"
+        );
+        assert!(
+            Template::parse("{date:%Y}")
+                .unwrap()
+                .render(&context)
+                .is_err()
+        );
+        assert!(
+            crate::naming::FilenameTemplate::parse("{date:%Y}")
+                .unwrap()
+                .render(&media)
+                .is_err()
+        );
+        let path = root.path().join("file.jpg");
+        for options in [
+            json!({"mode":"delete","fields":["date"]}),
+            json!({"mode":"modify","fields":{"date":"1970-01-01T00:00:00+00:00","copy":"{date}","date_updated":"{date!s}"}}),
+        ] {
+            MetadataOptions::parse(options.as_object().unwrap(), root.path())
+                .unwrap()
+                .run(&mut context, &media, &path, root.path())
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["date"],
+            "1970-01-01T00:00:00+00:00"
+        );
+        for field in ["date", "copy", "date_updated"] {
+            assert!(
+                Template::parse(&format!("{{{field}:%Y}}"))
+                    .unwrap()
+                    .render(&context)
+                    .is_err()
+            );
+        }
+        let encoder =
+            MetadataOptions::parse(json!({"mode":"json"}).as_object().unwrap(), root.path())
+                .unwrap();
+        assert!(
+            !encoder
+                .content(&context)
+                .unwrap()
+                .contains("$gallery_dl_source_")
+        );
+        let explicit = MetadataOptions::parse(
+            json!({"mode":"modify","fields":{"date":"{date!D}"}})
+                .as_object()
+                .unwrap(),
+            root.path(),
+        )
+        .unwrap();
+        explicit
+            .run(&mut context, &media, &path, root.path())
+            .await
+            .unwrap();
+        assert_eq!(
+            Template::parse("{date:%Y}")
+                .unwrap()
+                .render(&context)
+                .unwrap(),
+            "1970"
+        );
+        assert!(crate::filter::source_date_from_json(&context["date"]).is_some());
+        context.insert("replacement".into(), json!({"keep":1,"remove":2}));
+        context.insert("three".into(), json!(3));
+        for options in [
+            json!({"mode":"modify","fields":{"date":"{replacement}"}}),
+            json!({"mode":"modify","fields":{"date[keep]":"{three}"}}),
+            json!({"mode":"delete","fields":["date[remove]"]}),
+        ] {
+            MetadataOptions::parse(options.as_object().unwrap(), root.path())
+                .unwrap()
+                .run(&mut context, &media, &path, root.path())
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            crate::postprocess::public_keywords(&context)["date"],
+            json!({"keep":3})
+        );
     }
 }

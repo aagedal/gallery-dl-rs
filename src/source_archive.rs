@@ -72,6 +72,7 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "kemono" | "coomer" => matches!(format, KEMONO | DISCORD),
         "danbooru" if format == "fg_{favgroup[id]}_{id}" => true,
         "e621" | "e926" if format == "f_{user_id}_{id}" => true,
+        "danbooru" | "e621" | "e926" if format == "P_{scale[0]}_{date}_{id}" => true,
         "danbooru" | "e621" | "e926" => {
             matches!(
                 format,
@@ -286,6 +287,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 crate::booru::Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
                 crate::booru::Target::Favorites { .. } => "f_{user_id}_{id}",
                 crate::booru::Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
+                crate::booru::Target::Popular { .. } => "P_{scale[0]}_{date}_{id}",
             };
             return Some(descriptor(category, format));
         }

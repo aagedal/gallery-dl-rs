@@ -622,11 +622,12 @@ Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite
-groups and e621/e926/Gelbooru/Safebooru favorites. Danbooru/e621 support
+groups, e621/e926/Gelbooru/Safebooru favorites, and Danbooru/e621/e926 popular
+views. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: other favorites/popular/artist views, notes,
+Remaining: other favorites/artist views, notes,
 `tags`/`metadata` options, per-category tags and authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
@@ -1341,9 +1342,32 @@ precedence and exact backend argument forwarding. Arbitrary literal strftime
 specifications on unknown copied-date aliases remain a generic formatter gap;
 standard `%Y` date aliases are supported.
 
-**Remaining booru routes (source audit):** popular views require separate
-normalized date/scale metadata and original API parameters. Artist routes queue
-tag-search child jobs; they are not direct tag-search aliases.
+**Implemented Danbooru/e621/e926 popular views (source oracle, 1.32.17):**
+Popular routes retain original API query parameters, first-value query decoding,
+numbered pagination and source thresholds. Keyword dates use the local calendar
+when omitted, Monday normalization for ISO calendar/week dates, and literal
+Unicode slicing for month scale. Root date/scale retain primitive types through
+filters, formatting, hook copies, deletion and reassignment; explicit datetime
+conversion retains typed provenance. Default paths and live metadata archives
+use `{category}/popular/{scale}/{date}` and `P_{scale[0]}_{date}_{id}`, including
+empty-scale `None` formatting. Native creation timestamps and history identities
+remain attached to the original posts. Proven compatibility routes keep their
+class defaults and primitive scope even when hooks delete date/scale. Strict
+response handling preserves already published rows before a later malformed
+record fails. Genuine source replay covers 139 cases, twelve route probes and
+five formatter vectors, including API parameters, pagination, cancellation,
+six hook checkpoints, complete publication bytes and actual metadata archive SQL.
+
+**Remaining booru routes (source audit, 1.32.17):** artist routes queue
+sequential tag-search child jobs with the complete artist dictionary. Detail IDs
+retain lexical spelling; search requests retain original parameters, coerce page
+with source integer rules, and paginate at a fixed twenty rows. Artist names are
+validated and quoted before child selection; rejected valid children make no tag
+requests. Accepted URLs share root deduplication, and hook-mutated artist metadata
+is inherited under `_parent` rather than flattened into posts. Artist roots have
+no default archive key; tag children own their paths and `t_{search_tags}_{id}`
+keys. Implementation requires bounded full artist JSON in child contexts and
+source lifecycle handling for queue-only parents; they are not direct tag aliases.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

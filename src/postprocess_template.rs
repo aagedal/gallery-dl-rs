@@ -107,9 +107,18 @@ impl Template {
         }
     }
     pub fn render_value(&self, context: &Map<String, Value>) -> Result<Value> {
+        self.render_value_mode(context, false)
+    }
+    pub(crate) fn render_source_value(&self, context: &Map<String, Value>) -> Result<Value> {
+        self.render_value_mode(context, true)
+    }
+    fn render_value_mode(&self, context: &Map<String, Value>, typed_dates: bool) -> Result<Value> {
         if let [Part::Field(field)] = self.parts.as_slice() {
             let context = convert_context(context)?;
-            json_value(field.render_value(|name| context.get(name).cloned())?)
+            json_value(
+                field.render_value(|name| context.get(name).cloned())?,
+                typed_dates,
+            )
         } else {
             let context = convert_context(context)?;
             let mut output = String::new();
@@ -167,6 +176,16 @@ fn convert(
     *budget = budget
         .checked_sub(bytes)
         .ok_or_else(|| error("postprocessor context exceeds the size limit"))?;
+    if let Some(value) = crate::filter::source_primitive_from_json(value) {
+        return Ok(FormatValue::SourcePrimitive(Box::new(convert(
+            value,
+            "",
+            false,
+            depth + 1,
+            budget,
+            nodes,
+        )?)));
+    }
     if let Some(value) = crate::filter::source_date_from_json(value) {
         return Ok(value.map_or(
             FormatValue::InvalidDate,
@@ -224,9 +243,12 @@ pub(crate) fn parse_date(value: &str) -> std::result::Result<time::OffsetDateTim
         .map_err(|_| ())
 }
 
-fn json_value(value: FormatValue) -> Result<Value> {
+fn json_value(value: FormatValue, typed_dates: bool) -> Result<Value> {
     Ok(match value {
         FormatValue::None => Value::Null,
+        FormatValue::SourcePrimitive(value) => {
+            crate::filter::source_primitive_json(json_value(*value, typed_dates)?)
+        }
         FormatValue::InvalidDate => crate::filter::source_date_json(None),
         FormatValue::SourceDate(value) => {
             crate::filter::source_date_json(Some(value.unix_timestamp()))
@@ -240,14 +262,21 @@ fn json_value(value: FormatValue) -> Result<Value> {
             serde_json::Number::from_f64(v).ok_or_else(|| error("unsupported template number"))?,
         ),
         FormatValue::Str(v) => Value::String(v),
+        FormatValue::Date(v) if typed_dates => {
+            crate::filter::source_date_json(Some(v.unix_timestamp()))
+        }
         FormatValue::Date(v) => Value::String(
             v.format(&Rfc3339)
                 .map_err(|_| error("unsupported template date"))?,
         ),
-        FormatValue::List(v) => Value::Array(v.into_iter().map(json_value).collect::<Result<_>>()?),
+        FormatValue::List(v) => Value::Array(
+            v.into_iter()
+                .map(|value| json_value(value, typed_dates))
+                .collect::<Result<_>>()?,
+        ),
         FormatValue::Map(v) => Value::Object(
             v.into_iter()
-                .map(|(k, v)| Ok((k, json_value(v)?)))
+                .map(|(k, v)| Ok((k, json_value(v, typed_dates)?)))
                 .collect::<Result<_>>()?,
         ),
     })

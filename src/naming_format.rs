@@ -24,12 +24,14 @@ pub(crate) enum Value {
     Date(OffsetDateTime),
     InvalidDate,
     SourceDate(OffsetDateTime),
+    SourcePrimitive(Box<Value>),
 }
 
 impl Value {
     fn truthy(&self) -> bool {
         match self {
             Value::None | Value::InvalidDate => false,
+            Value::SourcePrimitive(value) => value.truthy(),
             Value::Bool(value) => *value,
             Value::Int(value) => *value != 0,
             Value::Float(value) => *value != 0.0,
@@ -44,6 +46,7 @@ impl Value {
     fn text(&self) -> String {
         match self {
             Value::Str(value) => value.clone(),
+            Value::SourcePrimitive(value) => value.text(),
             Value::InvalidDate => "[Invalid DateTime]".into(),
             Value::Date(value) | Value::SourceDate(value) => {
                 strftime(value, "%Y-%m-%d %H:%M:%S").unwrap_or_default()
@@ -67,6 +70,7 @@ pub(crate) fn source_timestamp(seconds: i64) -> Value {
 fn repr(value: &Value) -> String {
     match value {
         Value::None => "None".into(),
+        Value::SourcePrimitive(value) => repr(value),
         Value::InvalidDate => "NullDatetime(1, 1, 1, 0, 0)".into(),
         Value::Bool(true) => "True".into(),
         Value::Bool(false) => "False".into(),
@@ -207,6 +211,16 @@ impl Field {
             return Err(error("unsupported identity literal field syntax"));
         }
         let mut value = self.select(lookup);
+        if matches!(value, Value::SourcePrimitive(_))
+            && self.conversion.is_none()
+            && self.ops.is_empty()
+            && self.spec.is_empty()
+        {
+            return Ok(value);
+        }
+        if let Value::SourcePrimitive(inner) = value {
+            value = *inner;
+        }
         if let Some(conversion) = self.conversion {
             value = convert_identity(value, conversion)?;
         }
@@ -250,6 +264,9 @@ impl Field {
         lookup: impl Fn(&str) -> Option<Value>,
     ) -> Result<Option<String>> {
         let mut selected = self.select(lookup);
+        if let Value::SourcePrimitive(inner) = selected {
+            selected = *inner;
+        }
         if let Some(conversion) = self.conversion {
             selected = convert(selected, conversion)?;
         }
@@ -536,6 +553,7 @@ fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
 }
 fn identity_size(value: &Value) -> Option<usize> {
     match value {
+        Value::SourcePrimitive(value) => identity_size(value),
         Value::Str(value) => Some(value.len() + 1),
         Value::List(values) => values.iter().try_fold(1usize, |total, value| {
             total.checked_add(identity_size(value)?)
@@ -580,6 +598,7 @@ fn identity_int_float_cmp(integer: i128, float: f64) -> Option<std::cmp::Orderin
 
 fn identity_repr(value: &Value) -> String {
     match value {
+        Value::SourcePrimitive(value) => identity_repr(value),
         Value::Date(value) | Value::SourceDate(value) => format!(
             "datetime.datetime({}, {}, {}, {}, {}, {})",
             value.year(),
@@ -754,6 +773,9 @@ impl Value {
 }
 
 fn access(value: Value, accessor: &Accessor) -> Value {
+    if let Value::SourcePrimitive(inner) = value {
+        return Value::SourcePrimitive(Box::new(access(*inner, accessor)));
+    }
     let position = |index: i64, length: usize| -> Option<usize> {
         let index = if index < 0 {
             length as i64 + index
@@ -959,6 +981,7 @@ fn json(value: &Value) -> serde_json::Value {
     use serde_json::Value as Json;
     match value {
         Value::None => Json::Null,
+        Value::SourcePrimitive(value) => json(value),
         Value::Bool(value) => Json::Bool(*value),
         Value::Int(value) => serde_json::Number::from_i128(*value)
             .map_or_else(|| Json::String(value.to_string()), Json::Number),

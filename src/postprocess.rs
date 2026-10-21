@@ -563,6 +563,9 @@ pub(crate) async fn convert(
 /// Normalize internal source datetime objects when exporting public JSON.
 pub fn public_keywords(context: &Map<String, Value>) -> Map<String, Value> {
     fn public(value: &Value) -> Value {
+        if let Some(value) = crate::filter::source_primitive_from_json(value) {
+            return public(value);
+        }
         if let Some(value) = crate::filter::source_date_from_json(value) {
             return crate::filter::source_date_text(value).into();
         }
@@ -590,6 +593,7 @@ pub fn context(media: &Media) -> Map<String, Value> {
         match value {
             V::None => Value::Null,
             V::SourceDate(v) => crate::filter::source_date_json(*v),
+            V::SourcePrimitive(v) => crate::filter::source_primitive_json(json(v)),
             V::Bool(v) => (*v).into(),
             V::Int(v) => serde_json::Number::from_i128(*v).map_or(Value::Null, Value::Number),
             V::Float(v) => serde_json::Number::from_f64(*v).map_or(Value::Null, Value::Number),
@@ -603,7 +607,12 @@ pub fn context(media: &Media) -> Map<String, Value> {
         .map(|(k, v)| (k, json(&v)))
         .collect();
     crate::source_archive::project_keywords(media, &mut context);
-    if let Some(timestamp) = media.metadata.as_ref().and_then(|m| m.timestamp) {
+    if let Some(timestamp) = media
+        .metadata
+        .as_ref()
+        .filter(|m| m.booru_popular.is_none())
+        .and_then(|m| m.timestamp)
+    {
         context.entry("date").or_insert(timestamp.into());
     }
     for key in ["date", "date_updated", "date_url"] {

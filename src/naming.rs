@@ -42,6 +42,7 @@ const FIELDS: &[&str] = &[
     "timestamp",
     "date",
     "date_favorited",
+    "scale",
     "caption",
     "caption_html",
     "title",
@@ -645,6 +646,9 @@ fn convert_value(value: &crate::filter::Value, key: &str, dates: bool) -> Value 
     use crate::filter::Value as Source;
     match value {
         Source::None => Value::None,
+        Source::SourcePrimitive(value) => {
+            Value::SourcePrimitive(Box::new(convert_value(value, key, false)))
+        }
         Source::SourceDate(value) => value.map_or(Value::InvalidDate, format::source_timestamp),
         Source::Bool(value) => Value::Bool(*value),
         // Upstream exposes these as datetimes; native metadata stores seconds.
@@ -685,6 +689,17 @@ fn lookup(
         .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
         .unwrap_or((&media.filename, ""));
     let metadata = media.metadata.as_ref();
+    if let Some(fields) = metadata.and_then(|metadata| metadata.booru_popular.as_ref())
+        && matches!(name, "date" | "scale")
+    {
+        return fields.get(name).map(|value| {
+            Value::SourcePrimitive(Box::new(convert_value(
+                &crate::filter::json_value(value),
+                name,
+                false,
+            )))
+        });
+    }
     if matches!(name, "id" | "tags" | "date_favorited")
         && let Some(value) = metadata
             .and_then(|metadata| metadata.booru_keywords.as_ref())

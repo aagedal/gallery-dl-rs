@@ -43,6 +43,8 @@ const MAX_TAGS: usize = 1024;
 mod dapi_listing;
 #[path = "booru_gel_favorite.rs"]
 mod gel_favorite;
+#[path = "booru_popular.rs"]
+mod popular;
 #[derive(Clone, Copy, PartialEq)]
 enum RequestKind {
     Api,
@@ -118,6 +120,9 @@ pub enum Target {
     },
     Tags {
         tags: String,
+    },
+    Popular {
+        params: Vec<(String, String)>,
     },
     Favorites {
         params: Vec<(String, String)>,
@@ -273,7 +278,9 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     // A matched invalid capture must fail; falling back could select a
     // different duplicate query and silently change the requested namespace.
     let source_tags = checked_source_search_tags(site, url)?;
-    let target = if let Some(id) = dapi_listing::capture_favorites(site, url) {
+    let target = if let Some(params) = popular::capture(site, url) {
+        Some(Target::Popular { params })
+    } else if let Some(id) = dapi_listing::capture_favorites(site, url) {
         Some(Target::DapiFavorites { id })
     } else if let Some(id) = dapi_listing::capture(site, url) {
         Some(Target::Pool { id })
@@ -558,6 +565,7 @@ fn defaults(
         Target::Post { .. } => &["{category}"],
         Target::Tags { .. } => &["{category}", "{search_tags}"],
         Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
+        Target::Popular { .. } => &["{category}", "popular", "{scale}", "{date}"],
         Target::DapiFavorites { .. } => &["{category}", "favorites", "{favorite_id}"],
         Target::Pool { .. } if !site.danbooru_dialect() => &["{category}", "pool", "{pool}"],
         Target::Pool { .. } => &["{category}", "pool", "{pool[id]} {pool[name]}"],
@@ -574,6 +582,7 @@ fn defaults(
         Target::Pool { .. } => "p_{pool[id]}_{id}",
         Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
         Target::Favorites { .. } => "f_{user_id}_{id}",
+        Target::Popular { .. } => "P_{scale[0]}_{date}_{id}",
         Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
     };
     Arc::new(crate::naming::SourceDefaults::new(
@@ -695,6 +704,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             booru_user_id: None,
             booru_pool_name: None,
             booru_favorite_id: None,
+            booru_popular: None,
             file: Some(FileMetadata {
                 width,
                 height,
@@ -804,6 +814,7 @@ pub enum PoolOrder {
 pub struct Booru {
     pool_order: PoolOrder,
     favorite_order: Option<Value>,
+    popular_today: Option<time::Date>,
     site: Site,
     client: Client,
     network: NetworkOptions,
@@ -848,6 +859,10 @@ impl TagOrder {
     }
 }
 enum Cursor {
+    Popular {
+        params: Vec<(String, String)>,
+        page: Option<usize>,
+    },
     Favorites {
         params: Vec<(String, String)>,
         page: Option<usize>,
@@ -917,6 +932,7 @@ struct Collection {
 
 struct State {
     dapi_listing: Option<Box<dapi_listing::DapiListing>>,
+    popular: Option<Arc<serde_json::Map<String, Value>>>,
     favorite_user_id: Option<Arc<str>>,
     collection: Option<Collection>,
     root: Url,
@@ -935,6 +951,7 @@ impl Booru {
         Ok(Self {
             pool_order: PoolOrder::Pool,
             favorite_order: None,
+            popular_today: None,
             site,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
@@ -1023,6 +1040,11 @@ impl Booru {
         self.favorite_order = order;
         self
     }
+    /// Override the local calendar day for deterministic popular extraction.
+    pub fn with_popular_today(mut self, date: time::Date) -> Self {
+        self.popular_today = Some(date);
+        self
+    }
 
     /// Minimum raw page length that continues Danbooru/e621 searches.
     /// None uses the source default of twenty fewer than the API page size.
@@ -1097,6 +1119,10 @@ impl Booru {
             .as_ref()
             .map(|collection| Arc::new(Value::Object(collection.metadata.snapshot())));
         for (position, post) in raw.iter().enumerate() {
+            if state.popular.is_some() && !post.is_object() {
+                state.pending_error = Some(error("invalid booru popular post"));
+                break;
+            }
             if let Some(collection) = &state.collection
                 && !number(post.get("id")).is_some_and(|id| collection.positions.contains_key(&id))
             {
@@ -1124,6 +1150,7 @@ impl Booru {
                     media.handoff.insert("_fallback".into(), fallback);
                 }
                 if let Some(metadata) = &mut media.metadata {
+                    metadata.booru_popular = state.popular.clone();
                     if let Some(listing) = &state.dapi_listing {
                         if listing.favorite {
                             metadata.booru_favorite_id = Some((*listing.value).clone());
@@ -1166,7 +1193,7 @@ impl Booru {
                 let fields: &[&str] =
                     if state.search_tags.is_some() && !self.site.danbooru_dialect() {
                         &["num", "index", "media_id", "search_tags"]
-                    } else if state.collection.is_some() {
+                    } else if state.collection.is_some() || state.popular.is_some() {
                         &["index", "media_id"]
                     } else {
                         &["num", "index", "media_id"]
@@ -1181,6 +1208,8 @@ impl Booru {
                     } else {
                         &["filename", "name", "extension", "pool", "pool_name"]
                     }
+                } else if state.popular.is_some() {
+                    &["filename", "name", "extension", "date", "scale"]
                 } else if state.collection.is_some() {
                     &["filename", "name", "extension", "num"]
                 } else if state.favorite_user_id.is_some() {
@@ -1224,14 +1253,17 @@ impl Booru {
         }
         let limit = self.site.page_limit();
         let limit_text = limit.to_string();
-        if !matches!(state.cursor, Cursor::Tags { .. } | Cursor::Favorites { .. }) {
+        if !matches!(
+            state.cursor,
+            Cursor::Tags { .. } | Cursor::Favorites { .. } | Cursor::Popular { .. }
+        ) {
             state.pages += 1;
             if state.pages >= MAX_PAGES {
                 state.done = true;
             }
         }
         match &mut state.cursor {
-            Cursor::Favorites { params, page } => {
+            Cursor::Favorites { params, page } | Cursor::Popular { params, page } => {
                 let page_text = page.map(|page| page.to_string());
                 let mut query = params
                     .iter()
@@ -1249,8 +1281,21 @@ impl Booru {
                 {
                     query.push(("page", page));
                 }
-                let body = self.call(&state.root, "favorites.json", &query).await?;
-                let raw = posts(self.site, &body)?;
+                let path = if state.popular.is_some() {
+                    if self.site == Site::Danbooru {
+                        "explore/posts/popular.json"
+                    } else {
+                        "popular.json"
+                    }
+                } else {
+                    "favorites.json"
+                };
+                let body = self.call(&state.root, path, &query).await?;
+                let raw = if state.popular.is_some() {
+                    popular::posts(&body)?
+                } else {
+                    posts(self.site, &body)?
+                };
                 state.done = raw.len() < self.threshold.unwrap_or(limit - 20);
                 *page = Some(match *page {
                     None => 2,
@@ -1355,10 +1400,37 @@ impl Booru {
         };
         let root = self.api_root.clone().unwrap_or(root);
         let (tags, cursor) = match target {
+            Target::Popular { params } => {
+                return stream::once(async move {
+                    let metadata = popular::metadata(&params, self.popular_today)?;
+                    Ok::<_, crate::Error>(self.listing(State {
+                        dapi_listing: None,
+                        popular: Some(metadata),
+                        favorite_user_id: None,
+                        collection: None,
+                        root,
+                        tags: String::new(),
+                        search_tags: None,
+                        cursor: Cursor::Popular { params, page: None },
+                        pages: 0,
+                        done: false,
+                        pending: VecDeque::new(),
+                        pending_cursor: None,
+                        pending_error: None,
+                    }))
+                })
+                .map(|result| match result {
+                    Ok(events) => events,
+                    Err(failure) => stream::once(async move { Err(failure) }).boxed(),
+                })
+                .flatten()
+                .boxed();
+            }
             Target::DapiFavorites { id } => {
                 return match dapi_listing::favorites(self.site, id) {
                     Ok(listing) => self.listing(State {
                         dapi_listing: Some(listing),
+                        popular: None,
                         favorite_user_id: None,
                         collection: None,
                         root,
@@ -1379,6 +1451,7 @@ impl Booru {
                     let pool = dapi_listing::start(self, &root, id).await?;
                     Ok::<_, crate::Error>(self.listing(State {
                         dapi_listing: Some(pool),
+                        popular: None,
                         favorite_user_id: None,
                         collection: None,
                         root,
@@ -1407,6 +1480,7 @@ impl Booru {
                     .unwrap_or_default();
                 return self.listing(State {
                     dapi_listing: None,
+                    popular: None,
                     favorite_user_id: Some(Arc::from(user_id)),
                     collection: None,
                     root,
@@ -1425,6 +1499,7 @@ impl Booru {
                     let raw = self.post(&root, id).await?;
                     let mut state = State {
                         dapi_listing: None,
+                        popular: None,
                         favorite_user_id: None,
                         collection: None,
                         root,
@@ -1476,6 +1551,7 @@ impl Booru {
                         .collect();
                     let mut state = State {
                         dapi_listing: None,
+                        popular: None,
                         favorite_user_id: None,
                         collection: Some(Collection {
                             kind,
@@ -1613,6 +1689,7 @@ impl Booru {
         };
         self.listing(State {
             dapi_listing: None,
+            popular: None,
             favorite_user_id: None,
             collection: None,
             root,
@@ -1858,6 +1935,7 @@ mod tests {
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
                 dapi_listing: None,
+                popular: None,
                 favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
@@ -2030,6 +2108,7 @@ mod tests {
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
                 dapi_listing: None,
+                popular: None,
                 favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
@@ -2779,3 +2858,7 @@ mod dapi_favorite_tests;
 #[cfg(test)]
 #[path = "booru_gel_favorite_tests.rs"]
 mod gel_favorite_tests;
+
+#[cfg(test)]
+#[path = "booru_popular_tests.rs"]
+mod popular_tests;

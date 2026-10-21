@@ -12,6 +12,7 @@ pub(crate) use eval::float_repr;
 pub(super) enum Value {
     None,
     SourceDate(Option<i64>),
+    SourcePrimitive(Arc<Value>),
     Bool(bool),
     Int(i128),
     Float(f64),
@@ -316,6 +317,9 @@ fn map(values: BTreeMap<String, Value>) -> Value {
 }
 // Structured public metadata is validated before reaching this context.
 pub(crate) fn json_value(value: &serde_json::Value) -> Value {
+    if let Some(value) = source_primitive_from_json(value) {
+        return Value::SourcePrimitive(Arc::new(json_value(value)));
+    }
     if let Some(value) = source_date_from_json(value) {
         return Value::SourceDate(value);
     }
@@ -336,6 +340,24 @@ pub(crate) fn json_value(value: &serde_json::Value) -> Value {
             }
             Value::Map(Arc::new(result))
         }
+    }
+}
+const SOURCE_PRIMITIVE_KEY: &str = "$gallery_dl_source_primitive";
+pub(crate) fn source_primitive_json(value: serde_json::Value) -> serde_json::Value {
+    if source_date_from_json(&value).is_some() || source_primitive_from_json(&value).is_some() {
+        return value;
+    }
+    serde_json::Value::Object(serde_json::Map::from_iter([(
+        SOURCE_PRIMITIVE_KEY.into(),
+        value,
+    )]))
+}
+pub(crate) fn source_primitive_from_json(value: &serde_json::Value) -> Option<&serde_json::Value> {
+    let map = value.as_object()?;
+    if map.len() == 1 {
+        map.get(SOURCE_PRIMITIVE_KEY)
+    } else {
+        None
     }
 }
 const SOURCE_DATE_KEY: &str = "$gallery_dl_source_date";
@@ -814,6 +836,7 @@ fn context_parts(
         if let Some(num) = &post.source_num {
             values.insert("num".into(), json_value(num));
         } else if media.is_some()
+            && post.booru_popular.is_none()
             && !metadata.contains_key("num")
             && !post
                 .source_defaults
@@ -1112,6 +1135,17 @@ fn context_parts(
                     } else {
                         json_value(value)
                     };
+                    values.insert(key.into(), value.clone());
+                    metadata.insert(key.into(), value);
+                }
+            }
+        }
+        if let Some(fields) = &post.booru_popular {
+            for key in ["date", "scale"] {
+                values.remove(key);
+                metadata.remove(key);
+                if let Some(value) = fields.get(key) {
+                    let value = Value::SourcePrimitive(Arc::new(json_value(value)));
                     values.insert(key.into(), value.clone());
                     metadata.insert(key.into(), value);
                 }
