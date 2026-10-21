@@ -106,7 +106,6 @@ const FIELDS: &[&str] = &[
     "pixivision_title",
     "rating",
     "score",
-    "md5",
     "search_tags",
     "pool",
     "favgroup",
@@ -241,7 +240,7 @@ impl FilenameTemplate {
     pub fn render_optional(&self, media: &Media) -> Result<Option<String>> {
         let mut context = None;
         match self.select(media)? {
-            Some(parts) => Self::render_parts(parts, media, &mut context, false).map(Some),
+            Some(parts) => Self::render_parts(parts, media, &mut context, false, false).map(Some),
             None => Ok(None),
         }
     }
@@ -250,6 +249,14 @@ impl FilenameTemplate {
         &self,
         media: &Media,
         keywords: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Option<String>> {
+        self.render_keywords_mode(media, keywords, false)
+    }
+    fn render_keywords_mode(
+        &self,
+        media: &Media,
+        keywords: &serde_json::Map<String, serde_json::Value>,
+        directory_component: bool,
     ) -> Result<Option<String>> {
         let mut context = Some(
             keywords
@@ -265,7 +272,9 @@ impl FilenameTemplate {
             }
         }
         match selected {
-            Some(parts) => Self::render_parts(parts, media, &mut context, true).map(Some),
+            Some(parts) => {
+                Self::render_parts(parts, media, &mut context, true, directory_component).map(Some)
+            }
             None => Ok(None),
         }
     }
@@ -278,7 +287,7 @@ impl FilenameTemplate {
         Ok(self.parts.as_deref())
     }
 
-    fn render_with(
+    fn render_directory_component(
         &self,
         media: &Media,
         context: &mut Option<BTreeMap<String, crate::filter::Value>>,
@@ -286,7 +295,7 @@ impl FilenameTemplate {
         let parts = self
             .select(media)?
             .ok_or_else(|| error("no filename template condition matched"))?;
-        Self::render_parts(parts, media, context, false)
+        Self::render_parts(parts, media, context, false, true)
     }
 
     fn render_parts(
@@ -294,7 +303,12 @@ impl FilenameTemplate {
         media: &Media,
         context: &mut Option<BTreeMap<String, crate::filter::Value>>,
         keywords: bool,
+        directory_component: bool,
     ) -> Result<String> {
+        let source = media
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.source_defaults.is_some());
         let mut output = String::new();
         for part in parts {
             match part {
@@ -325,10 +339,15 @@ impl FilenameTemplate {
                         && field
                             .names()
                             .any(|name| matches!(name, "filename" | "extension" | "md5"));
-                    let value = if source_nameext {
+                    let value = if source || source_nameext {
                         field.render_content(lookup)?
                     } else {
                         field.render(lookup)?
+                    };
+                    let value = if source {
+                        Some(value.unwrap_or_else(|| "None".into()))
+                    } else {
+                        value
                     };
                     let Some(value) = value else {
                         let name = field.names().next().unwrap_or("literal");
@@ -343,12 +362,44 @@ impl FilenameTemplate {
                     };
                     // Sanitize each substitution independently so metadata can
                     // never introduce paths, drive prefixes, or control bytes.
-                    output.extend(value.chars().map(safe_char));
+                    if source {
+                        output.push_str(&value);
+                    } else {
+                        output.extend(value.chars().map(safe_char));
+                    }
                     if output.len() > 65536 {
                         return Err(error("filename template output exceeds limits"));
                     }
                 }
             }
+        }
+        if source {
+            if directory_component {
+                output = output.trim().to_owned();
+            }
+            let output: String = output
+                .chars()
+                .filter(|c| !matches!(*c, '\0'..='\u{1f}' | '\u{7f}'))
+                .map(|c| {
+                    if c == '/'
+                        || cfg!(windows)
+                            && matches!(c, '\\' | '|' | '<' | '>' | ':' | '"' | '?' | '*')
+                    {
+                        '_'
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            let output = if cfg!(windows) && directory_component {
+                output.trim_end_matches(['.', ' ']).to_owned()
+            } else {
+                output
+            };
+            if matches!(output.as_str(), "." | "..") || output.is_empty() && !directory_component {
+                return Err(error("source filename must produce a safe basename"));
+            }
+            return Ok(output);
         }
         let output: String = output.chars().map(safe_char).collect();
         let mut output = output.trim_matches('.').to_string();
@@ -403,6 +454,68 @@ fn safe_char(c: char) -> char {
 pub struct DirectoryTemplate {
     components: Option<Vec<FilenameTemplate>>,
     conditions: Vec<(crate::filter::FilterExpression, Vec<FilenameTemplate>)>,
+}
+
+/// Retained extractor class defaults; these are never part of mutable metadata.
+#[derive(Clone, Debug)]
+pub struct SourceDefaults {
+    pub(crate) category: &'static str,
+    filename: FilenameTemplate,
+    directory: DirectoryTemplate,
+}
+impl SourceDefaults {
+    pub(crate) fn new(category: &'static str, filename: &str, directory: &[&str]) -> Self {
+        Self {
+            category,
+            filename: FilenameTemplate::parse(filename).expect("static source filename"),
+            directory: DirectoryTemplate::parse(
+                &directory.iter().map(|s| (*s).into()).collect::<Vec<_>>(),
+            )
+            .expect("static source directory"),
+        }
+    }
+}
+pub(crate) fn effective_filename(
+    media: &Media,
+    explicit: Option<&FilenameTemplate>,
+) -> Option<FilenameTemplate> {
+    let source = media
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.source_defaults.as_deref());
+    match (explicit, source) {
+        (Some(template), Some(source)) => {
+            let mut template = template.clone();
+            if template.parts.is_none() {
+                template.parts = source.filename.parts.clone();
+            }
+            Some(template)
+        }
+        (Some(template), None) => Some(template.clone()),
+        (None, Some(source)) => Some(source.filename.clone()),
+        (None, None) => None,
+    }
+}
+pub(crate) fn effective_directory(
+    media: &Media,
+    explicit: Option<&DirectoryTemplate>,
+) -> Option<DirectoryTemplate> {
+    let source = media
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.source_defaults.as_deref());
+    match (explicit, source) {
+        (Some(template), Some(source)) => {
+            let mut template = template.clone();
+            if template.components.is_none() {
+                template.components = source.directory.components.clone();
+            }
+            Some(template)
+        }
+        (Some(template), None) => Some(template.clone()),
+        (None, Some(source)) => Some(source.directory.clone()),
+        (None, None) => None,
+    }
 }
 
 impl DirectoryTemplate {
@@ -467,7 +580,10 @@ impl DirectoryTemplate {
         let mut bytes = 0;
         let mut context = None;
         for component in components {
-            let component = component.render_with(media, &mut context)?;
+            let component = component.render_directory_component(media, &mut context)?;
+            if component.is_empty() {
+                continue;
+            }
             bytes += component.len() + 1;
             if bytes > 3072 {
                 return Err(error("rendered directory exceeds 3072 bytes"));
@@ -495,8 +611,11 @@ impl DirectoryTemplate {
         let mut bytes = 0;
         for component in components {
             let value = component
-                .render_keywords(media, keywords)?
+                .render_keywords_mode(media, keywords, true)?
                 .ok_or_else(|| error("invalid directory component"))?;
+            if value.is_empty() {
+                continue;
+            }
             bytes += value.len() + 1;
             if bytes > 3072 {
                 return Err(error("rendered directory exceeds 3072 bytes"));

@@ -610,6 +610,7 @@ pub(crate) struct HookPaths {
     pub filename: Option<std::ffi::OsString>,
     pub realpath: Option<PathBuf>,
     pub extension: String,
+    pub source_extension: Option<Value>,
 }
 impl Postprocessors {
     pub(crate) async fn run_job_hook(
@@ -771,6 +772,7 @@ mod job_mtime_path_tests {
             filename: None,
             realpath: Some(missing_file.clone()),
             extension: String::new(),
+            source_extension: None,
         };
         let mut context = Map::from_iter([("date".into(), json!(1704164646))]);
         processors

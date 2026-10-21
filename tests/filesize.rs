@@ -217,6 +217,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
     item.metadata = Some(PostMetadata {
         source_num: None,
         booru_keywords: None,
+        source_defaults: None,
         source_suffix: None,
         search_tags: None,
         pool: None,

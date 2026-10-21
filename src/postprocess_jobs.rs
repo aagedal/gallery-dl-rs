@@ -52,6 +52,7 @@ struct Shared {
     processors: Mutex<Option<Arc<Postprocessors>>>,
     objects: crate::postprocess::objects::Bindings,
     directory: Mutex<Option<PathBuf>>,
+    source_extension: Mutex<Option<Value>>,
     halt: Mutex<Option<Arc<AtomicBool>>>,
 }
 /// One emitted file's participation in its owning post. Drop on every outcome,
@@ -67,6 +68,13 @@ impl std::fmt::Debug for ScopeLease {
     }
 }
 impl ScopeLease {
+    pub(crate) fn set_source_extension(&self, extension: Option<Value>) {
+        *self
+            .shared
+            .source_extension
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = extension;
+    }
     pub(crate) fn directory(&self) -> Option<PathBuf> {
         self.shared
             .directory
@@ -262,6 +270,7 @@ impl Shared {
             processors: Mutex::new(None),
             objects,
             directory: Mutex::new(None),
+            source_extension: Mutex::new(None),
             halt: Mutex::new(None),
         })
     }
@@ -383,6 +392,8 @@ impl Runtime {
         objects: crate::postprocess::objects::Bindings,
     ) -> Result<()> {
         objects.refresh(&mut self.context);
+        let filename =
+            crate::naming::effective_filename(&self.media, self.configuration.filename.as_ref());
         let result = objects
             .observe(self.configuration.processors.run_job_hook(
                 hook,
@@ -390,7 +401,7 @@ impl Runtime {
                 &self.media,
                 &mut self.paths,
                 &self.configuration.root,
-                self.configuration.filename.as_ref(),
+                filename.as_ref(),
             ))
             .await;
         if result.is_err() {
@@ -433,6 +444,11 @@ impl Frame {
             if let Some(runtime) = &mut self.runtime {
                 runtime.context = context;
                 if let Some(path) = path {
+                    runtime.paths.source_extension = post
+                        .source_extension
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
                     runtime.paths.filename = path.file_name().map(|name| name.to_os_string());
                     runtime.paths.extension = runtime
                         .context
@@ -526,16 +542,12 @@ fn post_directory(
     media: &Media,
     keywords: &Map<String, Value>,
 ) -> Result<PathBuf> {
-    crate::download::destination_with_keyword_templates(
+    crate::download::directory_with_keywords(
         &configuration.root,
         media,
-        None,
         configuration.directory.as_ref(),
         keywords,
-    )?
-    .parent()
-    .map(Path::to_owned)
-    .ok_or_else(|| error("invalid postprocessor directory"))
+    )
 }
 fn public_context(media: &Media) -> Map<String, Value> {
     let mut context = crate::postprocess::context(media);
@@ -707,6 +719,7 @@ impl State<'_> {
                             filename: None,
                             realpath: None,
                             extension: String::new(),
+                            source_extension: None,
                         },
                         media: media.clone(),
                         failed: Arc::new(AtomicBool::new(frame.failed)),
@@ -763,7 +776,15 @@ impl State<'_> {
                         .configuration
                         .directory
                         .as_ref()
-                        .map(|_| runtime.paths.directory.clone());
+                        .map(|_| runtime.paths.directory.clone())
+                        .or_else(|| {
+                            runtime
+                                .media
+                                .metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.source_defaults.as_ref())
+                                .map(|_| runtime.paths.directory.clone())
+                        });
                     *frame
                         .post
                         .as_ref()

@@ -270,10 +270,7 @@ pub fn destination_with_template(
     media: &Media,
     template: &FilenameTemplate,
 ) -> Result<PathBuf> {
-    Ok(match template.render_optional(media)? {
-        Some(name) => root.join(safe_component(&media.category)).join(name),
-        None => destination(root, media),
-    })
+    destination_with_templates(root, media, Some(template), None)
 }
 
 /// Render a complete destination. An explicit directory replaces the default
@@ -284,11 +281,23 @@ pub fn destination_with_templates(
     filename: Option<&FilenameTemplate>,
     directory: Option<&DirectoryTemplate>,
 ) -> Result<PathBuf> {
-    let default = match filename {
-        Some(template) => destination_with_template(root, media, template)?,
+    let filename = crate::naming::effective_filename(media, filename);
+    let directory = crate::naming::effective_directory(media, directory);
+    let default = match filename
+        .as_ref()
+        .map(|template| template.render_optional(media))
+        .transpose()?
+        .flatten()
+    {
+        Some(name) => root.join(safe_component(&media.category)).join(name),
         None => destination(root, media),
     };
-    match directory.map(|d| d.render(media)).transpose()?.flatten() {
+    match directory
+        .as_ref()
+        .map(|d| d.render(media))
+        .transpose()?
+        .flatten()
+    {
         None => Ok(default),
         Some(directory) => Ok(root.join(directory).join(
             default
@@ -306,8 +315,10 @@ pub(crate) fn destination_with_keyword_templates(
     directory: Option<&DirectoryTemplate>,
     keywords: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<PathBuf> {
+    let filename = crate::naming::effective_filename(media, filename);
     let default = destination(root, media);
     let name = filename
+        .as_ref()
         .map(|template| template.render_keywords(media, keywords))
         .transpose()?
         .flatten();
@@ -316,16 +327,25 @@ pub(crate) fn destination_with_keyword_templates(
         .map(std::ffi::OsStr::new)
         .or_else(|| default.file_name())
         .ok_or_else(|| error("invalid media filename"))?;
+    Ok(directory_with_keywords(root, media, directory, keywords)?.join(basename))
+}
+
+/// Render the directory checkpoint without evaluating any filename formatter.
+pub(crate) fn directory_with_keywords(
+    root: &Path,
+    media: &Media,
+    directory: Option<&DirectoryTemplate>,
+    keywords: &serde_json::Map<String, serde_json::Value>,
+) -> Result<PathBuf> {
+    let directory = crate::naming::effective_directory(media, directory);
     let directory = directory
+        .as_ref()
         .map(|template| template.render_keywords(media, keywords))
         .transpose()?
         .flatten();
     Ok(match directory {
-        Some(directory) => root.join(directory).join(basename),
-        None => default
-            .parent()
-            .ok_or_else(|| error("invalid media directory"))?
-            .join(basename),
+        Some(directory) => root.join(directory),
+        None => root.join(safe_component(&media.category)),
     })
 }
 
@@ -394,6 +414,8 @@ pub async fn download_with_template(
 ) -> Result<Outcome> {
     let effective_media = client.effective_media(media);
     let media = effective_media.as_ref();
+    let resolved_filename = crate::naming::effective_filename(media, template);
+    let template = resolved_filename.as_ref();
     let source_booru = media
         .metadata
         .as_ref()

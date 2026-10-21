@@ -59,6 +59,7 @@ fn media() -> Media {
             index: 2,
             source_num: None,
             booru_keywords: None,
+            source_defaults: None,
             source_suffix: None,
             search_tags: None,
             pool: None,

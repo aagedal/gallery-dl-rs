@@ -506,6 +506,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
             metadata: Some(PostMetadata {
                 source_num: None,
                 booru_keywords: None,
+                source_defaults: None,
                 source_suffix: None,
                 pool: None,
                 favgroup: None,

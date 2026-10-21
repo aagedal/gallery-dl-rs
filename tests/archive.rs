@@ -19,6 +19,7 @@ fn item(url: &str) -> Media {
     media.metadata = Some(PostMetadata {
         source_num: None,
         booru_keywords: None,
+        source_defaults: None,
         source_suffix: None,
         search_tags: None,
         pool: None,

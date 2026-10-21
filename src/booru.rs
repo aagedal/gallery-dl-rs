@@ -500,6 +500,52 @@ fn nameext_keywords(
     keywords
 }
 
+fn defaults(
+    site: Site,
+    category: &'static str,
+    target: &Target,
+) -> Arc<crate::naming::SourceDefaults> {
+    let collection = matches!(target, Target::Pool { .. } | Target::Favgroup { .. });
+    let filename = if collection {
+        "{num:>04}_{id}_{filename}.{extension}"
+    } else if site.danbooru_dialect() {
+        "{category}_{id}_{filename}.{extension}"
+    } else {
+        "{category}_{id}_{md5}.{extension}"
+    };
+    let directory: &[&str] = match target {
+        Target::Post { .. } => &["{category}"],
+        Target::Tags { .. } => &["{category}", "{search_tags}"],
+        Target::Pool { .. } => &["{category}", "pool", "{pool[id]} {pool[name]}"],
+        Target::Favgroup { .. } => &[
+            "{category}",
+            "Favorite Groups",
+            "{favgroup[id]} {favgroup[name]}",
+        ],
+    };
+    Arc::new(crate::naming::SourceDefaults::new(
+        category, filename, directory,
+    ))
+}
+
+pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDefaults>> {
+    let category = match url.host_str()? {
+        "danbooru.donmai.us" => "danbooru",
+        "e621.net" => "e621",
+        "e926.net" => "e926",
+        "gelbooru.com" => "gelbooru",
+        "safebooru.org" => "safebooru",
+        _ => return None,
+    };
+    let site = if category == "e926" {
+        Site::E621
+    } else {
+        Site::from_category(category)?
+    };
+    let (target, _) = target(site, url).ok()?;
+    Some(defaults(site, category, &target))
+}
+
 /// Parse one post object. Posts without a usable file yield `None`.
 pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     let id = number(post.get("id"))?;
@@ -592,6 +638,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
         filename: format!("{category}_{id}_{media_id}.{ext}"),
         metadata: Some(PostMetadata {
             booru_keywords,
+            source_defaults: Some(defaults(site, site.category(), &Target::Post { id: 0 })),
             file: Some(FileMetadata {
                 width,
                 height,
@@ -1119,6 +1166,25 @@ impl Booru {
 
     /// Emit one post boundary per booru post; listings paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let defaults = defaults_for_url(url);
+        self.events_inner(url)
+            .map(move |event| {
+                event.map(|mut event| {
+                    let metadata = match &mut event {
+                        ExtractionEvent::Post(post) => post.metadata.as_mut(),
+                        ExtractionEvent::Media(media) => media.metadata.as_mut(),
+                        _ => None,
+                    };
+                    if let Some(metadata) = metadata {
+                        metadata.source_defaults = defaults.clone();
+                    }
+                    event
+                })
+            })
+            .boxed()
+    }
+
+    fn events_inner(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let (target, root) = match target(self.site, url) {
             Ok(parsed) => parsed,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
@@ -2436,3 +2502,7 @@ mod pool_tests;
 #[cfg(test)]
 #[path = "booru_nameext_compat_tests.rs"]
 mod nameext_compat_tests;
+
+#[cfg(test)]
+#[path = "booru_defaults_tests.rs"]
+mod defaults_tests;

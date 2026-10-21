@@ -1181,8 +1181,8 @@ A job-scoped object binding carries nested pool hook mutations across posts and
 post-after boundaries; root replacement/deletion, including equal replacements,
 detaches only that post. Mutation observers stay outside public JSON. Source
 fixtures and native traversal/live download-hook replay cover the contract;
-default pool archive keys are enabled. Native logical filename defaults remain
-different from upstream's MD5-based pool filenames. Generic root order settings
+default pool archive keys are enabled. Source publication paths are implemented
+below, separately from the native logical basename. Generic root order settings
 retain the existing asc/desc/reverse grammar; extra pool aliases require the
 Danbooru category scope.
 
@@ -1196,9 +1196,8 @@ legacy aliases, and capture only the source regex digit prefix before suffixes.
 Source replay covers requests, metadata, directories/format keys, live hooks,
 error checkpoints and cancellation. Collection compatibility capture is scoped
 to its booru categories; Pixiv user-detail and novel reserved-root guards reject
-`pool`/`favgroup` extras to prevent duplicate serialized JSON keys. Native
-logical filename defaults still
-differ from source MD5-based filenames. Alternate source hosts and raw Unicode
+`pool`/`favgroup` extras to prevent duplicate serialized JSON keys. Source
+publication paths are implemented below. Alternate source hosts and raw Unicode
 URL digit captures remain unimplemented; URL parsing percent-encodes those raw
 digits, so their original spelling is unavailable from the typed URL.
 
@@ -1222,12 +1221,31 @@ path. Full filename replay replaces the earlier prefix-only assertions; helper a
 job oracles cover all four families, and compatibility tests cover scoping,
 serialization, raw field presence and stable initial directories.
 
-**Next booru default naming step:** logical native filenames and default category
-folders still differ from source collection filenames/directories. Apply source
-class defaults using the live per-post directory checkpoint and retained source
-keywords, respecting explicit CLI/configuration templates. Do not weaken the
-complete filename assertions already in place. E621 favorites remains the next
-unsupported booru feed after the default naming contract is closed.
+**Implemented booru source paths:** native post/tag/pool/favorite-group routes
+retain immutable source class templates privately alongside the raw keyword
+snapshot. Source category `e926` is preserved independently of native e621
+settings and identity. Filename/directory overrides resolve independently, and
+conditional templates without a matching branch fall back to the source class
+default; an explicit empty directory remains empty. Directories freeze before
+Init/Post and after the preceding PostAfter, including implicit class defaults.
+Source path rendering preserves spaces/Unicode, replaces separators, removes
+controls, omits empty directory segments, and formats missing/null fields as
+`None`. Parent-directory basenames remain rejected. The selected filename
+formatter reaches Prepare/File hash rebuilds and metadata `extension-format`;
+the original mapped extension is cached separately from later live keyword/path
+changes, through PostAfter. Source-mode filenames are built after Prepare and
+remain fixed under ordinary File keyword edits. Direct and archived downloads
+without processors use the same preparation. Supported compatibility input URLs
+retain their class descriptor too; standalone `parse_messages` calls have no
+route provenance and retain legacy fallback behavior. Genuine source publication
+fixtures compare full media/sidecar paths, bytes, five hook snapshots, independent
+and conditional overrides, empty directories, typed MD5 fields, hash rebuilds,
+and multi-post directory checkpoints across all fourteen supported route classes.
+
+**Remaining booru paths/options:** custom path restriction/replacement/conversion,
+strip/substitution settings, extension-map overrides, unsupported routes and
+alternate source hosts still need their source contracts. Gelbooru/Safebooru
+pools and E621 favorites are not implemented. E621 favorites is the next feed.
 
 **Next booru favorites step (source audit):** E621 favorites stream
 `/favorites.json` with numbered pages (no pool buffering). The constructor

@@ -715,6 +715,9 @@ pub struct PostMetadata {
     /// Exact booru filename, extension and root MD5 keywords, including absence/null.
     #[serde(skip_serializing)]
     pub booru_keywords: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
+    /// Immutable source class path defaults, separate from live keywords.
+    #[serde(skip_serializing)]
+    pub source_defaults: Option<std::sync::Arc<crate::naming::SourceDefaults>>,
     /// Exact producer suffix, retained independently of the native filename.
     #[serde(skip_serializing)]
     pub source_suffix: Option<Value>,
@@ -1995,6 +1998,7 @@ fn compatibility_metadata(
             .and_then(|_| data.get("search_tags").and_then(Value::as_str))
             .filter(|tags| tags.len() <= 1024)
             .map(std::sync::Arc::from),
+        source_defaults: None,
         booru_keywords: (matches!(
             category,
             "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru"

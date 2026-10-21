@@ -82,6 +82,7 @@ struct DestinationState<'a> {
     directory: &'a Path,
     filename: Option<&'a std::ffi::OsStr>,
     extension: &'a str,
+    source_extension: Option<&'a Value>,
 }
 impl MetadataOptions {
     pub fn default_events() -> Vec<String> {
@@ -378,6 +379,17 @@ impl MetadataOptions {
         path: &Path,
         root: &Path,
     ) -> Result<()> {
+        self.run_with_source_extension(context, media, path, root, None)
+            .await
+    }
+    pub(crate) async fn run_with_source_extension(
+        &self,
+        context: &mut Map<String, Value>,
+        media: &Media,
+        path: &Path,
+        root: &Path,
+        source_extension: Option<&Value>,
+    ) -> Result<()> {
         let extension = path.extension().unwrap_or_default().to_string_lossy();
         self.run_destination(
             context,
@@ -386,6 +398,7 @@ impl MetadataOptions {
                 directory: path.parent().unwrap_or(root),
                 filename: path.file_name(),
                 extension: &extension,
+                source_extension,
             },
             root,
         )
@@ -405,6 +418,7 @@ impl MetadataOptions {
                 directory: &paths.directory,
                 filename: paths.filename.as_deref(),
                 extension: &paths.extension,
+                source_extension: paths.source_extension.as_ref(),
             },
             root,
         )
@@ -600,7 +614,13 @@ impl MetadataOptions {
             let mut keywords = context.clone();
             // Source substitutes the current path extension while formatting,
             // then rebuilds the extractor's configured filename.
-            keywords.insert("extension".into(), Value::String(paths.extension.into()));
+            keywords.insert(
+                "extension".into(),
+                paths
+                    .source_extension
+                    .cloned()
+                    .unwrap_or_else(|| Value::String(paths.extension.into())),
+            );
             let rendered = t.render(&keywords)?;
             keywords.insert("extension".into(), Value::String(rendered.clone()));
             if let Some(template) = &self.filename_template {
@@ -1379,6 +1399,7 @@ mod job_path_oracle {
                     .map(std::ffi::OsString::from),
                 realpath: case["paths"]["realpath"].as_str().map(expand),
                 extension: case["paths"]["extension"].as_str().unwrap().into(),
+                source_extension: None,
             };
             let mut context = case["keywords"].as_object().unwrap().clone();
             let options = MetadataOptions::parse(case["options"].as_object().unwrap(), temp.path())

@@ -93,6 +93,8 @@ impl Archive {
     ) -> Result<ArchiveOutcome> {
         let effective_media = client.effective_media(media);
         let media = effective_media.as_ref();
+        let resolved_filename = crate::naming::effective_filename(media, template);
+        let template = resolved_filename.as_ref();
         let source_booru = media
             .metadata
             .as_ref()

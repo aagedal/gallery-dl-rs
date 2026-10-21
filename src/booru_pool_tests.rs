@@ -914,6 +914,7 @@ fn source_filename_preparation_matches_real_pathformat_types_and_aliases() {
         crate::extract::direct(&Url::parse("https://fixture.invalid/file.jpg").unwrap()).unwrap();
     media.metadata = Some(crate::extract::PostMetadata {
         booru_keywords: Some(Arc::new(serde_json::Map::new())),
+        source_defaults: None,
         ..Default::default()
     });
     for case in cases {

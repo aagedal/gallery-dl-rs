@@ -1039,6 +1039,9 @@ fn context_parts(
                 }
             }
         }
+        if let Some(defaults) = &post.source_defaults {
+            values.insert("category".into(), Value::String(defaults.category.into()));
+        }
         values.insert("metadata".into(), map(metadata));
     }
     values

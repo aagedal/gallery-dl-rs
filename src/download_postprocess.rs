@@ -8,6 +8,7 @@ pub(crate) struct Prepared {
     pub keywords: Map<String, Value>,
     pub path: PathBuf,
     directory: Option<PathBuf>,
+    extension: Option<Value>,
 }
 fn logical_path(
     root: &Path,
@@ -22,12 +23,13 @@ fn logical_path(
             .postprocessor_scope
             .and_then(|scope| scope.directory())
     });
+    let base_directory = DirectoryTemplate::parse(&[])?;
     let mut path = destination_with_keyword_templates(
         root,
         media,
-        None,
+        template,
         if directory.is_some() {
-            None
+            Some(&base_directory)
         } else {
             options.directory
         },
@@ -38,11 +40,6 @@ fn logical_path(
             path.file_name()
                 .ok_or_else(|| error("invalid media filename"))?,
         );
-    }
-    if let Some(template) = template
-        && let Some(name) = template.render_keywords(media, keywords)?
-    {
-        path.set_file_name(name);
     }
     Ok(path)
 }
@@ -70,26 +67,21 @@ pub(crate) async fn prepare(
             .and_then(|scope| scope.directory())
             .is_none()
     {
-        options
-            .directory
-            .map(|template| {
-                destination_with_keyword_templates(
-                    root,
-                    &prepared,
-                    None,
-                    Some(template),
-                    &keywords,
-                )?
-                .parent()
-                .map(Path::to_owned)
-                .ok_or_else(|| error("invalid booru directory"))
-            })
+        crate::naming::effective_directory(&prepared, options.directory)
+            .as_ref()
+            .map(|template| directory_with_keywords(root, &prepared, Some(template), &keywords))
             .transpose()?
     } else {
         None
     };
     crate::booru::prepare_filename_keywords(&prepared, &mut keywords)?;
+    let extension = prepared
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.source_defaults.as_ref())
+        .and_then(|_| keywords.get("extension").cloned());
     if let Some(scope) = options.postprocessor_scope {
+        scope.set_source_extension(extension.clone());
         scope.complete(&keywords);
     }
     let path = logical_path(
@@ -123,6 +115,7 @@ pub(crate) async fn prepare(
         keywords,
         path,
         directory,
+        extension,
     };
     let input = result.path.clone();
     run_hook(
@@ -248,11 +241,12 @@ async fn run_hook(
                             config
                                 .clone()
                                 .with_filename_template(template.cloned())
-                                .run(
+                                .run_with_source_extension(
                                     &mut prepared.keywords,
                                     &prepared.media,
                                     &prepared.path,
                                     root,
+                                    prepared.extension.as_ref(),
                                 )
                                 .await?
                         }
@@ -632,11 +626,12 @@ async fn run_single_file(
                     config
                         .clone()
                         .with_filename_template(template.cloned())
-                        .run(
+                        .run_with_source_extension(
                             &mut prepared.keywords,
                             &prepared.media,
                             &prepared.path,
                             root,
+                            prepared.extension.as_ref(),
                         )
                         .await?
                 }

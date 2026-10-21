@@ -341,8 +341,7 @@ leading zeroes and the source URL digit capture. Posts without a file URL
 site's own HTTPS
 CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
 space-separated tag string, `username` the uploader name when the API provides
-one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{extension}`;
-archive identity is (category, post ID). API-reported file size is exposed as
+one (Gelbooru `owner`). Archive identity is (category, post ID). API-reported file size is exposed as
 `filesize`; `rating` and signed `score` are available to post filters and filename
 templates (e621 uses `score.total`). Per-category tags are not yet exposed.
 
@@ -358,8 +357,23 @@ applies the source default extension mapping once before Prepare/File hooks
 replace these keywords before that boundary; later File-hook replacements are
 not mapped again. Safebooru prefers its API `file_url`; supported CDN
 URLs without a recognized logical extension use `.bin` for the native basename.
-Explicit source filename templates can now reproduce the full source result;
-source default filename/directory selection remains unfinished.
+Default paths now follow the source extractor class. Post downloads use the
+category directory; tag searches add `search_tags`. Danbooru/e621 filenames are
+`{category}_{id}_{filename}.{extension}`; Gelbooru/Safebooru use
+`{category}_{id}_{md5}.{extension}`. Pools use
+`{category}/pool/{pool[id]} {pool[name]}` and
+`{num:>04}_{id}_{filename}.{extension}`. Danbooru favorite groups use
+`{category}/Favorite Groups/{favgroup[id]} {favgroup[name]}` with the pool filename.
+E926 source keywords and paths retain `e926` while its native settings remain
+under `e621`. Spaces and Unicode are preserved, path separators are replaced,
+control characters are removed, and empty directory segments are omitted.
+Explicit filename and directory overrides apply independently; unmatched
+conditional templates use the class default. Directories freeze before Post
+hooks, filenames are built after Prepare hooks, and ordinary File-hook edits do
+not rename the published file. Hash filename rebuilds and metadata
+`extension-format` retain the selected formatter and directory. These defaults
+also apply to compatibility streams with a supported booru input URL; standalone
+`parse_messages` calls lack route provenance and keep their existing fallback.
 
 Tag searches expose `search_tags` to metadata, filters, and templates, preserving
 case, whitespace, empty values, and source query decoding. Danbooru selects the
@@ -2205,7 +2219,7 @@ available from upstream.
   can both download an archive miss; inserts are idempotent. The parent directory
   must exist, and this archive format is separate from Python gallery-dl archives.
   This flag conflicts with `-g` and `-j`.
-- Filenames use a SHA-256 digest of the media URL and job/request context plus a
+- Booru inputs use the source class paths described above. Other filenames use a SHA-256 digest of the media URL and job/request context plus a
   sanitized filename, under `destination/category/`. Exact duplicate jobs within
   a run are removed, and existing paths are skipped for direct downloads. Bare
   direct links keep their original URL-only digest; media with headers now use a
@@ -2215,9 +2229,9 @@ available from upstream.
   repeated copies of the same file and request are suppressed across inputs.
   Rows without usable social IDs retain request-based deduplication. This also
   applies without a download archive; X `unique: false` bypasses deduplication.
-- `-f` / `--filename` replaces the default digest-prefixed basename with a native
-  template under `destination/category/`. Available fields are `{filename}`
-  (including extension), `{name}` (without the final extension), `{extension}`
+- `-f` / `--filename` replaces the default basename with a native
+  template, retaining the selected directory. Available fields are `{filename}`
+  (including extension outside boorus), `{name}` (without the final extension), `{extension}`
   (without the dot), `{category}`, `{post_id}`, `{media_id}`, `{shortcode}`,
   `{username}`, `{index}`, `{num}`, `{timestamp}`, `{date}` (a UTC datetime),
   `{caption}`/`{content}`, `{description}`, `{community_id}`, `{community_name}`,
@@ -2226,7 +2240,7 @@ available from upstream.
   `{height_original}`, `{duration}`, `{bitrate}`, `{media_type}`/`{type}`,
   `{sensitive_flags}`, and `{source_id}`/`{source_username}`; X adds
   `{tweet_id}`, `{retweet_id}`, and `{quote_id}`, and Facebook adds `{id}`.
-  Unlike upstream, `{filename}` includes the extension, and `{url}` is
+  Outside boorus, `{filename}` includes the extension. `{url}` is
   unavailable so signed transport URLs cannot leak into paths.
   Fields use gallery-dl's replacement-field syntax: `.key`/`[key]`, `[index]`,
   and `[start:stop]` accessors; `{a|b|'literal'}` alternatives; the `!l`, `!u`,
@@ -2255,8 +2269,10 @@ available from upstream.
   empty list saves directly in the base directory. Fields and sanitization match
   filename templates. Components cannot contain literal paths, control characters,
   or drive prefixes; metadata separators are sanitized. Limits are 32 components,
-  8 KiB per encoded component template, 240 bytes per rendered component, and
-  3072 bytes for the rendered relative directory. Missing fields fail before
+  8 KiB per encoded component template, and 3072 bytes for the rendered relative
+  directory. Legacy ASCII names are limited to 240 bytes per component; booru
+  source names preserve Unicode and use filesystem component limits. Missing
+  booru fields format as source `None`; other missing fields fail before
   requests or directory creation. `-D` / `--directory PATH` chooses an exact
   directory, overriding configured base/directory values; it conflicts with `-d`
   and `--directory-template`. Filename selection, sidecars, resume checkpoints,

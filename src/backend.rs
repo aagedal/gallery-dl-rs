@@ -72,6 +72,7 @@ struct Process {
     stderr: Diagnostics,
     decoder: Decoder,
     category: &'static str,
+    source_defaults: Option<std::sync::Arc<crate::naming::SourceDefaults>>,
     remaining: Duration,
     had_media: bool,
     had_post: bool,
@@ -91,6 +92,7 @@ impl Process {
         let category = extract::social_site(&url).ok_or_else(|| {
             error("unsupported URL; use an Instagram, Facebook, Twitter/X, Imgur, Bluesky, Reddit, Danbooru, e621, Gelbooru, Safebooru, Mastodon, Kemono, Coomer, Pixeldrain, Catbox, imgbox, Postimg, Tumblr, Pixiv, DeviantArt, Flickr, Wallhaven, ArtStation, Pinterest, VSCO, Newgrounds, Fur Affinity, Weasyl URL or direct media link")
         })?;
+        let source_defaults = crate::booru::defaults_for_url(&url);
         crate::network::NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let mut child = backend
             .command(&url, &options)
@@ -132,6 +134,7 @@ impl Process {
             stderr: Diagnostics(Some(task)),
             decoder: Decoder::default(),
             category,
+            source_defaults,
             remaining: backend.timeout,
             had_media: false,
             had_post: false,
@@ -202,7 +205,10 @@ impl Process {
                     .and_then(serde_json::Value::as_i64)
                     == Some(2)
                 {
-                    let post = extract::parse_post_message(&message, self.category)?;
+                    let mut post = extract::parse_post_message(&message, self.category)?;
+                    if let Some(metadata) = &mut post.metadata {
+                        metadata.source_defaults = self.source_defaults.clone();
+                    }
                     self.had_post = true;
                     if self.in_post {
                         self.pending
@@ -212,7 +218,10 @@ impl Process {
                     self.in_post = true;
                     return Ok(Some(ExtractionEvent::Post(Box::new(post))));
                 }
-                if let Some(media) = extract::parse_message(message, self.category)? {
+                if let Some(mut media) = extract::parse_message(message, self.category)? {
+                    if let Some(metadata) = &mut media.metadata {
+                        metadata.source_defaults = self.source_defaults.clone();
+                    }
                     self.had_media = true;
                     return Ok(Some(ExtractionEvent::Media(Box::new(media))));
                 }
