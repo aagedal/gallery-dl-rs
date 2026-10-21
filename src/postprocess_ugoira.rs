@@ -1186,9 +1186,10 @@ mod process_tests {
         );
         let output = directory.path().join("failed.webm");
         let worker_input = input.clone();
+        let worker_program = program.clone();
         let worker_output = output.clone();
         let worker = tokio::spawn(async move {
-            options(json!({"mode":"concat","ffmpeg-location":program}))
+            options(json!({"mode":"concat","ffmpeg-location":worker_program}))
                 .convert(
                     &worker_input,
                     &worker_output,
@@ -1226,7 +1227,8 @@ mod process_tests {
             );
             tokio::task::yield_now().await;
         }
-        let error = options(json!({"mode":"concat"}))
+        // A spawn failure (e.g. no ffmpeg on PATH) would beat a zero deadline.
+        let error = options(json!({"mode":"concat","ffmpeg-location":program}))
             .convert(&input, &output, &media(), Duration::ZERO)
             .await
             .unwrap_err()
