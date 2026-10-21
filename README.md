@@ -317,11 +317,16 @@ Experimental native booru extraction (`--extractor native`) covers categories
 `safebooru` (safebooru.org): single posts (`/posts/ID`,
 `index.php?page=post&s=view&id=ID`), tag searches (`/posts?tags=...`,
 `index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID`).
-Danbooru/e621 page with an id cursor (`page=bID`, 200 per page) and Gelbooru-style
-sites with `pid` (100 per page), both capped at 100 pages; pools are fetched in
-pool order, up to 10,000 posts. Source-specific ascending and non-ID cursor
-strategies remain unfinished. Posts without a file URL (deleted, banned,
-restricted) are skipped, and files are accepted only from the site's own HTTPS
+Danbooru/e621 use before/after ID cursors or numbered pages according to search
+tags, requesting 200/320 posts per page respectively. Ascending searches retain
+the first API page and reverse subsequent pages before selecting the next cursor.
+Searches stop below the source page-length threshold (180/300 by default), on
+cancellation, or on an API error. They have no fixed 100-page cutoff. The
+`threshold` configuration option accepts an integer, clamps values below one to
+one, and restores the default for other JSON types, including null and booleans.
+Gelbooru-style sites use `pid` (100 per page) and remain capped at 100 pages;
+pools are fetched in pool order, up to 10,000 posts. Posts without a file URL
+(deleted, banned or restricted) are skipped. Files are accepted only from the site's own HTTPS
 CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
 space-separated tag string, `username` the uploader name when the API provides
 one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{extension}`;
@@ -2041,7 +2046,10 @@ positions and the project's declared asset count.
 
 Booru search keywords follow their producer ownership: Danbooru/e621 retain
 post-hook changes to `search_tags`, while Gelbooru/Safebooru reassign it before
-each file, matching the source's extractor keyword updates.
+each file, matching the source's extractor keyword updates. Danbooru/e621 also
+observe the last post's live `id` after file work drains to select the next
+cursor. Post/file-hook changes and deletions affect that cursor; `post-after`
+changes occur after its keyword snapshot.
 
 `num` preserves the producer's counter separately from the native file `index`.
 Ordinary Pixiv artwork and original ugoira frames start `num` at zero while

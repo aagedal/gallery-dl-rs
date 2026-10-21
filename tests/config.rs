@@ -3544,3 +3544,230 @@ fn novel_cover_and_series_switches_preserve_null_clearing_and_hierarchy() {
     assert_eq!(cfg.resolve("pixiv").unwrap().covers, None);
     assert_eq!(cfg.resolve("pixiv").unwrap().full_series, None);
 }
+
+#[test]
+fn booru_threshold_preserves_absence_integer_clamping_and_explicit_defaults() {
+    assert_eq!(
+        parse("{}")
+            .unwrap()
+            .resolve("danbooru")
+            .unwrap()
+            .booru_threshold,
+        None
+    );
+    for (raw, expected) in [
+        ("17", 17),
+        ("1", 1),
+        ("0", 1),
+        ("-1", 1),
+        ("-0", 1),
+        ("-99999999999999999999999999999999999999999999", 1),
+    ] {
+        for document in [
+            format!(r#"{{"threshold":{raw}}}"#),
+            format!(r#"{{"extractor":{{"threshold":{raw}}}}}"#),
+            [r#"{"extractor":{"danbooru":{"threshold":"#, raw, "}}}"].concat(),
+            [r#"{"extractor":{"e621":{"threshold":"#, raw, "}}}"].concat(),
+        ] {
+            let config = parse(&document).unwrap();
+            let category = if document.contains("e621") {
+                "e621"
+            } else {
+                "danbooru"
+            };
+            assert_eq!(
+                config.resolve(category).unwrap().booru_threshold,
+                Some(Some(expected)),
+                "{document}"
+            );
+        }
+    }
+    let max = usize::MAX;
+    assert_eq!(
+        parse(&format!(r#"{{"threshold":{max}}}"#))
+            .unwrap()
+            .resolve("danbooru")
+            .unwrap()
+            .booru_threshold,
+        Some(Some(max))
+    );
+    for raw in [
+        "null",
+        "false",
+        "true",
+        "1.0",
+        "1e0",
+        "-1.0",
+        "1e99999",
+        r#""PRIVATE_VALUE""#,
+        "[]",
+        r#"{"PRIVATE_VALUE": 1}"#,
+    ] {
+        let config = parse(&format!(
+            r#"{{"extractor":{{"threshold":23,"danbooru":{{"threshold":{raw}}}}}}}"#
+        ))
+        .unwrap();
+        assert_eq!(
+            config.resolve("danbooru").unwrap().booru_threshold,
+            Some(None),
+            "{raw}"
+        );
+        assert_eq!(
+            config.resolve("e621").unwrap().booru_threshold,
+            Some(Some(23)),
+            "{raw}"
+        );
+    }
+}
+
+#[test]
+fn booru_threshold_scope_precedence_and_reset_overlays_are_sparse() {
+    let config = parse(
+        r#"{"extractor":{"threshold":25,"danbooru":{"threshold":null},"e621":{"threshold":12}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        config.resolve("danbooru").unwrap().booru_threshold,
+        Some(None)
+    );
+    assert_eq!(
+        config.resolve("e621").unwrap().booru_threshold,
+        Some(Some(12))
+    );
+    let root =
+        parse(r#"{"threshold":false,"extractor":{"threshold":25,"danbooru":{"threshold":12}}}"#)
+            .unwrap();
+    assert_eq!(
+        root.resolve("danbooru").unwrap().booru_threshold,
+        Some(None)
+    );
+    let root =
+        parse(r#"{"threshold":7,"extractor":{"threshold":25,"danbooru":{"threshold":null}}}"#)
+            .unwrap();
+    assert_eq!(
+        root.resolve("danbooru").unwrap().booru_threshold,
+        Some(Some(7))
+    );
+    let options = Options {
+        booru_threshold: Some(Some(23)),
+        ..Default::default()
+    };
+    assert_eq!(
+        options.overlay(&Options::default()).booru_threshold,
+        Some(Some(23))
+    );
+    assert_eq!(
+        options
+            .overlay(&Options {
+                booru_threshold: Some(None),
+                ..Default::default()
+            })
+            .booru_threshold,
+        Some(None)
+    );
+    assert_eq!(
+        options
+            .overlay(&Options {
+                booru_threshold: Some(Some(1)),
+                ..Default::default()
+            })
+            .booru_threshold,
+        Some(Some(1))
+    );
+}
+
+#[test]
+fn booru_threshold_rejects_unsupported_categories_and_positive_overflow_privately() {
+    for category in ["gelbooru", "safebooru", "twitter", "direct", "pixiv"] {
+        let document = serde_json::json!({"extractor":{category:{"threshold":"PRIVATE_VALUE"}}});
+        let failure = parse(&document.to_string()).unwrap_err().to_string();
+        assert!(failure.contains("threshold"));
+        assert!(!failure.contains("PRIVATE_VALUE"));
+    }
+    let raw = "99999999999999999999999999999999999999999999999999999999999999";
+    for document in [
+        format!(r#"{{"threshold":{raw}}}"#),
+        format!(r#"{{"extractor":{{"threshold":{raw}}}}}"#),
+        [r#"{"extractor":{"danbooru":{"threshold":"#, raw, "}}}"].concat(),
+        [r#"{"extractor":{"e621":{"threshold":"#, raw, "}}}"].concat(),
+    ] {
+        let failure = parse(&document).unwrap_err().to_string();
+        assert!(failure.contains("threshold"));
+        assert!(!failure.contains(raw));
+    }
+    assert!(parse(r#"{"threshold":1,"threshold":2}"#).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn booru_threshold_compatibility_forwarding_is_sparse_scoped_and_retains_default() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$BOORU_THRESHOLD_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (document, expected) in [
+        (serde_json::json!({}), None),
+        (serde_json::json!({"threshold":11}), Some("threshold=11")),
+        (
+            serde_json::json!({"extractor":{"threshold":23,"danbooru":{"threshold":null},"e621":{"threshold":false}}}),
+            Some("threshold=null"),
+        ),
+        (serde_json::json!({"threshold":0}), Some("threshold=1")),
+        (
+            serde_json::json!({"threshold":true,"extractor":{"danbooru":{"threshold":17}}}),
+            Some("threshold=null"),
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&document).unwrap()).unwrap();
+        for (url, booru) in [
+            ("https://danbooru.donmai.us/posts?tags=cat", true),
+            ("https://e621.net/posts?tags=cat", true),
+            (
+                "https://gelbooru.com/index.php?page=post&s=list&tags=cat",
+                false,
+            ),
+            ("https://instagram.com/p/Example/", false),
+        ] {
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+                .env("BOORU_THRESHOLD_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .args(["--extractor", "compatibility", "-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let args: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = args
+                .windows(2)
+                .filter(|pair| pair[0] == "--option" && pair[1].starts_with("threshold="))
+                .map(|pair| pair[1])
+                .collect();
+            assert_eq!(
+                forwarded,
+                if booru {
+                    expected.into_iter().collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                },
+                "{document} {url}"
+            );
+        }
+    }
+}

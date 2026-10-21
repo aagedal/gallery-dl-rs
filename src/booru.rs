@@ -9,7 +9,7 @@
 //! CDN hosts.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
+    event::{ExtractionEvent, KeywordFeedback, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -35,7 +35,7 @@ const USER_AGENT: &str = concat!(
     " (native booru extractor)"
 );
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
-/// Bound listings to 100 pages (20,000 Danbooru/e621 or 10,000 Gelbooru posts).
+/// Bound DAPI listings to 100 pages (10,000 Gelbooru posts).
 const MAX_PAGES: usize = 100;
 const MAX_TAGS: usize = 1024;
 /// Pool members fetched per `id:` query.
@@ -84,7 +84,11 @@ impl Site {
     }
 
     fn page_limit(self) -> usize {
-        if self.danbooru_dialect() { 200 } else { 100 }
+        match self {
+            Self::Danbooru => 200,
+            Self::E621 => 320,
+            Self::Gelbooru | Self::Safebooru => 100,
+        }
     }
 
     /// HTTPS CDN hosts that may serve this site's files.
@@ -532,15 +536,54 @@ pub struct Booru {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    threshold: Option<usize>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TagOrder {
+    Before,
+    After,
+    Numbered,
+}
+impl TagOrder {
+    fn for_tags(tags: &str) -> Self {
+        let mut order = Self::Before;
+        // Python str.split also recognizes the four ASCII record separators.
+        for tag in tags
+            .split(|c: char| c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}'))
+            .filter(|tag| !tag.is_empty())
+        {
+            if tag.starts_with("order:") {
+                order = match tag {
+                    "order:id" | "order:id_asc" => Self::After,
+                    "order:id_desc" => Self::Before,
+                    _ => Self::Numbered,
+                };
+            } else if ["id:", "md5:", "ordfav:", "ordfavgroup:", "ordpool:"]
+                .iter()
+                .any(|prefix| tag.starts_with(prefix))
+            {
+                return Self::Numbered;
+            }
+        }
+        order
+    }
+}
 enum Cursor {
-    /// Danbooru/e621 `page=bID` cursor, the lowest ID seen so far.
-    Before(Option<u64>),
+    /// Source tag ordering selects before/after IDs or numbered API pages.
+    Tags {
+        order: TagOrder,
+        page: Option<String>,
+    },
     /// Gelbooru `pid` page number.
     Page(usize),
     /// Remaining pool members in pool order.
     Pool(VecDeque<u64>),
+}
+
+struct PendingTagCursor {
+    last_id: Option<Value>,
+    feedback: KeywordFeedback,
 }
 
 struct State {
@@ -551,6 +594,7 @@ struct State {
     pages: usize,
     done: bool,
     pending: VecDeque<ExtractionEvent>,
+    pending_cursor: Option<PendingTagCursor>,
 }
 
 impl Booru {
@@ -566,6 +610,7 @@ impl Booru {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            threshold: None,
         })
     }
 
@@ -633,6 +678,13 @@ impl Booru {
         self
     }
 
+    /// Minimum raw page length that continues Danbooru/e621 searches.
+    /// None uses the source default of twenty fewer than the API page size.
+    pub fn with_threshold(mut self, threshold: Option<usize>) -> Self {
+        self.threshold = threshold.map(|value| value.max(1));
+        self
+    }
+
     /// Bound each HTTP request separately from the per-call deadline.
     pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
@@ -685,7 +737,7 @@ impl Booru {
     }
 
     fn emit(&self, state: &mut State, raw: &[Value]) {
-        for post in raw {
+        for (position, post) in raw.iter().enumerate() {
             if let Some(mut media) = parse_post(self.site, post) {
                 if let Some(metadata) = &mut media.metadata {
                     metadata.search_tags = state.search_tags.clone();
@@ -699,8 +751,13 @@ impl Booru {
                     } else {
                         &["num", "index", "media_id"]
                     };
-                let keywords = KeywordPolicy::shared(fields)
+                let mut keywords = KeywordPolicy::shared(fields)
                     .with_post_fields(&media, &["filename", "name", "extension"]);
+                if position + 1 == raw.len()
+                    && let Some(cursor) = &state.pending_cursor
+                {
+                    keywords = keywords.with_feedback(cursor.feedback.clone());
+                }
                 state.pending.extend(group_with_keywords(
                     vec![media],
                     self.site.category(),
@@ -713,24 +770,56 @@ impl Booru {
     async fn next_page(&self, state: &mut State) -> Result<()> {
         let limit = self.site.page_limit();
         let limit_text = limit.to_string();
-        state.pages += 1;
-        if state.pages >= MAX_PAGES {
-            state.done = true;
+        if !matches!(state.cursor, Cursor::Tags { .. }) {
+            state.pages += 1;
+            if state.pages >= MAX_PAGES {
+                state.done = true;
+            }
         }
         match &mut state.cursor {
-            Cursor::Before(before) => {
-                let page = before.map(|id| format!("b{id}"));
+            Cursor::Tags { order, page } => {
+                if let Some(cursor) = state.pending_cursor.take() {
+                    *page = Some(match order {
+                        TagOrder::Before | TagOrder::After => {
+                            let value = cursor
+                                .feedback
+                                .take()
+                                .unwrap_or(cursor.last_id)
+                                .ok_or_else(|| error("invalid booru pagination cursor"))?;
+                            let context = serde_json::Map::from_iter([("id".into(), value)]);
+                            let id = crate::postprocess::template::Template::parse("{id}")?
+                                .render(&context)?;
+                            format!("{}{id}", if *order == TagOrder::Before { 'b' } else { 'a' })
+                        }
+                        TagOrder::Numbered => match page.as_deref() {
+                            None => "2".into(),
+                            Some(value) => value
+                                .parse::<usize>()
+                                .ok()
+                                .and_then(|value| value.checked_add(1))
+                                .map(|value| value.to_string())
+                                .ok_or_else(|| error("booru pagination page overflow"))?,
+                        },
+                    });
+                }
                 let mut query = vec![("tags", state.tags.as_str()), ("limit", &limit_text)];
-                if let Some(page) = &page {
+                if let Some(page) = page.as_ref() {
                     query.push(("page", page));
                 }
                 let body = self.call(&state.root, "posts.json", &query).await?;
-                let raw = posts(self.site, &body)?;
-                let lowest = raw.iter().filter_map(|p| number(p.get("id"))).min();
-                if raw.is_empty() || lowest.is_none() || lowest >= *before && before.is_some() {
-                    state.done = true;
+                let mut raw = posts(self.site, &body)?;
+                if *order == TagOrder::After && page.is_some() {
+                    raw.reverse();
                 }
-                *before = lowest;
+                state.done = raw.len() < self.threshold.unwrap_or(limit - 20);
+                if !state.done {
+                    // Source chooses the cursor only after the consumer resumes
+                    // the final yielded dictionary. Hooks can change its ID.
+                    state.pending_cursor = Some(PendingTagCursor {
+                        last_id: raw.last().and_then(|post| post.get("id")).cloned(),
+                        feedback: KeywordFeedback::new("id"),
+                    });
+                }
                 self.emit(state, &raw);
             }
             Cursor::Page(pid) => {
@@ -800,6 +889,7 @@ impl Booru {
                         pages: 0,
                         done: true,
                         pending: VecDeque::new(),
+                        pending_cursor: None,
                     };
                     self.emit(&mut state, &raw);
                     if state.pending.is_empty() {
@@ -817,7 +907,10 @@ impl Booru {
                 .flatten()
                 .boxed();
             }
-            Target::Tags { tags } if self.site.danbooru_dialect() => (tags, Cursor::Before(None)),
+            Target::Tags { tags } if self.site.danbooru_dialect() => {
+                let order = TagOrder::for_tags(&tags);
+                (tags, Cursor::Tags { order, page: None })
+            }
             Target::Tags { tags } => (tags, Cursor::Page(0)),
             Target::Pool { id } => {
                 return stream::once(async move {
@@ -831,6 +924,7 @@ impl Booru {
                         cursor: Cursor::Pool(ids.into()),
                         pages: 0,
                         pending: VecDeque::new(),
+                        pending_cursor: None,
                     }))
                 })
                 .map(|result| match result {
@@ -855,6 +949,7 @@ impl Booru {
             pages: 0,
             done: false,
             pending: VecDeque::new(),
+            pending_cursor: None,
         })
     }
 
@@ -999,6 +1094,10 @@ impl From<crate::Error> for Failure {
 }
 
 #[cfg(test)]
+#[path = "booru_pagination_tests.rs"]
+mod pagination_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::event::group;
@@ -1011,14 +1110,14 @@ mod tests {
 
     const MD5: &str = "0123456789abcdef0123456789abcdef";
 
-    fn danbooru_post(id: u64) -> Value {
+    pub(super) fn danbooru_post(id: u64) -> Value {
         json!({"id": id, "created_at": "2024-01-02T03:04:05.123-05:00", "md5": MD5,
                "file_ext": "png", "image_width": 800, "image_height": 600, "file_size": 1234,
                "tag_string": "1girl solo", "uploader_name": "alice",
                "file_url": format!("https://cdn.donmai.us/original/01/23/{MD5}.png")})
     }
 
-    fn e621_post(id: u64) -> Value {
+    pub(super) fn e621_post(id: u64) -> Value {
         json!({"id": id, "created_at": "2024-01-02T08:04:05.000Z",
                "file": {"url": format!("https://static1.e621.net/data/01/23/{MD5}.webm"),
                         "ext": "webm", "md5": MD5, "width": 1920, "height": 1080, "size": 9},
@@ -1074,6 +1173,7 @@ mod tests {
                 pages: 0,
                 done: false,
                 pending: VecDeque::new(),
+                pending_cursor: None,
             };
             client.emit(&mut state, std::slice::from_ref(&case["input_post"]));
             let ExtractionEvent::Post(post) = state.pending.pop_front().unwrap() else {
@@ -1241,6 +1341,7 @@ mod tests {
                 pages: 0,
                 done: false,
                 pending: VecDeque::new(),
+                pending_cursor: None,
             };
             client.emit(&mut state, std::slice::from_ref(&case["input_post"]));
             // Exercise publication and file hooks without any HTTP. The native
@@ -1443,7 +1544,7 @@ mod tests {
         }
     }
 
-    fn response(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
+    pub(super) fn response(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
         let mut out = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n",
             body.len()
@@ -1453,7 +1554,7 @@ mod tests {
         out
     }
 
-    fn serve(responses: Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
+    pub(super) fn serve(responses: Vec<Vec<u8>>) -> (Url, JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let task = thread::spawn(move || {
@@ -1478,7 +1579,7 @@ mod tests {
         (root, task)
     }
 
-    fn booru(site: Site, root: Url) -> Booru {
+    pub(super) fn booru(site: Site, root: Url) -> Booru {
         Booru::new(site, Duration::from_secs(5))
             .unwrap()
             .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
@@ -1555,7 +1656,7 @@ mod tests {
                 response("200 OK", "", page.to_string().as_bytes()),
                 response("200 OK", "", empty.as_bytes()),
             ]);
-            let client = booru(site, root);
+            let client = booru(site, root).with_threshold(Some(1));
             let url = Url::parse(&format!(
                 "https://{}/posts?tags=First&tags=Last",
                 if site == Site::Danbooru {

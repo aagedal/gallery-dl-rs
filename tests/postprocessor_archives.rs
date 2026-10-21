@@ -53,6 +53,7 @@ fn source_events(input: &Value, phase: &str) -> Vec<gallery_dl_rs::Result<Extrac
     let fields = json!({"id":1,"num":0,"phase":phase,"payload":"first", "scope":"directory","removed":"present","extension":"txt", "category":"fixture","subcategory":"archive-job"});
     let mut events = vec![Ok(ExtractionEvent::Post(Box::new(Post {
         keywords: KeywordPolicy::Shared {
+            feedback: None,
             post_fields: Arc::new(fields.as_object().unwrap().clone()),
             file_fields: ["num", "payload", "index", "filename", "name", "extension"]
                 .map(String::from)

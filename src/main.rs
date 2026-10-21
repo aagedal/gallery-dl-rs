@@ -1364,6 +1364,7 @@ fn extract_input<'a>(
                                             options.user_id.as_deref(),
                                             options.api_key.as_deref(),
                                         )?
+                                        .with_threshold(options.booru_threshold.flatten())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1400,6 +1401,9 @@ fn extract_input<'a>(
                                 .flatten(),
                             expand: matches!(category, "twitter" | "kemono" | "coomer")
                                 .then_some(options.expand)
+                                .flatten(),
+                            booru_threshold: matches!(category, "danbooru" | "e621")
+                                .then_some(options.booru_threshold)
                                 .flatten(),
                             max_posts: matches!(
                                 category,
@@ -1695,6 +1699,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         search_limit: None,
         search_stop: None,
         max_posts: None,
+        booru_threshold: None,
         metadata: None,
         api_key: None,
         refresh_token: None,

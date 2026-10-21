@@ -1150,7 +1150,37 @@ Danbooru/e621 keywords retain post-hook mutations; DAPI extractors reapply their
 search keyword before each file. The source oracle includes 110 URL cases
 (23 unmatched) and four live mutation traces. Broader native
 aliases remain usable with explicit archive formats. Pool metadata/default keys
-and ascending/non-ID source cursor policies remain unfinished.
+remain unfinished.
+
+**Implemented booru tag pagination:** Danbooru/e621 follow source prefix
+selection and tag precedence, including ascending ID cursors and numbered pages
+for non-ID ordering and ID/collection filters. Cursors use the last raw post,
+with later ascending responses reversed before emission and cursor selection.
+Source page sizes (200/320), threshold defaults (180/300), integer clamping and
+explicit default resets are supported. Threshold configuration follows native
+scope precedence and is forwarded to compatibility extraction. Tag searches no
+longer stop at 100 pages or an unchanged ID; cancellation drops pending requests.
+Malformed terminal cursors retain preceding files before reporting an error.
+Source fixtures cover request parameters, emitted order, threshold boundaries,
+repeated pages, long traversal and cancellation. DAPI traversal bounds and
+range-driven source page skipping remain unfinished.
+Shared keyword feedback captures the last post's live ID after selected file
+leases drain, before post-after hooks. Cursor generation resumes from that value,
+so supported post/file-hook changes and deletions affect the next request.
+
+**Next booru pool step (source audit, 1.32.17):** preserve the response pool
+object, remove `post_ids`, and replace underscores in its name once. Default keys
+use the response `pool[id]`; feed queries retain the requested pool ID. Danbooru
+uses `ordpool:ID` pagination and emits API order with original pool positions.
+E621 buffers `pool:ID` pages, then restores original positions and unavailable
+member gaps. Native ID chunks currently discard metadata and drop duplicates;
+these need source feed/order semantics before enabling pool default keys.
+The source shallow-copies one shared nested pool object into every post. Nested
+`pool[id]`/`pool[name]` hook writes reach later posts, while replacing or deleting
+the root `pool` detaches only that post. Previous post-after nested writes are
+visible even in the next already-prepared Directory dictionary. Implement
+shared object identity with root detachment and nested mutation tracking;
+static pool copies or whole-root feedback cannot preserve this contract.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

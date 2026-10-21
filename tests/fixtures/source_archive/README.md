@@ -44,4 +44,13 @@ empty searches, DAPI `all` wire sentinels, query-order differences and source
 pagination arguments. Four additional cases apply the real MetadataPP modify
 hook between source post/file yields, retaining dictionary identity and real
 job keyword updates. Native tests replay keys and keyword ownership. Pool
-metadata and ascending/non-ID pagination policies remain separate gaps.
+metadata remains a separate gap.
+
+`booru_pagination.json` runs real tag `posts()` and inherited `_pagination()`
+against synthetic ID pages. Only transport and authentication discovery are
+stubbed. It records source defaults, raw and wire query parameters, emitted
+order, threshold settings, prefix precedence, repeated pages and cancellation.
+Native replay constructs API posts from the same IDs and checks the complete
+request sequence, including traversal beyond 100 pages. Regenerate using the
+adjacent `booru_pagination_generate.py` in the installed source environment,
+using `python -B` to avoid writing bytecode caches beside the fixtures.

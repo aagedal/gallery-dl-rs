@@ -129,6 +129,9 @@ pub struct Options {
     pub search_stop: Option<u8>,
     /// Limit Kemono/Coomer or Pixiv source works; zero clears an inherited limit.
     pub max_posts: Option<usize>,
+    /// Danbooru/e621 pagination threshold. Outer None is absent; inner None
+    /// explicitly restores the source's per-page default for noninteger input.
+    pub booru_threshold: Option<Option<usize>>,
     /// Look up Kemono/Coomer creator profiles or Pixiv author metadata.
     pub metadata: Option<bool>,
     /// Include Pixiv illustration or novel comments.
@@ -322,6 +325,7 @@ impl Options {
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
             max_posts: overrides.max_posts.or(self.max_posts),
+            booru_threshold: overrides.booru_threshold.or(self.booru_threshold),
             metadata: overrides.metadata.or(self.metadata),
             comments: overrides.comments.or(self.comments),
             captions: overrides.captions.or(self.captions),
@@ -453,6 +457,7 @@ struct RawRoot {
     search_limit: Field,
     search_stop: Field,
     max_posts: Field,
+    threshold: Field,
     metadata: Field,
     comments: Field,
     captions: Field,
@@ -532,6 +537,7 @@ struct RawExtractor {
     search_limit: Field,
     search_stop: Field,
     max_posts: Field,
+    threshold: Field,
     metadata: Field,
     comments: Field,
     captions: Field,
@@ -646,6 +652,7 @@ struct RawOptions {
     search_limit: Field,
     search_stop: Field,
     max_posts: Field,
+    threshold: Field,
     metadata: Field,
     comments: Field,
     captions: Field,
@@ -835,6 +842,7 @@ impl Config {
             search_limit: root.search_limit,
             search_stop: root.search_stop,
             max_posts: root.max_posts,
+            threshold: root.threshold,
             metadata: root.metadata,
             comments: root.comments,
             captions: root.captions,
@@ -922,6 +930,7 @@ impl Config {
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
             max_posts: extractor.max_posts,
+            threshold: extractor.threshold,
             metadata: extractor.metadata,
             comments: extractor.comments,
             captions: extractor.captions,
@@ -993,6 +1002,11 @@ impl Config {
             {
                 return Err(error(
                     "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain and gelbooru",
+                ));
+            }
+            if !matches!(name, "danbooru" | "e621") && settings.threshold.0.is_some() {
+                return Err(error(
+                    "native configuration threshold is only supported for danbooru and e621",
                 ));
             }
             if !matches!(name, "danbooru" | "e621")
@@ -1550,6 +1564,27 @@ impl RawOptions {
         let sanity = self.sanity.0.as_ref().map(value_truthy);
         let embeds = self.embeds.0.as_ref().map(value_truthy);
         let metadata_bookmark = self.metadata_bookmark.0.as_ref().map(value_truthy);
+        let booru_threshold = self
+            .threshold
+            .0
+            .map(|value| -> Result<Option<usize>> {
+                if let Value::Number(number) = value {
+                    let raw = number.to_string();
+                    // Python accepts only int here, excluding bool and float even
+                    // when a floating-point value has an integral numeric value.
+                    if !raw.contains(['.', 'e', 'E']) {
+                        if raw.starts_with('-') {
+                            return Ok(Some(1));
+                        }
+                        let threshold = raw.parse::<usize>().map_err(|_| {
+                            error("native configuration threshold integer exceeds the supported range")
+                        })?;
+                        return Ok(Some(threshold.max(1)));
+                    }
+                }
+                Ok(None)
+            })
+            .transpose()?;
         let max_posts = match self.max_posts.0 {
             None => None,
             Some(Value::Number(value)) => Some(
@@ -1821,6 +1856,7 @@ impl RawOptions {
             search_limit,
             search_stop,
             max_posts,
+            booru_threshold,
             metadata,
             comments,
             captions,

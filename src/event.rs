@@ -7,7 +7,7 @@ use futures_util::{StreamExt, stream::BoxStream};
 use std::{
     collections::VecDeque,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -258,6 +258,42 @@ impl std::fmt::Debug for KeywordUpdate {
     }
 }
 
+/// One producer keyword observed after a post's file hooks have drained.
+/// Missing and unobserved are distinct so skipped posts retain their raw API
+/// cursor, while an explicit hook deletion can be reported by the producer.
+#[derive(Clone)]
+pub struct KeywordFeedback(Arc<KeywordFeedbackState>);
+struct KeywordFeedbackState {
+    name: String,
+    value: Mutex<Option<Option<serde_json::Value>>>,
+}
+impl KeywordFeedback {
+    pub fn new(name: &str) -> Self {
+        Self(Arc::new(KeywordFeedbackState {
+            name: name.to_owned(),
+            value: Mutex::new(None),
+        }))
+    }
+    /// Consume the latest observation: None is unobserved; Some(None) means
+    /// the keyword was absent, and Some(Some(Null)) is an explicit JSON null.
+    pub fn take(&self) -> Option<Option<serde_json::Value>> {
+        self.0
+            .value
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    }
+    pub(crate) fn capture(&self, keywords: &serde_json::Map<String, serde_json::Value>) {
+        *self.0.value.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(keywords.get(&self.0.name).cloned());
+    }
+}
+impl std::fmt::Debug for KeywordFeedback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KeywordFeedback { fields: [redacted] }")
+    }
+}
+
 /// Ownership of public keyword dictionaries emitted around one post.
 /// Shared producers explicitly declare the fields they assign again per file.
 #[derive(Clone, Debug, Default)]
@@ -271,6 +307,7 @@ pub enum KeywordPolicy {
     Shared {
         file_fields: Arc<[String]>,
         post_fields: Arc<serde_json::Map<String, serde_json::Value>>,
+        feedback: Option<KeywordFeedback>,
     },
 }
 impl KeywordPolicy {
@@ -290,8 +327,16 @@ impl KeywordPolicy {
     pub fn shared(fields: &[&str]) -> Self {
         Self::Shared {
             post_fields: Arc::new(serde_json::Map::new()),
+            feedback: None,
             file_fields: fields.iter().map(|field| (*field).to_owned()).collect(),
         }
+    }
+    /// Observe one shared root keyword after all selected file work finishes.
+    pub fn with_feedback(mut self, value: KeywordFeedback) -> Self {
+        if let Self::Shared { feedback, .. } = &mut self {
+            *feedback = Some(value);
+        }
+        self
     }
     /// Preserve fields the producer already supplied before the Directory event.
     pub fn with_post_fields(mut self, media: &Media, names: &[&str]) -> Self {

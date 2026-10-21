@@ -672,6 +672,7 @@ mod tests {
             let KeywordPolicy::Shared {
                 file_fields,
                 post_fields,
+                ..
             } = &post.keywords
             else {
                 panic!("ArtStation asset must reuse Directory keywords")

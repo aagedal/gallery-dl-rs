@@ -286,10 +286,18 @@ impl Shared {
             {
                 let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
                 if state.pending == 0 {
-                    return state.last.as_ref().map_or_else(
+                    let latest = state.last.as_ref().map_or_else(
                         || (state.initial.clone(), None),
                         |(_, ctx, path)| (ctx.clone(), path.clone()),
                     );
+                    if let KeywordPolicy::Shared {
+                        feedback: Some(feedback),
+                        ..
+                    } = &state.policy
+                    {
+                        feedback.capture(&latest.0);
+                    }
+                    return latest;
                 }
             }
             notified.await;
@@ -1540,5 +1548,142 @@ mod keyword_order_tests {
         assert!(second.inherit_for(&file, &mut Map::new()).await.is_err());
         drop(second);
         assert_eq!(shared.finish().await.0["num"], 1);
+    }
+}
+
+#[cfg(test)]
+mod keyword_feedback_tests {
+    use super::*;
+    use crate::{event::KeywordFeedback, extract::PostMetadata, postprocess::Specification};
+    use futures_util::FutureExt;
+    use serde_json::json;
+
+    #[test]
+    fn feedback_distinguishes_missing_null_and_unobserved_and_redacts_debug() {
+        let feedback = KeywordFeedback::new("PRIVATE_KEY");
+        let clone = feedback.clone();
+        assert_eq!(feedback.take(), None);
+        feedback.capture(&json!({"PRIVATE_KEY": null}).as_object().unwrap().clone());
+        assert_eq!(clone.take(), Some(Some(Value::Null)));
+        assert_eq!(feedback.take(), None);
+        feedback.capture(&Map::new());
+        assert_eq!(feedback.take(), Some(None));
+        let mut context = json!({"PRIVATE_KEY":{"nested":"PRIVATE_VALUE"}})
+            .as_object()
+            .unwrap()
+            .clone();
+        feedback.capture(&context);
+        context["PRIVATE_KEY"]["nested"] = json!("changed");
+        assert!(!format!("{feedback:?}").contains("PRIVATE"));
+        assert_eq!(
+            feedback.take(),
+            Some(Some(json!({"nested":"PRIVATE_VALUE"})))
+        );
+    }
+
+    #[tokio::test]
+    async fn feedback_waits_for_all_file_leases_and_repeated_finish_observes_latest() {
+        let feedback = KeywordFeedback::new("id");
+        let context = json!({"id":100}).as_object().unwrap().clone();
+        let shared = Shared::new(
+            context.clone(),
+            context,
+            KeywordPolicy::shared(&[]).with_feedback(feedback.clone()),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let first = shared.lease().unwrap();
+        let second = shared.lease().unwrap();
+        assert!(shared.finish().now_or_never().is_none());
+        assert_eq!(feedback.take(), None);
+        first.complete(json!({"id":200}).as_object().unwrap());
+        drop(first);
+        assert!(shared.finish().now_or_never().is_none());
+        assert_eq!(feedback.take(), None);
+        let mut second_context = json!({"id":100}).as_object().unwrap().clone();
+        second.inherit(&mut second_context).await;
+        assert_eq!(second_context["id"], 200);
+        second_context.insert("id".into(), json!(300));
+        second.complete(&second_context);
+        drop(second);
+        assert_eq!(shared.finish().await.0["id"], 300);
+        assert_eq!(feedback.take(), Some(Some(json!(300))));
+        shared.checkpoint(json!({"id":400}).as_object().unwrap());
+        shared.finish().await;
+        assert_eq!(feedback.take(), Some(Some(json!(400))));
+    }
+
+    fn post(feedback: KeywordFeedback) -> ExtractionEvent {
+        ExtractionEvent::Post(Box::new(Post {
+            category: "fixture".into(),
+            count: Some(0),
+            metadata: Some(PostMetadata {
+                post_id: "42".into(),
+                ..Default::default()
+            }),
+            keywords: KeywordPolicy::shared(&[]).with_feedback(feedback),
+        }))
+    }
+
+    #[tokio::test]
+    async fn post_only_feedback_captures_hook_mutations_and_deletion_before_post_after() {
+        for (hook, expected) in [
+            (
+                json!({"name":"metadata","mode":"modify","event":"post","fields":{"id":"{num}"}}),
+                Some(json!(220)),
+            ),
+            (
+                json!({"name":"metadata","mode":"delete","event":"post","fields":["id"]}),
+                None,
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let processors=Arc::new(Postprocessors::new(vec![
+                Specification::parse(&hook,root.path()).unwrap(),
+                Specification::parse(&json!({"name":"metadata","mode":"modify","event":"post-after","fields":{"id":"AFTER"}}),root.path()).unwrap(),
+            ]));
+            let feedback = KeywordFeedback::new("id");
+            let mut event = post(feedback.clone());
+            if let ExtractionEvent::Post(post) = &mut event
+                && let KeywordPolicy::Shared { post_fields, .. } = &mut post.keywords
+            {
+                *post_fields = Arc::new(json!({"id":42,"num":220}).as_object().unwrap().clone());
+            }
+            let input =
+                futures_util::stream::iter(vec![Ok(event), Ok(ExtractionEvent::EndPost)]).boxed();
+            let result = apply(
+                input,
+                Arc::new(BTreeMap::from([(
+                    "fixture".into(),
+                    JobConfiguration {
+                        processors,
+                        root: root.path().to_owned(),
+                        filename: None,
+                        directory: None,
+                        init: false,
+                    },
+                )])),
+            )
+            .collect::<Vec<_>>()
+            .await;
+            assert!(result.is_empty());
+            assert_eq!(feedback.take(), Some(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn posts_without_hook_scope_leave_feedback_unobserved() {
+        let feedback = KeywordFeedback::new("id");
+        let input = futures_util::stream::iter(vec![
+            Ok(post(feedback.clone())),
+            Ok(ExtractionEvent::EndPost),
+        ])
+        .boxed();
+        assert!(
+            apply(input, Arc::new(BTreeMap::new()))
+                .collect::<Vec<_>>()
+                .await
+                .is_empty()
+        );
+        assert_eq!(feedback.take(), None);
     }
 }

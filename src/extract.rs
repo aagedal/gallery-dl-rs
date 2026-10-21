@@ -929,6 +929,7 @@ pub struct BackendOptions {
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
     pub max_posts: Option<usize>,
+    pub booru_threshold: Option<Option<usize>>,
     pub metadata: Option<bool>,
     pub endpoint: Option<crate::kemono::Endpoint>,
     pub bluesky_endpoint: Option<crate::bluesky::LikesEndpoint>,
@@ -1092,6 +1093,11 @@ impl Backend {
             if let Some(value) = value {
                 command.arg("--option").arg(format!("{name}={value}"));
             }
+        }
+        if let Some(threshold) = options.booru_threshold {
+            command
+                .arg("--option")
+                .arg(format!("threshold={}", serde_json::json!(threshold)));
         }
         if let Some(mode) = options.ugoira {
             command
