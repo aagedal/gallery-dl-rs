@@ -138,6 +138,10 @@ fn string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 /// Parse a `post/v1/media` or `post/v1/albums` response. `requested_id`
 /// must match the response so a mismatched post is never misattributed.
 pub fn parse_post(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
+    parse_post_with_mp4(bytes, requested_id, true)
+}
+
+fn parse_post_with_mp4(bytes: &[u8], requested_id: &str, mp4: bool) -> Result<Vec<Media>> {
     let post: Value =
         serde_json::from_slice(bytes).map_err(|_| error("Imgur returned invalid JSON"))?;
     if post.get("errors").is_some() {
@@ -176,7 +180,10 @@ pub fn parse_post(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
             .ok_or_else(|| error("Imgur media has an invalid extension"))?;
         if ext == "jpeg" {
             ext = "jpg".into();
-        } else if ext == "gif" && meta.get("is_animated").and_then(Value::as_bool) == Some(true) {
+        } else if mp4
+            && ext == "gif"
+            && meta.get("is_animated").and_then(Value::as_bool) == Some(true)
+        {
             // Upstream's default `mp4` option prefers the MP4 rendition.
             ext = "mp4".into();
         }
@@ -229,6 +236,7 @@ pub struct Imgur {
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
+    mp4: bool,
     rate_limits: RateLimits,
 }
 
@@ -241,6 +249,7 @@ impl Imgur {
             timeout,
             request_timeout: timeout,
             retries: 0,
+            mp4: true,
             rate_limits: RateLimits::default(),
         })
     }
@@ -255,6 +264,13 @@ impl Imgur {
     /// Additional attempts for HTTP 429/5xx and transport failures.
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;
+        self
+    }
+
+    /// Prefer MP4 renditions of animated GIFs (the upstream default).
+    /// Disabling this preserves GIFs; native video files remain unchanged.
+    pub fn with_mp4(mut self, mp4: bool) -> Self {
+        self.mp4 = mp4;
         self
     }
 
@@ -302,7 +318,7 @@ impl Imgur {
                 Err(failure) => return Err(failure.error),
             },
         };
-        let mut media = parse_post(&body, id)?;
+        let mut media = parse_post_with_mp4(&body, id, self.mp4)?;
         for item in &mut media {
             self.network.apply_media(item);
         }
@@ -514,6 +530,39 @@ mod tests {
     }
 
     #[test]
+    fn mp4_selection_only_changes_animated_gif_renditions() {
+        let response = json!({
+            "id": "AbCdE12",
+            "media": [
+                {"id":"Gif0001","ext":"gif","metadata":{"is_animated":true}},
+                {"id":"Gif0002","ext":"gif","metadata":{"is_animated":false}},
+                {"id":"Gif0003","ext":"gif"},
+                {"id":"Vid0004","ext":"mp4","metadata":{"is_animated":true}},
+                {"id":"Img0005","ext":"jpeg","metadata":{"is_animated":false}}
+            ]
+        })
+        .to_string();
+        let preferred = parse_post(response.as_bytes(), "AbCdE12").unwrap();
+        let original = parse_post_with_mp4(response.as_bytes(), "AbCdE12", false).unwrap();
+        assert_eq!(preferred[0].url.as_str(), "https://i.imgur.com/Gif0001.mp4");
+        assert_eq!(original[0].url.as_str(), "https://i.imgur.com/Gif0001.gif");
+        assert_eq!(original[0].filename, "Gif0001.gif");
+        assert_eq!(original[0].archive_key(), preferred[0].archive_key());
+        assert_eq!(
+            serde_json::to_value(&original[0].metadata).unwrap(),
+            serde_json::to_value(&preferred[0].metadata).unwrap()
+        );
+        for index in 1..5 {
+            assert_eq!(preferred[index].url, original[index].url);
+            assert_eq!(preferred[index].filename, original[index].filename);
+        }
+        assert_eq!(preferred[1].filename, "Gif0002.gif");
+        assert_eq!(preferred[2].filename, "Gif0003.gif");
+        assert_eq!(original[3].filename, "Vid0004.mp4");
+        assert_eq!(original[4].filename, "Img0005.jpg");
+    }
+
+    #[test]
     fn rejects_mismatched_empty_and_invalid_responses() {
         assert!(parse_post(&album(), "Other12").is_err());
         assert!(parse_post(b"not json", "AbCdE12").is_err());
@@ -650,6 +699,31 @@ mod tests {
             "GET /post/v1/albums/zf2fIms?client_id=546c25a59c58ad7&include=media%2Ctags%2Caccount "
         ));
         assert!(requests[1].starts_with("GET /post/v1/media/zf2fIms?"));
+    }
+
+    #[tokio::test]
+    async fn extraction_applies_mp4_choice_to_every_post_target() {
+        let body = json!({
+            "id":"Img0002",
+            "media":[{"id":"Img0002","ext":"gif","metadata":{"is_animated":true}}]
+        })
+        .to_string();
+        for url in [
+            "https://imgur.com/a/Img0002",
+            "https://imgur.com/Img0002",
+            "https://imgur.com/gallery/Img0002",
+        ] {
+            let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+            let media = imgur(root)
+                .with_mp4(false)
+                .extract(&Url::parse(url).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(media.len(), 1);
+            assert_eq!(media[0].filename, "Img0002.gif");
+            assert_eq!(media[0].url.as_str(), "https://i.imgur.com/Img0002.gif");
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
     }
 
     #[tokio::test]

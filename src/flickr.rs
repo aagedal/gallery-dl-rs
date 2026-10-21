@@ -9,7 +9,7 @@
 //! video streams, `*.flickr.com`.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -484,7 +484,11 @@ impl Flickr {
 
     fn finish(&self, mut item: Media) -> VecDeque<ExtractionEvent> {
         self.network.apply_media(&mut item);
-        group(vec![item], "flickr")
+        group_with_keywords(
+            vec![item],
+            "flickr",
+            KeywordPolicy::shared(&["num", "index", "media_id", "filename", "name", "extension"]),
+        )
     }
 
     async fn photo(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
@@ -931,14 +935,27 @@ mod tests {
             ok(info),
             ok(sizes_body()),
         ]);
-        let media: Vec<_> = flickr(root)
+        let events: Vec<_> = flickr(root)
             .with_retries(1)
             .with_api_key(Some("secret"))
-            .stream(&Url::parse("https://www.flickr.com/photos/alice/123").unwrap())
+            .events(&Url::parse("https://www.flickr.com/photos/alice/123").unwrap())
             .collect()
             .await;
-        assert_eq!(media.len(), 1);
-        assert_eq!(media[0].as_ref().unwrap().url.as_str(), ORIGINAL);
+        assert_eq!(events.len(), 3);
+        let ExtractionEvent::Post(post) = events[0].as_ref().unwrap() else {
+            panic!("missing source post")
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("Flickr must reuse Directory keywords")
+        };
+        assert_eq!(
+            file_fields.as_ref(),
+            &["num", "index", "media_id", "filename", "name", "extension"]
+        );
+        let ExtractionEvent::Media(media) = events[1].as_ref().unwrap() else {
+            panic!("missing media")
+        };
+        assert_eq!(media.url.as_str(), ORIGINAL);
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with(
             "GET /services/rest/?method=flickr.photos.getInfo&api_key=secret&format=json&nojsoncallback=1&photo_id=123 "

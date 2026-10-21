@@ -1,0 +1,1253 @@
+{
+  "version": "1.32.17",
+  "source_sha256": {
+    "twitter.py": "991984e31293558bd1e0a82c49b24372df43f139936e90cce70af0bf6ea37d8b",
+    "pixiv.py": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+    "bluesky.py": "1285ec68f5017e2b083b2ddb2d9070eff987c6ece7fed3a4025a650eca1c5fa1",
+    "reddit.py": "0d2e7e8e1c15bc39985236ee643626709d4e7de42608a2de7d745db7c2c9d302",
+    "mastodon.py": "151075a1f6f4533f59aa998d1e99d06e336062ce77837188458d507a44c96eea",
+    "tumblr.py": "d116c89834563df8f89a6a9f288c817526655c44feaaedc7c68bc5b64156181a",
+    "kemono.py": "284738d3058db0a0149c1f9c860055e9be17971f65d91f548780219bb648741e",
+    "imgur.py": "af2503483be420ccb535d78c0a3b526e0a2566d2e927ecb01ae735ab2ebf8389",
+    "deviantart.py": "67e8db37fcb6a852c475a85e4a5ce2edfcc0220d29c25d6a9281f6acae7b9203",
+    "flickr.py": "24b8544aece57d696f39341abedec758b4a5396b7e5998a353fab3b079210dfa",
+    "wallhaven.py": "8f9b7ebecc9d0cd96f80e22bd0d6fffcb20948d59c54fadf7207341b609d987d",
+    "artstation.py": "1ebcad93b80bca6637dc9b62492b3b6bf7c35cdf1b64b372e020233030a1722b",
+    "pinterest.py": "f0e1b09add6ddd01aa527c74d9dedf83f69da0213440cb65f2fe5ae61dcac3c0",
+    "newgrounds.py": "052300a80f9605143749ec61f86ade6ef5e13f7dd6de0dd5241fd80484e08b43",
+    "furaffinity.py": "cadf575162cfb1b8dd057129a6894c72794946417e001a4ce0a1ddc2d37bbdb2",
+    "weasyl.py": "df93c21a00fe2977ec25b85a0df65542ed3aa1bbc59f48e56411a04933732053",
+    "vsco.py": "13f1914405f27430fc3b9fa8df92e2a88fbae8b0996088f6fa12cec886264778",
+    "pixeldrain.py": "b4ae922551f5142d67b8f6c29cfa396eca732c970892f9f9c4390928c005bfe2",
+    "catbox.py": "59e9429f6960949d4e557a1d93c6e4728f96e7bb3a1e1112c1406cf9e549635d",
+    "imgbox.py": "e26b8af28f0f75fe3ac74aad33a86d1d29488a1812cd555db9ba25886707531c",
+    "imagehosts.py": "e209e50b12e6c9934b134ebf60776a1dd5c0d78e84cf569ac360a30c6b0ace86",
+    "instagram.py": "4ae933940f089ca389af458ed0dae4fb9699c6462db794b1016389de1c054bf7",
+    "facebook.py": "1e01280bc3186c607563783b67209590d8510a1320a47efb252ce09387216816",
+    "danbooru.py": "61f14ebb644cf2f5889d5502d850fddb54389a192ed1f659ba1b00cf04c088fb",
+    "e621.py": "97ab705c292733645b9f794f43aa20b2bcf6f619e78c8fdaf4139efb9459690c",
+    "gelbooru.py": "1810877d0491be68be1b299cf08ce642531d90abcd0a460d3b858880bfcb9f19",
+    "gelbooru_v02.py": "0f840910ee1a701524d52390a3050e7445cd30d2657a0f798eab28c4f58f52cb",
+    "common.py": "70d1e0b895c0ccfef07cac0d7f02a92d90ec28d12567c80885c7c709ce0f2c75",
+    "formatter.py": "c14d011952fe7502a5af97676c629c2b5258222a0e3486ca517b2b20f231b1e3"
+  },
+  "cases": [
+    {
+      "url": "https://x.com/example",
+      "extractor": "TwitterUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "twitter",
+        "format": "{tweet_id}_{retweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://x.com/example/media",
+      "extractor": "TwitterMediaExtractor",
+      "subcategory": "media",
+      "descriptor": {
+        "category": "twitter",
+        "format": "{tweet_id}_{retweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://x.com/example/photo",
+      "extractor": "TwitterAvatarExtractor",
+      "subcategory": "avatar",
+      "descriptor": {
+        "category": "twitter",
+        "format": "AV_{user[id]}_{date}"
+      }
+    },
+    {
+      "url": "https://x.com/example/header_photo",
+      "extractor": "TwitterBackgroundExtractor",
+      "subcategory": "background",
+      "descriptor": {
+        "category": "twitter",
+        "format": "BG_{user[id]}_{date}"
+      }
+    },
+    {
+      "url": "https://x.com/example/status/123456789",
+      "extractor": "TwitterTweetExtractor",
+      "subcategory": "tweet",
+      "descriptor": {
+        "category": "twitter",
+        "format": "{tweet_id}_{retweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://x.com/search?q=cat",
+      "extractor": "TwitterSearchExtractor",
+      "subcategory": "search",
+      "descriptor": {
+        "category": "twitter",
+        "format": "{tweet_id}_{retweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://x.com/i/bookmarks",
+      "extractor": "TwitterBookmarkExtractor",
+      "subcategory": "bookmark",
+      "descriptor": {
+        "category": "twitter",
+        "format": "{tweet_id}_{retweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://x.com/i/lists/123456789",
+      "extractor": "TwitterListExtractor",
+      "subcategory": "list",
+      "descriptor": {
+        "category": "twitter",
+        "format": "{tweet_id}_{retweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://x.com/i/communities/123456789",
+      "extractor": "TwitterCommunityExtractor",
+      "subcategory": "community",
+      "descriptor": {
+        "category": "twitter",
+        "format": "C_{community[id]}_{tweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://x.com/i/communities",
+      "extractor": "TwitterCommunitiesExtractor",
+      "subcategory": "communities",
+      "descriptor": {
+        "category": "twitter",
+        "format": "C_{community[id]}_{tweet_id}_{num}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123",
+      "extractor": "PixivUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/artworks",
+      "extractor": "PixivArtworksExtractor",
+      "subcategory": "artworks",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/illustrations",
+      "extractor": "PixivArtworksExtractor",
+      "subcategory": "artworks",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/manga",
+      "extractor": "PixivArtworksExtractor",
+      "subcategory": "artworks",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/artworks/cat",
+      "extractor": "PixivArtworksExtractor",
+      "subcategory": "artworks",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/bookmarks/artworks",
+      "extractor": "PixivFavoriteExtractor",
+      "subcategory": "favorite",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "f_{user_bookmark[id]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/bookmarks/artworks/cat?rest=hide",
+      "extractor": "PixivFavoriteExtractor",
+      "subcategory": "favorite",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "f_{user_bookmark[id]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/bookmark.php?id=123",
+      "extractor": "PixivFavoriteExtractor",
+      "subcategory": "favorite",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "f_{user_bookmark[id]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/bookmark.php?type=user",
+      "extractor": "PixivFavoriteExtractor",
+      "subcategory": "following",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "f_{user_bookmark[id]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/member_illust.php?id=123",
+      "extractor": "PixivArtworksExtractor",
+      "subcategory": "artworks",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/artworks/123",
+      "extractor": "PixivWorkExtractor",
+      "subcategory": "work",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/avatar",
+      "extractor": "PixivAvatarExtractor",
+      "subcategory": "avatar",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "avatar_{user[id]}_{date}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/background",
+      "extractor": "PixivBackgroundExtractor",
+      "subcategory": "background",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "background_{user[id]}_{date}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/following",
+      "extractor": "PixivFavoriteExtractor",
+      "subcategory": "following",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "f_{user_bookmark[id]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/ranking.php",
+      "extractor": "PixivRankingExtractor",
+      "subcategory": "ranking",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "r_{ranking[mode]}_{ranking[date]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/tags/cat/artworks",
+      "extractor": "PixivSearchExtractor",
+      "subcategory": "search",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "s_{search[word]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/search.php?word=cat",
+      "extractor": "PixivSearchExtractor",
+      "subcategory": "search",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "s_{search[word]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/bookmark_new_illust.php",
+      "extractor": "PixivFollowedExtractor",
+      "subcategory": "followed",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "F_{user_follow[id]}_{id}{num}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/user/123/series/456",
+      "extractor": "PixivSeriesExtractor",
+      "subcategory": "series",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixivision.net/en/a/123",
+      "extractor": "PixivPixivisionExtractor",
+      "subcategory": "pixivision",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "V{pixivision_id}_{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://sketch.pixiv.net/@example",
+      "extractor": "PixivSketchExtractor",
+      "subcategory": "sketch",
+      "descriptor": {
+        "category": "pixiv",
+        "format": "S{user[id]}_{id}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/novel/show.php?id=123",
+      "extractor": "PixivNovelNovelExtractor",
+      "subcategory": "novel",
+      "descriptor": {
+        "category": "pixiv-novel",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/n/123",
+      "extractor": "PixivNovelNovelExtractor",
+      "subcategory": "novel",
+      "descriptor": {
+        "category": "pixiv-novel",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/novels",
+      "extractor": "PixivNovelUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "pixiv-novel",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/novel/series/123",
+      "extractor": "PixivNovelSeriesExtractor",
+      "subcategory": "series",
+      "descriptor": {
+        "category": "pixiv-novel",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.pixiv.net/users/123/bookmarks/novels",
+      "extractor": "PixivNovelBookmarkExtractor",
+      "subcategory": "bookmark",
+      "descriptor": {
+        "category": "pixiv-novel",
+        "format": "{id}{suffix}.{extension}"
+      }
+    },
+    {
+      "url": "https://bsky.app/profile/example.com",
+      "extractor": "BlueskyUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "bluesky",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://bsky.app/profile/example.com/post/3k2k3k2k3k2k3",
+      "extractor": "BlueskyPostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "bluesky",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://bsky.app/profile/example.com/feed/example",
+      "extractor": "BlueskyFeedExtractor",
+      "subcategory": "feed",
+      "descriptor": {
+        "category": "bluesky",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://bsky.app/profile/example.com/likes",
+      "extractor": "BlueskyLikesExtractor",
+      "subcategory": "likes",
+      "descriptor": {
+        "category": "bluesky",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://bsky.app/profile/example.com/avatar",
+      "extractor": "BlueskyAvatarExtractor",
+      "subcategory": "avatar",
+      "descriptor": {
+        "category": "bluesky",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://www.reddit.com/r/pics/comments/abc123/title/",
+      "extractor": "RedditSubmissionExtractor",
+      "subcategory": "submission",
+      "descriptor": {
+        "category": "reddit",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://www.reddit.com/r/pics/",
+      "extractor": "RedditSubredditExtractor",
+      "subcategory": "subreddit",
+      "descriptor": {
+        "category": "reddit",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://www.reddit.com/user/example/",
+      "extractor": "RedditUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "reddit",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://redd.it/abc123",
+      "extractor": "RedditSubmissionExtractor",
+      "subcategory": "submission",
+      "descriptor": {
+        "category": "reddit",
+        "format": "{filename}"
+      }
+    },
+    {
+      "url": "https://mastodon.social/@example",
+      "extractor": "MastodonUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "mastodon.social",
+        "format": "{media[id]}"
+      }
+    },
+    {
+      "url": "https://mastodon.social/@example/123456789",
+      "extractor": "MastodonStatusExtractor",
+      "subcategory": "status",
+      "descriptor": {
+        "category": "mastodon.social",
+        "format": "{media[id]}"
+      }
+    },
+    {
+      "url": "https://mastodon.social/bookmarks",
+      "extractor": "MastodonBookmarkExtractor",
+      "subcategory": "bookmark",
+      "descriptor": {
+        "category": "mastodon.social",
+        "format": "{media[id]}"
+      }
+    },
+    {
+      "url": "https://mastodon.social/favourites",
+      "extractor": "MastodonFavoriteExtractor",
+      "subcategory": "favorite",
+      "descriptor": {
+        "category": "mastodon.social",
+        "format": "{media[id]}"
+      }
+    },
+    {
+      "url": "https://mastodon.social/tags/cat",
+      "extractor": "MastodonHashtagExtractor",
+      "subcategory": "hashtag",
+      "descriptor": {
+        "category": "mastodon.social",
+        "format": "{media[id]}"
+      }
+    },
+    {
+      "url": "https://example.tumblr.com/",
+      "extractor": "TumblrUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "tumblr",
+        "format": "{id}_{num}"
+      }
+    },
+    {
+      "url": "https://example.tumblr.com/post/123456789/title",
+      "extractor": "TumblrPostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "tumblr",
+        "format": "{id}_{num}"
+      }
+    },
+    {
+      "url": "https://example.tumblr.com/tagged/cat",
+      "extractor": "TumblrTagExtractor",
+      "subcategory": "tag",
+      "descriptor": {
+        "category": "tumblr",
+        "format": "{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/artists",
+      "extractor": "KemonoArtistsExtractor",
+      "subcategory": "artists",
+      "descriptor": {
+        "category": "kemono",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/posts",
+      "extractor": "KemonoPostsExtractor",
+      "subcategory": "posts",
+      "descriptor": {
+        "category": "kemono",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/favorites",
+      "extractor": "KemonoFavoriteExtractor",
+      "subcategory": "favorite",
+      "descriptor": {
+        "category": "kemono",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/patreon/user/123",
+      "extractor": "KemonoUserExtractor",
+      "subcategory": "patreon",
+      "descriptor": {
+        "category": "kemono",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/patreon/user/123/post/456",
+      "extractor": "KemonoPostExtractor",
+      "subcategory": "patreon",
+      "descriptor": {
+        "category": "kemono",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/patreon/user/123/post/456/revisions",
+      "extractor": "KemonoPostExtractor",
+      "subcategory": "patreon",
+      "descriptor": {
+        "category": "kemono",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/discord/server/123",
+      "extractor": "KemonoDiscordServerExtractor",
+      "subcategory": "discord-server",
+      "descriptor": {
+        "category": "kemono",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://kemono.cr/discord/server/123/channel/456",
+      "extractor": "KemonoDiscordExtractor",
+      "subcategory": "discord",
+      "descriptor": {
+        "category": "kemono",
+        "format": "discord_{server_id}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://coomer.st/onlyfans/user/example",
+      "extractor": "KemonoUserExtractor",
+      "subcategory": "onlyfans",
+      "descriptor": {
+        "category": "coomer",
+        "format": "{service}_{user}_{id}_{num}"
+      }
+    },
+    {
+      "url": "https://imgur.com/abcde",
+      "extractor": "ImgurImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "imgur",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://imgur.com/a/abcde",
+      "extractor": "ImgurAlbumExtractor",
+      "subcategory": "album",
+      "descriptor": {
+        "category": "imgur",
+        "format": "{album[id]}_{id}"
+      }
+    },
+    {
+      "url": "https://imgur.com/gallery/abcde",
+      "extractor": "ImgurGalleryExtractor",
+      "subcategory": "gallery",
+      "descriptor": {
+        "category": "imgur",
+        "format": ""
+      }
+    },
+    {
+      "url": "https://www.deviantart.com/example",
+      "extractor": "DeviantartUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "deviantart",
+        "format": ""
+      }
+    },
+    {
+      "url": "https://www.deviantart.com/example/gallery",
+      "extractor": "DeviantartGalleryExtractor",
+      "subcategory": "gallery",
+      "descriptor": {
+        "category": "deviantart",
+        "format": "g_{_username}_{index}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.deviantart.com/example/gallery/12345678/test",
+      "extractor": "DeviantartFolderExtractor",
+      "subcategory": "folder",
+      "descriptor": {
+        "category": "deviantart",
+        "format": "F_{folder[uuid]}_{index}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.deviantart.com/example/art/test-123456789",
+      "extractor": "DeviantartDeviationExtractor",
+      "subcategory": "deviation",
+      "descriptor": {
+        "category": "deviantart",
+        "format": "g_{_username}_{index}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.flickr.com/photos/example/",
+      "extractor": "FlickrUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "flickr",
+        "format": "u_{user[nsid]}_{id}"
+      }
+    },
+    {
+      "url": "https://www.flickr.com/photos/example/123456789/",
+      "extractor": "FlickrImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "flickr",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://www.flickr.com/photos/example/albums/123456789/",
+      "extractor": "FlickrAlbumExtractor",
+      "subcategory": "album",
+      "descriptor": {
+        "category": "flickr",
+        "format": "a_{album[id]}_{id}"
+      }
+    },
+    {
+      "url": "https://flic.kr/p/2abcde",
+      "extractor": "FlickrImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "flickr",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://wallhaven.cc/w/abc123",
+      "extractor": "WallhavenImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "wallhaven",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://wallhaven.cc/search?q=cat",
+      "extractor": "WallhavenSearchExtractor",
+      "subcategory": "search",
+      "descriptor": {
+        "category": "wallhaven",
+        "format": "s_{search[q]}_{id}"
+      }
+    },
+    {
+      "url": "https://wallhaven.cc/user/example/uploads",
+      "extractor": "WallhavenUploadsExtractor",
+      "subcategory": "uploads",
+      "descriptor": {
+        "category": "wallhaven",
+        "format": "u_{username}_{id}"
+      }
+    },
+    {
+      "url": "https://wallhaven.cc/user/example/favorites/123",
+      "extractor": "WallhavenCollectionExtractor",
+      "subcategory": "collection",
+      "descriptor": {
+        "category": "wallhaven",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://www.artstation.com/example",
+      "extractor": "ArtstationUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "artstation",
+        "format": "{asset[id]}"
+      }
+    },
+    {
+      "url": "https://www.artstation.com/artwork/abc123",
+      "extractor": "ArtstationImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "artstation",
+        "format": "{asset[id]}"
+      }
+    },
+    {
+      "url": "https://www.pinterest.com/example/pins/",
+      "extractor": "PinterestAllpinsExtractor",
+      "subcategory": "allpins",
+      "descriptor": {
+        "category": "pinterest",
+        "format": "{id}{media_id|page_id}"
+      }
+    },
+    {
+      "url": "https://www.pinterest.com/example/board/",
+      "extractor": "PinterestBoardExtractor",
+      "subcategory": "board",
+      "descriptor": {
+        "category": "pinterest",
+        "format": "{board[id]}_{id}"
+      }
+    },
+    {
+      "url": "https://www.pinterest.com/pin/123456789/",
+      "extractor": "PinterestPinExtractor",
+      "subcategory": "pin",
+      "descriptor": {
+        "category": "pinterest",
+        "format": "{id}{media_id|page_id}"
+      }
+    },
+    {
+      "url": "https://pin.it/abc123",
+      "extractor": "PinterestPinitExtractor",
+      "subcategory": "pinit",
+      "descriptor": {
+        "category": "pinterest",
+        "format": "{id}{media_id|page_id}"
+      }
+    },
+    {
+      "url": "https://www.newgrounds.com/art/view/example/test",
+      "extractor": "NewgroundsImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "newgrounds",
+        "format": "{_type}{_index}"
+      }
+    },
+    {
+      "url": "https://example.newgrounds.com/art",
+      "extractor": "NewgroundsArtExtractor",
+      "subcategory": "art",
+      "descriptor": {
+        "category": "newgrounds",
+        "format": "{_type}{_index}"
+      }
+    },
+    {
+      "url": "https://www.furaffinity.net/view/123456789/",
+      "extractor": "FuraffinityPostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "furaffinity",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://www.furaffinity.net/gallery/example/",
+      "extractor": "FuraffinityGalleryExtractor",
+      "subcategory": "gallery",
+      "descriptor": {
+        "category": "furaffinity",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://www.furaffinity.net/scraps/example/",
+      "extractor": "FuraffinityScrapsExtractor",
+      "subcategory": "scraps",
+      "descriptor": {
+        "category": "furaffinity",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://www.furaffinity.net/favorites/example/",
+      "native_supported": false,
+      "native_reason": "Native Fur Affinity currently supports submissions, gallery and scraps only.",
+      "extractor": "FuraffinityFavoriteExtractor",
+      "subcategory": "favorite",
+      "descriptor": {
+        "category": "furaffinity",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://www.weasyl.com/~example/submissions/1234567/test",
+      "extractor": "WeasylSubmissionExtractor",
+      "subcategory": "submission",
+      "descriptor": {
+        "category": "weasyl",
+        "format": "{submitid}"
+      }
+    },
+    {
+      "url": "https://www.weasyl.com/submission/1234567/test",
+      "extractor": "WeasylSubmissionExtractor",
+      "subcategory": "submission",
+      "descriptor": {
+        "category": "weasyl",
+        "format": "{submitid}"
+      }
+    },
+    {
+      "url": "https://www.weasyl.com/~example",
+      "extractor": "WeasylSubmissionsExtractor",
+      "subcategory": "submissions",
+      "descriptor": {
+        "category": "weasyl",
+        "format": "{submitid}"
+      }
+    },
+    {
+      "url": "https://vsco.co/example/gallery",
+      "extractor": "VscoGalleryExtractor",
+      "subcategory": "gallery",
+      "descriptor": {
+        "category": "vsco",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://vsco.co/example/media/1234567890abcdef12345678",
+      "extractor": "VscoImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "vsco",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://pixeldrain.com/u/abcdefgh",
+      "extractor": "PixeldrainFileExtractor",
+      "subcategory": "file",
+      "descriptor": {
+        "category": "pixeldrain",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://pixeldrain.com/l/abcdefgh",
+      "extractor": "PixeldrainAlbumExtractor",
+      "subcategory": "album",
+      "descriptor": {
+        "category": "pixeldrain",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://catbox.moe/c/abcdef",
+      "extractor": "CatboxAlbumExtractor",
+      "subcategory": "album",
+      "descriptor": {
+        "category": "catbox",
+        "format": "{album_id}_{filename}"
+      }
+    },
+    {
+      "url": "https://imgbox.com/abcdefgh",
+      "extractor": "ImgboxImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "imgbox",
+        "format": "{image_key}"
+      }
+    },
+    {
+      "url": "https://imgbox.com/g/abcdefghij",
+      "extractor": "ImgboxGalleryExtractor",
+      "subcategory": "gallery",
+      "descriptor": {
+        "category": "imgbox",
+        "format": "{gallery_key}_{image_key}"
+      }
+    },
+    {
+      "url": "https://postimg.cc/abcdefgh",
+      "extractor": "PostimgImageExtractor",
+      "subcategory": "image",
+      "descriptor": {
+        "category": "postimg",
+        "format": "{token}"
+      }
+    },
+    {
+      "url": "https://postimg.cc/gallery/abcdefgh",
+      "extractor": "PostimgGalleryExtractor",
+      "subcategory": "gallery",
+      "descriptor": {
+        "category": "postimg",
+        "format": "{token}"
+      }
+    },
+    {
+      "url": "https://www.instagram.com/p/AbCdEfGhIjK/",
+      "extractor": "InstagramPostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "instagram",
+        "format": "{media_id}"
+      }
+    },
+    {
+      "url": "https://www.instagram.com/example/",
+      "extractor": "InstagramUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "instagram",
+        "format": "{media_id}"
+      }
+    },
+    {
+      "url": "https://www.facebook.com/photo.php?fbid=123456789",
+      "extractor": "FacebookPhotoExtractor",
+      "subcategory": "photo",
+      "descriptor": {
+        "category": "facebook",
+        "format": "{id}.{extension}"
+      }
+    },
+    {
+      "url": "https://www.facebook.com/watch/?v=123456789",
+      "extractor": "FacebookVideoExtractor",
+      "subcategory": "video",
+      "descriptor": {
+        "category": "facebook",
+        "format": "{id}.{extension}"
+      }
+    },
+    {
+      "url": "https://danbooru.donmai.us/posts/123",
+      "extractor": "DanbooruPostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "danbooru",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://danbooru.donmai.us/posts?tags=cat",
+      "extractor": "DanbooruTagExtractor",
+      "subcategory": "tag",
+      "descriptor": {
+        "category": "danbooru",
+        "format": "t_{search_tags}_{id}"
+      }
+    },
+    {
+      "url": "https://danbooru.donmai.us/pools/123",
+      "extractor": "DanbooruPoolExtractor",
+      "subcategory": "pool",
+      "descriptor": {
+        "category": "danbooru",
+        "format": "p_{pool[id]}_{id}"
+      }
+    },
+    {
+      "url": "https://e621.net/posts/123",
+      "extractor": "E621PostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "e621",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://e621.net/posts?tags=cat",
+      "extractor": "E621TagExtractor",
+      "subcategory": "tag",
+      "descriptor": {
+        "category": "e621",
+        "format": "t_{search_tags}_{id}"
+      }
+    },
+    {
+      "url": "https://e621.net/pools/123",
+      "extractor": "E621PoolExtractor",
+      "subcategory": "pool",
+      "descriptor": {
+        "category": "e621",
+        "format": "p_{pool[id]}_{id}"
+      }
+    },
+    {
+      "url": "https://e926.net/posts/123",
+      "extractor": "E621PostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "e926",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://www.e926.net/posts/123",
+      "reason": "Installed upstream does not match this native route alias.",
+      "descriptor": null
+    },
+    {
+      "url": "https://www.e621.net/posts/123",
+      "reason": "Installed upstream does not match this native route alias.",
+      "descriptor": null
+    },
+    {
+      "url": "https://www.danbooru.donmai.us/posts/123",
+      "reason": "Installed upstream does not match this native route alias.",
+      "descriptor": null
+    },
+    {
+      "url": "https://donmai.us/posts/123",
+      "reason": "Installed upstream does not match this native route alias.",
+      "descriptor": null
+    },
+    {
+      "url": "https://www.safebooru.org/index.php?page=post&s=view&id=123",
+      "reason": "Installed upstream does not match this native route alias.",
+      "descriptor": null
+    },
+    {
+      "url": "https://www.gelbooru.com/index.php?page=post&s=view&id=123",
+      "extractor": "GelbooruPostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "gelbooru",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://pawoo.net/@example",
+      "extractor": "MastodonUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "pawoo",
+        "format": "{media[id]}"
+      }
+    },
+    {
+      "url": "https://baraag.net/@example",
+      "extractor": "MastodonUserExtractor",
+      "subcategory": "user",
+      "descriptor": {
+        "category": "baraag",
+        "format": "{media[id]}"
+      }
+    },
+    {
+      "url": "https://gelbooru.com/index.php?page=post&s=view&id=123",
+      "extractor": "GelbooruPostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "gelbooru",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://gelbooru.com/index.php?page=post&s=list&tags=cat",
+      "extractor": "GelbooruTagExtractor",
+      "subcategory": "tag",
+      "descriptor": {
+        "category": "gelbooru",
+        "format": "t_{search_tags}_{id}"
+      }
+    },
+    {
+      "url": "https://safebooru.org/index.php?page=post&s=view&id=123",
+      "extractor": "GelbooruV02PostExtractor",
+      "subcategory": "post",
+      "descriptor": {
+        "category": "safebooru",
+        "format": "{id}"
+      }
+    },
+    {
+      "url": "https://safebooru.org/index.php?page=post&s=list&tags=cat",
+      "extractor": "GelbooruV02TagExtractor",
+      "subcategory": "tag",
+      "descriptor": {
+        "category": "safebooru",
+        "format": "t_{search_tags}_{id}"
+      }
+    }
+  ],
+  "key_cases": [
+    {
+      "name": "pixiv_single",
+      "url": "https://www.pixiv.net/artworks/42",
+      "input": {
+        "id": 42,
+        "type": "illust",
+        "user": {
+          "id": 7,
+          "account": "artist"
+        },
+        "title": "Title",
+        "caption": "",
+        "create_date": "2024-01-02T03:04:05+00:00",
+        "tags": [],
+        "x_restrict": 0,
+        "image_urls": {},
+        "width": 640,
+        "height": 480,
+        "meta_single_page": {
+          "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [],
+        "is_bookmarked": false
+      },
+      "keys": [
+        "42.jpg"
+      ],
+      "source_keywords": [
+        {
+          "id": 42,
+          "num": 0,
+          "suffix": "",
+          "extension": "jpg"
+        }
+      ]
+    },
+    {
+      "name": "pixiv_pages",
+      "url": "https://www.pixiv.net/artworks/42",
+      "input": {
+        "id": 42,
+        "type": "illust",
+        "user": {
+          "id": 7,
+          "account": "artist"
+        },
+        "title": "Title",
+        "caption": "",
+        "create_date": "2024-01-02T03:04:05+00:00",
+        "tags": [],
+        "x_restrict": 0,
+        "image_urls": {},
+        "width": 640,
+        "height": 480,
+        "meta_single_page": {
+          "original_image_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+        },
+        "meta_pages": [
+          {
+            "image_urls": {
+              "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg"
+            }
+          },
+          {
+            "image_urls": {
+              "original": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg"
+            }
+          }
+        ],
+        "is_bookmarked": false
+      },
+      "keys": [
+        "42_p00.jpg",
+        "42_p01.jpg"
+      ],
+      "source_keywords": [
+        {
+          "id": 42,
+          "num": 0,
+          "suffix": "_p00",
+          "extension": "jpg"
+        },
+        {
+          "id": 42,
+          "num": 1,
+          "suffix": "_p01",
+          "extension": "jpg"
+        }
+      ]
+    },
+    {
+      "name": "artstation_asset",
+      "url": "https://www.artstation.com/artwork/abc123",
+      "input": {
+        "hash_id": "abc123",
+        "id": 90,
+        "title": "Project",
+        "description": "",
+        "created_at": "2024-01-02T03:04:05+00:00",
+        "published_at": "2024-01-02T03:04:05+00:00",
+        "user": {
+          "username": "artist"
+        },
+        "assets": [
+          {
+            "id": 123,
+            "asset_type": "image",
+            "has_image": true,
+            "has_embedded_player": false,
+            "image_url": "https://cdna.artstation.com/p/assets/images/images/123/large/example.jpg"
+          }
+        ]
+      },
+      "keys": [
+        "123"
+      ]
+    }
+  ]
+}

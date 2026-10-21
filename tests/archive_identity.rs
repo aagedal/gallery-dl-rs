@@ -16,6 +16,56 @@ fn compatibility(category: &str, metadata: Value, token: &str) -> Media {
 }
 
 #[test]
+fn novel_identity_matches_native_and_separates_illustrations_and_covers() {
+    let raw = "日本語\r\n[newpage]\n100% %20 [pixivimage:42-1]\n";
+    let mut native = Media {
+        url: extract::inline_text(raw.into()).unwrap().0,
+        job: extract::inline_text(raw.into()).unwrap().1,
+        category: "pixiv-novel".into(),
+        filename: "42_p0.txt".into(),
+        metadata: Some(extract::PostMetadata {
+            post_id: "42".into(),
+            media_id: "42_p0".into(),
+            index: 1,
+            ..Default::default()
+        }),
+        headers: Default::default(),
+        handoff: Default::default(),
+    };
+    let compat = extract::parse_messages(
+        &serde_json::to_vec(&json!([[3, format!("text:{raw}"), {
+            "id":42, "num":0, "filename":"42_p0", "extension":"txt",
+            "title":"Title", "caption":"<p>Caption</p>",
+            "user":{"account":"author"}
+        }]]))
+        .unwrap(),
+        "pixiv-novel",
+    )
+    .unwrap()
+    .remove(0);
+    assert_eq!(native.archive_key(), compat.archive_key());
+    assert!(matches!(&compat.job, extract::MediaJob::InlineText { data } if data == raw));
+    let post = compat.metadata.as_ref().unwrap();
+    assert_eq!(post.index, 1);
+    assert_eq!(post.caption.as_deref(), Some("Title\n\nCaption"));
+    assert_eq!(post.username.as_deref(), Some("author"));
+    assert_ne!(
+        native.archive_key(),
+        compatibility("pixiv", json!({"id":42,"num":0}), "a").archive_key()
+    );
+    let cover = compatibility("pixiv-novel", json!({"id":42,"num":1}), "a");
+    assert_ne!(native.archive_key(), cover.archive_key());
+    let key = native.archive_key().unwrap();
+    native.job = extract::inline_text("edited text".into()).unwrap().1;
+    assert_eq!(native.archive_key().as_deref(), Some(key.as_str()));
+    for private in ["日本語", "pixivimage", "Title", "author", "https"] {
+        assert!(!key.contains(private));
+    }
+    native.metadata.as_mut().unwrap().media_id = "42_bad".into();
+    assert!(native.archive_key().is_none());
+}
+
+#[test]
 fn native_and_compatibility_instagram_use_the_same_stable_identity() {
     let native =
         instagram::parse_response(include_bytes!("fixtures/instagram/photo.json"), "BA").unwrap();

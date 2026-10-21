@@ -49,6 +49,7 @@ pub use search::{
 };
 #[path = "twitter_profile.rs"]
 mod profile;
+pub(crate) use profile::profile_asset_identity;
 #[path = "twitter_timeline.rs"]
 mod timeline;
 use base64::{
@@ -89,6 +90,7 @@ pub struct ProfileOptions {
 }
 
 pub struct Twitter {
+    include: Option<crate::dispatch::Include>,
     expansion: ExpansionOptions,
     text_tweets: bool,
     profile_options: ProfileOptions,
@@ -127,6 +129,7 @@ impl Twitter {
                 .timeout(timeout)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
+            include: None,
             expansion: ExpansionOptions::default(),
             text_tweets: false,
             profile_options: ProfileOptions::default(),
@@ -146,6 +149,11 @@ impl Twitter {
             transaction: Mutex::new(None),
             initialize: tokio::sync::Mutex::new(()),
         })
+    }
+
+    pub fn with_include(mut self, include: Option<crate::dispatch::Include>) -> Self {
+        self.include = include;
+        self
     }
 
     /// Select repost identity and opt into explicit quoted-post traversal.

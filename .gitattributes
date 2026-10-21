@@ -1,0 +1,2 @@
+# Fixture generators are embedded byte-for-byte in recorded JSON oracles.
+tests/fixtures/**/*.py text eol=lf

@@ -1,0 +1,3970 @@
+{
+  "source": "PixivExtractor.items/_request_ajax/_sanitize_ajax_caption + PixivNovelExtractor.items + Extractor._init_session",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py",
+  "source_sha256": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+  "generator": "Actual items/AJAX/sanitizer helpers; synthetic work/files/API and request_json stubs. Source option assignments evaluated without AppAPI/OAuth initialization. Default web headers obtained from actual _init_session with all config absent, then local session closed without requests. Deep-copy snapshots; no network. HTTP status vectors run actual _request_ajax/request_json/request with in-memory requests.Response, zero retries and no rate challenge; only session.request is stubbed.",
+  "default_web_headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Encoding": "gzip, deflate, zstd",
+    "Referer": "https://www.pixiv.net/"
+  },
+  "cases": [
+    {
+      "name": "default_disabled",
+      "novel": false,
+      "options": {},
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "enabled_fetches_raw_html",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 2,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p1.jpg",
+            "filename": "42_p1",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "zero_files_still_fetch",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 0,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "caption_missing_fetch",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "existing_caption_retained",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "<p>Existing &amp; raw</p>",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Existing &amp; raw</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Existing &amp; raw</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "existing_truthy_nonstring_retained",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": {
+          "unexpected": "truthy"
+        },
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": {
+              "unexpected": "truthy"
+            },
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": {
+              "unexpected": "truthy"
+            },
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "caption_zero_fetch",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": 0,
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "caption_null_fetch",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": null,
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "caption_emptyarray_fetch",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": [],
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "mypixiv_skips",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true,
+        "_mypixiv": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "_mypixiv": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "_mypixiv": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "ajax_skips",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true,
+        "_ajax": "false"
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "_ajax": "false",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "_ajax": "false",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "falsy_gates_fetch",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true,
+        "_mypixiv": 0,
+        "_ajax": false
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "_mypixiv": 0,
+            "_ajax": false,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "_mypixiv": 0,
+            "_ajax": false,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "request_failure_ignored",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": true,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "api_error_ignored",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": true,
+        "message": "An unknown error occurred",
+        "body": {
+          "illustComment": "ignored"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "missing_body_ignored",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "falsy_body_ignored",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "body": {}
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "truthy_body_missing_caption_aborts",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "body": {
+          "other": true
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "truthy_body_list_aborts",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "body": [
+          1
+        ]
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [],
+      "error": "TypeError"
+    },
+    {
+      "name": "truthy_caption_nonstring_aborts",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "body": {
+          "illustComment": {
+            "unexpected": true
+          }
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [],
+      "error": "TypeError"
+    },
+    {
+      "name": "empty_ajax_caption_retained",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "body": {
+          "illustComment": ""
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "full_order_user_comments_bookmark_caption",
+      "novel": false,
+      "options": {
+        "captions": true,
+        "metadata": true,
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "user_detail",
+          "id": "5"
+        },
+        {
+          "method": "illust_comments",
+          "id": 42
+        },
+        {
+          "method": "illust_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": "Fixture"
+              }
+            ],
+            "tags_bookmark": [
+              "keep"
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": "Fixture"
+              }
+            ],
+            "tags_bookmark": [
+              "keep"
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "user_merge_supplies_caption_blocks_fetch",
+      "novel": false,
+      "options": {
+        "captions": true,
+        "metadata": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": {
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "caption": "Detail caption"
+      },
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "user_detail",
+          "id": "5"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "Detail caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "Detail caption",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "novel_caption_option_ignored",
+      "novel": true,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_null",
+      "novel": false,
+      "options": {
+        "captions": null
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_false",
+      "novel": false,
+      "options": {
+        "captions": false
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_zero",
+      "novel": false,
+      "options": {
+        "captions": 0
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_string",
+      "novel": false,
+      "options": {
+        "captions": ""
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_array",
+      "novel": false,
+      "options": {
+        "captions": []
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_object",
+      "novel": false,
+      "options": {
+        "captions": {}
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_true",
+      "novel": false,
+      "options": {
+        "captions": true
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_negative",
+      "novel": false,
+      "options": {
+        "captions": -1
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_string",
+      "novel": false,
+      "options": {
+        "captions": "false"
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_array",
+      "novel": false,
+      "options": {
+        "captions": [
+          false
+        ]
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_object",
+      "novel": false,
+      "options": {
+        "captions": {
+          "enabled": false
+        }
+      },
+      "input_work": {
+        "id": 42,
+        "title": "Fixture title <raw>",
+        "caption": "",
+        "type": "illust",
+        "user": {
+          "id": 5,
+          "account": "fixture.artist"
+        },
+        "tags": [
+          {
+            "name": "猫",
+            "translated_name": "cat"
+          }
+        ],
+        "create_date": "2024-01-02T12:04:05+09:00",
+        "x_restrict": 0,
+        "total_comments": 1,
+        "is_bookmarked": true
+      },
+      "file_count": 1,
+      "user_detail": null,
+      "ajax_response": {
+        "error": false,
+        "body": {
+          "illustComment": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>"
+        }
+      },
+      "request_fail": false,
+      "calls": [
+        {
+          "method": "_extract_files",
+          "id": 42
+        },
+        {
+          "method": "request_json",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/"
+            },
+            "fatal": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture title <raw>",
+            "caption": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+            "type": "illust",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 1,
+            "is_bookmarked": true,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_p0.jpg",
+            "filename": "42_p0",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "hash": ""
+          }
+        }
+      ],
+      "error": null
+    }
+  ],
+  "sanitizer_vectors": [
+    {
+      "input": "<p>Fixture &amp; 猫<br><a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fpath%3Fq%3Da+b\">link</a> &copy;</p>",
+      "output": "<p>Fixture & 猫<br><a href=\"https://example.invalid/path?q=a+b\">link</a> ©</p>",
+      "error": null
+    },
+    {
+      "input": "<a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2F%+1%+A%01\">signed escape</a>",
+      "output": "<a href=\"https://example.invalid/%+1%+A\u0001\">signed escape</a>",
+      "error": null
+    },
+    {
+      "input": "&amp;lt; &notit; &copy &CounterClockwiseContourIntegral; &#x80; &#0; &#xD800; &#1114112;",
+      "output": "&lt; ¬it; © ∳ € � � �",
+      "error": null
+    },
+    {
+      "input": "<a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2Fa+b%2520c\">x</a>",
+      "output": "<a href=\"https://example.invalid/a+b%20c\">x</a>",
+      "error": null
+    },
+    {
+      "input": "<a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2F%FF%FE%ZZ%\">bad</a>",
+      "output": "<a href=\"https://example.invalid/��%ZZ%\">bad</a>",
+      "error": null
+    },
+    {
+      "input": "<a href=\"/jump.php?https%3A%2F%2Fexample.invalid%2F%E7%8C%AB\">猫</a>",
+      "output": "<a href=\"https://example.invalid/猫\">猫</a>",
+      "error": null
+    },
+    {
+      "input": "<a href='/jump.php?https%3A%2F%2Fexample.invalid'>single quote untouched</a>",
+      "output": "<a href='/jump.php?https%3A%2F%2Fexample.invalid'>single quote untouched</a>",
+      "error": null
+    },
+    {
+      "input": "<A href=\"/jump.php?https%3A%2F%2Fexample.invalid\">upper tag untouched</A>",
+      "output": "<A href=\"/jump.php?https%3A%2F%2Fexample.invalid\">upper tag untouched</A>",
+      "error": null
+    },
+    {
+      "input": "<a href=\"/jump.php?\">empty untouched</a>",
+      "output": "<a href=\"/jump.php?\">empty untouched</a>",
+      "error": null
+    },
+    {
+      "input": "<script>if (a &lt; b) raw()</script>",
+      "output": "<script>if (a < b) raw()</script>",
+      "error": null
+    },
+    {
+      "input": null,
+      "output": "",
+      "error": null
+    },
+    {
+      "input": false,
+      "output": "",
+      "error": null
+    },
+    {
+      "input": 0,
+      "output": "",
+      "error": null
+    },
+    {
+      "input": "",
+      "output": "",
+      "error": null
+    },
+    {
+      "input": [],
+      "output": "",
+      "error": null
+    },
+    {
+      "input": {},
+      "output": "",
+      "error": null
+    }
+  ],
+  "http_status_vectors": [
+    {
+      "status": 200,
+      "response_json": {
+        "error": false,
+        "body": {
+          "illustComment": "Fixture body"
+        }
+      },
+      "calls": [
+        {
+          "method": "GET",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/",
+              "Origin": "https://www.pixiv.net",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            },
+            "proxies": {},
+            "timeout": 30,
+            "verify": true
+          }
+        }
+      ],
+      "body": {
+        "illustComment": "Fixture body"
+      }
+    },
+    {
+      "status": 400,
+      "response_json": {
+        "error": false,
+        "body": {
+          "illustComment": "Fixture body"
+        }
+      },
+      "calls": [
+        {
+          "method": "GET",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/",
+              "Origin": "https://www.pixiv.net",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            },
+            "proxies": {},
+            "timeout": 30,
+            "verify": true
+          }
+        }
+      ],
+      "body": {
+        "illustComment": "Fixture body"
+      }
+    },
+    {
+      "status": 403,
+      "response_json": {
+        "error": false,
+        "body": {
+          "illustComment": "Fixture body"
+        }
+      },
+      "calls": [
+        {
+          "method": "GET",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/",
+              "Origin": "https://www.pixiv.net",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            },
+            "proxies": {},
+            "timeout": 30,
+            "verify": true
+          }
+        }
+      ],
+      "body": {
+        "illustComment": "Fixture body"
+      }
+    },
+    {
+      "status": 404,
+      "response_json": {
+        "error": false,
+        "body": {
+          "illustComment": "Fixture body"
+        }
+      },
+      "calls": [
+        {
+          "method": "GET",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/",
+              "Origin": "https://www.pixiv.net",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            },
+            "proxies": {},
+            "timeout": 30,
+            "verify": true
+          }
+        }
+      ],
+      "body": {
+        "illustComment": "Fixture body"
+      }
+    },
+    {
+      "status": 429,
+      "response_json": {
+        "error": false,
+        "body": {
+          "illustComment": "Fixture body"
+        }
+      },
+      "calls": [
+        {
+          "method": "GET",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/",
+              "Origin": "https://www.pixiv.net",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            },
+            "proxies": {},
+            "timeout": 30,
+            "verify": true
+          }
+        }
+      ],
+      "body": null
+    },
+    {
+      "status": 500,
+      "response_json": {
+        "error": false,
+        "body": {
+          "illustComment": "Fixture body"
+        }
+      },
+      "calls": [
+        {
+          "method": "GET",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/",
+              "Origin": "https://www.pixiv.net",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            },
+            "proxies": {},
+            "timeout": 30,
+            "verify": true
+          }
+        }
+      ],
+      "body": null
+    },
+    {
+      "status": 503,
+      "response_json": {
+        "error": false,
+        "body": {
+          "illustComment": "Fixture body"
+        }
+      },
+      "calls": [
+        {
+          "method": "GET",
+          "url": "https://www.pixiv.net/ajax/illust/42",
+          "kwargs": {
+            "headers": {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Accept-Encoding": "gzip, deflate, zstd",
+              "Referer": "https://www.pixiv.net/",
+              "Origin": "https://www.pixiv.net",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            },
+            "proxies": {},
+            "timeout": 30,
+            "verify": true
+          }
+        }
+      ],
+      "body": null
+    }
+  ]
+}

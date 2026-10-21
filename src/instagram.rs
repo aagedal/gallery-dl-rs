@@ -153,7 +153,13 @@ impl Instagram {
         if shortcode(url).is_ok() {
             let url = url.clone();
             return stream::once(async move { self.extract(&url).await })
-                .map_ok(|items| stream::iter(event::group(items, "instagram").into_iter().map(Ok)))
+                .map_ok(|items| {
+                    stream::iter(
+                        event::group_with_keywords(items, "instagram", instagram_keywords())
+                            .into_iter()
+                            .map(Ok),
+                    )
+                })
                 .try_flatten()
                 .boxed();
         }
@@ -301,7 +307,11 @@ impl Instagram {
             for item in &mut media {
                 self.network.apply_media(item);
             }
-            pending.extend(event::group(media, "instagram"));
+            pending.extend(event::group_with_keywords(
+                media,
+                "instagram",
+                instagram_keywords(),
+            ));
         }
         state.pending = pending;
         state.cursor = cursor;
@@ -649,7 +659,51 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                 category: "instagram".into(),
                 filename: format!("{post_id}_{media_id}.{extension}"),
                 metadata: Some(PostMetadata {
+                    source_num: None,
+                    booru_keywords: None,
+                    source_defaults: None,
+                    booru_user_id: None,
+                    booru_pool_name: None,
+                    booru_favorite_id: None,
+                    booru_artist_parent: None,
+                    booru_popular: None,
+                    source_suffix: None,
+                    pool: None,
+                    favgroup: None,
+                    search_tags: None,
+                    keyword_updates: None,
+                    tags: None,
+                    sketch: None,
+                    sketch_archive: false,
+                    user_bookmark: None,
+                    bookmark_archive: false,
+                    ajax: None,
+                    mypixiv: None,
+                    pixiv_novel_metadata: None,
+                    caption_html: None,
+                    pixiv_user_detail: None,
+                    comments: None,
+                    tags_bookmark: None,
+                    ugoira_original: None,
+                    ugoira_frame_index: None,
+                    pixivision: None,
+                    pixivision_archive: false,
+                    user_follow: None,
+                    followed_archive: false,
+                    series: None,
+                    num_series: None,
+                    search: None,
+                    search_archive: false,
+                    ranking: None,
+                    ranking_archive: false,
+                    profile_asset: None,
                     file: Some(file_metadata(item, variant, kind == Some(2))),
+                    frames: None,
+                    rating: None,
+                    score: None,
+                    revision: None,
+                    discord: None,
+                    creator: None,
                     community: None,
                     community_archive: false,
                     retweet_id: None,
@@ -1644,3 +1698,25 @@ mod story_tests;
 #[cfg(test)]
 #[path = "instagram_collections_tests.rs"]
 mod collection_tests;
+
+fn instagram_keywords() -> event::KeywordPolicy {
+    event::KeywordPolicy::copied_after_post(&[
+        "num",
+        "index",
+        "media_id",
+        "filename",
+        "name",
+        "extension",
+        "url",
+        "_url",
+        "file",
+        "width",
+        "height",
+        "duration",
+        "description",
+        "alt",
+        "audio_url",
+        "video_url",
+        "display_url",
+    ])
+}

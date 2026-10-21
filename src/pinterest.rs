@@ -11,7 +11,7 @@
 //! or `v*.pinimg.com` only. Promoted pins are skipped.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -747,6 +747,35 @@ impl From<crate::Error> for Failure {
     }
 }
 
+// PinterestExtractor.items reuses pin and applies each prepared media map.
+// Include native file aliases without resetting unrelated post-level fields.
+fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
+    group_with_keywords(
+        media,
+        category,
+        KeywordPolicy::shared(&[
+            "num",
+            "index",
+            "media_id",
+            "filename",
+            "name",
+            "extension",
+            "url",
+            "_url",
+            "_filesize",
+            "width",
+            "height",
+            "duration",
+            "size",
+            "story_id",
+            "page_id",
+            "_fallback",
+            "_ytdl_manifest",
+            "file",
+        ]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,6 +791,31 @@ mod tests {
             "pinner": {"username": "alice"},
             "images": {"orig": {"url": format!("https://i.pinimg.com/originals/aa/{id}.jpg"),
                 "width": 800, "height": 600}}})
+    }
+
+    #[test]
+    fn shared_keyword_policy_declares_source_file_assignments() {
+        let events = group(pin_media(&pin("123")), "pinterest");
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("missing post");
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("expected shared Pinterest keywords");
+        };
+        for field in [
+            "num",
+            "index",
+            "media_id",
+            "page_id",
+            "story_id",
+            "width",
+            "height",
+            "filename",
+            "extension",
+        ] {
+            assert!(file_fields.iter().any(|f| f == field));
+        }
+        assert!(!file_fields.iter().any(|f| f == "description"));
     }
 
     #[test]

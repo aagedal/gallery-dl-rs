@@ -177,9 +177,9 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
         r#"{"extractor":{"filename":{"1":["secret-value"]}}}"#,
-        r#"{"extractor":{"filename":"{secret-value}"}}"#,
+        r#"{"extractor":{"filename":"{secret-value[}"}}"#,
         r#"{"extractor":{"filename":"secret-value/{filename}"}}"#,
-        r#"{"extractor":{"postprocessors":[{"name":"exec","command":"secret-value"}]}}"#,
+        r#"{"extractor":{"postprocessors":["ugoira", {"secret-value": true}, 1]}}"#,
         r#"{"extractor":{"archive":"postgresql://secret-value"}}"#,
         r#"{"extractor":{"archive":"$secret-value"}}"#,
         r#"{"extractor":{"archive":"~secret-value"}}"#,
@@ -200,6 +200,24 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         assert!(!message.contains("secret-key"), "{message}");
         assert!(!message.contains("secret-value"), "{message}");
     }
+}
+
+#[test]
+fn source_templates_accept_dynamic_api_fields_before_extraction() {
+    // Source formatter resolves these API dictionary keys at rendering time,
+    // including keys that are not Python identifiers.
+    let filename = "{private-field!D:%Y}.{extension}";
+    let directory = vec!["{category}".to_owned(), "{private-field!d:%Y}".to_owned()];
+    let config = parse(
+        &serde_json::json!({
+            "extractor": {"filename": filename, "directory": directory}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let settings = config.resolve("danbooru").unwrap();
+    assert_eq!(settings.filename.as_deref(), Some(filename));
+    assert_eq!(settings.directory.as_ref(), Some(&directory));
 }
 
 #[test]
@@ -315,7 +333,7 @@ fn directory_templates_resolve_scopes_and_preserve_explicit_empty_overrides() {
 }
 
 #[test]
-fn directory_templates_reject_invalid_types_paths_and_unknown_fields_privately() {
+fn directory_templates_reject_invalid_types_paths_and_malformed_fields_privately() {
     for value in [
         serde_json::json!(null),
         serde_json::json!("secret-value"),
@@ -326,7 +344,7 @@ fn directory_templates_reject_invalid_types_paths_and_unknown_fields_privately()
         serde_json::json!([".."]),
         serde_json::json!(["/secret-value"]),
         serde_json::json!(["secret-value/child"]),
-        serde_json::json!(["{secret-value}"]),
+        serde_json::json!(["{secret-value[}"]),
         serde_json::json!(["secret-value\0"]),
         serde_json::json!(vec!["secret-value"; 33]),
         serde_json::json!(["secret-value".repeat(8193)]),
@@ -465,9 +483,10 @@ fn invalid_size_configuration_fails_without_echoing_values() {
 }
 
 #[test]
-fn date_limits_resolve_scopes_and_preserve_epoch_zero() {
+fn date_limits_resolve_scopes_and_preserve_string_epoch_zero() {
     let config =
-        parse(r#"{"extractor":{"date-before":"2000-01-01","twitter":{"date-after":0}}}"#).unwrap();
+        parse(r#"{"extractor":{"date-before":"2000-01-01","twitter":{"date-after":"0"}}}"#)
+            .unwrap();
     let twitter = config.resolve("twitter").unwrap();
     assert_eq!(twitter.date_before, Some(946684800));
     assert_eq!(twitter.date_after, Some(0));
@@ -486,28 +505,55 @@ fn date_limits_resolve_scopes_and_preserve_epoch_zero() {
 }
 
 #[test]
-fn date_limits_reject_invalid_private_values_and_duplicate_keys() {
+fn date_limits_disable_invalid_or_falsy_values_and_convert_source_numeric_bounds() {
     for field in ["date-before", "date-after"] {
-        for value in [
-            serde_json::json!(null),
-            serde_json::json!(false),
-            serde_json::json!(1.5),
-            serde_json::json!([]),
-            serde_json::json!("private-date"),
-            serde_json::json!("2025-02-29"),
-            serde_json::json!("2026-01-01T24:00:00"),
-            serde_json::json!("18446744073709551615"),
+        for (value, expected) in [
+            (serde_json::json!(null), None),
+            (serde_json::json!(false), None),
+            (serde_json::json!(0), None),
+            (serde_json::json!(true), Some(1)),
+            (serde_json::json!(1.5), Some(1)),
+            (serde_json::json!(-1.5), Some(-1)),
+            (serde_json::json!(0.1), Some(0)),
+            (serde_json::json!([]), None),
+            (serde_json::json!({"private":"PRIVATE_DATE"}), None),
+            (serde_json::json!("private-date"), None),
+            (serde_json::json!("2025-02-29"), None),
+            (serde_json::json!("2026-01-01T24:00:00"), Some(1767312000)),
+            (serde_json::json!("18446744073709551615"), None),
         ] {
             for doc in [
                 serde_json::json!({(field):value}),
                 serde_json::json!({"extractor":{(field):value}}),
                 serde_json::json!({"extractor":{"instagram":{(field):value}}}),
             ] {
-                let message = parse(&doc.to_string()).unwrap_err().to_string();
-                assert!(!message.contains("private-date"));
+                let config = parse(&doc.to_string()).unwrap();
+                let settings = config.resolve("instagram").unwrap();
+                assert_eq!(
+                    if field == "date-before" {
+                        settings.date_before
+                    } else {
+                        settings.date_after
+                    },
+                    expected
+                );
             }
         }
     }
+    let settings = parse(r#"{"date-after":null,"extractor":{"date-after":"2000-01-01"}}"#)
+        .unwrap()
+        .resolve("twitter")
+        .unwrap();
+    assert_eq!(settings.date_after, None);
+    assert_eq!(
+        settings
+            .overlay(&Options {
+                date_after: Some(0),
+                ..Default::default()
+            })
+            .date_after,
+        Some(0)
+    );
     assert!(parse(r#"{"date-before":1,"date-before":2}"#).is_err());
 }
 
@@ -1883,7 +1929,7 @@ fn api_key_is_tumblr_flickr_wallhaven_and_weasyl_only_and_never_echoed() {
 }
 
 #[test]
-fn refresh_token_is_pixiv_only_and_never_echoed() {
+fn refresh_token_is_pixiv_scoped_and_never_echoed() {
     let config = parse(r#"{"extractor":{"pixiv":{"refresh-token":"abc_123-x"}}}"#).unwrap();
     assert_eq!(
         config.resolve("pixiv").unwrap().refresh_token.as_deref(),
@@ -1900,6 +1946,69 @@ fn refresh_token_is_pixiv_only_and_never_echoed() {
         let error = parse(json).err().unwrap().to_string();
         assert!(!error.contains("abc"), "{error}");
     }
+}
+
+#[test]
+fn novel_settings_and_credentials_are_separate_from_illustrations() {
+    let config = parse(r#"{"extractor":{"pixiv":{"refresh-token":"art_token"},"pixiv-novel":{"refresh-token":"novel_token","covers":true,"full-series":true,"filename":"novel.{extension}"}}}"#).unwrap();
+    let novels = config.resolve("pixiv-novel").unwrap();
+    assert_eq!(novels.refresh_token.as_deref(), Some("novel_token"));
+    assert_eq!(novels.covers, Some(true));
+    assert_eq!(novels.full_series, Some(true));
+    assert_eq!(novels.filename.as_deref(), Some("novel.{extension}"));
+    let art = config.resolve("pixiv").unwrap();
+    assert_eq!(art.refresh_token.as_deref(), Some("art_token"));
+    assert_eq!(art.covers, None);
+    assert_eq!(art.full_series, None);
+    let overridden = novels.overlay(&Options {
+        covers: Some(false),
+        full_series: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(overridden.covers, Some(false));
+    assert_eq!(overridden.full_series, Some(false));
+    for (document, category, covers, full_series) in [
+        (r#"{"covers":true}"#, "pixiv-novel", Some(true), None),
+        (
+            r#"{"extractor":{"covers":true}}"#,
+            "pixiv-novel",
+            Some(true),
+            None,
+        ),
+        (
+            r#"{"extractor":{"pixiv":{"full-series":true}}}"#,
+            "pixiv",
+            None,
+            Some(true),
+        ),
+        (
+            r#"{"extractor":{"tumblr":{"covers":false}}}"#,
+            "tumblr",
+            Some(false),
+            None,
+        ),
+        (
+            r#"{"extractor":{"pixiv-novel":{"covers":"secret-value"}}}"#,
+            "pixiv-novel",
+            Some(true),
+            None,
+        ),
+        (
+            r#"{"extractor":{"pixiv-novel":{"full-series":1}}}"#,
+            "pixiv-novel",
+            None,
+            Some(true),
+        ),
+    ] {
+        let resolved = parse(document).unwrap().resolve(category).unwrap();
+        assert_eq!(resolved.covers, covers);
+        assert_eq!(resolved.full_series, full_series);
+        assert!(!format!("{resolved:?}").contains("secret-value"));
+    }
+    let message = parse(r#"{"extractor":{"pixiv-novel":{"refresh-token":"secret value"}}}"#)
+        .unwrap_err()
+        .to_string();
+    assert!(!message.contains("secret"));
 }
 
 #[test]
@@ -1921,5 +2030,1891 @@ fn client_credentials_are_deviantart_only_and_never_echoed() {
     ] {
         let error = parse(json).err().unwrap().to_string();
         assert!(!error.contains("abc"), "{error}");
+    }
+}
+
+#[test]
+fn site_media_booleans_obey_scope_precedence_and_reject_private_invalid_values() {
+    let cfg = parse(r#"{"extractor":{"mp4":true,"reblogs":false,"text-posts":false,"imgur":{"mp4":false},"mastodon":{"reblogs":true,"text-posts":true,"replies":false}}}"#).unwrap();
+    assert_eq!(cfg.resolve("imgur").unwrap().mp4, Some(false));
+    assert_eq!(cfg.resolve("reddit").unwrap().mp4, Some(true));
+    let m = cfg.resolve("mastodon").unwrap();
+    assert_eq!(m.reblogs, Some(true));
+    assert_eq!(m.text_posts, Some(true));
+    assert_eq!(m.replies, Some(gallery_dl_rs::twitter::ReplyMode::Skip));
+    assert_eq!(
+        m.overlay(&Options {
+            reblogs: Some(false),
+            ..Options::default()
+        })
+        .reblogs,
+        Some(false)
+    );
+    let cfg = parse(r#"{"mp4":true,"reblogs":false,"text-posts":false,"extractor":{"imgur":{"mp4":false},"mastodon":{"reblogs":true,"text-posts":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("imgur").unwrap().mp4, Some(true));
+    assert_eq!(cfg.resolve("mastodon").unwrap().reblogs, Some(false));
+    assert_eq!(cfg.resolve("mastodon").unwrap().text_posts, Some(false));
+    for key in ["mp4", "reblogs", "text-posts"] {
+        for bad in [
+            serde_json::json!(null),
+            serde_json::json!(1),
+            serde_json::json!("private-value"),
+            serde_json::json!([]),
+        ] {
+            let body = serde_json::json!({"extractor": {"mastodon": {key: bad}}}).to_string();
+            let error = parse(&body).err().unwrap().to_string();
+            assert!(error.contains(key), "{error}");
+            assert!(!error.contains("private-value"));
+        }
+    }
+}
+
+#[test]
+fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
+    let key = "opaque:key-_.!";
+    let cfg = parse(&serde_json::json!({"extractor":{"pixeldrain":{"api-key":key}}}).to_string())
+        .unwrap();
+    assert_eq!(
+        cfg.resolve("pixeldrain").unwrap().api_key.as_deref(),
+        Some(key)
+    );
+    assert_eq!(cfg.resolve("catbox").unwrap().api_key, None);
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(7),
+        serde_json::json!("private key"),
+        serde_json::json!("private\nkey"),
+        serde_json::json!("x".repeat(4097)),
+    ] {
+        let body = serde_json::json!({"extractor":{"pixeldrain":{"api-key":value}}}).to_string();
+        let error = parse(&body).err().unwrap().to_string();
+        assert!(!error.contains("private"));
+    }
+}
+
+#[test]
+fn reposts_are_strict_booleans_and_ugoira_defaults_remain_scoped() {
+    use gallery_dl_rs::pixiv::UgoiraMode;
+    let cfg = parse(r#"{"extractor":{"reposts":false,"ugoira":false,"bluesky":{"reposts":true},"pixiv":{"ugoira":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("bluesky").unwrap().reposts, Some(true));
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Zip));
+    assert_eq!(cfg.resolve("direct").unwrap().reposts, Some(false));
+    let cfg = parse(r#"{"reposts":false,"ugoira":false,"extractor":{"bluesky":{"reposts":true},"pixiv":{"ugoira":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("bluesky").unwrap().reposts, Some(false));
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Skip));
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(1),
+        serde_json::json!("private-value"),
+        serde_json::json!([]),
+    ] {
+        let error =
+            parse(&serde_json::json!({"extractor":{"bluesky":{"reposts":value}}}).to_string())
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(!error.contains("private-value"));
+    }
+}
+
+#[test]
+fn mastodon_instance_credentials_are_separate_and_inherit_shared_settings() {
+    let cfg = parse(r#"{"extractor":{"retries":1,"mastodon":{"reblogs":true,"text-posts":true,"timeout":5},"mastodon.social":{"access-token":"social-token","replies":false},"pawoo":{"access-token":"pawoo-token","timeout":7}}}"#).unwrap();
+    let social = cfg.resolve("mastodon.social").unwrap();
+    assert_eq!(social.access_token.as_deref(), Some("social-token"));
+    assert_eq!(social.reblogs, Some(true));
+    assert_eq!(
+        social.replies,
+        Some(gallery_dl_rs::twitter::ReplyMode::Skip)
+    );
+    assert_eq!(social.timeout, Some(Duration::from_secs(5)));
+    let pawoo = cfg.resolve("pawoo").unwrap();
+    assert_eq!(pawoo.access_token.as_deref(), Some("pawoo-token"));
+    assert_eq!(pawoo.reblogs, Some(true));
+    assert_eq!(pawoo.timeout, Some(Duration::from_secs(7)));
+    let baraag = cfg.resolve("baraag").unwrap();
+    assert_eq!(baraag.access_token, None);
+    assert_eq!(baraag.text_posts, Some(true));
+    assert_eq!(cfg.resolve("mastodon").unwrap().access_token, None);
+    let disabled = parse(r#"{"extractor":{"pawoo":{"access-token":false}}}"#).unwrap();
+    assert_eq!(
+        disabled.resolve("pawoo").unwrap().access_token.as_deref(),
+        Some("")
+    );
+    for scope in ["mastodon", "twitter", "bluesky", "direct"] {
+        assert!(
+            parse(
+                &serde_json::json!({"extractor":{scope:{"access-token":"private-token"}}})
+                    .to_string()
+            )
+            .is_err()
+        );
+    }
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!(7),
+        serde_json::json!("private token"),
+        serde_json::json!("private\r\ntoken"),
+        serde_json::json!("cache"),
+        serde_json::json!("x".repeat(4097)),
+    ] {
+        let error =
+            parse(&serde_json::json!({"extractor":{"pawoo":{"access-token":value}}}).to_string())
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(!error.contains("private"));
+    }
+    for text in [
+        r#"{"access-token":"private-token"}"#,
+        r#"{"extractor":{"access-token":"private-token"}}"#,
+        r#"{"extractor":{"pawoo":{"access-token":"a","access-token":"b"}}}"#,
+    ] {
+        assert!(parse(text).is_err());
+    }
+    assert!(!format!("{social:?}").contains("social-token"));
+}
+
+#[test]
+fn tumblr_selections_replace_inherited_modes_and_preserve_global_precedence() {
+    use gallery_dl_rs::tumblr::{Inline, Reblogs};
+    let cfg = parse(r#"{"extractor":{"reblogs":false,"posts":"photo,video","inline":false,"original":false,"tumblr":{"reblogs":"same-blog","posts":["audio"],"inline":"reblog"}}}"#).unwrap();
+    let selection = cfg.resolve("tumblr").unwrap().tumblr_selection();
+    assert_eq!(selection.reblogs, Reblogs::SameBlog);
+    assert_eq!(selection.inline, Inline::Reblog);
+    assert!(!selection.original);
+    assert_eq!(
+        selection.posts.unwrap().into_iter().collect::<Vec<_>>(),
+        vec!["audio"]
+    );
+    assert_eq!(cfg.resolve("mastodon").unwrap().reblogs, Some(false));
+    let cfg = parse(r#"{"reblogs":false,"posts":"all","inline":"original","original":true,"extractor":{"tumblr":{"reblogs":"same-blog","posts":["photo"],"inline":false,"original":false}}}"#).unwrap();
+    let options = cfg.resolve("tumblr").unwrap();
+    let selection = options.tumblr_selection();
+    assert_eq!(selection.reblogs, Reblogs::OriginalOnly);
+    assert_eq!(selection.inline, Inline::Original);
+    assert!(selection.original);
+    assert!(selection.posts.is_none());
+    let explicit = options.overlay(&Options {
+        reblogs: Some(true),
+        tumblr_reblogs: Some(Reblogs::SameBlog),
+        ..Default::default()
+    });
+    assert_eq!(explicit.reblogs, None);
+    assert_eq!(explicit.tumblr_selection().reblogs, Reblogs::SameBlog);
+    let explicit = explicit.overlay(&Options {
+        reblogs: Some(false),
+        posts: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(explicit.tumblr_selection().reblogs, Reblogs::OriginalOnly);
+    assert!(explicit.tumblr_selection().posts.unwrap().is_empty());
+}
+
+#[test]
+fn tumblr_invalid_modes_and_types_fail_without_echoing_values() {
+    for (key, value) in [
+        ("reblogs", serde_json::json!("PRIVATE_VALUE")),
+        ("posts", serde_json::json!("PRIVATE_VALUE")),
+        ("posts", serde_json::json!(["all"])),
+        ("posts", serde_json::json!(true)),
+        ("posts", serde_json::json!(null)),
+        ("inline", serde_json::json!("PRIVATE_VALUE")),
+        ("inline", serde_json::json!(1)),
+        ("original", serde_json::json!("PRIVATE_VALUE")),
+    ] {
+        let error = parse(&serde_json::json!({"extractor":{"tumblr":{key:value}}}).to_string())
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!error.contains("PRIVATE_VALUE"));
+    }
+    for value in [
+        serde_json::json!(false),
+        serde_json::json!([]),
+        serde_json::json!(""),
+    ] {
+        let options =
+            parse(&serde_json::json!({"extractor":{"tumblr":{"posts":value}}}).to_string())
+                .unwrap()
+                .resolve("tumblr")
+                .unwrap();
+        assert!(options.tumblr_selection().posts.unwrap().is_empty());
+    }
+}
+
+#[test]
+fn booru_credentials_stay_in_their_category_and_are_private() {
+    let cfg = parse(r#"{"extractor":{"danbooru":{"username":"alice","password":"key:one"},"e621":{"username":"bob","password":"key-two"},"gelbooru":{"user-id":42,"api-key":"key:&=!?"},"safebooru":{"user-id":"00043","api-key":"safe-key"}}}"#).unwrap();
+    let danbooru = cfg.resolve("danbooru").unwrap();
+    assert_eq!(danbooru.username.as_deref(), Some("alice"));
+    assert_eq!(danbooru.password.as_deref(), Some("key:one"));
+    assert_eq!(
+        cfg.resolve("e621").unwrap().username.as_deref(),
+        Some("bob")
+    );
+    assert_eq!(
+        cfg.resolve("gelbooru").unwrap().user_id.as_deref(),
+        Some("42")
+    );
+    assert_eq!(
+        cfg.resolve("gelbooru").unwrap().api_key.as_deref(),
+        Some("key:&=!?")
+    );
+    let safebooru = cfg.resolve("safebooru").unwrap();
+    assert_eq!(safebooru.user_id.as_deref(), Some("00043"));
+    assert_eq!(safebooru.api_key.as_deref(), Some("safe-key"));
+    assert!(safebooru.username.is_none() && safebooru.password.is_none());
+    assert!(!format!("{safebooru:?}").contains("safe-key"));
+    for category in ["twitter", "direct", "tumblr"] {
+        let options = cfg.resolve(category).unwrap();
+        assert!(
+            options.username.is_none() && options.password.is_none() && options.user_id.is_none()
+        );
+    }
+    assert!(!format!("{danbooru:?}").contains("key:one"));
+    for body in [
+        serde_json::json!({"username":"PRIVATE_VALUE"}),
+        serde_json::json!({"extractor":{"password":"PRIVATE_VALUE"}}),
+        serde_json::json!({"extractor":{"twitter":{"username":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"gelbooru":{"password":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"safebooru":{"user-id":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"danbooru":{"username":"PRIVATE:VALUE"}}}),
+        serde_json::json!({"extractor":{"e621":{"password":"PRIVATE\nVALUE"}}}),
+        serde_json::json!({"extractor":{"gelbooru":{"api-key":"PRIVATE VALUE"}}}),
+        serde_json::json!({"extractor":{"gelbooru":{"user-id":0}}}),
+    ] {
+        let error = parse(&body.to_string()).err().unwrap().to_string();
+        assert!(!error.contains("PRIVATE"), "{error}");
+    }
+}
+
+#[test]
+fn source_post_limits_inherit_and_zero_explicitly_clears_limits() {
+    let config = parse(r#"{"extractor":{"max-posts":20,"expand":true,"kemono":{"max-posts":2,"expand":false},"coomer":{"max-posts":0},"pixiv":{"max-posts":4},"pixiv-novel":{"max-posts":0}}}"#).unwrap();
+    let kemono = config.resolve("kemono").unwrap();
+    assert_eq!((kemono.max_posts, kemono.expand), (Some(2), Some(false)));
+    let coomer = config.resolve("coomer").unwrap();
+    assert_eq!((coomer.max_posts, coomer.expand), (Some(0), Some(true)));
+    assert_eq!(config.resolve("pixiv").unwrap().max_posts, Some(4));
+    assert_eq!(config.resolve("pixiv-novel").unwrap().max_posts, Some(0));
+    let generic = config.resolve("instagram").unwrap();
+    assert_eq!(generic.max_posts, Some(20));
+    assert_eq!(
+        generic
+            .overlay(&Options {
+                max_posts: Some(0),
+                ..Default::default()
+            })
+            .max_posts,
+        Some(0)
+    );
+    assert_eq!(kemono.overlay(&Options::default()), kemono);
+    let root =
+        parse(r#"{"max-posts":3,"extractor":{"max-posts":20,"kemono":{"max-posts":2}}}"#).unwrap();
+    assert_eq!(root.resolve("kemono").unwrap().max_posts, Some(3));
+    assert_eq!(
+        parse("{}").unwrap().resolve("kemono").unwrap().max_posts,
+        None
+    );
+}
+
+#[test]
+fn source_post_limits_reject_invalid_types_privately_in_all_scopes() {
+    use serde_json::json;
+    for value in [
+        json!(null),
+        json!(true),
+        json!(false),
+        json!(-1),
+        json!(1.5),
+        json!("PRIVATE_VALUE"),
+        json!([]),
+        json!({"PRIVATE_VALUE": 1}),
+    ] {
+        for document in [
+            json!({"max-posts":value}),
+            json!({"extractor":{"max-posts":value}}),
+            json!({"extractor":{"kemono":{"max-posts":value}}}),
+            json!({"extractor":{"coomer":{"max-posts":value}}}),
+            json!({"extractor":{"pixiv":{"max-posts":value}}}),
+            json!({"extractor":{"pixiv-novel":{"max-posts":value}}}),
+        ] {
+            let failure = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(failure.contains("max-posts"), "{failure}");
+            assert!(!failure.contains("PRIVATE_VALUE"), "{failure}");
+        }
+    }
+    assert!(parse(r#"{"max-posts":1,"max-posts":2}"#).is_err());
+}
+
+#[test]
+fn kemono_file_selection_is_typed_scoped_and_preserves_explicit_empty_values() {
+    use gallery_dl_rs::kemono::{DuplicateOptions, FileKind};
+    let config = parse(r#"{"extractor":{"files":"file, inline","duplicates":true,"original":true,"kemono":{"files":["attachments","file","attachments"],"duplicates":["attachment"],"original":false},"coomer":{"files":[],"duplicates":false}}}"#).unwrap();
+    let kemono = config.resolve("kemono").unwrap();
+    assert_eq!(
+        kemono.files,
+        Some(vec![
+            FileKind::Attachments,
+            FileKind::File,
+            FileKind::Attachments
+        ])
+    );
+    assert_eq!(
+        kemono.duplicates,
+        Some(DuplicateOptions {
+            attachment: true,
+            ..Default::default()
+        })
+    );
+    assert!(!kemono.kemono_selection().original);
+    let coomer = config.resolve("coomer").unwrap();
+    assert_eq!(coomer.files, Some(vec![]));
+    assert_eq!(coomer.duplicates, Some(DuplicateOptions::default()));
+    assert!(coomer.kemono_selection().original);
+    let inherited = config.resolve("instagram").unwrap();
+    assert_eq!(
+        inherited.files,
+        Some(vec![FileKind::File, FileKind::Inline])
+    );
+    assert_eq!(inherited.duplicates, Some(DuplicateOptions::all()));
+    assert_eq!(
+        inherited
+            .overlay(&Options {
+                files: Some(vec![]),
+                duplicates: Some(Default::default()),
+                ..Default::default()
+            })
+            .files,
+        Some(vec![])
+    );
+    let root =
+        parse(r#"{"files":[],"duplicates":"","extractor":{"files":"file","duplicates":true}}"#)
+            .unwrap()
+            .resolve("kemono")
+            .unwrap();
+    assert_eq!(root.files, Some(vec![]));
+    assert_eq!(root.duplicates, Some(DuplicateOptions::default()));
+    let defaults = Options::default();
+    assert!(!defaults.kemono_selection().original);
+    assert!(defaults.tumblr_selection().original);
+}
+
+#[test]
+fn kemono_file_selection_rejects_unknown_names_and_types_privately() {
+    use serde_json::json;
+    for (field, values) in [
+        (
+            "files",
+            vec![
+                json!(null),
+                json!(false),
+                json!(1),
+                json!(""),
+                json!("attachment"),
+                json!("PRIVATE_VALUE"),
+                json!(["file", 1]),
+            ],
+        ),
+        (
+            "duplicates",
+            vec![
+                json!(null),
+                json!(1),
+                json!("attachments"),
+                json!("PRIVATE_VALUE"),
+                json!(["inline", false]),
+            ],
+        ),
+    ] {
+        for value in values {
+            for document in [
+                json!({field:value}),
+                json!({"extractor":{field:value}}),
+                json!({"extractor":{"kemono":{field:value}}}),
+            ] {
+                let error = parse(&document.to_string()).unwrap_err().to_string();
+                assert!(error.contains(field), "{error}");
+                assert!(!error.contains("PRIVATE_VALUE"), "{error}");
+            }
+        }
+    }
+    assert!(parse(&json!({"files":vec!["file";65]}).to_string()).is_err());
+    assert!(parse(&json!({"duplicates":vec!["file";65]}).to_string()).is_err());
+}
+
+#[test]
+fn kemono_revision_modes_and_orders_inherit_without_losing_explicit_false() {
+    use gallery_dl_rs::kemono::{RevisionMode, RevisionOrder};
+    let cfg=parse(r#"{"extractor":{"revisions":true,"order-revisions":"reverse","kemono":{"revisions":"unique","order-revisions":"desc"},"coomer":{"revisions":false}}}"#).unwrap();
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert_eq!(
+        (kemono.revisions, kemono.order_revisions),
+        (Some(RevisionMode::Unique), Some(RevisionOrder::Newest))
+    );
+    let coomer = cfg.resolve("coomer").unwrap();
+    assert_eq!(
+        (coomer.revisions, coomer.order_revisions),
+        (Some(RevisionMode::None), Some(RevisionOrder::Oldest))
+    );
+    assert_eq!(
+        kemono
+            .overlay(&Options {
+                revisions: Some(RevisionMode::None),
+                ..Default::default()
+            })
+            .revisions,
+        Some(RevisionMode::None)
+    );
+    let root=parse(r#"{"revisions":false,"order-revisions":"asc","extractor":{"revisions":true,"order-revisions":"desc","kemono":{"revisions":"unique"}}}"#).unwrap().resolve("kemono").unwrap();
+    assert_eq!(
+        (root.revisions, root.order_revisions),
+        (Some(RevisionMode::None), Some(RevisionOrder::Oldest))
+    );
+    let empty = parse("{}").unwrap().resolve("kemono").unwrap();
+    assert_eq!((empty.revisions, empty.order_revisions), (None, None));
+}
+
+#[test]
+fn kemono_revision_settings_reject_unknown_types_and_values_privately() {
+    use serde_json::json;
+    for (field, values) in [
+        (
+            "revisions",
+            vec![
+                json!(null),
+                json!(1),
+                json!([]),
+                json!("true"),
+                json!("PRIVATE_VALUE"),
+            ],
+        ),
+        (
+            "order-revisions",
+            vec![
+                json!(null),
+                json!(true),
+                json!(1),
+                json!([]),
+                json!("PRIVATE_VALUE"),
+            ],
+        ),
+    ] {
+        for value in values {
+            for doc in [
+                json!({field:value}),
+                json!({"extractor":{field:value}}),
+                json!({"extractor":{"kemono":{field:value}}}),
+                json!({"extractor":{"coomer":{field:value}}}),
+            ] {
+                let error = parse(&doc.to_string()).unwrap_err().to_string();
+                assert!(error.contains(field), "{error}");
+                assert!(!error.contains("PRIVATE_VALUE"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn kemono_metadata_option_is_sparse_and_scoped_with_explicit_false_overlays() {
+    let cfg = parse(r#"{"extractor":{"metadata":false,"kemono":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(true));
+    assert_eq!(cfg.resolve("coomer").unwrap().metadata, Some(false));
+    assert_eq!(
+        cfg.resolve("kemono")
+            .unwrap()
+            .overlay(&Options {
+                metadata: Some(false),
+                ..Default::default()
+            })
+            .metadata,
+        Some(false)
+    );
+    assert_eq!(
+        parse(r#"{"metadata":false,"extractor":{"metadata":true,"kemono":{"metadata":true}}}"#)
+            .unwrap()
+            .resolve("kemono")
+            .unwrap()
+            .metadata,
+        Some(false)
+    );
+    assert_eq!(
+        parse("{}").unwrap().resolve("kemono").unwrap().metadata,
+        None
+    );
+    for (value, expected) in [
+        (serde_json::json!(null), false),
+        (serde_json::json!(1), true),
+        (serde_json::json!("PRIVATE_VALUE"), true),
+        (serde_json::json!([]), false),
+    ] {
+        for doc in [
+            serde_json::json!({"metadata":value}),
+            serde_json::json!({"extractor":{"kemono":{"metadata":value}}}),
+        ] {
+            let resolved = parse(&doc.to_string()).unwrap().resolve("kemono").unwrap();
+            assert_eq!(resolved.metadata, Some(expected));
+            assert!(!format!("{resolved:?}").contains("PRIVATE_VALUE"));
+        }
+    }
+}
+
+#[test]
+fn kemono_endpoint_and_discord_post_order_are_scoped_sparse_and_strict() {
+    use gallery_dl_rs::kemono::{Endpoint, PostOrder};
+    let cfg = parse(r#"{"extractor":{"endpoint":"legacy+","order-posts":"reverse","kemono":{"endpoint":"posts","order-posts":"asc"}}}"#).unwrap();
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert_eq!(
+        (kemono.endpoint, kemono.order_posts),
+        (Some(Endpoint::Posts), Some(PostOrder::Forward))
+    );
+    let coomer = cfg.resolve("coomer").unwrap();
+    assert_eq!(
+        (coomer.endpoint, coomer.order_posts),
+        (Some(Endpoint::Expanded), Some(PostOrder::Reverse))
+    );
+    let overlaid = coomer.overlay(&Options {
+        endpoint: Some(Endpoint::Posts),
+        order_posts: Some(PostOrder::Forward),
+        ..Default::default()
+    });
+    assert_eq!(
+        (overlaid.endpoint, overlaid.order_posts),
+        (kemono.endpoint, kemono.order_posts)
+    );
+    let cfg = parse(r#"{"endpoint":"posts+","order-posts":"desc","extractor":{"kemono":{"endpoint":"legacy","order-posts":"asc"}}}"#).unwrap();
+    let resolved = cfg.resolve("kemono").unwrap();
+    assert_eq!(
+        (resolved.endpoint, resolved.order_posts),
+        (Some(Endpoint::Expanded), Some(PostOrder::Reverse))
+    );
+    let empty = parse("{}").unwrap().resolve("kemono").unwrap();
+    assert_eq!((empty.endpoint, empty.order_posts), (None, None));
+    for field in ["endpoint", "order-posts"] {
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(true),
+            serde_json::json!(1),
+            serde_json::json!([]),
+            serde_json::json!("PRIVATE_VALUE"),
+        ] {
+            for doc in [
+                serde_json::json!({field:value}),
+                serde_json::json!({"extractor":{field:value}}),
+                serde_json::json!({"extractor":{"kemono":{field:value}}}),
+            ] {
+                let error = parse(&doc.to_string()).unwrap_err().to_string();
+                assert!(
+                    error.contains(field) && !error.contains("PRIVATE_VALUE"),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn kemono_favorites_are_sparse_scoped_and_validated_privately() {
+    use gallery_dl_rs::kemono::Favorites;
+    let cfg =
+        parse(r#"{"extractor":{"favorites":"post","kemono":{"favorites":"artist"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("kemono").unwrap().favorites,
+        Some(Favorites::Artist)
+    );
+    assert_eq!(
+        cfg.resolve("coomer").unwrap().favorites,
+        Some(Favorites::Post)
+    );
+    let cfg =
+        parse(r#"{"favorites":"post","extractor":{"kemono":{"favorites":"artist"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("kemono").unwrap().favorites,
+        Some(Favorites::Post)
+    );
+    assert_eq!(
+        cfg.resolve("kemono")
+            .unwrap()
+            .overlay(&Options {
+                favorites: Some(Favorites::Artist),
+                ..Default::default()
+            })
+            .favorites,
+        Some(Favorites::Artist)
+    );
+    assert_eq!(
+        parse("{}").unwrap().resolve("kemono").unwrap().favorites,
+        None
+    );
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!(1),
+        serde_json::json!([]),
+        serde_json::json!("PRIVATE_VALUE"),
+    ] {
+        for doc in [
+            serde_json::json!({"favorites":value}),
+            serde_json::json!({"extractor":{"favorites":value}}),
+            serde_json::json!({"extractor":{"coomer":{"favorites":value}}}),
+        ] {
+            let error = parse(&doc.to_string()).unwrap_err().to_string();
+            assert!(
+                error.contains("favorites") && !error.contains("PRIVATE_VALUE"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn child_selection_is_scoped_sparse_and_explicitly_clearable() {
+    let cfg=parse(r#"{"extractor":{"child-range":["2","4"],"child-filter":["service == 'patreon'"],"kemono":{"child-range":"1","child-filter":[]}}}"#).unwrap();
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert_eq!(kemono.child_range.as_deref(), Some("1"));
+    assert_eq!(kemono.child_filter, Some(vec![]));
+    let coomer = cfg.resolve("coomer").unwrap();
+    assert_eq!(coomer.child_range.as_deref(), Some("2,4"));
+    assert_eq!(
+        coomer.child_filter,
+        Some(vec!["service == 'patreon'".into()])
+    );
+    let overlaid = coomer.overlay(&Options {
+        child_range: Some("3".into()),
+        child_filter: Some(vec![]),
+        ..Default::default()
+    });
+    assert_eq!(overlaid.child_range.as_deref(), Some("3"));
+    assert_eq!(overlaid.child_filter, Some(vec![]));
+    let empty = parse("{}").unwrap().resolve("kemono").unwrap();
+    assert!(empty.child_range.is_none() && empty.child_filter.is_none());
+    assert_eq!(
+        parse(r#"{"child-range":"5","extractor":{"kemono":{"child-range":"1"}}}"#)
+            .unwrap()
+            .resolve("kemono")
+            .unwrap()
+            .child_range
+            .as_deref(),
+        Some("5")
+    );
+    for (field, values) in [
+        (
+            "child-range",
+            vec![
+                serde_json::json!(null),
+                serde_json::json!(true),
+                serde_json::json!({}),
+                serde_json::json!("PRIVATE_VALUE"),
+            ],
+        ),
+        (
+            "child-filter",
+            vec![
+                serde_json::json!(null),
+                serde_json::json!(true),
+                serde_json::json!([1]),
+                serde_json::json!({"private":"PRIVATE_VALUE"}),
+            ],
+        ),
+    ] {
+        for value in values {
+            let doc = serde_json::json!({"extractor":{"kemono":{field:value}}});
+            let error = parse(&doc.to_string()).unwrap_err().to_string();
+            assert!(
+                error.contains(field) && !error.contains("PRIVATE_VALUE"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn include_configuration_is_sparse_ordered_and_explicitly_clearable() {
+    use gallery_dl_rs::dispatch::Include;
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("twitter").unwrap().include,
+        None
+    );
+    let cfg = parse(
+        &json!({"extractor":{"include":" media, replies,media ",
+        "pixiv":{"include":"all"},"twitter":{"include":[]},"bluesky":{"include":null}}})
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().include, Some(Include::All));
+    for category in ["twitter", "bluesky"] {
+        assert_eq!(
+            cfg.resolve(category).unwrap().include,
+            Some(Include::Views(vec![]))
+        );
+    }
+    assert_eq!(
+        cfg.resolve("tumblr").unwrap().include,
+        Some(Include::Views(vec![
+            "media".into(),
+            "replies".into(),
+            "media".into()
+        ]))
+    );
+    let merged = cfg.resolve("pixiv").unwrap().overlay(&Options {
+        include: Some(Include::Views(vec![])),
+        ..Default::default()
+    });
+    assert_eq!(merged.include, Some(Include::Views(vec![])));
+    let cfg = parse(
+        &json!({"include":"all","extractor":{"include":false,"pixiv":{"include":[]}}}).to_string(),
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().include, Some(Include::All));
+    for value in [
+        json!(true),
+        json!(3),
+        json!(["media", null]),
+        json!({"private":"include-secret"}),
+    ] {
+        let error = parse(&json!({"extractor":{"include":value}}).to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("include-secret"));
+        assert!(error.contains("include"));
+    }
+}
+
+#[test]
+fn bluesky_likes_endpoint_and_api_server_are_scoped_sparse_and_private() {
+    use gallery_dl_rs::bluesky::LikesEndpoint;
+    use serde_json::json;
+    let cfg=parse(&json!({"extractor":{"endpoint":"posts+","bluesky":{"endpoint":"getActorLikes","api-server":"https://appview.example/base/"}}}).to_string()).unwrap();
+    let blue = cfg.resolve("bluesky").unwrap();
+    assert_eq!(blue.bluesky_endpoint, Some(LikesEndpoint::ActorLikes));
+    assert_eq!(
+        blue.api_server.as_deref(),
+        Some("https://appview.example/base/")
+    );
+    let kemono = cfg.resolve("kemono").unwrap();
+    assert!(kemono.bluesky_endpoint.is_none());
+    assert!(kemono.api_server.is_none());
+    assert_eq!(
+        kemono.endpoint,
+        Some(gallery_dl_rs::kemono::Endpoint::Expanded)
+    );
+    let cleared = blue.overlay(&Options {
+        api_server: Some(String::new()),
+        bluesky_endpoint: Some(LikesEndpoint::Records),
+        ..Default::default()
+    });
+    assert_eq!(cleared.api_server.as_deref(), Some(""));
+    assert_eq!(cleared.bluesky_endpoint, Some(LikesEndpoint::Records));
+    for value in [json!(""), json!(false), json!(null)] {
+        let cfg = parse(
+            &json!({"extractor":{"bluesky":{"api-server":value,"endpoint":null}}}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.resolve("bluesky").unwrap().api_server.as_deref(),
+            Some("")
+        );
+        assert_eq!(
+            cfg.resolve("bluesky").unwrap().bluesky_endpoint,
+            Some(LikesEndpoint::Records)
+        );
+    }
+    let cfg = parse(r#"{"extractor":{"bluesky":{"endpoint":"other"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("bluesky").unwrap().bluesky_endpoint,
+        Some(LikesEndpoint::Records)
+    );
+    for value in [
+        json!(true),
+        json!(7),
+        json!("https://private:secret@appview.example/"),
+        json!("https://appview.example/?token=secret"),
+        json!("https://appview.example/#secret"),
+        json!("file:///private/secret"),
+        json!("https://appview.example/\nsecret"),
+    ] {
+        let error = parse(&json!({"extractor":{"bluesky":{"api-server":value}}}).to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("secret"));
+        assert!(error.contains("api-server"));
+    }
+    for document in [
+        json!({"api-server":"https://private.example/"}),
+        json!({"extractor":{"api-server":"https://private.example/"}}),
+        json!({"extractor":{"twitter":{"api-server":"https://private.example/"}}}),
+    ] {
+        assert!(parse(&document.to_string()).is_err());
+    }
+}
+
+#[test]
+fn pixiv_tag_modes_are_sparse_inherited_and_independent_between_categories() {
+    use gallery_dl_rs::pixiv::TagMode;
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().tags, None);
+    assert_eq!(
+        parse("{}").unwrap().resolve("pixiv-novel").unwrap().tags,
+        None
+    );
+    let cfg = parse(r#"{"extractor":{"tags":"translated","pixiv":{"tags":"original"},"pixiv-novel":{"tags":"japanese"}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().tags, Some(TagMode::Original));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().tags,
+        Some(TagMode::Japanese)
+    );
+    assert_eq!(
+        cfg.resolve("direct").unwrap().tags,
+        Some(TagMode::Translated)
+    );
+    let cfg = parse(r#"{"extractor":{"tags":"translated","pixiv":{"tags":"original"}}}"#).unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().tags,
+        Some(TagMode::Translated)
+    );
+    let cfg = parse(r#"{"tags":"original","extractor":{"tags":"japanese","pixiv":{"tags":"translated"},"pixiv-novel":{"tags":"translated"}}}"#).unwrap();
+    for category in ["pixiv", "pixiv-novel"] {
+        let options = cfg.resolve(category).unwrap();
+        assert_eq!(options.tags, Some(TagMode::Original));
+        assert_eq!(
+            options
+                .overlay(&Options {
+                    tags: Some(TagMode::Japanese),
+                    ..Options::default()
+                })
+                .tags,
+            Some(TagMode::Japanese)
+        );
+        assert_eq!(
+            options.overlay(&Options::default()).tags,
+            Some(TagMode::Original)
+        );
+    }
+}
+
+#[test]
+fn pixiv_tag_modes_use_upstream_fallback_for_every_other_present_value() {
+    use gallery_dl_rs::pixiv::TagMode;
+    use serde_json::json;
+    for value in [
+        json!("japanese"),
+        json!("unknown-private-value"),
+        json!("ORIGINAL"),
+        json!("Translated"),
+        json!(" original"),
+        json!(""),
+        json!(null),
+        json!(true),
+        json!(false),
+        json!(0),
+        json!(1.5),
+        json!([]),
+        json!(["private-payload"]),
+        json!({"private":"payload"}),
+    ] {
+        for category in ["pixiv", "pixiv-novel"] {
+            let cfg = parse(
+                &json!({"extractor":{"tags":"translated", category: {"tags":value}}}).to_string(),
+            )
+            .unwrap();
+            let resolved = cfg.resolve(category).unwrap();
+            assert_eq!(resolved.tags, Some(TagMode::Japanese));
+            let debug = format!("{resolved:?}");
+            assert!(!debug.contains("private"));
+            assert!(!debug.contains("payload"));
+        }
+        for document in [json!({"tags":value}), json!({"extractor":{"tags":value}})] {
+            let cfg = parse(&document.to_string()).unwrap();
+            assert_eq!(cfg.resolve("pixiv").unwrap().tags, Some(TagMode::Japanese));
+            assert_eq!(
+                cfg.resolve("pixiv-novel").unwrap().tags,
+                Some(TagMode::Japanese)
+            );
+        }
+    }
+    let cfg = parse(r#"{"extractor":{"pixiv":{"tags":"translated","ugoira":false,"max-posts":3},"pixiv-novel":{"tags":"original","covers":true}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.tags, Some(TagMode::Translated));
+    assert_eq!(pixiv.ugoira, Some(gallery_dl_rs::pixiv::UgoiraMode::Skip));
+    assert_eq!(pixiv.max_posts, Some(3));
+    let novels = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(novels.tags, Some(TagMode::Original));
+    assert_eq!(novels.covers, Some(true));
+    assert_eq!(novels.ugoira, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn pixiv_bookmark_cursors_preserve_scalar_types_and_clear_inherited_settings() {
+    use gallery_dl_rs::pixiv::BookmarkCursor;
+    use serde_json::json;
+    let cursor = |value: serde_json::Value| BookmarkCursor::parse(&value).unwrap();
+    let cfg = parse(
+        r#"{"extractor":{"cursor":42,"pixiv":{"cursor":"0"},"pixiv-novel":{"cursor":null}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv").unwrap().cursor,
+        Some(cursor(json!("0")))
+    );
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().cursor,
+        Some(cursor(json!(null)))
+    );
+    assert_eq!(
+        cfg.resolve("direct").unwrap().cursor,
+        Some(cursor(json!(42)))
+    );
+    let cfg = parse(r#"{"cursor":"root","extractor":{"cursor":-1,"pixiv":{"cursor":"art"},"pixiv-novel":{"cursor":"novel"}}}"#).unwrap();
+    for category in ["pixiv", "pixiv-novel"] {
+        let options = cfg.resolve(category).unwrap();
+        assert_eq!(options.cursor, Some(cursor(json!("root"))));
+        let cleared = options.overlay(&Options {
+            cursor: Some(cursor(json!(null))),
+            ..Options::default()
+        });
+        assert_eq!(cleared.cursor.as_ref().unwrap().query_value(), None);
+        let blank = cleared.overlay(&Options {
+            cursor: Some(cursor(json!(""))),
+            ..Options::default()
+        });
+        assert_eq!(blank.cursor.as_ref().unwrap().query_value(), Some(""));
+    }
+    for value in [
+        json!(null),
+        json!(0),
+        json!(-15),
+        json!(""),
+        json!("猫 \n"),
+        json!("a".repeat(1024)),
+    ] {
+        for document in [
+            json!({"cursor":value}),
+            json!({"extractor":{"cursor":value}}),
+            json!({"extractor":{"pixiv":{"cursor":value}}}),
+        ] {
+            let cfg = parse(&document.to_string()).unwrap();
+            assert_eq!(
+                cfg.resolve("pixiv")
+                    .unwrap()
+                    .cursor
+                    .as_ref()
+                    .unwrap()
+                    .as_json(),
+                &value
+            );
+        }
+    }
+    let big = "9".repeat(1024);
+    let cfg = parse(&format!(
+        r#"{{"extractor":{{"pixiv-novel":{{"cursor":{big}}}}}}}"#
+    ))
+    .unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv-novel")
+            .unwrap()
+            .cursor
+            .unwrap()
+            .query_value(),
+        Some(big.as_str())
+    );
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().cursor, None);
+}
+
+#[test]
+fn pixiv_bookmark_cursor_invalid_types_and_bounds_fail_privately_in_every_scope() {
+    use serde_json::json;
+    for value in [
+        json!(true),
+        json!(false),
+        json!(1.5),
+        json!([]),
+        json!(["cursor-private-payload"]),
+        json!({"private":"cursor-private-payload"}),
+        json!("private-payload".repeat(100)),
+    ] {
+        for document in [
+            json!({"cursor":value}),
+            json!({"extractor":{"cursor":value}}),
+            json!({"extractor":{"pixiv":{"cursor":value}}}),
+            json!({"extractor":{"pixiv-novel":{"cursor":value}}}),
+        ] {
+            let message = parse(&document.to_string()).unwrap_err().to_string();
+            assert!(message.contains("cursor"));
+            assert!(!message.contains("private"));
+            assert!(!message.contains("payload"));
+        }
+    }
+    for value in ["1e10", "1.0", &"9".repeat(1025)] {
+        assert!(parse(&format!(r#"{{"cursor":{value}}}"#)).is_err());
+    }
+}
+
+#[test]
+fn pixiv_ugoira_modes_preserve_python_truthiness_and_discard_private_payloads() {
+    use gallery_dl_rs::pixiv::UgoiraMode;
+    use serde_json::json;
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().ugoira, None);
+    for (value, expected) in [
+        (json!(null), UgoiraMode::Skip),
+        (json!(false), UgoiraMode::Skip),
+        (json!(0), UgoiraMode::Skip),
+        (json!(0.0), UgoiraMode::Skip),
+        (json!(""), UgoiraMode::Skip),
+        (json!([]), UgoiraMode::Skip),
+        (json!({}), UgoiraMode::Skip),
+        (json!(true), UgoiraMode::Zip),
+        (json!(1), UgoiraMode::Zip),
+        (json!(-2), UgoiraMode::Zip),
+        (json!(0.5), UgoiraMode::Zip),
+        (json!("original"), UgoiraMode::Original),
+        (json!("ORIGINAL"), UgoiraMode::Zip),
+        (json!("Original"), UgoiraMode::Zip),
+        (json!("false"), UgoiraMode::Zip),
+        (json!(" "), UgoiraMode::Zip),
+        (json!("private-payload"), UgoiraMode::Zip),
+        (json!([false]), UgoiraMode::Zip),
+        (json!({"private":"payload"}), UgoiraMode::Zip),
+    ] {
+        for document in [
+            json!({"ugoira":value}),
+            json!({"extractor":{"ugoira":value}}),
+            json!({"extractor":{"pixiv":{"ugoira":value}}}),
+            json!({"extractor":{"pixiv-novel":{"ugoira":value}}}),
+        ] {
+            let config = parse(&document.to_string()).unwrap();
+            let category = if document["extractor"].get("pixiv-novel").is_some() {
+                "pixiv-novel"
+            } else {
+                "pixiv"
+            };
+            let resolved = config.resolve(category).unwrap();
+            assert_eq!(resolved.ugoira, Some(expected));
+            let debug = format!("{resolved:?}");
+            assert!(!debug.contains("private"));
+            assert!(!debug.contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_ugoira_modes_override_original_with_false_and_null_without_scope_leaks() {
+    use gallery_dl_rs::pixiv::UgoiraMode;
+    let cfg = parse(r#"{"extractor":{"ugoira":"original","pixiv":{"ugoira":false},"pixiv-novel":{"ugoira":null}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Skip));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().ugoira,
+        Some(UgoiraMode::Skip)
+    );
+    assert_eq!(
+        cfg.resolve("direct").unwrap().ugoira,
+        Some(UgoiraMode::Original)
+    );
+    let cfg = parse(r#"{"extractor":{"ugoira":true,"pixiv":{"ugoira":"original"}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.ugoira, Some(UgoiraMode::Original));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().ugoira,
+        Some(UgoiraMode::Zip)
+    );
+    assert_eq!(
+        pixiv
+            .overlay(&Options {
+                ugoira: Some(UgoiraMode::Skip),
+                ..Options::default()
+            })
+            .ugoira,
+        Some(UgoiraMode::Skip)
+    );
+    assert_eq!(
+        pixiv.overlay(&Options::default()).ugoira,
+        Some(UgoiraMode::Original)
+    );
+    let cfg = parse(r#"{"ugoira":null,"extractor":{"ugoira":"original","pixiv":{"ugoira":true}}}"#)
+        .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().ugoira, Some(UgoiraMode::Skip));
+    let cfg =
+        parse(r#"{"ugoira":"original","extractor":{"ugoira":false,"pixiv":{"ugoira":null}}}"#)
+            .unwrap();
+    assert_eq!(
+        cfg.resolve("pixiv").unwrap().ugoira,
+        Some(UgoiraMode::Original)
+    );
+}
+
+#[test]
+fn pixiv_enrichment_switches_accept_truthiness_and_discard_private_values() {
+    use serde_json::json;
+    let sparse = parse("{}").unwrap().resolve("pixiv").unwrap();
+    assert_eq!(sparse.comments, None);
+    assert_eq!(sparse.metadata_bookmark, None);
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"comments":value,"metadata-bookmark":value}),
+            json!({"extractor":{"comments":value,"metadata-bookmark":value}}),
+            json!({"extractor":{"pixiv":{"comments":value,"metadata-bookmark":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv")
+                .unwrap();
+            assert_eq!(resolved.comments, Some(expected));
+            assert_eq!(resolved.metadata_bookmark, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_enrichment_switches_are_scoped_and_explicit_null_clears_defaults() {
+    let cfg = parse(r#"{"extractor":{"comments":true,"metadata-bookmark":true,"pixiv":{"comments":null,"metadata-bookmark":false},"pixiv-novel":{"comments":false}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.comments, Some(false));
+    assert_eq!(pixiv.metadata_bookmark, Some(false));
+    let novel = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(novel.comments, Some(false));
+    assert_eq!(novel.metadata_bookmark, Some(true));
+    let generic = cfg.resolve("direct").unwrap();
+    assert_eq!(generic.comments, Some(true));
+    assert_eq!(generic.metadata_bookmark, Some(true));
+    let cfg = parse(r#"{"comments":null,"metadata-bookmark":false,"extractor":{"comments":true,"metadata-bookmark":true,"pixiv":{"comments":true,"metadata-bookmark":true}}}"#).unwrap();
+    let resolved = cfg.resolve("pixiv").unwrap();
+    assert_eq!(resolved.comments, Some(false));
+    assert_eq!(resolved.metadata_bookmark, Some(false));
+    let overridden = resolved.overlay(&Options {
+        comments: Some(true),
+        metadata_bookmark: Some(true),
+        ..Options::default()
+    });
+    assert_eq!(overridden.comments, Some(true));
+    assert_eq!(overridden.metadata_bookmark, Some(true));
+    assert_eq!(overridden.overlay(&Options::default()), overridden);
+    for (document, expected) in [
+        (r#"{"metadata":null}"#, false),
+        (r#"{"extractor":{"metadata":"private-payload"}}"#, true),
+    ] {
+        let resolved = parse(document).unwrap().resolve("pixiv").unwrap();
+        assert_eq!(resolved.metadata, Some(expected));
+        assert!(!format!("{resolved:?}").contains("private-payload"));
+    }
+    let cfg =
+        parse(r#"{"extractor":{"pixiv":{"comments":true,"metadata-bookmark":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().comments, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata_bookmark, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn metadata_switch_matches_source_truthiness_across_pixiv_and_kemono_scopes() {
+    use serde_json::json;
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for category in ["pixiv", "pixiv-novel", "kemono", "coomer"] {
+            for document in [
+                json!({"metadata":value}),
+                json!({"extractor":{"metadata":value}}),
+                json!({"extractor":{category:{"metadata":value}}}),
+            ] {
+                let resolved = parse(&document.to_string())
+                    .unwrap()
+                    .resolve(category)
+                    .unwrap();
+                assert_eq!(resolved.metadata, Some(expected));
+                assert!(!format!("{resolved:?}").contains("private"));
+                assert!(!format!("{resolved:?}").contains("payload"));
+            }
+        }
+    }
+}
+
+#[test]
+fn metadata_switch_preserves_independent_pixiv_novel_scopes_and_explicit_null_clearing() {
+    let cfg = parse(r#"{"extractor":{"metadata":true,"pixiv":{"metadata":null},"pixiv-novel":{"metadata":"false"},"kemono":{"metadata":[]}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().metadata, Some(false));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, Some(true));
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(false));
+    assert_eq!(cfg.resolve("coomer").unwrap().metadata, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, None);
+    let cfg = parse(r#"{"metadata":null,"extractor":{"metadata":true,"pixiv":{"metadata":true},"pixiv-novel":{"metadata":true}}}"#).unwrap();
+    for category in ["pixiv", "pixiv-novel", "kemono"] {
+        let resolved = cfg.resolve(category).unwrap();
+        assert_eq!(resolved.metadata, Some(false));
+        assert_eq!(
+            resolved
+                .overlay(&Options {
+                    metadata: Some(true),
+                    ..Options::default()
+                })
+                .metadata,
+            Some(true)
+        );
+        assert_eq!(resolved.overlay(&Options::default()).metadata, Some(false));
+    }
+    for category in ["pixiv", "pixiv-novel", "kemono", "coomer"] {
+        assert_eq!(
+            parse("{}").unwrap().resolve(category).unwrap().metadata,
+            None
+        );
+    }
+}
+
+#[test]
+fn pixiv_captions_are_sparse_truthy_and_discard_private_configuration_values() {
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("pixiv").unwrap().captions,
+        None
+    );
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"captions":value}),
+            json!({"extractor":{"captions":value}}),
+            json!({"extractor":{"pixiv":{"captions":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv")
+                .unwrap();
+            assert_eq!(resolved.captions, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_captions_obey_hierarchy_null_clearing_and_independent_novel_scopes() {
+    let cfg = parse(r#"{"extractor":{"captions":true,"pixiv":{"captions":null},"pixiv-novel":{"captions":"false"}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().captions, Some(false));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, Some(true));
+    assert_eq!(cfg.resolve("direct").unwrap().captions, Some(true));
+    let cfg = parse(r#"{"captions":null,"extractor":{"captions":true,"pixiv":{"captions":true}}}"#)
+        .unwrap();
+    let resolved = cfg.resolve("pixiv").unwrap();
+    assert_eq!(resolved.captions, Some(false));
+    assert_eq!(
+        resolved
+            .overlay(&Options {
+                captions: Some(true),
+                ..Options::default()
+            })
+            .captions,
+        Some(true)
+    );
+    assert_eq!(resolved.overlay(&Options::default()).captions, Some(false));
+    let cfg =
+        parse(r#"{"captions":"enabled","extractor":{"captions":false,"pixiv":{"captions":null}}}"#)
+            .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().captions, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv":{"captions":true,"comments":false,"metadata":null,"metadata-bookmark":true}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.captions, Some(true));
+    assert_eq!(pixiv.comments, Some(false));
+    assert_eq!(pixiv.metadata, Some(false));
+    assert_eq!(pixiv.metadata_bookmark, Some(true));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn pixiv_sanity_is_sparse_and_matches_source_truthiness_in_all_scopes() {
+    use serde_json::json;
+    assert_eq!(parse("{}").unwrap().resolve("pixiv").unwrap().sanity, None);
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"sanity":value}),
+            json!({"extractor":{"sanity":value}}),
+            json!({"extractor":{"pixiv":{"sanity":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv")
+                .unwrap();
+            assert_eq!(resolved.sanity, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_sanity_preserves_null_clearing_hierarchy_and_independent_categories() {
+    let cfg = parse(
+        r#"{"extractor":{"sanity":true,"pixiv":{"sanity":null},"pixiv-novel":{"sanity":"false"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().sanity, Some(false));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, Some(true));
+    assert_eq!(cfg.resolve("direct").unwrap().sanity, Some(true));
+    let cfg =
+        parse(r#"{"sanity":null,"extractor":{"sanity":true,"pixiv":{"sanity":true}}}"#).unwrap();
+    let resolved = cfg.resolve("pixiv").unwrap();
+    assert_eq!(resolved.sanity, Some(false));
+    assert_eq!(
+        resolved
+            .overlay(&Options {
+                sanity: Some(true),
+                ..Options::default()
+            })
+            .sanity,
+        Some(true)
+    );
+    assert_eq!(resolved.overlay(&Options::default()).sanity, Some(false));
+    let cfg =
+        parse(r#"{"sanity":true,"extractor":{"sanity":false,"pixiv":{"sanity":null}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().sanity, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv":{"sanity":false,"captions":true,"comments":false,"metadata":null,"metadata-bookmark":true}}}"#).unwrap();
+    let pixiv = cfg.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.sanity, Some(false));
+    assert_eq!(pixiv.captions, Some(true));
+    assert_eq!(pixiv.comments, Some(false));
+    assert_eq!(pixiv.metadata, Some(false));
+    assert_eq!(pixiv.metadata_bookmark, Some(true));
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn pixiv_novel_embeds_are_sparse_truthy_and_discard_private_values() {
+    use serde_json::json;
+    assert_eq!(
+        parse("{}").unwrap().resolve("pixiv-novel").unwrap().embeds,
+        None
+    );
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"embeds":value}),
+            json!({"extractor":{"embeds":value}}),
+            json!({"extractor":{"pixiv-novel":{"embeds":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv-novel")
+                .unwrap();
+            assert_eq!(resolved.embeds, Some(expected));
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn pixiv_novel_embeds_preserve_null_clearing_hierarchy_and_independent_categories() {
+    let cfg = parse(
+        r#"{"extractor":{"embeds":true,"pixiv-novel":{"embeds":null},"pixiv":{"embeds":"false"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().embeds, Some(false));
+    assert_eq!(cfg.resolve("pixiv").unwrap().embeds, Some(true));
+    assert_eq!(cfg.resolve("direct").unwrap().embeds, Some(true));
+    let cfg = parse(r#"{"embeds":null,"extractor":{"embeds":true,"pixiv-novel":{"embeds":true}}}"#)
+        .unwrap();
+    let resolved = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(resolved.embeds, Some(false));
+    assert_eq!(
+        resolved
+            .overlay(&Options {
+                embeds: Some(true),
+                ..Options::default()
+            })
+            .embeds,
+        Some(true)
+    );
+    assert_eq!(resolved.overlay(&Options::default()).embeds, Some(false));
+    let cfg =
+        parse(r#"{"embeds":"enabled","extractor":{"embeds":false,"pixiv-novel":{"embeds":null}}}"#)
+            .unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().embeds, Some(true));
+    let cfg = parse(r#"{"extractor":{"pixiv-novel":{"embeds":true,"captions":false,"comments":true,"metadata":null,"metadata-bookmark":false}}}"#).unwrap();
+    let novel = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(novel.embeds, Some(true));
+    assert_eq!(novel.captions, Some(false));
+    assert_eq!(novel.comments, Some(true));
+    assert_eq!(novel.metadata, Some(false));
+    assert_eq!(novel.metadata_bookmark, Some(false));
+    assert_eq!(cfg.resolve("pixiv").unwrap().embeds, None);
+    assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
+}
+
+#[test]
+fn novel_cover_and_series_switches_match_source_truthiness_in_all_scopes() {
+    use serde_json::json;
+    for (value, expected) in [
+        (json!(null), false),
+        (json!(false), false),
+        (json!(0), false),
+        (json!(-0.0), false),
+        (json!(""), false),
+        (json!([]), false),
+        (json!({}), false),
+        (json!(true), true),
+        (json!(1), true),
+        (json!(-1), true),
+        (json!(0.5), true),
+        (json!("false"), true),
+        (json!("private-payload"), true),
+        (json!([false]), true),
+        (json!({"private":"payload"}), true),
+    ] {
+        for document in [
+            json!({"covers":value,"full-series":value}),
+            json!({"extractor":{"covers":value,"full-series":value}}),
+            json!({"extractor":{"pixiv-novel":{"covers":value,"full-series":value}}}),
+        ] {
+            let resolved = parse(&document.to_string())
+                .unwrap()
+                .resolve("pixiv-novel")
+                .unwrap();
+            assert_eq!(
+                (resolved.covers, resolved.full_series),
+                (Some(expected), Some(expected))
+            );
+            assert!(!format!("{resolved:?}").contains("private"));
+            assert!(!format!("{resolved:?}").contains("payload"));
+        }
+    }
+}
+
+#[test]
+fn novel_cover_and_series_switches_preserve_null_clearing_and_hierarchy() {
+    let cfg = parse(r#"{"extractor":{"covers":true,"full-series":true,"pixiv-novel":{"covers":null,"full-series":false},"pixiv":{"covers":"false","full-series":[]}}}"#).unwrap();
+    let novel = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(
+        (novel.covers, novel.full_series),
+        (Some(false), Some(false))
+    );
+    let art = cfg.resolve("pixiv").unwrap();
+    assert_eq!((art.covers, art.full_series), (Some(true), Some(false)));
+    let generic = cfg.resolve("direct").unwrap();
+    assert_eq!(
+        (generic.covers, generic.full_series),
+        (Some(true), Some(true))
+    );
+    let cfg = parse(r#"{"covers":null,"full-series":null,"extractor":{"covers":true,"full-series":true,"pixiv-novel":{"covers":true,"full-series":true}}}"#).unwrap();
+    let resolved = cfg.resolve("pixiv-novel").unwrap();
+    assert_eq!(
+        (resolved.covers, resolved.full_series),
+        (Some(false), Some(false))
+    );
+    let overridden = resolved.overlay(&Options {
+        covers: Some(true),
+        full_series: Some(true),
+        ..Options::default()
+    });
+    assert_eq!(
+        (overridden.covers, overridden.full_series),
+        (Some(true), Some(true))
+    );
+    assert_eq!(resolved.overlay(&Options::default()), resolved);
+    let sparse = parse("{}").unwrap().resolve("pixiv-novel").unwrap();
+    assert_eq!((sparse.covers, sparse.full_series), (None, None));
+    let cfg = parse(r#"{"extractor":{"pixiv-novel":{"covers":true,"full-series":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv").unwrap().covers, None);
+    assert_eq!(cfg.resolve("pixiv").unwrap().full_series, None);
+}
+
+#[test]
+fn booru_threshold_preserves_absence_integer_clamping_and_explicit_defaults() {
+    assert_eq!(
+        parse("{}")
+            .unwrap()
+            .resolve("danbooru")
+            .unwrap()
+            .booru_threshold,
+        None
+    );
+    for (raw, expected) in [
+        ("17", 17),
+        ("1", 1),
+        ("0", 1),
+        ("-1", 1),
+        ("-0", 1),
+        ("-99999999999999999999999999999999999999999999", 1),
+    ] {
+        for document in [
+            format!(r#"{{"threshold":{raw}}}"#),
+            format!(r#"{{"extractor":{{"threshold":{raw}}}}}"#),
+            [r#"{"extractor":{"danbooru":{"threshold":"#, raw, "}}}"].concat(),
+            [r#"{"extractor":{"e621":{"threshold":"#, raw, "}}}"].concat(),
+        ] {
+            let config = parse(&document).unwrap();
+            let category = if document.contains("e621") {
+                "e621"
+            } else {
+                "danbooru"
+            };
+            assert_eq!(
+                config.resolve(category).unwrap().booru_threshold,
+                Some(Some(expected)),
+                "{document}"
+            );
+        }
+    }
+    let max = usize::MAX;
+    assert_eq!(
+        parse(&format!(r#"{{"threshold":{max}}}"#))
+            .unwrap()
+            .resolve("danbooru")
+            .unwrap()
+            .booru_threshold,
+        Some(Some(max))
+    );
+    for raw in [
+        "null",
+        "false",
+        "true",
+        "1.0",
+        "1e0",
+        "-1.0",
+        "1e99999",
+        r#""PRIVATE_VALUE""#,
+        "[]",
+        r#"{"PRIVATE_VALUE": 1}"#,
+    ] {
+        let config = parse(&format!(
+            r#"{{"extractor":{{"threshold":23,"danbooru":{{"threshold":{raw}}}}}}}"#
+        ))
+        .unwrap();
+        assert_eq!(
+            config.resolve("danbooru").unwrap().booru_threshold,
+            Some(None),
+            "{raw}"
+        );
+        assert_eq!(
+            config.resolve("e621").unwrap().booru_threshold,
+            Some(Some(23)),
+            "{raw}"
+        );
+    }
+}
+
+#[test]
+fn booru_threshold_scope_precedence_and_reset_overlays_are_sparse() {
+    let config = parse(
+        r#"{"extractor":{"threshold":25,"danbooru":{"threshold":null},"e621":{"threshold":12}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        config.resolve("danbooru").unwrap().booru_threshold,
+        Some(None)
+    );
+    assert_eq!(
+        config.resolve("e621").unwrap().booru_threshold,
+        Some(Some(12))
+    );
+    let root =
+        parse(r#"{"threshold":false,"extractor":{"threshold":25,"danbooru":{"threshold":12}}}"#)
+            .unwrap();
+    assert_eq!(
+        root.resolve("danbooru").unwrap().booru_threshold,
+        Some(None)
+    );
+    let root =
+        parse(r#"{"threshold":7,"extractor":{"threshold":25,"danbooru":{"threshold":null}}}"#)
+            .unwrap();
+    assert_eq!(
+        root.resolve("danbooru").unwrap().booru_threshold,
+        Some(Some(7))
+    );
+    let options = Options {
+        booru_threshold: Some(Some(23)),
+        ..Default::default()
+    };
+    assert_eq!(
+        options.overlay(&Options::default()).booru_threshold,
+        Some(Some(23))
+    );
+    assert_eq!(
+        options
+            .overlay(&Options {
+                booru_threshold: Some(None),
+                ..Default::default()
+            })
+            .booru_threshold,
+        Some(None)
+    );
+    assert_eq!(
+        options
+            .overlay(&Options {
+                booru_threshold: Some(Some(1)),
+                ..Default::default()
+            })
+            .booru_threshold,
+        Some(Some(1))
+    );
+}
+
+#[test]
+fn booru_threshold_rejects_unsupported_categories_and_positive_overflow_privately() {
+    for category in ["gelbooru", "safebooru", "twitter", "direct", "pixiv"] {
+        let document = serde_json::json!({"extractor":{category:{"threshold":"PRIVATE_VALUE"}}});
+        let failure = parse(&document.to_string()).unwrap_err().to_string();
+        assert!(failure.contains("threshold"));
+        assert!(!failure.contains("PRIVATE_VALUE"));
+    }
+    let raw = "99999999999999999999999999999999999999999999999999999999999999";
+    for document in [
+        format!(r#"{{"threshold":{raw}}}"#),
+        format!(r#"{{"extractor":{{"threshold":{raw}}}}}"#),
+        [r#"{"extractor":{"danbooru":{"threshold":"#, raw, "}}}"].concat(),
+        [r#"{"extractor":{"e621":{"threshold":"#, raw, "}}}"].concat(),
+    ] {
+        let failure = parse(&document).unwrap_err().to_string();
+        assert!(failure.contains("threshold"));
+        assert!(!failure.contains(raw));
+    }
+    assert!(parse(r#"{"threshold":1,"threshold":2}"#).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn booru_threshold_compatibility_forwarding_is_sparse_scoped_and_retains_default() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$BOORU_THRESHOLD_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (document, expected) in [
+        (serde_json::json!({}), None),
+        (serde_json::json!({"threshold":11}), Some("threshold=11")),
+        (
+            serde_json::json!({"extractor":{"threshold":23,"danbooru":{"threshold":null},"e621":{"threshold":false}}}),
+            Some("threshold=null"),
+        ),
+        (serde_json::json!({"threshold":0}), Some("threshold=1")),
+        (
+            serde_json::json!({"threshold":true,"extractor":{"danbooru":{"threshold":17}}}),
+            Some("threshold=null"),
+        ),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&document).unwrap()).unwrap();
+        for (url, booru) in [
+            ("https://danbooru.donmai.us/posts?tags=cat", true),
+            ("https://e621.net/posts?tags=cat", true),
+            (
+                "https://gelbooru.com/index.php?page=post&s=list&tags=cat",
+                false,
+            ),
+            ("https://instagram.com/p/Example/", false),
+        ] {
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+                .env("BOORU_THRESHOLD_ARGUMENTS", &log)
+                .arg("--native-config")
+                .arg(&config)
+                .arg("--extractor-command")
+                .arg(&backend)
+                .args(["--extractor", "compatibility", "-g", url])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let arguments = std::fs::read_to_string(&log).unwrap();
+            let args: Vec<_> = arguments.lines().collect();
+            let forwarded: Vec<_> = args
+                .windows(2)
+                .filter(|pair| pair[0] == "--option" && pair[1].starts_with("threshold="))
+                .map(|pair| pair[1])
+                .collect();
+            assert_eq!(
+                forwarded,
+                if booru {
+                    expected.into_iter().collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                },
+                "{document} {url}"
+            );
+        }
+    }
+}
+
+#[test]
+fn danbooru_pool_order_aliases_and_falsy_resets_are_independent_of_kemono() {
+    use gallery_dl_rs::{booru::PoolOrder, kemono::PostOrder};
+    for (values, expected) in [
+        (
+            vec![
+                serde_json::json!(null),
+                serde_json::json!(false),
+                serde_json::json!(0),
+                serde_json::json!(""),
+                serde_json::json!([]),
+                serde_json::json!({}),
+                serde_json::json!("asc"),
+                serde_json::json!("pool"),
+                serde_json::json!("pool_asc"),
+                serde_json::json!("asc_pool"),
+            ],
+            PoolOrder::Pool,
+        ),
+        (
+            vec![
+                serde_json::json!("desc"),
+                serde_json::json!("desc_pool"),
+                serde_json::json!("pool_desc"),
+            ],
+            PoolOrder::PoolReverse,
+        ),
+        (
+            vec![
+                serde_json::json!("id"),
+                serde_json::json!("desc_id"),
+                serde_json::json!("id_desc"),
+            ],
+            PoolOrder::IdDescending,
+        ),
+        (
+            vec![serde_json::json!("asc_id"), serde_json::json!("id_asc")],
+            PoolOrder::IdAscending,
+        ),
+    ] {
+        for value in values {
+            let doc = serde_json::json!({"extractor":{"order-posts":"reverse","danbooru":{"order-posts":value},"kemono":{"order-posts":"asc"}}});
+            let cfg = parse(&doc.to_string()).unwrap();
+            let dan = cfg.resolve("danbooru").unwrap();
+            assert_eq!(dan.booru_order_posts, Some(expected), "{value}");
+            assert_eq!(dan.order_posts, Some(PostOrder::Reverse));
+            assert_eq!(
+                cfg.resolve("kemono").unwrap().order_posts,
+                Some(PostOrder::Forward)
+            );
+            let override_settings = dan.overlay(&Options {
+                order_posts: Some(PostOrder::Forward),
+                ..Default::default()
+            });
+            assert_eq!(override_settings.booru_order_posts, Some(PoolOrder::Pool));
+        }
+    }
+    let cfg = parse(r#"{"order-posts":"desc","extractor":{"danbooru":{"order-posts":"id_asc"}}}"#)
+        .unwrap();
+    assert_eq!(
+        cfg.resolve("danbooru").unwrap().booru_order_posts,
+        Some(PoolOrder::PoolReverse)
+    );
+    assert_eq!(
+        parse("{}")
+            .unwrap()
+            .resolve("danbooru")
+            .unwrap()
+            .booru_order_posts,
+        None
+    );
+    for value in [
+        serde_json::json!(true),
+        serde_json::json!(1),
+        serde_json::json!(["pool"]),
+        serde_json::json!("PRIVATE_INVALID_ORDER"),
+    ] {
+        let doc = serde_json::json!({"extractor":{"danbooru":{"order-posts":value}}});
+        let err = parse(&doc.to_string()).unwrap_err().to_string();
+        assert!(
+            err.contains("order-posts") && !err.contains("PRIVATE_INVALID_ORDER"),
+            "{err}"
+        );
+        // Unlike Danbooru, upstream e621 does not consult this option.
+        let doc = serde_json::json!({"extractor":{"e621":{"order-posts":value}}});
+        assert_eq!(
+            parse(&doc.to_string())
+                .unwrap()
+                .resolve("e621")
+                .unwrap()
+                .booru_order_posts,
+            None
+        );
     }
 }

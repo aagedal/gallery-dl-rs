@@ -1,0 +1,7404 @@
+{
+  "source": "PixivNovelExtractor.items via PixivNovelNovelExtractor instance",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py",
+  "source_sha256": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+  "generator": "Actual novel items generator with synthetic novels plus API novel_comments/novel_bookmark_detail/novel_webview stubs. Exact source _init enrichment assignments evaluated without session initialization. Snapshot each source yield; normalize datetimes to naive UTC ISO; use source filename/archive formats. No network/authentication.",
+  "cases": [
+    {
+      "name": "defaults_absent",
+      "options": {},
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "enabled_text_and_cover",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "covers": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p01",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "_fallback": [
+              "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.png"
+            ],
+            "filename": "42"
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "enabled_text_only",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "no_novels_no_enrichment",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        }
+      ],
+      "events": [],
+      "error": null
+    },
+    {
+      "name": "comments_total_zero",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 0,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 0,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 0,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_total_missing",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "ajax_truthy_does_not_skip_comments",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          },
+          "_ajax": true
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "_ajax": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "_ajax": true,
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_failure_before_first_aborts_later_novel",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        },
+        {
+          "id": 43,
+          "title": "Later fixture",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": 0
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "RuntimeError"
+    },
+    {
+      "name": "comments_failure_after_first_aborts_later_novel",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        },
+        {
+          "id": 43,
+          "title": "Later fixture",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": 1
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "RuntimeError"
+    },
+    {
+      "name": "comments_failure_after_all_aborts_later_novel",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        },
+        {
+          "id": 43,
+          "title": "Later fixture",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": 2
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "RuntimeError"
+    },
+    {
+      "name": "bookmark_false_absent",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": false,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": false,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": false,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bookmark_missing_source_error",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "bookmark_failure_aborts_later_novel",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        },
+        {
+          "id": 43,
+          "title": "Later fixture",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": true,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "RuntimeError"
+    },
+    {
+      "name": "bookmark_empty_tags_present",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": []
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bookmark_missing_tags_source_error",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {},
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "bookmark_registered_missing_name_source_error",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "translated_tags_independent",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "tags": "translated",
+        "covers": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "cat",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "cat",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "cat",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p01",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "_fallback": [
+              "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.png"
+            ],
+            "filename": "42"
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "original_tags_independent",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "tags": "original",
+        "covers": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              {
+                "name": "猫",
+                "translated_name": "cat",
+                "extra": {
+                  "nested": true
+                }
+              },
+              {
+                "name": "猫",
+                "translated_name": null
+              }
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              {
+                "name": "猫",
+                "translated_name": "cat",
+                "extra": {
+                  "nested": true
+                }
+              },
+              {
+                "name": "猫",
+                "translated_name": null
+              }
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              {
+                "name": "猫",
+                "translated_name": "cat",
+                "extra": {
+                  "nested": true
+                }
+              },
+              {
+                "name": "猫",
+                "translated_name": null
+              }
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p01",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "_fallback": [
+              "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.png"
+            ],
+            "filename": "42"
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "malformed_tags_error_after_enrichment",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {}
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        }
+      ],
+      "events": [],
+      "error": "KeyError"
+    },
+    {
+      "name": "webview_failure_retains_post_skips_cover_continues",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "covers": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        },
+        {
+          "id": 43,
+          "title": "Later fixture",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": true,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        },
+        {
+          "method": "novel_comments",
+          "id": 43
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 43
+        },
+        {
+          "method": "novel_webview",
+          "id": 43
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 43,
+            "title": "Later fixture",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Later fixture text",
+          "metadata": {
+            "id": 43,
+            "title": "Later fixture",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "43_p0.txt",
+          "archive": "43.txt"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.jpg",
+          "metadata": {
+            "id": 43,
+            "title": "Later fixture",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p01",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "_fallback": [
+              "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.png"
+            ],
+            "filename": "42"
+          },
+          "default_filename": "43_p1.jpg",
+          "archive": "43_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "webview_missing_text_retains_post_skips_cover",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "covers": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {},
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "empty_text_still_emits_media_and_cover",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true,
+        "covers": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": ""
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "_p01",
+            "extension": "jpg",
+            "date_url": "2024-01-01 18:04:05",
+            "_fallback": [
+              "https://i.pximg.net/novel-cover-original/img/2024/01/02/03/04/05/42.png"
+            ],
+            "filename": "42"
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "comments_only",
+      "options": {
+        "comments": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "bookmark_only",
+      "options": {
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "truthy_total_string",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": "0",
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": "0",
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": "0",
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_null",
+      "options": {
+        "comments": null,
+        "metadata-bookmark": null
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_false",
+      "options": {
+        "comments": false,
+        "metadata-bookmark": false
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_zero",
+      "options": {
+        "comments": 0,
+        "metadata-bookmark": 0
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_string",
+      "options": {
+        "comments": "",
+        "metadata-bookmark": ""
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_array",
+      "options": {
+        "comments": [],
+        "metadata-bookmark": []
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_empty_object",
+      "options": {
+        "comments": {},
+        "metadata-bookmark": {}
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_true",
+      "options": {
+        "comments": true,
+        "metadata-bookmark": true
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_negative",
+      "options": {
+        "comments": -1,
+        "metadata-bookmark": -1
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_string",
+      "options": {
+        "comments": "false",
+        "metadata-bookmark": "false"
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_array",
+      "options": {
+        "comments": [
+          false
+        ],
+        "metadata-bookmark": [
+          false
+        ]
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "config_truthiness_nonempty_object",
+      "options": {
+        "comments": {
+          "enabled": false
+        },
+        "metadata-bookmark": {
+          "enabled": false
+        }
+      },
+      "input_works": [
+        {
+          "id": 42,
+          "title": "Fixture novel",
+          "caption": "Fixture caption",
+          "user": {
+            "id": 5,
+            "account": "fixture.artist"
+          },
+          "tags": [
+            {
+              "name": "猫",
+              "translated_name": "cat",
+              "extra": {
+                "nested": true
+              }
+            },
+            {
+              "name": "猫",
+              "translated_name": null
+            }
+          ],
+          "create_date": "2024-01-02T12:04:05+09:00",
+          "x_restrict": 0,
+          "total_comments": 2,
+          "is_bookmarked": true,
+          "image_urls": {
+            "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+          }
+        }
+      ],
+      "comments_script": {
+        "values": [
+          {
+            "id": 701,
+            "comment": " 猫 & fixture\n",
+            "user": {
+              "id": 8,
+              "name": "Fixture commenter"
+            },
+            "date": "2024-01-03T12:00:00+09:00",
+            "extra": {
+              "nested": [
+                true,
+                null,
+                {
+                  "key": "value"
+                }
+              ]
+            }
+          },
+          {
+            "id": 702,
+            "comment": "second",
+            "user": {
+              "id": 9,
+              "name": "Other fixture"
+            }
+          }
+        ],
+        "fail_before_index": null
+      },
+      "bookmark_detail": {
+        "tags": [
+          {
+            "name": "keep",
+            "is_registered": true
+          },
+          {
+            "name": "omit",
+            "is_registered": false
+          },
+          {
+            "name": "keep",
+            "is_registered": 1
+          },
+          {
+            "is_registered": false
+          },
+          {
+            "name": " 猫 ",
+            "is_registered": "registered"
+          },
+          {
+            "name": "",
+            "is_registered": true
+          }
+        ]
+      },
+      "bookmark_fail": false,
+      "webview": {
+        "text": "Fixture novel text\n猫"
+      },
+      "webview_fail": false,
+      "calls": [
+        {
+          "method": "novels"
+        },
+        {
+          "method": "novel_comments",
+          "id": 42
+        },
+        {
+          "method": "novel_bookmark_detail",
+          "id": 42
+        },
+        {
+          "method": "novel_webview",
+          "id": 42
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "text:Fixture novel text\n猫",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture novel",
+            "caption": "Fixture caption",
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫",
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "total_comments": 2,
+            "is_bookmarked": true,
+            "image_urls": {
+              "large": "https://i.pximg.net/novel-cover-master/img/2024/01/02/03/04/05/42_master1200.jpg"
+            },
+            "comments": [
+              {
+                "id": 701,
+                "comment": " 猫 & fixture\n",
+                "user": {
+                  "id": 8,
+                  "name": "Fixture commenter"
+                },
+                "date": "2024-01-03T12:00:00+09:00",
+                "extra": {
+                  "nested": [
+                    true,
+                    null,
+                    {
+                      "key": "value"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 702,
+                "comment": "second",
+                "user": {
+                  "id": 9,
+                  "name": "Other fixture"
+                }
+              }
+            ],
+            "tags_bookmark": [
+              "keep",
+              "keep",
+              " 猫 ",
+              ""
+            ],
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "rating": "General",
+            "suffix": "",
+            "extension": "txt"
+          },
+          "default_filename": "42_p0.txt",
+          "archive": "42.txt"
+        }
+      ],
+      "error": null
+    }
+  ]
+}

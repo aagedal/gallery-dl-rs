@@ -321,6 +321,16 @@ private diagnostics, scope/CLI precedence, environment disabling, and resume
 separation after user-agent changes. SOCKS, proxy bypass rules, and TLS/browser
 impersonation remain.
 
+**Implemented shared input budgets:** every CLI extraction now has one cumulative
+active deadline spanning initialization, all pages/children, token lookups,
+retries, and events later discarded by filters. Downloader/consumer pauses do
+not consume it. Exhaustion drops the input and active HTTP request futures;
+owned compatibility processes terminate. Firefox imports check cancellation
+before starting and interrupt active SQLite scans, including nonmatching-row
+scans beyond output limits. Virtual-clock tests cover accounting and filtered
+errors; local HTTP tests cover later-page cancellation/connection closure, and
+browser tests cover queued, active and idle-interrupt-race cleanup.
+
 ## 3. Large collections and reliable archives
 
 Stream extraction into a bounded work queue; add pagination, stable site/post/media
@@ -412,13 +422,14 @@ variants, profile album listings, and upstream jump heuristics remain.
 **Implemented file selection:** `--range` and scoped native `file-range` strings
 or lists select one-based media positions using comma unions, inclusive hyphen
 ranges, and exclusive-stop signed slices. Membership and final indices use
-bounded arithmetic rather than expanding ranges. Selection runs per input before
+bounded arithmetic rather than expanding ranges. Selection runs per extractor job before
 global deduplication and archive checks, applies to inspection and downloading,
 and drops upstream immediately at the last matching index. Empty selections do
 not start extraction or open archives. Cooperative skips preserve cancellation.
 Parser, CLI, process-lifecycle, native-pagination, sidecar, and archive tests cover
-selection behavior. Site-specific offset skipping, counters at flattened child
-boundaries, child ranges, and child metadata filters remain.
+selection behavior. Native Kemono/Coomer child jobs now reset counters;
+site-specific offset skipping, additional native queue boundaries and flattened
+compatibility child counters remain.
 
 **Implemented explicit post selection:** native extractors and the compatibility
 decoder expose post/media/end events, while media-only library APIs remain
@@ -434,9 +445,98 @@ X text-only tweets create posts only with `text-tweets`. Empty ranges start no e
 native ranges drop at the selected end. Compatibility must read the next
 directory or validated EOF, potentially doing upstream work for the next post.
 Parser, runtime, CLI, cancellation, selected-only archive/sidecar, configuration,
-and error-ordering tests cover these paths. Nested child counters, queue events,
-child selection, complete upstream metadata, and live authenticated verification
-remain.
+and error-ordering tests cover these paths. Child scopes and selection are
+described below; complete upstream metadata, broader extractor queue boundaries
+and live authenticated verification remain.
+
+**Implemented native child jobs and selection:** explicit BeginChild/EndChild
+boundaries with shared cancellation controls now wrap Kemono/Coomer collection
+creators/posts/servers and Discord server channels. Bare X, Bluesky and Pixiv
+profiles now dispatch one default timeline/feed/artworks child, with explicit
+feed URLs remaining roots. A shared lazy child adapter exposes queue metadata
+before constructing the extractor, closes matching ends after errors, and drops
+active work on cooperative cancellation while unwinding visible descendants.
+The default profile queue exposes only category/user labels, matching upstream's
+private extractor marker; rejecting it avoids identity/session requests and
+Pixiv token validation/refresh. One selection engine resets
+post/file/child counters per job, applies child/file predicates before their
+ranges, preserves existing post date/filter ordering, and restores parent state
+after nested children. Finite ranges cancel only the current job and avoid later
+pages while keeping its parent's later children available. Child metadata retains
+bounded public scalar fields and actual one-level Discord server/channel maps;
+unselected invalid identities need no requests. Child range/filter config and
+CLI options forward to compatibility mode, whose own queue selection applies;
+resolved compatibility media still lack child boundary markers for Rust counters.
+Tests cover nested state restoration, framing failures, depth/identity guards,
+manual cancellation, empty posts, source indices, selected-only requests,
+metadata privacy, shared server metadata and actual nested HTTP traversal.
+Profile tests also cover request-free rejection, deferred token errors, default
+feed selection, direct-view isolation and unchanged archive identities.
+Additional native queue producers, per-child/subcategory settings, parent metadata
+propagation and authenticated verification remain unfinished.
+
+**Implemented ordered profile include dispatch:** scoped native `include`
+supports exact-string `all`, comma strings, literal lists and explicit empty
+overrides, forwarded as typed compatibility options. Bare X, Bluesky and Pixiv
+profiles queue their configured views in upstream catalog order or requested
+order, preserving aliases and repeated child positions. Post/file limits cancel
+each selected child independently; explicit view URLs remain roots. Recorded
+upstream Dispatch reference vectors cover string/list distinctions and unknown
+entries. Native mode currently omits unknown include names without upstream's
+warning. All X profile views have native paths; Bluesky adds replies/video,
+avatar/banner blobs and normalized fileless info; Pixiv adds original
+avatar/background images and extension fallbacks. Native Pixiv novels now use
+their own category client for user/bookmark child views; Sketch resolves the
+artist account lazily after child selection and loads its public wall. Profile info retains only the
+normalized public subset; full metadata-only JSON dumping remains unfinished.
+X/Pixiv typed profile image identity isolates owner/kind/version archives from
+ordinary posts and agrees with compatibility rows. Inspection, filters and
+templates expose those public identity fields. HTTP fixtures verify actual
+request order, no-request rejection, independent counters, failed-child recovery,
+default preservation and native/compatibility archive stability. Successful live
+public Bluesky avatar inspection on 2026-10-20 emitted one original blob job
+under `include`/child/file limits, with no errors or media download. Live
+authenticated X/Pixiv profile asset/include traversal remains unverified.
+
+**Implemented native Bluesky likes:** explicit likes URLs and profile include
+views now read public like records from the owner's discovered PDS, lazily
+hydrating referenced posts through AppView. DID documents bind to the owner;
+validated HTTPS service endpoints fall back to bsky.social on discovery failure.
+Record URI, subject CID and hydrated author/record identities are checked.
+Malformed/deleted/inaccessible subjects do not poison later likes; repository
+errors fail the current job. Independent bounded opaque cursors follow empty
+record pages, stop cycles and cap traversal; cooperative skip checkpoints and
+moving record arrays preserve cancellation without duplicating page payloads.
+The optional `getActorLikes` endpoint handles mixed-author feeds and stops on
+empty responses. Scoped api-server overrides only AppView, while endpoint values
+remain separate from Kemono's namesake setting; both forward to compatibility.
+Empty server overrides restore defaults, and errors never echo private values.
+HTTP/CLI fixtures cover discovery/fallback, order, identity, no credential
+forwarding, malformed/deleted references, independent ranges and sibling views.
+Valid own media now emit before quote validation, so a malformed quote cannot
+erase those files or poison later likes. On 2026-10-20 bounded public native
+likes inspection emitted one media job with no errors; an upstream resolved-JSON
+inspection selected the same original post, author DID and blob CID. Neither
+inspection downloaded media. Native login/restricted likes remain unfinished.
+
+**Implemented author-specific Bluesky blob routing:** asynchronous native post,
+feed, liked-post, quote and profile-image streams now use each media author's
+validated DID service endpoint for getBlob jobs, including service base paths.
+The shared bounded cache stores up to 1,024 successful/fallback roots with
+in-flight lookup sharing, releases locks before network work and allows canceled
+initialization to retry. Repository owner discovery shares this cache; unrelated
+liked/quoted authors retain their own PDS and DID/CID archive identity. Empty
+media and canceled later jobs start no blob discovery. Offline parse helpers
+retain the bsky.social fallback because they perform no network requests.
+Fixtures cover different author servers, profile assets, shared lookup reuse,
+fallbacks, cache bounds, cancellation and credential isolation. CLI proxy tests
+fail discovery locally to verify fallback without public traffic. On 2026-10-20
+native and upstream public avatar inspections produced equivalent getBlob URLs
+on the same non-default PDS. A separate bounded native download saved one
+256,555-byte JPEG in a fresh temporary directory with no partial artifacts;
+JPEG signatures, end marker and image metadata were verified, and the saved
+bytes' SHA-256 digest matched the blob CID's multihash.
+Authenticated/restricted blobs and broader PDS captures remain unverified.
 
 **Implemented native file metadata expressions:** repeated `--filter` and scoped
 `file-filter` / `image-filter` string/list settings select normalized public fields
@@ -451,7 +551,8 @@ requests. Filters do not mutate filenames, source indices, or stable identities.
 Scoped replacement/clearing, aliases, selected-only sidecars/archives, streaming
 errors, and cancellation have CLI coverage; recorded CPython reference vectors
 exercise accepted expression semantics. Full Python syntax, integer precision,
-helpers, datetime/regex, arbitrary upstream fields, and child filters remain.
+helpers, datetime/regex and arbitrary upstream fields remain; bounded native
+child filters are described above.
 
 **Implemented file-size selection:** CLI and scoped native `filesize-min` /
 `filesize-max` settings support byte amounts and binary suffixes, inclusive
@@ -475,8 +576,8 @@ metadata now normalizes recognized formatted dates without changing stable IDs.
 Local tests cover calendar/offset/fraction boundaries, range order, private
 configuration errors, native pagination and process cancellation, later inputs,
 and selected-only metadata/archive effects. Relative/week-date syntax,
-site-specific skip optimizations, pinned/out-of-order handling, and nested child
-boundaries remain.
+site-specific skip optimizations and pinned/out-of-order policies remain to audit.
+Nested job date boundaries and live booru keyword types are implemented below.
 
 **Implemented archive step:** `--download-archive` tracks completed media in a
 versioned SQLite database. Stable namespaced identities for native and
@@ -515,45 +616,340 @@ downloads. Document compatibility differences as features land.
 
 **Implemented experimental native Imgur:** single images, albums and gallery
 posts via the public `post/v1` API, with shared retries, timeouts, network
-options and Retry-After cooldowns. Not yet: user profiles, favorites,
-subreddits, searches, tag listings, and the upstream `mp4` option (animated GIFs
-always use MP4).
+options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
+to true; false preserves animated GIFs while leaving native video unchanged.
+Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
-Safebooru posts and tag searches, plus Danbooru/e621 pools. Remaining: API
-key/login credentials, favorites/popular/artist views, Gelbooru pools, notes,
-`tags`/`metadata` options, and file-size/rating metadata.
+Safebooru posts, tag searches and pools, plus Danbooru favorite
+groups, e621/e926/Gelbooru/Safebooru favorites, and Danbooru/e621/e926 popular
+views and artist discovery. Danbooru/e621 support
+API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
+user-id/api-key credentials, with same-origin redirects and no credentials in
+media metadata. API-reported file size, rating and signed score are exposed.
+Remaining: other favorites, notes,
+`tags`/`metadata` options, per-category tags and authenticated live verification.
 
-**Implemented experimental native Mastodon:** statuses and user media
-timelines on mastodon.social, pawoo.net and baraag.net (single `mastodon`
-category). Remaining: access tokens, arbitrary instances, bookmarks/favorites/
-lists/hashtags/followed views, card images, `reblogs`/`replies`/`text-posts`
-options, and per-instance categories.
+**Implemented experimental native Mastodon:** statuses, user timelines,
+bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
+pawoo.net and baraag.net. Instance scopes (`mastodon.social`/`pawoo`/`baraag`)
+inherit shared `mastodon` settings; tokens bind explicitly to an instance API
+origin and stay out of media requests. Instance output categories now match
+upstream; existing attachment archive identities remain stable, while default
+category directories change without migrating files. Numeric account IDs skip
+lookup. Collection paging follows server bookmark/status cursors from all Link
+fields, detects cycles, and stops lazily; collection dates are non-terminating.
+`reblogs`/`replies`/`text-posts` preserve outer repost metadata, attachment IDs,
+and empty post boundaries. Optional card images append outer-post previews with
+upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
+Scoped config, compatibility forwarding, header
+privacy, split Link fields, date ordering and cancellation have local coverage.
+Remaining: OAuth/cache discovery, arbitrary/additional instances, followed views,
+account-search fallback/moved handling, and fuller metadata/default
+naming. Authenticated live verification and real captures remain required.
 
-**Implemented experimental native Kemono/Coomer:** posts and creator post
-listings with deduplicated files. Remaining: creator names, favorites,
-Discord servers, search/tag/popular views, revisions, comments/DMs, inline
-content images, archive/link extraction from post text, cookies/login, and
-upstream options (`duplicates`, `revisions`, `max-posts`, `endpoint`).
+**Implemented experimental native Kemono/Coomer:** posts, creator post listings
+and global `/posts` feeds with deduplicated files. Creator/global listings accept
+query/tag/initial offset parameters and paginate lazily in batches of 50.
+Global posts validate their own service/creator identities; present conflicting
+detail identities are rejected. Scoped `expand` fetches full details on demand,
+and `max-posts` counts raw posts including file-less ones, cutting off later
+detail/page requests. Empty post boundaries retain metadata for post ranges and
+filters. Publication dates use non-terminating filtering. Configuration and
+compatibility forwarding, metadata/archive equivalence, parser identity checks,
+and local HTTP pagination/cancellation tests cover these paths. Reduced sanitized
+public listing/detail captures are included. On 2026-10-20 native Kemono global
+inspection and a separate one-post detail expansion each emitted two media jobs;
+no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
+thumbnail job and a Coomer MP4 original job with creator display names; no media
+was downloaded in those inspections. Authenticated verification, wider service
+captures and successful original transfers remain required.
+Remaining: popular views, comments/DMs, archive/link
+extraction from post text, username/password login, additional endpoint behavior
+and full upstream metadata/default naming.
+
+**Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
+lookups attach typed immutable IDs and optional display names, public IDs, dates,
+counts and other validated profile fields. A host/service/creator cache retains
+up to 1,024 successes or failures; `metadata: false` suppresses lookups. Invalid
+or unavailable profiles preserve extraction with identity-only metadata.
+Profiles bind to the requested identity; display names never substitute for IDs
+in archives. Native and compatibility output, filters and templates share these
+fields, and renames preserve archive keys. Public API responses observed on
+2026-10-20 used gzip even when identity encoding was requested. Bounded gzip
+support now validates all members/checksums off the async executor, with input
+and output cancellation checkpoints. Local tests cover profile caching,
+concurrent lookup/cancellation, identity rejection, scoped configuration,
+compatibility parity, gzip limits/checksums and cancellation across empty gzip
+members. A sanitized public profile schema fixture accompanies these tests.
+
+**Implemented Kemono/Coomer Discord:** explicit channel paths/hash selectors
+and whole-server traversal validate enclosing server/channel/message identities.
+Forward and reverse 150-message pagination, retained duplicate attachments and
+inline CDN links, source indices/counts, empty boundaries and per-channel raw
+post limits share native range/date/filter/cancellation behavior. Typed Discord
+metadata reaches compatibility output, filters and templates; positional server
+archives do not depend on display names. Public Referers permit media CDN
+redirects without exposing API cookies. Scoped cookies rotate on API responses,
+respect URL attributes and never enter emitted jobs; API redirects remain
+same-origin. Creator `endpoint` aliases now select ordinary or lazily expanded
+listings, independently of Discord ordering. Sanitized public server/message
+captures accompany synthetic and local HTTP tests. A native one-post public
+channel inspection on 2026-10-20 emitted one original media job with typed Discord
+metadata and no errors; no media was downloaded. The existing 1.32.17
+thumbnail baseline is retained; direct inline CDN images preserve their real
+extensions rather than forming upstream's malformed thumbnail path. Newer
+upstream master removes thumbnail selection, so version alignment remains open.
+Discord author/embed/revision/archive metadata, authenticated verification,
+full downloads and broader service coverage remain unfinished.
+
+**Implemented Kemono/Coomer favorites and artists:** session-backed artist/post
+favorites and public creator discovery share lazy creator/post/Discord traversal.
+Scoped `favorites` selects the default type; supported URL query overrides,
+name/service filtering and sorting follow upstream behavior, including exact wide
+integer comparisons, stable truthy ties and reversed false-value ties. Child
+identities validate when consumed, preserving cutoffs before later malformed
+entries; failed children report private errors and leave later children available.
+Catalogs retain the 32 MiB response bound and accept up to 500,000 entries, with
+background parsing and cancellable filtering/sorting. Sanitized public creator
+schema captures and Python-generated ordering vectors accompany local tests.
+On 2026-10-20 public catalog checks returned 108,063 Kemono and 220,005 Coomer
+creators within those bounds; anonymous favorites returned HTTP 401. A filtered
+native Kemono artist inspection emitted two original media jobs; a separate
+Coomer artist inspection emitted one. Both retained creator identities and
+reported no errors; no media was downloaded.
+Authenticated favorites traversal and downloads remain unverified; login,
+per-child settings and fuller queue metadata remain open.
+
+**Implemented Kemono/Coomer file selection:** ordered `files`, per-kind
+`duplicates`, and `original` settings now match upstream category order and
+thumbnail defaults. Safe inline sources, backslash normalization, original-name
+extensions and file types are covered. Source counts/indices precede thumbnail
+skips. Positional archives preserve requested duplicates and hashless inline
+archives; old hash-based entries are not migrated. Public media headers preserve
+CDN redirects while credentials disable that exception. Exact missing-file
+placeholders on renamed `.txt` originals fail before direct, resumed, range-
+assembled or HTTP 416 publication; poisoned partials are reset. Candidate paths
+are bounded and descriptive names shared across repeated file groups.
+Scoped configuration, compatibility forwarding, source identity/counts,
+inline validation, memory sharing, safe redirects, and download cleanup tests
+cover these paths. A public native thumbnail check on 2026-10-20 downloaded one
+27,699-byte JPEG from `img.kemono.cr` with the default selection; separate
+inspection confirmed thumbnail-host jobs. This verifies one anonymous image
+transfer, not complete CDN/original/service coverage.
+A separate original-file attempt with a 15-second download timeout and 2 MiB
+size limit timed out without publication; successful original transfers remain
+unverified.
+
+**Implemented Kemono/Coomer revisions:** boolean/`unique` revision extraction,
+`asc`/`reverse`/`desc` ordering, explicit history and selected-revision URLs,
+embedded revision data and API fallback, and encoded historical file metadata.
+Unique mode removes adjacent equal content hashes before indexing/order changes;
+explicit history bypasses that filter and excludes the current post. Historical
+IDs/owners validate before output. Typed post-owned revision metadata survives
+empty/nonimage boundaries and reaches filters/templates/compatibility output.
+Historical archives and filename suffixes retain versions even when file URLs
+are identical; current ID zero preserves its normal archive key. Source limits
+drain the selected parent's revisions and prevent later parent requests.
+Python SHA-1 reference vectors cover Unicode, float notation, signed zero and
+large integers; nonfinite overflow is rejected. Requests, bounds, cancellation,
+ordering, uniqueness, identity errors and disabled-mode behavior have local
+coverage. A public revision-enabled native inspection on 2026-10-20 emitted one
+current-version thumbnail job, whose hash matched the Python calculation on a
+separate API response. Successful live historical-version extraction remains
+unverified.
 
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
-lists, albums, galleries and image pages. Remaining: Pixeldrain API keys,
-`#item=N` selection, filesystem (`/d/`) links and other domains; Catbox file
+lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
+and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
+and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
+change media selection. Pixeldrain API keys authenticate API requests and file downloads.
+Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
 `/c/` descriptions; imgbox per-image metadata (width/height); Postimg
 JS-paginated gallery pages beyond the server-rendered listing.
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
-tagged listings via API v2 with an overridable `api-key`. Remaining: OAuth and
-private/dashboard blogs, likes/search/day views, NPF posts, upstream's
-highest-resolution image rewriting (`s2048x3072`/`_1280` to original),
-external audio/video, `reblogs`/`posts`/`inline`/`external`/`original`/
-`fallback-delay` options, and custom-domain blogs.
+tagged listings via API v2 with an overridable `api-key`, original-image token
+resolution for capped photos and modern inline images, legacy inline `_1280`
+rewriting, GIFV download fallbacks, and `reblogs` (boolean/`same-blog`), `posts`
+(legacy type selection), `inline` (boolean/`reblog`/`original`) and `original`
+settings. Single-post URLs bypass the `posts` filter, matching upstream.
+Failed token lookups fall back to the
+API rendition; upstream's delayed token refresh retries remain unimplemented.
+Remaining: OAuth and private/dashboard blogs, likes/search/day views, NPF posts,
+external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
+and custom-domain blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
-works via the App API with a `refresh-token`. Remaining: ugoira (frame ZIP and
-delays), bookmarks/favorites, following, rankings, searches, novels, sketch,
-pixivision, series, user avatars/backgrounds, upstream metadata options
-(`metadata`, `tags`, `max-posts`), and Referer-routed plain `i.pximg.net` links.
+works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
+and `ugoira: "original"` individual frames with ordered ZIP member names/delays
+in metadata (`ugoira: false` skips them). Original URL derivation, JPG/PNG/GIF
+probes, empty frame lists, file-only frame indices and exact option truthiness
+are covered by upstream vectors. Probes omit OAuth credentials and permit bounded
+same-origin redirects; cross-origin probe redirects remain unsupported. Artwork
+archive keys now include extension across all artwork contexts to separate ZIPs
+from individual frames; older keys without extensions do not suppress downloads
+under these corrected identities. Conversion and live authenticated original-frame
+verification remain unfinished.
+Public/private illustration bookmarks support user/legacy URLs, path/query tag
+filters, and own bookmarks resolved from OAuth, with lazy pagination scoped to
+the selected visibility, owner and tag. Private access still requires an account
+authorized by Pixiv; live authenticated bookmark verification remains unverified.
+Illustration bookmark jobs resolve a named owner before listing or snapshot the
+initial OAuth owner. Public `user_bookmark` identity is shared across posts and
+files, while artist metadata stays separate. Archives now include bookmark owner,
+artwork, page and extension; tag, visibility, cursor and display fields do not
+change identity. Prior ordinary artwork entries do not suppress the corrected
+bookmark archive namespace. Extended owner fields remain unfinished.
+The separate `pixiv-novel` category supports single novels, user works, series,
+public/private bookmarks, exact UTF-8 text, optional original covers and
+`full-series` expansion. Profile novel views use novel-scoped credentials and
+network/output settings. HTTP fixtures cover lazy selection, scoped pagination,
+raw text publication and recovery; authenticated live novel extraction remains
+unverified. Native `embeds` expands uploaded images in response order and queues
+linked artworks after text and covers. Source numbering and persistent public
+image metadata reach files and child predicates, with bounded snapshots and
+traversal. Artwork children use independently configured illustration clients;
+selection precedes requests and selected targets deduplicate across the novel job.
+Novel archive identities now include extension. Novel `embeds`, `covers` and
+`full-series` switches support scoped JSON truthiness and explicit null clearing.
+Source oracle and HTTP tests cover
+ordering, metadata mutations, selection, client scope and failure boundaries.
+Text/cover failures currently report errors where upstream warns. Per-child category predicate overrides remain unfinished.
+Illustration and novel bookmark `cursor` settings support strings, integers and
+explicit null clearing in independent category scopes. The starting cursor is
+sent only on the first request; pagination can replace or remove it without
+changing fixed owner/tag/visibility scope. Recorded source/API vectors and HTTP
+fixtures cover owner snapshots, empty animations, cursor encoding and novel
+archive exclusions. Compatibility forwarding retains the cursor's JSON type;
+automatic resume hints and separate child-category compatibility overrides remain
+unfinished.
+Native illustration/novel `metadata` now loads complete artist user details
+before comments/bookmark enrichment, with source ordering, listing-owner preloads,
+empty animation posts and fatal pre-post failure handling. Basic artist objects
+are retained when disabled; avatar/background jobs reuse their required detail
+lookup. Ordered user/profile/publicity/workspace values and native API extras
+reach inspection, sidecars, predicates and templates without changing archives.
+Successful same-artist lookups share bounded cached snapshots, including owner
+and profile discovery; attached illustration/novel clients share matching API
+roots. Cache/snapshot limits and identity/canonical-key guards bound untrusted
+responses; failed or cancelled lookups are not cached. Metadata configuration
+now follows upstream JSON truthiness in Pixiv and Kemono/Coomer, preserving their
+different runtime defaults. Source vectors and HTTP tests cover ordering, cache
+reuse, option scope, selection, shared snapshots and cancellation. Live authenticated
+verification and complete arbitrary compatibility-field normalization remain
+unfinished.
+Native illustration `captions` fills missing captions through the web AJAX API
+after other enrichment, preserving source gates, literal jump-link URL decoding
+and HTML5 entities. Full `caption_html` is exposed separately from normalized
+text, including unchanged novel captions. Web requests use scoped Netscape or
+Firefox cookies, rotate response cookies in memory, and isolate App API
+credentials. Same-origin redirects, request/retry deadlines and encoded/decoded
+32 MiB limits bound traversal; corrupt gzip retries while size excess does not.
+Source-compatible 4xx JSON semantics, soft request/API failures and fatal malformed
+caption bodies are covered by source vectors and HTTP tests, alongside ranges,
+empty posts and cancellation. Live authenticated AJAX remains
+unverified. Shared Firefox import now accepts every native
+cookie consumer's domain, fixing Kemono/Coomer/FurAffinity allowlist omissions.
+Native Pixiv sanity recovery now uses browser AJAX metadata for limited artwork,
+including original page discovery and limited ugoira ZIP/frame metadata. Artist
+artwork/illustration/manga routes share one untyped App API feed; web profile IDs
+are merged lazily in source order before tag filtering and selection. Recovery
+flags remain visible on empty posts, filters, sidecars and templates. The `sanity`
+option defaults to true and supports sparse JSON truthiness configuration.
+Source-oracle fixtures and local HTTP tests verify traversal and recovery; live
+authenticated recovery remains unverified.
+Native illustration `comments` and `metadata-bookmark` enrich selected works
+lazily after file discovery. Comment objects retain nested source fields and
+ordered pagination; enabled empty/error cases emit an empty list, discarding
+partial failed traversals. Registered bookmark tags retain order and duplicates;
+bookmark-detail failures abort before the affected post. Both fields reach
+inspection, sidecars, predicates and templates without changing archives.
+Configuration honors JSON truthiness and explicit-null inheritance clearing.
+Fixed comment endpoint/scope, cycle/page/aggregate bounds and cancellation protect
+pagination. Native novels support the same switches in an independent category,
+including profile queues. Novel comments use their own endpoint and ID scope,
+ignore `_ajax`, and propagate failures before the post or text/cover requests.
+Enrichment is shared by Post/text/cover output; later text failures keep the post
+and allow subsequent novels. Source oracle cases and HTTP tests cover category
+routing, ordering, failure boundaries and selection. Compatibility novel text and
+cover defaults now use source `{id}_p{N}.{extension}` filenames. Live authenticated
+enrichment verification remains unfinished.
+Native following lists queue selected users through normal profile `include`
+dispatch, with bounded preview fields for child filters, lazy scoped pagination,
+cycle detection and a 200-page cap. Modern and legacy URLs support public/private
+visibility; ownerless legacy routes resolve the OAuth user. Fixture/oracle tests
+cover queue metadata, selection and recovery. Live authenticated following remains
+unverified.
+Native rankings support all upstream web mode aliases, UTC-yesterday/default
+dates, exact content filtering before rank assignment, lazy scoped pagination
+and ranking-specific mode/date archives. Ranking metadata is available in
+inspection, sidecars, predicates and templates; post/file selection retains
+original ranks and unordered date selection scans later entries. Recorded
+upstream metadata vectors and HTTP fixtures cover query semantics and request
+behavior. Live authenticated ranking extraction remains unverified.
+Empty or failed animation entries retain post-range positions; metadata failures
+still report native errors where upstream warns.
+Native tag/search URLs now support upstream term precedence/decoding, order and
+target aliases, optional date bounds, lazy scoped pagination and date-window
+rollover at API offset 5,000. Search metadata retains original bounds and is
+available in inspection, sidecars, predicates and templates. Term-scoped archives
+exclude sort/target/dates and remain separate from ranking/artwork entries.
+Date selection scans unordered results; empty animation posts keep their range
+positions. Recorded upstream query vectors and HTTP fixtures cover traversal;
+live authenticated search remains unverified.
+Native illustration series support singular-user series URLs, scoped lazy
+pagination, first-response id/title/caption/total metadata, descending signed
+`num_series`, source filename prefixes and ordinary artwork archive identity.
+Recorded source pagination vectors cover empty first pages, immutable detail,
+mixed artists and numbering gaps; HTTP fixtures cover selection and recovery.
+Extended series-detail metadata and live authenticated verification remain
+unfinished.
+The followed-artists illustration feed now supports `bookmark_new_illust.php`,
+scoped lazy pagination and an immutable public OAuth owner snapshot. Feed archive
+identity includes owner/artwork/page and excludes display fields. Source vectors
+and HTTP fixtures cover mixed artists, token refresh, private-field omission,
+selection and recovery. Extended OAuth user metadata and live authenticated
+verification remain unfinished.
+Native Pixivision articles load their canonical public page before OAuth,
+then lazily resolve artwork details in source order. Exact anchor matching,
+adjacent raw-link deduplication and full HTML5 title decoding follow recorded
+upstream vectors. Article metadata is available in inspection, sidecars,
+predicates and templates; article-scoped archives exclude title changes.
+HTTP fixtures cover authentication order, empty articles, selection, failures
+and animation positions. Live authenticated extraction and upstream default
+article directory layout remain unfinished.
+Native illustration and novel `max-posts` limits count source works per job,
+preserve the final work's files, and stop later enrichment and pagination.
+Queued profile views receive independent budgets; rankings filter content and
+searches suppress replayed rows before counting. Zero clears inherited limits,
+and compatibility mode forwards the root category setting upstream. Separate
+compatibility overrides for queued child categories remain incomplete.
+Native illustration and novel tags support Japanese names, translated names
+with stable fallback/deduplication, and complete original tag objects. Metadata
+is shared across post/file output and available in predicates and templates;
+original dictionary order survives rendering. Thirty vectors recorded from
+both upstream generators cover mode fallback, duplicates, empty/Unicode values
+and original extra fields. Bounded malformed tag arrays are omitted where
+upstream can abort; tag options need no additional API calls.
+Native Sketch walls support public pagination without OAuth, lazy original
+photos, empty posts and independent owner/photo archives. Public post metadata
+is retained for inspection, predicates and templates; source API headers,
+filenames, identity, ignored Pixiv-only options and malformed-photo cutoffs are
+covered by recorded upstream vectors. Profile include views discover the wall
+account only after child selection. Anonymous first-photo output from the public
+`@pxv_sketch` wall matched upstream IDs, owner, dimensions, filename and URL on
+2026-10-20. Live pagination/profile discovery remains unverified. Configured
+cookies, default directory layout and source `filename` template semantics remain
+unfinished.
+Native ugoira postprocessing now supports ZIP and original-frame inputs,
+FFmpeg concat/image2, MKVToolNix remuxing, archive repacking, timing strategies,
+two-pass encoding, scoped lists/options and named definitions. Conversion outputs
+are atomic and failures preserve inputs without recording success. Other
+postprocessor types, extractor-subcategory selectors, converter diagnostic
+forwarding and full hook/event parity remain unfinished.
+Remaining: bookmark resume-cursor diagnostics, additional metadata fields and
+Referer-routed plain `i.pximg.net` links.
 
 **Implemented experimental native DeviantArt:** deviations, user galleries and
 folders via the OAuth2 API (client credentials, overridable `client-id`/
@@ -610,11 +1006,18 @@ album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
 
-**Implemented experimental native Bluesky:** single posts and author
-media/posts feeds via the public AppView, with full-size `getBlob` images and
-videos. Not yet: likes, custom feeds, lists, searches, quoted-post media,
-authentication, PDS-specific blob hosts (blobs always use `bsky.social`), and
-upstream's `include`, `reposts`, `quoted` and `videos` options.
+**Implemented experimental native Bluesky:** single posts, author media/posts
+feeds, public custom feeds and list feeds via the public AppView, with full-size
+`getBlob` images and videos. Custom feeds/lists resolve their record owner once,
+retain mixed post authors/reposts, follow opaque cursors lazily, and stop cursor
+cycles. `reposts`, `quoted`, and boolean `videos` match upstream defaults;
+quoted records retain their own media identity, validate reference/view
+identities, use hydrated data and fetch missing records lazily with cycle and
+depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
+requested; own pinned posts are retained. Ordered include, replies/video and
+profile-image and public likes views are described above. Not yet: searches,
+authentication, thread `depth`,
+metadata facets/user expansion, and newer multi-item media embeds.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook
 selections retain available file dimensions, original dimensions, seconds-based
@@ -661,8 +1064,438 @@ retries, and per-request deadlines. The overall extraction deadline remains
 separate. Inspection opens no configured archives and creates no output paths.
 Tests cover schema, scope/CLI precedence, relative paths, credentials selection,
 fractional timeouts, retry counts, and separate compatibility configuration.
-Full configuration compatibility, discovery, conditional templates, and
-postprocessors remain.
+Full configuration compatibility and additional postprocessors remain.
+
+**Implemented generic postprocessor step:** native metadata, hash and mtime
+processors share scoped lists, definitions, filters and lifecycle hooks. Metadata
+supports JSON/JSONL, tags, custom/print and keyword modify/delete modes, bounded
+content templates, custom sidecar paths and serialized append records. Hashes
+include MD5, SHA1/SHA2/SHA3 and BLAKE2, with digest-based filename rebuilding before
+atomic publication. Mtime supports metadata/template values and file/directory
+targets. Selection preserves post/child boundaries so empty selected posts,
+concurrent downloads, abort/terminate, errors and finalization retain their hooks;
+inspection has no processor side effects. Source fixtures cover rendering,
+algorithm choices, timestamps and lifecycle traces. Job paths now distinguish the
+current directory from the retained filename and completed file path, including
+empty posts and ordered hash/metadata hooks. Scoped `init` supports eager jobs,
+including no-result roots and children, with source truthiness fixtures.
+Explicit producer policies now preserve shared root mutations/deletions for
+ordinary Pixiv artwork, boorus, Flickr, Fur Affinity, ArtStation, Bluesky,
+Kemono/Coomer, Mastodon and Pinterest. Shared file contexts wait for earlier
+leases, including cancelled/filtered files; independent and copied contexts
+retain concurrent execution. Twitter/Tumblr and Instagram declare their different
+copy precedence. ArtStation has per-asset boundaries and source asset positions
+and counts. The keyword engine replays all 204 snapshots in nine genuine source
+job traces; six additional consumed Pixiv emitter cases document overwrites,
+incrementing counters and nested aliases.
+Source counters are now stored independently of the native file index: Pixiv
+artwork and original ugoira frames use zero-based `num`, compatibility input
+preserves the original counter value/type, and filters plus filename/directory
+rendering retain zero. Source Directory counters remain available to post filters.
+Canonical native indices, serialized metadata, and archive keys remain stable.
+Recorded consumed-generator cases verify ordinary/Pixivision counters against
+both native and compatibility inputs.
+Pixiv novel producer writes now run against live shared root keywords: cover and
+upload counters advance after preceding hooks; uploaded fields can override the
+counter before incrementing; cover fallback deletion runs on producer resume.
+Linked artwork queues wait for pending file hooks and retain child/child-after
+mutations across queues. Eager child initialization selects the artwork category.
+Raw native indices and archive identities remain separate from these live writes.
+Child-after failures now retain partial keyword mutations through post-after and
+error finalization, including premature child stream completion. A recorded
+DownloadJob/MetadataPP ASCII-write failure verifies the retained keywords.
+Metadata modify formatting now preserves typed results after supported
+conversions/operators, stringifies mixed templates, and retains values on field
+errors. A generated 321-case source matrix covers numeric arithmetic, lists, sorting,
+format specs, dates and errors; native dates retain JSON representations rather
+than Python runtime datetime/sentinel objects. Novel runtime fixtures exercise
+conversion/arithmetic results through later file and child counter increments.
+Keyword-driven pre-download selection and request/text-fetch changes remain open.
+Remaining: PostgreSQL processor archives and further default-key coverage,
+additional encodings/open modes and formatter dialects, Unicode
+decimal/underscore-float parsing, nested-container sorting, runtime Python
+datetime/sentinel object identity, arbitrary native filename fields,
+keyword-driven archive identity and pre-download selection changes, further
+cross-processor hook parity, further producer policies and framing, nested alias
+identity, additional counter policies and mutation-driven request URLs/text
+fetches, remaining temporary-path behavior, and
+other processor types.
+
+**Implemented processor archive step (gallery-dl 1.32.17):** SQLite metadata
+archives are separate from the native download archive schema.
+Writing modes JSON/tags/custom/JSONL use source `archive(entry)` tables,
+producer category/extractor archive-format descriptors, and per-job sessions
+created before init hooks. Defaults use category + `_MD_` + extractor format;
+explicit table/prefix/format values have distinct default and empty semantics.
+Path-list/table templates resolve against initial Directory keywords. Checks run
+before destination/path/skip/render side effects and preserve `_archive_metadata`
+for additions; existing-file skips add nothing, while empty completed output adds.
+Modify/delete/stdout initialize and close sessions but bypass checks/additions;
+hash/mtime/ugoira have no such generic archive. Connection reuse/pragma semantics,
+immediate commits through later failures, and unconditional close after active
+work drains are implemented. Source fixtures cover 26 archive cases, 21 complete
+processor cases across 22 jobs, 124 extractor routes, and three producer key
+traces. Tests cover instance isolation, cancellation/concurrency, and Python
+SQLite interoperability. Native sidecar publication remains atomic on failure.
+Default-key support is gated where native fields or source job framing are not
+yet preserved; explicit formats remain available. PostgreSQL remains a missing
+backend. See upstream
+`postprocessor/common.py:24`, `postprocessor/metadata.py:111`, `archive.py:19`,
+and `job.py:817` for initialization and lifecycle order.
+
+**Implemented booru search archive context:** native tag searches retain
+`search_tags` separately from request tags, expose it to filters/templates, and
+enable default `t_{search_tags}_{id}` metadata archive keys for source-matched
+routes. Constructor decoding, duplicate-query rules, empty searches, whitespace,
+and Gelbooru/Safebooru `all` request sentinels follow source fixtures. Shared
+Danbooru/e621 keywords retain post-hook mutations; DAPI extractors reapply their
+search keyword before each file. The source oracle includes 110 URL cases
+(23 unmatched) and four live mutation traces. Broader native
+aliases remain usable with explicit archive formats. Pool metadata/default keys
+remain unfinished.
+
+**Implemented booru tag pagination:** Danbooru/e621 follow source prefix
+selection and tag precedence, including ascending ID cursors and numbered pages
+for non-ID ordering and ID/collection filters. Cursors use the last raw post,
+with later ascending responses reversed before emission and cursor selection.
+Source page sizes (200/320), threshold defaults (180/300), integer clamping and
+explicit default resets are supported. Threshold configuration follows native
+scope precedence and is forwarded to compatibility extraction. Tag searches no
+longer stop at 100 pages or an unchanged ID; cancellation drops pending requests.
+Malformed terminal cursors retain preceding files before reporting an error.
+Source fixtures cover request parameters, emitted order, threshold boundaries,
+repeated pages, long traversal and cancellation. DAPI traversal bounds and
+range-driven source page skipping remain unfinished.
+Shared keyword feedback captures the last post's live ID after selected file
+leases drain, before post-after hooks. Cursor generation resumes from that value,
+so supported post/file-hook changes and deletions affect the next request.
+
+**Implemented booru pools (source oracle, 1.32.17):** preserve the full response
+pool object without `post_ids`, normalize its name once, and retain original
+member positions as `num`. Feed queries use the requested ID; archive keys use
+the response `pool[id]`. Danbooru streams numbered `ordpool:` pages in API order
+and supports pool/id ordering options; reverse modes buffer and validate first.
+E621 buffers numbered `pool:` pages, retains the final response per ID, then
+restores member order with unavailable-member gaps. Repeated e621 members retain
+the source's partial-output failure. No native ID-chunk truncation remains.
+A job-scoped object binding carries nested pool hook mutations across posts and
+post-after boundaries; root replacement/deletion, including equal replacements,
+detaches only that post. Mutation observers stay outside public JSON. Source
+fixtures and native traversal/live download-hook replay cover the contract;
+default pool archive keys are enabled. Source publication paths are implemented
+below, separately from the native logical basename. Generic root order settings
+retain the existing asc/desc/reverse grammar; extra pool aliases require the
+Danbooru category scope.
+
+**Implemented Danbooru favorite groups:** `/favorite_groups/ID` and
+`/favorite_group/show/ID` share collection traversal, ordering, member positions,
+and nested object ownership with pools. Metadata comes from
+`/favorite_groups/ID.json`, retains its response ID, and is projected as
+`favgroup`; metadata archives use `fg_{favgroup[id]}_{id}`. Pool and favorite-group
+routes preserve literal decimal IDs (including zero and leading zeroes), support
+legacy aliases, and capture only the source regex digit prefix before suffixes.
+Source replay covers requests, metadata, directories/format keys, live hooks,
+error checkpoints and cancellation. Collection compatibility capture is scoped
+to its booru categories; Pixiv user-detail and novel reserved-root guards reject
+`pool`/`favgroup` extras to prevent duplicate serialized JSON keys. Source
+publication paths are implemented below. Alternate source hosts and raw Unicode
+URL digit captures remain unimplemented; URL parsing percent-encodes those raw
+digits, so their original spelling is unavailable from the typed URL.
+
+**Implemented booru filename keywords:** preserve raw producer `filename`,
+`extension`, and root `md5` independently of the native logical path in a private,
+nonserialized keyword snapshot. Danbooru applies `text.nameext_from_url` semantics
+before URL normalization (lossy percent decoding, final-dot split, sixteen
+Unicode-character extension limit, lowercase, no fragment stripping). E621 uses
+raw `file.md5`/`file.ext`; Gelbooru/Safebooru preserve API keys when extension is
+present. Safebooru prefers the actual API file URL and retains the validated
+image/directory fallback; unsupported logical suffixes use `.bin` without losing
+source keywords. Empty/missing/null/typed values stay distinct. Filter contexts,
+direct filename/directory templates, and real shared Post/File hooks use these
+values. The real source PathFormat checkpoint is replayed too: default extension
+alias mapping occurs once after Post inheritance and before Prepare/File hooks;
+raw extraction values remain untouched. The same preparation runs without
+configured postprocessors, for direct downloads and archive checks; explicit
+directories retain their pre-normalization values. File-hook replacements are
+not mapped again. E926 compatibility metadata now follows the booru identity
+path. Full filename replay replaces the earlier prefix-only assertions; helper and actual
+job oracles cover all four families, and compatibility tests cover scoping,
+serialization, raw field presence and stable initial directories.
+
+**Implemented booru source paths:** native post/tag/pool/favorite-group routes
+retain immutable source class templates privately alongside the raw keyword
+snapshot. Source category `e926` is preserved independently of native e621
+settings and identity. Filename/directory overrides resolve independently, and
+conditional templates without a matching branch fall back to the source class
+default; an explicit empty directory remains empty. Directories freeze before
+Init/Post and after the preceding PostAfter, including implicit class defaults.
+Source path rendering preserves spaces/Unicode, replaces separators, removes
+controls, omits empty directory segments, and formats missing/null fields as
+`None`. Parent-directory basenames remain rejected. The selected filename
+formatter reaches Prepare/File hash rebuilds and metadata `extension-format`;
+the original mapped extension is cached separately from later live keyword/path
+changes, through PostAfter. Source-mode filenames are built after Prepare and
+remain fixed under ordinary File keyword edits. Direct and archived downloads
+without processors use the same preparation. Supported compatibility input URLs
+retain their class descriptor too; standalone `parse_messages` calls have no
+route provenance and retain legacy fallback behavior. Genuine source publication
+fixtures compare full media/sidecar paths, bytes, five hook snapshots, independent
+and conditional overrides, empty directories, typed MD5 fields, hash rebuilds,
+and multi-post directory checkpoints across all fourteen supported route classes.
+
+**Remaining booru paths/options:** custom path restriction/replacement/conversion,
+strip/substitution settings, extension-map overrides, unsupported routes and
+alternate source hosts still need their source contracts. Gelbooru video URL
+rewriting outside pools and broader DAPI response normalization remain unfinished.
+
+**Implemented E621/e926 favorites:** E621 favorites stream
+`/favorites.json` with numbered pages (no pool buffering). The constructor
+matches `/favorites` as a prefix; only an immediately following query is
+captured. Decode query keys/values once, skip bare pairs, and retain the first
+value for each decoded key, including blanks. URL `page`/`limit` are overwritten
+by native pagination defaults; other query parameters remain API-only and do
+not create `search_tags`. Retain `user_id` as an arbitrary string, including the
+empty default, and reapply it per Post only. Current Post/File mutations survive
+within the post; the next post and API request restore the constructor owner.
+ID mutations/deletion do not affect numbered cursors. The default metadata
+archive key is `f_{user_id}_{id}` using live file keywords; the source directory
+is category/Favorites/user_id. Danbooru has no matching `/favorites` extractor.
+Native traversal is lazy, has no 100-page cutoff, and does not buffer, reorder,
+or deduplicate API pages. User IDs remain exact strings (including blanks) and
+compatibility owner keywords preserve raw types without leaking private schema
+fields into inspection JSON. Retained source class descriptors now include
+archive formats, allowing `for_media` to recover proven booru post/tag/pool/
+favorite-group/favorite defaults without inferring classes from mutable owner or
+collection keywords. Genuine source replay covers constructor parsing, API
+parameters, pages, cancellation, later-page failures, five hook checkpoints,
+complete published paths/bytes, live metadata archive keys, and unchanged native
+SQLite identity. Compatibility tests cover typed owner presence, category scope,
+E926 keyword category, unknown-route rejection, and media-only default archives.
+
+**Implemented DAPI pools (source oracle, 1.32.17):** Gelbooru matches the ordered
+`page=pool&s=show&id=ID` query on `/` or `/index.php`; Safebooru requires
+`/index.php`. Preserve lexical digit captures, then expose scalar integer `pool`
+and HTML-decoded `pool_name`. Missing/empty titles fail before post requests.
+Gelbooru fetches the title HTML, fetches the listing again with `pid=0`, then
+requests JSON DAPI records for each HTML ID in order; continue at 45 HTML IDs
+with offsets increasing by 45, preserving duplicates and counting IDs rather
+than API results. Safebooru retains thumbnail IDs from its initial HTML and
+fetches XML DAPI records lazily, without HTML pagination. Reapply the two pool
+keywords per post, without Danbooru shared-object semantics or synthetic `num`.
+Defaults are `{category}/pool/{pool}`, the ordinary DAPI filename, and metadata
+archive key `p_{pool}_{id}`. Replay title failures/decoding, repeated HTML reads,
+45-ID boundaries, duplicate/zero/multiple API results, cancellation before later
+ID requests, and per-post keyword restoration. Native source replay compares
+actual publication paths/bytes, all six hook events including duplicate skips,
+metadata archive keys, and unchanged native SQLite post identity. Pool HTML
+never receives API credentials, including across redirects; both DAPI sites
+accept API-only credentials. XML decoding uses the bounded existing parser and
+rejects DTDs; API error bodies are excluded from diagnostics. XML attribute IDs
+and stripped tags preserve source string types in filters, templates and hooks.
+Both sites validate required tags/date after skipping records without file URLs.
+
+**Implemented Safebooru favorites (source oracle, 1.32.17):** match the ordered
+`page=favorites&s=view&id=ID` query on `/index.php`. Expose scalar integer
+`favorite_id` while retaining the lexical requested ID in HTML queries. Begin
+HTML traversal at `pid=0` without a title request; the source regex matches
+Python whitespace followed by `id="p` and a Unicode decimal digit prefix, without
+requiring a closing quote. Count every match, including duplicates, and advance
+by 50 when at least 50 matches occur, independently of XML response row counts.
+Each member uses lazy XML DAPI preparation, preserving string IDs and stripped
+tags and skipping missing file URLs before required-field validation. Reapply
+`favorite_id` per Post without sharing later mutations across posts or requests.
+Default paths are `{category}/favorites/{favorite_id}` with the ordinary DAPI
+filename; metadata archives use live `f_{favorite_id}_{id}` keys. Native history
+retains the original canonical post identity. Compatibility keywords preserve
+raw owner types for Gelbooru/Safebooru without inferring a source class; proven
+Gelbooru/Safebooru favorite routes select these defaults. Existing Pixiv Unicode
+17 decimal rules now serve the HTML scanner too. Genuine source replay covers
+41 cases and nine route probes, six hook checkpoints, full media/sidecar bytes,
+actual source metadata archive SQL, and canonical native history identity.
+DAPI source contexts no longer synthesize `num`; user-added values remain live
+within the current post. The existing 73 pool cases also verify that absence.
+
+**Implemented Gelbooru favorites (source oracle, 1.32.17):** the ordered
+`page=favorites&s=view&id=ID` query matches `/` or `/index.php`, retaining lexical
+IDs for API requests and scalar `favorite_id` for source keywords. A JSON probe
+uses string limit `2`, compares the first two raw entry IDs with Python ordering,
+and chooses forward or reverse traversal. Forward pages use numeric limit 100
+and stop only on an empty favorite result; reverse traversal starts at
+`divmod(count-1,100)[0]`, reverses each page and decrements through zero, including
+the source's initial negative page for zero counts and float page spellings.
+Regular single-object responses are supported forward but fail in reverse, where
+the source requires a mutable list. Count types are validated only on paths that
+use them. Category `order-posts` retains raw JSON and first-element truthiness
+rules, including delayed errors after the probe. Global supported order strings
+retain their original spelling rather than conflating `reverse` with `desc`.
+Each favorite entry hydrates posts lazily, then assigns `date_favorited`; missing
+`added` fails only when hydration returns a post. Timestamp conversion follows
+source integer coercion, with a typed falsy NullDatetime sentinel for invalid
+values. Typed dates survive hook copies and template/filter evaluation; primitive
+hook replacements retain their types, and public metadata JSON removes internal
+type markers. Default paths and archives match Safebooru favorites. Source replay
+covers 76 cases, ten typed timestamp vectors and six route probes, including
+pagination, cancellation, six hook events, full publication bytes, metadata
+archive SQL and stable native history IDs. Compatibility/configuration tests
+cover date types, retained source class provenance, sparse raw order settings,
+precedence and exact backend argument forwarding. Arbitrary literal strftime
+specifications on unknown copied-date aliases remain a generic formatter gap;
+standard `%Y` date aliases are supported.
+
+**Implemented Danbooru/e621/e926 popular views (source oracle, 1.32.17):**
+Popular routes retain original API query parameters, first-value query decoding,
+numbered pagination and source thresholds. Keyword dates use the local calendar
+when omitted, Monday normalization for ISO calendar/week dates, and literal
+Unicode slicing for month scale. Root date/scale retain primitive types through
+filters, formatting, hook copies, deletion and reassignment; explicit datetime
+conversion retains typed provenance. Default paths and live metadata archives
+use `{category}/popular/{scale}/{date}` and `P_{scale[0]}_{date}_{id}`, including
+empty-scale `None` formatting. Native creation timestamps and history identities
+remain attached to the original posts. Proven compatibility routes keep their
+class defaults and primitive scope even when hooks delete date/scale. Strict
+response handling preserves already published rows before a later malformed
+record fails. Genuine source replay covers 139 cases, twelve route probes and
+five formatter vectors, including API parameters, pagination, cancellation,
+six hook checkpoints, complete publication bytes and actual metadata archive SQL.
+
+**Implemented Danbooru/e621/e926 artist routes (source oracle, 1.32.17):**
+Artist detail IDs retain lexical spelling; searches retain first-decoded query
+parameters, source integer page coercion and fixed twenty-row pagination.
+Artists queue lazy tag-search jobs with complete bounded artist JSON, fixed
+quoted URLs, selection before shared URL deduplication, and name validation
+before selection. Children inherit hook-mutated artist metadata under `_parent`
+as a shallow copy: root edits stay with the child, nested-map edits propagate to
+the parent's later callback, and replacements detach those objects. The source
+reapplies its original parent mapping at each post/file message. Tag children
+own paths and `t_{search_tags}_{id}` archives; queue-only roots use their inherited
+empty archive format and initialize hooks only when eager initialization is set.
+Native history retains canonical post identities independently of source metadata
+archives. Genuine source jobs cover 129 cases and 24 route probes, including
+request order, cancellation, filters/ranges/deduplication, malformed partial
+results, hook ownership, primitive date fields, publication bytes and SQLite keys.
+**Implemented artist metadata inheritance options (source oracle, 1.32.17):**
+`parent-metadata` and legacy `metadata-parent` retain raw JSON and resolve each
+key across configuration layers before primary-key presence selects the result.
+Falsy values disable inheritance, nonempty strings select exact nested keys,
+and truthy non-strings flatten the artist fields. Shallow nested identities and
+hook-created aliases survive Child, child Post/File, ChildAfter and final parent
+hooks. Inherited fields reapply at every Directory and Url boundary, including
+colliding IDs, dates, category labels, tags, names, filename/extension and custom
+metadata keys. Original API identity remains separate for native history.
+Raw date strings stay primitive; explicit conversions retain datetime identity.
+
+Stable artist/artist-search/tag job configuration selects hooks and eager
+initialization independently of mutable public class labels. These class scopes
+support inheritance, job hooks/options, base directory, filename/directory,
+child selection, post filters/ranges and date bounds; unsupported class extraction/selection options fail
+explicitly. Declared custom parent names work in templates across scopes.
+CLI artist classes keep independent cached inheritance settings, and tag children
+use their own job templates and output settings. Compatibility forwards both
+raw inheritance keys without collapsing absence or null. Compatibility jobs retain
+category-level native hook and output settings. Canonical booru tag keywords now
+retain source-normalized arrays. Genuine new source jobs cover
+168 cases (including 48 observed collision-path Skip events), all eight hook
+phases, complete publication bytes and actual metadata archive SQL. The original
+129 artist cases remain frozen and pass unchanged.
+
+Remaining: other class-scoped extraction/selection options, source download-archive
+path arrays, dynamic Python class/proxy keyword objects, and array-element
+mutation. Configurable parent inheritance for other native queue producers has
+not yet been implemented.
+
+**Implemented live booru date selection (source oracle, 1.32.17):** 141 genuine
+DownloadJob cases plus 12 separately labeled predicate helper vectors preserve
+Directory-only evaluation, post-filter/date/range order, source raw types,
+exclusive boundaries, inverted-window behavior, and child-local errors/stops.
+Falsy live dates bypass comparisons; truthy non-datetime values fail privately.
+The selector borrows live artist keyword objects instead of cloning their trees.
+Actual tag classes resolve their own date/post predicates independently of artist
+root settings. Invalid/falsy configuration bounds disable comparison by presence,
+including clearing a less specific bound; numeric truthy values convert to integer
+Unix seconds. Native API history still records original post identities. Replay
+checks exact consumed messages, hook phases, paths, publication bytes and both
+SQLite archives. Source skip_date policies for other extractors and producer date precision remain
+to audit; source bound conversion is extended below.
+
+**Implemented source date-bound conversion (gallery-dl 1.32.17/Python 3.15):**
+Configuration and CLI share ISO-first conversion followed by Python-style decimal
+integer fallback. Basic/extended calendar and week dates, ambiguous week-date
+separators, arbitrary Unicode separators, 24:00 rollover, timezone seconds and
+fractions, long fractions, Unicode decimal digits and numeric underscores retain
+source behavior. UTC normalization happens before microsecond truncation; invalid
+or out-of-range conversions disable the bound by presence. Raw configuration
+accepts unpaired-surrogate date separators without changing unrelated JSON data,
+valid surrogate pairs or duplicate-key validation. The legacy strict date API is
+unchanged. Genuine source cases cover 328 conversions (including two raw
+surrogate inputs) and 66 complete DownloadJobs, verifying normalized dates, category/class resolution, clearing, predicates, publication
+bytes and SQLite identities. Broader source JSON decoding, including the global
+4,300-digit integer literal limit, remains separate configuration parity work.
+
+**Implemented source template date conversion (gallery-dl 1.32.17/Python 3.15):**
+`!D` shares ISO-first conversion while `!d` uses timestamp coercion, including
+numeric zero and truncation toward zero. Invalid conversions retain the source's
+falsy NullDatetime identity, formatting marker, scalar attributes, and epoch
+conversion. Missing values and explicit null values preserve their different
+default-formatter behavior. Metadata modify preserves datetime values copied to
+arbitrary keys; assigning primitive values to date-named keys does not infer a
+new datetime. Default multi-part formatting rejects object-valued fields, while
+identity-mode formatting safely converts them to text; the `I` specifier retains
+object identity. Source templates validate final format specifications against
+the actual value, allowing literal datetime formats.
+
+Booru keyword contexts now retain arbitrary API fields and nested primitive
+types, with source filename/extension, tag groups, dates and immutable job class
+labels taking precedence. Configuration and CLI templates accept dynamically
+provided fields; native history identities retain canonical post IDs. Genuine
+source evidence includes 1,230 direct cases, 32 modifications and nine complete
+DownloadJobs with exact paths, bytes, typed callbacks and SQLite identities.
+Native replay covers 1,224 direct cases and 28 modifications plus all nine jobs.
+Four unpaired-surrogate string cases, two raw fractional-timezone renderings and
+four preexisting subsecond datetime modifications remain explicit representation
+boundaries in the frozen fixture. An additional 72 formatter evaluations and 12
+MetadataPP runs preserve shifted NullDatetime payloads and enforce calendar
+overflow at years one and 9999. Broader producer datetime precision and source
+JSON decoding remain parity work.
+
+Source `O` arguments now use duration arithmetic, including unsigned hours,
+Unicode decimal integers, underscores, signed minutes, values beyond 24 hours,
+and the source's zero-hour minute-sign rule. Arbitrary-size operands can cancel
+before enforcing Python timedelta bounds. Empty and `local` arguments look up
+the host timezone at the input date, preserving historical second-level offsets
+and the float timestamp rounding used by Python. Numeric parse failures remain
+distinct from calendar overflow during rendering. Frozen source formatter,
+MetadataPP and DownloadJob replays cover these behaviors; timezone replays use
+isolated subprocesses. The epoch-only JSON date wrapper still cannot distinguish
+aware UTC dates from naive dates; source rejects aware dates for local offsets.
+
+**Implemented typed booru source path results (gallery-dl 1.32.17):** Source
+filename templates require text. Directory components accept text, expand flat
+string lists and insertion-ordered map keys, and discard the missing-value
+sentinel. Numeric, null, datetime and nested non-string results fail privately.
+Bare conversions preserve their result types; explicit formatting converts them
+to text. Empty source fields ignore both conversions and an empty context key.
+The strict native naming APIs retain their required-field behavior. Dynamic
+directories share the existing segment cleanup and 3,072-byte path bound, with a
+4,096-item budget that also counts empty elements.
+
+Prepare hooks run before final filename validation and can repair or invalidate
+keyword values. Their metadata destinations use the frozen directory, cached
+extension and unset filename, so default sidecars are named `metadata.*`.
+A later filename error preserves completed sidecars and leaves canonical media
+history empty. Evidence includes 74 complete source jobs, six additional
+Prepare jobs, five direct conversion failures and four real PathFormat
+open/finalize probes. Seven empty-basename cases retain an explicit native
+policy difference: native rejects them before file hooks or publication; source
+open/finalize fails later and may retain a partial file. Synthetic transfer
+artifacts in these cases are recorded separately from actual file-open evidence.
+First-file Prepare hashing uses the cleared input path rather than a provisional
+destination; the source fallback to a prior cached realpath across files/posts
+remains file-state parity work. That cache records the last built path, including
+archived, skipped or failed attempts, and a filename-rebuilding callback changes
+the input for subsequent callbacks in the same hook. Typed path handling remains
+gated by proven booru source defaults; other native extractors still need source
+path and class defaults.
+
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the
@@ -736,9 +1569,21 @@ format selection, completed-path publication, and the segmented-download/merge
 fixture suite. Direct HTTP fallback URLs now execute through the shared downloader;
 opaque `_ytdl_*` options still await the companion adapter.
 
-The inspected local yt-dlp-rs prototype exposes `YoutubeDl`, `VideoInfo`,
-`VideoFormat`, and an `Extractor` interface for direct media and limited HTML5
-pages. It does not yet implement HLS/DASH, cookies, or FFmpeg postprocessing.
-Those are prerequisites for the corresponding video handoffs, not functionality
-that gallery-dl-rs can currently advertise. No companion dependency or runtime
-delegation is enabled yet.
+**Companion audit, 2026-10-20:** the old main checkout was stale. Published
+[yt-dlp-rs main at `10223c019ef6ec5552627b90251d8e967404e440`](https://github.com/aagedal/yt-dlp-rs/tree/10223c019ef6ec5552627b90251d8e967404e440)
+already implements HLS VOD, static single-period DASH, AES-128 HLS, scoped
+cookies, FFmpeg merging, progress/cooperative transfer cancellation, and
+completed-path results. Its public APIs and fixture coverage were inspected;
+that revision has not been independently compiled as a gallery dependency.
+No tags or GitHub releases existed at audit time. The immutable commit is a
+reproducible preview candidate, not a stable released adapter contract.
+
+Remaining public API requirements: inline manifest data plus its base URL;
+configurable request/connect timeouts (published defaults are hard-coded);
+cancellation during extraction; scope-preserving session cookie sharing; and
+request-specific sensitive headers that do not follow unrelated segment/key
+origins. Manifest parsers are private, and the companion's cookie jar is a
+different concrete type. Global default headers cannot replace the required
+scoped request boundary. Do not discard inline manifests or flatten cookies
+to make a preview adapter appear complete. No companion dependency or runtime
+delegation is enabled yet; gallery-owned integration/publication tests remain.

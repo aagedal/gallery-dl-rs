@@ -70,6 +70,9 @@ impl Twitter {
             Ok(None) => {}
         }
         match timeline::profile_input(url) {
+            Ok((input, _)) if timeline::is_user_dispatch(url) => {
+                self.user_events(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
+            }
             Ok((input, ProfileTab::Timeline)) => {
                 self.timeline_events(input, Url::parse("https://x.com/i/api/graphql/").unwrap())
             }
@@ -80,6 +83,53 @@ impl Twitter {
             ),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
+    }
+
+    pub(super) fn user_events(
+        &self,
+        input: ProfileInput,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let views = crate::dispatch::select(
+            self.include.as_ref(),
+            &["timeline"],
+            &[
+                "info",
+                "avatar",
+                "background",
+                "timeline",
+                "tweets",
+                "media",
+                "with-replies",
+                "highlights",
+                "likes",
+            ],
+            &[("replies", "with-replies")],
+        );
+        stream::iter(views)
+            .flat_map(move |view| {
+                let input = input.clone();
+                let base = base.clone();
+                event::child_job(
+                    event::ChildMetadata::from_raw("twitter", "user", &serde_json::Map::new()),
+                    move || {
+                        let tab = match view.as_str() {
+                            "info" => ProfileTab::Info,
+                            "avatar" => ProfileTab::Avatar,
+                            "background" => ProfileTab::Background,
+                            "timeline" => ProfileTab::Timeline,
+                            "tweets" => ProfileTab::Tweets,
+                            "media" => ProfileTab::Media,
+                            "with-replies" => ProfileTab::Replies,
+                            "highlights" => ProfileTab::Highlights,
+                            "likes" => ProfileTab::Likes,
+                            _ => unreachable!("validated dispatcher view"),
+                        };
+                        self.profile_events(input, tab, base)
+                    },
+                )
+            })
+            .boxed()
     }
 
     pub(super) fn status_events(&self, id: String) -> BoxStream<'_, Result<ExtractionEvent>> {
@@ -307,6 +357,25 @@ impl Twitter {
     ) -> BoxStream<'_, Result<ExtractionEvent>> {
         if tab == ProfileTab::Timeline {
             return self.timeline_events(input, base);
+        }
+        if matches!(
+            tab,
+            ProfileTab::Info | ProfileTab::Avatar | ProfileTab::Background
+        ) {
+            return stream::once(async move {
+                let endpoint = user_endpoint(&base, &input)?;
+                self.ensure_transaction_at("", &endpoint).await?;
+                let bytes = self.fetch(&endpoint, "", true).await?;
+                let mut events = profile_view(&bytes, &input, tab)?;
+                for event in &mut events {
+                    if let ExtractionEvent::Media(media) = event {
+                        self.network.apply_media(media);
+                    }
+                }
+                Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)))
+            })
+            .try_flatten()
+            .boxed();
         }
         self.collection_events(Some(input), Source::Profile(tab), None, base)
     }
@@ -862,6 +931,208 @@ impl Twitter {
     }
 }
 
+pub(crate) fn profile_asset_identity(
+    kind: crate::profile_asset::ProfileAssetKind,
+    owner: &str,
+    url: &Url,
+) -> Option<crate::profile_asset::ProfileAssetMetadata> {
+    use crate::profile_asset::{ProfileAssetKind, ProfileAssetMetadata};
+    if !valid_id(owner)
+        || url.as_str().len() > 4096
+        || url.scheme() != "https"
+        || url.host_str() != Some("pbs.twimg.com")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    let parts: Vec<_> = url.path().strip_prefix('/')?.split('/').collect();
+    let version = match (kind, parts.as_slice()) {
+        (ProfileAssetKind::Avatar, ["profile_images", version, filename]) if valid_id(version) => {
+            let (stem, extension) = filename.rsplit_once('.')?;
+            if stem.is_empty()
+                || !stem
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+                || !matches!(
+                    extension.to_ascii_lowercase().as_str(),
+                    "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif"
+                )
+            {
+                return None;
+            }
+            *version
+        }
+        (ProfileAssetKind::Background, ["profile_banners", source_owner, version])
+            if *source_owner == owner && valid_id(version) =>
+        {
+            let seconds: u64 = version.parse().ok()?;
+            u128::from(seconds)
+                .checked_mul(1000)?
+                .checked_sub(1_288_834_974_657)?;
+            *version
+        }
+        _ => return None,
+    };
+    Some(ProfileAssetMetadata {
+        kind,
+        owner_id: owner.into(),
+        version: version.into(),
+    })
+}
+
+pub(super) fn profile_view(
+    bytes: &[u8],
+    input: &ProfileInput,
+    tab: ProfileTab,
+) -> Result<VecDeque<ExtractionEvent>> {
+    use crate::{extract::MediaJob, profile_asset::ProfileAssetKind};
+    use std::sync::Arc;
+    let invalid = || error("Twitter profile asset is missing valid public identity or metadata");
+    let owner = timeline::parse_user(bytes, input)?;
+    let name = timeline::parse_user_name(bytes, &owner)?;
+    let document = timeline::document(bytes)?;
+    let user = document.pointer("/data/user/result").ok_or_else(invalid)?;
+    let bounded_text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .filter(|value| value.len() <= 64 * 1024 && !value.contains('\0'))
+            .map(Arc::<str>::from)
+    };
+    if tab == ProfileTab::Info {
+        let created = user
+            .pointer("/core/created_at")
+            .or_else(|| user.pointer("/legacy/created_at"))
+            .and_then(Value::as_str)
+            .and_then(timestamp);
+        return Ok(VecDeque::from([
+            ExtractionEvent::Post(Box::new(event::Post {
+                keywords: Default::default(),
+                category: "twitter".into(),
+                metadata: Some(PostMetadata {
+                    post_id: owner,
+                    username: Some(Arc::from(name)),
+                    caption: bounded_text(user.pointer("/legacy/description")),
+                    timestamp: created,
+                    ..PostMetadata::default()
+                }),
+                count: Some(0),
+            })),
+            ExtractionEvent::EndPost,
+        ]));
+    }
+    let (kind, source) = match tab {
+        ProfileTab::Avatar => (
+            ProfileAssetKind::Avatar,
+            user.pointer("/avatar/image_url")
+                .or_else(|| user.pointer("/legacy/profile_image_url_https")),
+        ),
+        ProfileTab::Background => (
+            ProfileAssetKind::Background,
+            user.pointer("/legacy/profile_banner_url"),
+        ),
+        _ => return Err(invalid()),
+    };
+    let Some(source) = source.filter(|source| !source.is_null()) else {
+        return Ok(VecDeque::new());
+    };
+    let source = source
+        .as_str()
+        .filter(|source| source.len() <= 4096)
+        .ok_or_else(invalid)?;
+    if source.is_empty()
+        || kind == ProfileAssetKind::Avatar
+            && source
+                == "https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png"
+    {
+        return Ok(VecDeque::new());
+    }
+    let mut url = Url::parse(source).map_err(|_| invalid())?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("pbs.twimg.com")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid());
+    }
+    let parts: Vec<_> = url.path().trim_start_matches('/').split('/').collect();
+    let (post_id, version, timestamp, extension) = match (kind, parts.as_slice()) {
+        (ProfileAssetKind::Avatar, ["profile_images", version, filename]) if valid_id(version) => {
+            let filename = filename.replace("_normal.", ".");
+            let (stem, extension) = filename.rsplit_once('.').ok_or_else(invalid)?;
+            if stem.is_empty()
+                || !stem
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+                || !matches!(
+                    extension.to_ascii_lowercase().as_str(),
+                    "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif"
+                )
+            {
+                return Err(invalid());
+            }
+            let version_id: u64 = version.parse().map_err(|_| invalid())?;
+            let timestamp = ((version_id >> 22) + 1_288_834_974_657) / 1000;
+            (
+                version.to_string(),
+                version.to_string(),
+                Some(timestamp as i64),
+                extension.to_ascii_lowercase(),
+            )
+        }
+        (ProfileAssetKind::Background, ["profile_banners", source_owner, version])
+            if *source_owner == owner && valid_id(version) =>
+        {
+            let seconds: u64 = version.parse().map_err(|_| invalid())?;
+            let id = u128::from(seconds)
+                .checked_mul(1000)
+                .and_then(|milliseconds| milliseconds.checked_sub(1_288_834_974_657))
+                .and_then(|difference| difference.checked_mul(1 << 22))
+                .ok_or_else(invalid)?;
+            (
+                id.to_string(),
+                version.to_string(),
+                i64::try_from(seconds).ok(),
+                String::new(),
+            )
+        }
+        _ => return Err(invalid()),
+    };
+    if kind == ProfileAssetKind::Avatar {
+        url.set_path(&url.path().replace("_normal.", "."));
+    }
+    let asset = profile_asset_identity(kind, &owner, &url).ok_or_else(invalid)?;
+    let filename = if extension.is_empty() {
+        format!("{}_{}_{}", kind.as_str(), owner, version)
+    } else {
+        format!("{}_{}_{}.{}", kind.as_str(), owner, version, extension)
+    };
+    let media = Media {
+        url,
+        job: MediaJob::DirectHttp,
+        category: "twitter".into(),
+        filename,
+        metadata: Some(PostMetadata {
+            profile_asset: Some(asset),
+            post_id,
+            media_id: "1".into(),
+            username: Some(Arc::from(name)),
+            index: 1,
+            timestamp,
+            ..PostMetadata::default()
+        }),
+        headers: BTreeMap::new(),
+        handoff: BTreeMap::new(),
+    };
+    Ok(event::group(vec![media], "twitter"))
+}
+
 fn user_endpoint(base: &Url, input: &ProfileInput) -> Result<Url> {
     let (operation, variables, toggles) = match input {
         ProfileInput::Name(name) => (
@@ -923,6 +1194,9 @@ fn profile_endpoint(
         }
         ProfileTab::Highlights => "gmHw9geMTncZ7jeLLUUNOw/UserHighlightsTweets",
         ProfileTab::Timeline => return Err(error("Twitter timeline strategy was not resolved")),
+        ProfileTab::Info | ProfileTab::Avatar | ProfileTab::Background => {
+            return Err(error("Twitter profile view is not a post timeline"));
+        }
     };
     if let Some(cursor) = cursor {
         variables["cursor"] = cursor.into();
@@ -1054,6 +1328,8 @@ fn queue_unique(
         }
     }
     pending.push_back(ExtractionEvent::Post(Box::new(event::Post {
+        keywords: event::KeywordPolicy::copied_after_post(&["num", "index", "media_id"])
+            .without_post_fields(&["source_id", "source_user", "sensitive_flags"]),
         category: "twitter".into(),
         metadata: Some(post.metadata),
         count: Some(post.media.len()),

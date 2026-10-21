@@ -9,6 +9,124 @@ use std::{
 use tokio::time::Instant;
 use url::Url;
 
+/// A corrupt compressed response, distinct from permanent size/encoding limits.
+#[derive(Debug)]
+pub(crate) struct ApiContentDecodeError;
+impl std::fmt::Display for ApiContentDecodeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("could not decompress API response")
+    }
+}
+impl std::error::Error for ApiContentDecodeError {}
+
+/// Decode bounded API payloads without enabling automatic decompression on
+/// media clients, whose byte ranges and validators refer to wire bytes.
+pub(crate) async fn decode_api_body(
+    body: Vec<u8>,
+    headers: &HeaderMap,
+    limit: usize,
+) -> Result<Vec<u8>> {
+    if body.len() > limit {
+        return Err(error("API response exceeded size limit"));
+    }
+    let mut encodings = headers.get_all(reqwest::header::CONTENT_ENCODING).iter();
+    let encoding = encodings.next();
+    if encodings.next().is_some() {
+        return Err(error("unsupported API response encoding"));
+    }
+    let Some(encoding) = encoding else {
+        return Ok(body);
+    };
+    let encoding = encoding
+        .to_str()
+        .map_err(|_| error("unsupported API response encoding"))?
+        .trim();
+    if encoding.eq_ignore_ascii_case("identity") {
+        return Ok(body);
+    }
+    if !encoding.eq_ignore_ascii_case("gzip") {
+        return Err(error("unsupported API response encoding"));
+    }
+    decode_gzip_body(body, limit, Arc::new(DecodeState::default())).await
+}
+
+#[derive(Default)]
+struct DecodeState {
+    cancelled: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    started: std::sync::atomic::AtomicBool,
+}
+impl DecodeState {
+    fn check(&self) -> Result<()> {
+        if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            Err(error("API decoding cancelled"))
+        } else {
+            Ok(())
+        }
+    }
+}
+struct CancelDecode(Arc<DecodeState>);
+impl Drop for CancelDecode {
+    fn drop(&mut self) {
+        self.0
+            .cancelled
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+struct DecodeInput {
+    bytes: std::io::Cursor<Vec<u8>>,
+    state: Arc<DecodeState>,
+}
+impl std::io::Read for DecodeInput {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self
+            .state
+            .cancelled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(std::io::Error::other("API decoding cancelled"));
+        }
+        // Empty gzip members can consume substantial input without producing
+        // decoded bytes. Check cancellation on input progress as well.
+        let count = buffer.len().min(4096);
+        std::io::Read::read(&mut self.bytes, &mut buffer[..count])
+    }
+}
+async fn decode_gzip_body(body: Vec<u8>, limit: usize, state: Arc<DecodeState>) -> Result<Vec<u8>> {
+    let _cancel = CancelDecode(state.clone());
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        #[cfg(test)]
+        state
+            .started
+            .store(true, std::sync::atomic::Ordering::Release);
+        state.check()?;
+        let input = DecodeInput {
+            bytes: std::io::Cursor::new(body),
+            state: state.clone(),
+        };
+        let mut decoder = flate2::read::MultiGzDecoder::new(input);
+        let mut decoded = Vec::new();
+        let mut chunk = [0; 16 * 1024];
+        loop {
+            state.check()?;
+            let count = decoder
+                .read(&mut chunk)
+                .map_err(|_| Box::new(ApiContentDecodeError) as crate::Error)?;
+            if count == 0 {
+                break;
+            }
+            if count > limit.saturating_sub(decoded.len()) {
+                return Err(error("decoded API response exceeded size limit"));
+            }
+            decoded.extend_from_slice(&chunk[..count]);
+        }
+        Ok(decoded)
+    })
+    .await
+    .map_err(|_| error("API decoding task failed"))?
+}
+
 /// Manual redirects keep request credentials under the caller's control.
 /// Never include a Location value in diagnostics: it can contain credentials.
 pub(crate) struct Redirects {
@@ -349,5 +467,97 @@ mod tests {
             headers.insert(RETRY_AFTER, value.parse().unwrap());
             assert_eq!(retry_after(&headers, now), expected, "{value}");
         }
+    }
+}
+
+#[cfg(test)]
+mod api_body_tests {
+    use super::*;
+    use reqwest::header::CONTENT_ENCODING;
+    use std::io::Write;
+    fn gzip(body: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(body).unwrap();
+        encoder.finish().unwrap()
+    }
+    fn headers(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_ENCODING, value.parse().unwrap());
+        headers
+    }
+    #[tokio::test]
+    async fn gzip_api_decoding_is_bounded_and_validates_all_members() {
+        let mut body = gzip(b"one");
+        body.extend(gzip(b"two"));
+        assert_eq!(
+            decode_api_body(body, &headers("GZip"), 100).await.unwrap(),
+            b"onetwo"
+        );
+        let error = decode_api_body(gzip(&vec![b'x'; 65536]), &headers("gzip"), 1024)
+            .await
+            .unwrap_err();
+        assert!(!error.is::<ApiContentDecodeError>());
+        assert!(error.to_string().contains("size limit"));
+        let mut truncated = gzip(b"private response");
+        truncated.truncate(truncated.len() - 3);
+        let error = decode_api_body(truncated, &headers("gzip"), 1024)
+            .await
+            .unwrap_err();
+        assert!(error.is::<ApiContentDecodeError>());
+        let message = error.to_string();
+        assert!(message.contains("decompress") && !message.contains("private response"));
+    }
+    #[tokio::test]
+    async fn identity_and_unsupported_api_encodings_never_guess_payload_format() {
+        assert_eq!(
+            decode_api_body(b"json".to_vec(), &HeaderMap::new(), 4)
+                .await
+                .unwrap(),
+            b"json"
+        );
+        assert_eq!(
+            decode_api_body(b"json".to_vec(), &headers("identity"), 4)
+                .await
+                .unwrap(),
+            b"json"
+        );
+        assert!(
+            decode_api_body(b"large".to_vec(), &HeaderMap::new(), 4)
+                .await
+                .is_err()
+        );
+        for encoding in ["br", "gzip, gzip", "PRIVATE_VALUE", ""] {
+            let error = decode_api_body(vec![], &headers(encoding), 10)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(!error.contains("PRIVATE_VALUE"));
+        }
+        let mut double = headers("gzip");
+        double.append(CONTENT_ENCODING, "identity".parse().unwrap());
+        assert!(decode_api_body(gzip(b"x"), &double, 100).await.is_err());
+    }
+    #[tokio::test]
+    async fn cancelling_many_empty_gzip_members_stops_worker_and_releases_input() {
+        let state = Arc::new(DecodeState::default());
+        let body = gzip(b"").repeat(100_000);
+        let mut pending = Box::pin(decode_gzip_body(body, 32 * 1024 * 1024, state.clone()));
+        assert!(futures_util::poll!(pending.as_mut()).is_pending());
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !state.started.load(std::sync::atomic::Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("gzip worker did not start");
+        drop(pending);
+        assert!(state.cancelled.load(std::sync::atomic::Ordering::Acquire));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while Arc::strong_count(&state) > 1 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("cancelled gzip worker retained input/state");
     }
 }

@@ -1,0 +1,3003 @@
+{
+  "source": "PixivWorkExtractor.items/works + PixivExtractor._extract_files/_extract_ugoira",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/extractor/pixiv.py",
+  "source_sha256": "add614ad99cf2739f934b5d4e30155fab361ebb9f3ed99f9b89f08468aef507f",
+  "generator": "Actual Work items/works/_extract_files/_extract_ugoira; fake API detail/ugoira_metadata plus request HEAD stub. Source _init ugoira expressions evaluated without creating a session. Real HttpError models completed HTTP failure or already-exhausted network failure; request retry loop itself not simulated. HEAD kwargs record explicit arguments only, not inherited authenticated source-session headers. Native intentionally excludes OAuth/app headers from probes. Deep copies at post/media boundaries; dates normalized to naive UTC ISO. No network/authentication.",
+  "cases": [
+    {
+      "name": "direct_ugoira0_jpg",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.jpg",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "direct_query_suffix_preserved",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?token=fixture",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?token=fixture",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?token=fixture",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.jpg?token=fixture",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.jpg?token=fixture",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "last_marker_inside_query_controls_raw_partition",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?variant=_ugoira0.png",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?variant=_ugoira0.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?variant=_ugoira0.png",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?variant=_ugoira1.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg?variant=_ugoira1.png",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira0",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "fallback_jpg",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpg",
+          "archive": "42_p00.jpg"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.jpg",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.jpg",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "jpg",
+            "hash": ""
+          },
+          "default_filename": "42_p1.jpg",
+          "archive": "42_p01.jpg"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "fallback_png_drops_query",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip?token=fixture",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [
+        "http_error",
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "png",
+            "hash": ""
+          },
+          "default_filename": "42_p0.png",
+          "archive": "42_p00.png"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.png",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.png",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "png",
+            "hash": ""
+          },
+          "default_filename": "42_p1.png",
+          "archive": "42_p01.png"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "fallback_gif",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [
+        "http_error",
+        "http_error",
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "gif",
+            "hash": ""
+          },
+          "default_filename": "42_p0.gif",
+          "archive": "42_p00.gif"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.gif",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.gif",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "gif",
+            "hash": ""
+          },
+          "default_filename": "42_p1.gif",
+          "archive": "42_p01.gif"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "fallback_all_http_errors_still_gif",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [
+        "http_error",
+        "http_error",
+        "http_error"
+      ],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "gif",
+            "hash": ""
+          },
+          "default_filename": "42_p0.gif",
+          "archive": "42_p00.gif"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.gif",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.gif",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "gif",
+            "hash": ""
+          },
+          "default_filename": "42_p1.gif",
+          "archive": "42_p01.gif"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "fallback_exhausted_network_errors_still_gif",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [
+        "network_exhausted",
+        "network_exhausted",
+        "network_exhausted"
+      ],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "network_exhausted"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "network_exhausted"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "network_exhausted"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.gif",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "gif",
+            "hash": ""
+          },
+          "default_filename": "42_p0.gif",
+          "archive": "42_p00.gif"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.gif",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.gif",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "gif",
+            "hash": ""
+          },
+          "default_filename": "42_p1.gif",
+          "archive": "42_p01.gif"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "empty_original_direct",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [],
+      "ugoira_metadata": {
+        "frames": [],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [],
+            "frames": [],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "empty_original_still_probes",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip",
+      "frames": [],
+      "ugoira_metadata": {
+        "frames": [],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [
+        "http_error",
+        "success"
+      ],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "http_error"
+        },
+        {
+          "method": "request",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.png",
+          "kwargs": {
+            "method": "HEAD"
+          },
+          "outcome": "success"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [],
+            "frames": [],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "empty_zip",
+      "mode_set": true,
+      "mode": true,
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [],
+      "ugoira_metadata": {
+        "frames": [],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [],
+            "frames": [],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [],
+            "frames": [],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+            "filename": "42_ugoira1920x1080",
+            "extension": "zip",
+            "hash": ""
+          },
+          "default_filename": "42_p0.zip",
+          "archive": "42.zip"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "normal_zip",
+      "mode_set": true,
+      "mode": true,
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+            "filename": "42_ugoira1920x1080",
+            "extension": "zip",
+            "hash": ""
+          },
+          "default_filename": "42_p0.zip",
+          "archive": "42.zip"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "default_zip",
+      "mode_set": false,
+      "mode": null,
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+            "filename": "42_ugoira1920x1080",
+            "extension": "zip",
+            "hash": ""
+          },
+          "default_filename": "42_p0.zip",
+          "archive": "42.zip"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "false_skips",
+      "mode_set": true,
+      "mode": false,
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "null_skips",
+      "mode_set": true,
+      "mode": null,
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "unknown_truthy_zip",
+      "mode_set": true,
+      "mode": "unknown",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+            "filename": "42_ugoira1920x1080",
+            "extension": "zip",
+            "hash": ""
+          },
+          "default_filename": "42_p0.zip",
+          "archive": "42.zip"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "case_variant_zip",
+      "mode_set": true,
+      "mode": "Original",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": false,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 1,
+            "rating": "General",
+            "suffix": "",
+            "url": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira1920x1080.zip",
+            "filename": "42_ugoira1920x1080",
+            "extension": "zip",
+            "hash": ""
+          },
+          "default_filename": "42_p0.zip",
+          "archive": "42.zip"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "empty_string_skips",
+      "mode_set": true,
+      "mode": "",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.jpg",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 0,
+            "rating": "General",
+            "suffix": ""
+          }
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "direct_uppercase_JPEG_preserves_jpeg_extension",
+      "mode_set": true,
+      "mode": "original",
+      "img_url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.JPEG",
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "ugoira_metadata": {
+        "frames": [
+          {
+            "file": "000000.jpg",
+            "delay": 50
+          },
+          {
+            "file": "000001.jpg",
+            "delay": 125
+          }
+        ],
+        "zip_urls": {
+          "medium": "https://i.pximg.net/img-zip-ugoira/img/2024/01/02/03/04/05/42_ugoira600x600.zip"
+        }
+      },
+      "head_outcomes": [],
+      "calls": [
+        {
+          "method": "illust_detail",
+          "id": "42"
+        },
+        {
+          "method": "ugoira_metadata",
+          "id": "42"
+        }
+      ],
+      "events": [
+        {
+          "kind": "post",
+          "url": "",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": ""
+          }
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.JPEG",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 0,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p00",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira0.JPEG",
+            "_ugoira_frame_index": 0,
+            "filename": "42_ugoira0",
+            "extension": "jpeg",
+            "hash": ""
+          },
+          "default_filename": "42_p0.jpeg",
+          "archive": "42_p00.jpeg"
+        },
+        {
+          "kind": "media",
+          "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.JPEG",
+          "metadata": {
+            "id": 42,
+            "title": "Fixture animation",
+            "caption": "Fixture caption",
+            "type": "ugoira",
+            "width": 640,
+            "height": 480,
+            "user": {
+              "id": 5,
+              "account": "fixture.artist"
+            },
+            "tags": [
+              "猫"
+            ],
+            "create_date": "2024-01-02T12:04:05+09:00",
+            "x_restrict": 0,
+            "_ugoira_frame_data": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "frames": [
+              {
+                "file": "000000.jpg",
+                "delay": 50
+              },
+              {
+                "file": "000001.jpg",
+                "delay": 125
+              }
+            ],
+            "_ugoira_original": true,
+            "_http_adjust_extension": false,
+            "date_url": "2024-01-01 18:04:05",
+            "num": 1,
+            "date": "2024-01-02 03:04:05",
+            "count": 2,
+            "rating": "General",
+            "suffix": "_p01",
+            "url": "https://i.pximg.net/img-original/img/2024/01/02/03/04/05/42_ugoira1.JPEG",
+            "_ugoira_frame_index": 1,
+            "filename": "42_ugoira1",
+            "extension": "jpeg",
+            "hash": ""
+          },
+          "default_filename": "42_p1.jpeg",
+          "archive": "42_p01.jpeg"
+        }
+      ],
+      "error": null
+    }
+  ]
+}

@@ -21,11 +21,15 @@ use crate::{
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
+use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::{
     StreamExt,
     stream::{self, BoxStream},
 };
-use reqwest::{Client, StatusCode};
+use reqwest::{
+    Client, StatusCode,
+    header::{AUTHORIZATION, HeaderValue},
+};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
@@ -137,7 +141,7 @@ pub fn valid_media_id(site: Site, id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     PixeldrainFile(String),
-    PixeldrainList(String),
+    PixeldrainList(String, Option<usize>),
     CatboxAlbum(String),
     ImgboxGallery(String),
     ImgboxImage(String),
@@ -148,7 +152,7 @@ pub enum Target {
 impl Target {
     pub fn site(&self) -> Site {
         match self {
-            Self::PixeldrainFile(_) | Self::PixeldrainList(_) => Site::Pixeldrain,
+            Self::PixeldrainFile(_) | Self::PixeldrainList(_, _) => Site::Pixeldrain,
             Self::CatboxAlbum(_) => Site::Catbox,
             Self::ImgboxGallery(_) | Self::ImgboxImage(_) => Site::Imgbox,
             Self::PostimgImage(_) | Self::PostimgGallery(_) => Site::Postimg,
@@ -180,7 +184,14 @@ pub fn target(url: &Url) -> Result<Target> {
     let id = |id: &str, len| alnum(id, len).then(|| id.to_owned());
     match (site, segments.as_slice()) {
         (Site::Pixeldrain, ["u", file]) => id(file, 1..=32).map(Target::PixeldrainFile),
-        (Site::Pixeldrain, ["l", list]) => id(list, 1..=32).map(Target::PixeldrainList),
+        (Site::Pixeldrain, ["l", list]) => id(list, 1..=32).map(|id| {
+            let item = url.fragment().and_then(|fragment| {
+                let value = fragment.strip_prefix("item=")?;
+                let digits = value.bytes().take_while(u8::is_ascii_digit).count();
+                (digits > 0).then(|| value[..digits].parse().unwrap_or(usize::MAX))
+            });
+            Target::PixeldrainList(id, item)
+        }),
         (Site::Catbox, ["c", album]) => id(album, 1..=32).map(Target::CatboxAlbum),
         (Site::Imgbox, ["g", gallery]) => id(gallery, 10..=10).map(Target::ImgboxGallery),
         (Site::Imgbox, [image]) => id(image, 8..=8).map(Target::ImgboxImage),
@@ -434,6 +445,10 @@ pub fn parse_pixeldrain_file(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
 
 /// Parse `/api/list/ID`.
 pub fn parse_pixeldrain_list(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
+    parse_pixeldrain_list_item(bytes, id, None)
+}
+
+fn parse_pixeldrain_list_item(bytes: &[u8], id: &str, item: Option<usize>) -> Result<Vec<Media>> {
     let body = json(Site::Pixeldrain, bytes)?;
     if string(&body, "id").is_some_and(|found| found != id) {
         return Err(error(
@@ -444,13 +459,30 @@ pub fn parse_pixeldrain_list(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
         .get("files")
         .and_then(Value::as_array)
         .ok_or_else(|| error("Pixeldrain response is not a file list"))?;
-    let items = files.iter().filter_map(pixeldrain_item).collect();
+    // Upstream indexes the raw API list before filtering files and keeps the
+    // selected file's original one-based number, including for #item=0.
+    let selected = match item {
+        Some(index) => match files.get(index) {
+            Some(file) => std::slice::from_ref(file),
+            None => return Ok(Vec::new()),
+        },
+        None => files.as_slice(),
+    };
+    let items = selected.iter().filter_map(pixeldrain_item).collect();
     let title = string(&body, "title").map(str::to_owned);
     let timestamp = string(&body, "date_created").and_then(|d| crate::date::parse_date(d).ok());
-    non_empty(
-        Site::Pixeldrain,
-        build(Site::Pixeldrain, id, title, timestamp, items, false),
-    )
+    let mut media = build(Site::Pixeldrain, id, title, timestamp, items, false);
+    if let Some(index) = item {
+        for file in &mut media {
+            let number = index + 1; // The index exists in `files`, so this cannot overflow.
+            file.metadata.as_mut().expect("built metadata").index = number;
+            file.filename = format!(
+                "{id}_{number:02}.{}",
+                file.filename.rsplit('.').next().unwrap()
+            );
+        }
+    }
+    non_empty(Site::Pixeldrain, media)
 }
 
 fn non_empty(site: Site, media: Vec<Media>) -> Result<Vec<Media>> {
@@ -467,8 +499,8 @@ fn html(site: Site, bytes: &[u8]) -> Result<&str> {
 // ---------------------------------------------------------------------------
 // Catbox.
 
-/// `DD Month YYYY` (as on catbox album pages) to Unix seconds at midnight UTC.
-fn day_month_year(text: &str) -> Option<i64> {
+/// Catbox's `Month DD YYYY`, plus the previously accepted `DD Month YYYY` format.
+fn catbox_date(text: &str) -> Option<i64> {
     const MONTHS: [&str; 12] = [
         "january",
         "february",
@@ -484,20 +516,29 @@ fn day_month_year(text: &str) -> Option<i64> {
         "december",
     ];
     let mut parts = text.split_whitespace();
-    let day: u8 = parts.next()?.parse().ok()?;
-    let month = parts.next()?.to_ascii_lowercase();
+    let (first, second, year) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let (day, month) = if let Ok(day) = first.parse::<u8>() {
+        (day, second.to_ascii_lowercase())
+    } else {
+        (second.parse::<u8>().ok()?, first.to_ascii_lowercase())
+    };
     let month = MONTHS.iter().position(|m| *m == month)? as u8 + 1;
-    let year: i32 = parts.next()?.parse().ok()?;
+    let year: i32 = year.parse().ok()?;
     let date =
         time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
     Some(date.midnight().assume_utc().unix_timestamp())
 }
 
-/// Parse an album page: `<h1>` title, `Uploaded DATE` and file links.
+/// Parse an album page: `<h1>` title, `Created DATE` and file links.
 pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let page = html(Site::Catbox, bytes)?;
     let title = between(page, "<h1>", "<").and_then(clean_text);
-    let timestamp = between(page, "<p>Uploaded ", "</p>").and_then(day_month_year);
+    let timestamp = between(page, "<p>Created ", "<")
+        .or_else(|| between(page, "<p>Uploaded ", "<"))
+        .and_then(catbox_date);
     let items = between_all(page, "href=\"https://files.catbox.moe/", "\"")
         .filter_map(|name| {
             if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.') {
@@ -685,6 +726,7 @@ pub struct ImageHosts {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    pixeldrain_authorization: Option<HeaderValue>,
 }
 
 impl ImageHosts {
@@ -697,6 +739,7 @@ impl ImageHosts {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            pixeldrain_authorization: None,
         })
     }
 
@@ -705,6 +748,38 @@ impl ImageHosts {
         self.client = network.client(USER_AGENT, self.timeout)?;
         self.network = network.clone();
         Ok(self)
+    }
+
+    /// Authenticate Pixeldrain API requests and file downloads with HTTP Basic
+    /// auth (empty username, API key as password), matching upstream.
+    pub fn with_pixeldrain_api_key(mut self, api_key: Option<&str>) -> Result<Self> {
+        if api_key.is_some_and(|key| key.len() > 4096 || !key.bytes().all(|b| b.is_ascii_graphic()))
+        {
+            return Err(error(
+                "Pixeldrain API key must contain at most 4096 printable ASCII characters without whitespace",
+            ));
+        }
+        self.pixeldrain_authorization = api_key.filter(|key| !key.is_empty()).map(|key| {
+            let encoded = STANDARD.encode(format!(":{key}"));
+            let mut value = HeaderValue::from_str(&format!("Basic {encoded}"))
+                .expect("base64 is a valid header value");
+            value.set_sensitive(true);
+            value
+        });
+        Ok(self)
+    }
+
+    fn apply_pixeldrain_auth(&self, media: &mut Media) {
+        if media.category == Site::Pixeldrain.category()
+            && Site::Pixeldrain.media_host(&media.url)
+            && media.url.path().starts_with("/api/file/")
+            && let Some(value) = &self.pixeldrain_authorization
+        {
+            // Private transport headers are omitted from public JSON metadata.
+            media
+                .headers
+                .insert("Authorization".into(), value.to_str().unwrap().into());
+        }
     }
 
     /// Additional attempts for HTTP 429/5xx and transport failures.
@@ -742,9 +817,11 @@ impl ImageHosts {
             Target::PixeldrainFile(id) => {
                 parse_pixeldrain_file(&self.call(site, &format!("api/file/{id}/info")).await?, &id)
             }
-            Target::PixeldrainList(id) => {
-                parse_pixeldrain_list(&self.call(site, &format!("api/list/{id}")).await?, &id)
-            }
+            Target::PixeldrainList(id, item) => parse_pixeldrain_list_item(
+                &self.call(site, &format!("api/list/{id}")).await?,
+                &id,
+                item,
+            ),
             Target::CatboxAlbum(id) => {
                 parse_catbox_album(&self.call(site, &format!("c/{id}")).await?, &id)
             }
@@ -795,6 +872,7 @@ impl ImageHosts {
             let mut media = self.extract(target).await?;
             for item in &mut media {
                 self.network.apply_media(item);
+                self.apply_pixeldrain_auth(item);
             }
             Ok::<VecDeque<_>, crate::Error>(group(media, category))
         })
@@ -830,15 +908,19 @@ impl ImageHosts {
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let response = self
+            let mut request = self
                 .client
                 .get(target.clone())
-                .timeout(self.request_timeout)
-                .send()
-                .await
-                .map_err(|_| {
-                    Failure::transient(format!("{name} request failed; check network access"))
-                })?;
+                .timeout(self.request_timeout);
+            if site == Site::Pixeldrain
+                && target.path().starts_with("/api/")
+                && let Some(value) = &self.pixeldrain_authorization
+            {
+                request = request.header(AUTHORIZATION, value.clone());
+            }
+            let response = request.send().await.map_err(|_| {
+                Failure::transient(format!("{name} request failed; check network access"))
+            })?;
             match redirects.next(response.url(), response.status(), response.headers())? {
                 Some(next) => target = next,
                 None => break response,
@@ -936,7 +1018,7 @@ mod tests {
         );
         assert_eq!(
             t("https://pixeldrain.com/l/Lst1").unwrap(),
-            Target::PixeldrainList("Lst1".into())
+            Target::PixeldrainList("Lst1".into(), None)
         );
         assert_eq!(
             t("https://catbox.moe/c/ab12cd").unwrap(),
@@ -1025,6 +1107,60 @@ mod tests {
         assert!(parse_pixeldrain_list(list.to_string().as_bytes(), "L2").is_err());
     }
 
+    #[test]
+    fn pixeldrain_selection_indexes_raw_list_and_keeps_numbering() {
+        let list = json!({"id": "L1", "title": "Selected album", "files": [
+            {"id": "f1", "name": "first.png"},
+            {"id": "bad/id", "name": "invalid.png"},
+            {"id": "f1", "name": "repeated.jpg"},
+            {"id": "f2", "name": "last.mp4"}
+        ]})
+        .to_string();
+        let first = parse_pixeldrain_list_item(list.as_bytes(), "L1", Some(0)).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].filename, "L1_01.png");
+        let repeated = parse_pixeldrain_list_item(list.as_bytes(), "L1", Some(2)).unwrap();
+        assert_eq!(repeated.len(), 1);
+        assert_eq!(repeated[0].filename, "L1_03.jpg");
+        assert_eq!(meta(&repeated[0]).index, 3);
+        assert_eq!(meta(&repeated[0]).media_id, "f1");
+        assert_eq!(
+            meta(&repeated[0]).caption.as_deref(),
+            Some("Selected album")
+        );
+        assert_eq!(first[0].archive_key(), repeated[0].archive_key());
+        assert!(
+            parse_pixeldrain_list_item(list.as_bytes(), "L1", Some(4))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            parse_pixeldrain_list_item(list.as_bytes(), "L1", Some(usize::MAX))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(parse_pixeldrain_list_item(list.as_bytes(), "other", Some(4)).is_err());
+        for (fragment, expected) in [
+            ("item=0", Some(0)),
+            ("item=0002", Some(2)),
+            ("item=3&view=grid", Some(3)),
+            (
+                "item=999999999999999999999999999999999999",
+                Some(usize::MAX),
+            ),
+            ("item=-1", None),
+            ("item=", None),
+            ("unrelated", None),
+        ] {
+            assert_eq!(
+                target(&Url::parse(&format!("https://pixeldrain.com/l/L1#{fragment}")).unwrap())
+                    .unwrap(),
+                Target::PixeldrainList("L1".into(), expected),
+                "{fragment}"
+            );
+        }
+    }
+
     const CATBOX: &str = r#"<html><body><div class="title"><h1>Cats &amp; Dogs</h1>
         <p>Uploaded 05 March 2023</p><p>desc</p></div>
         <a href="https://files.catbox.moe/abc123.PNG" target="_blank">x</a>
@@ -1045,6 +1181,44 @@ mod tests {
         assert_eq!(m.media_id, "abc123");
         assert_eq!(m.timestamp, Some(1677974400));
         assert!(parse_catbox_album(b"<h1>Empty</h1>", "alb1").is_err());
+    }
+
+    #[test]
+    fn catbox_created_dates_match_upstream_and_preserve_media_identity() {
+        let legacy = parse_catbox_album(CATBOX.as_bytes(), "alb1").unwrap();
+        for date in ["March 05 2023", "march 5 2023", "05 March 2023"] {
+            let page = CATBOX.replace("Uploaded 05 March 2023", &format!("Created {date}"));
+            let media = parse_catbox_album(page.as_bytes(), "alb1").unwrap();
+            for (actual, expected) in media.iter().zip(&legacy) {
+                assert_eq!(meta(actual).timestamp, Some(1677974400));
+                assert_eq!(actual.filename, expected.filename);
+                assert_eq!(actual.identity(), expected.identity());
+                assert_eq!(actual.archive_key(), expected.archive_key());
+            }
+        }
+        assert_eq!(catbox_date("February 29 2024"), Some(1709164800));
+    }
+
+    #[test]
+    fn invalid_catbox_dates_are_optional_and_do_not_change_media_selection() {
+        let expected = parse_catbox_album(CATBOX.as_bytes(), "alb1").unwrap();
+        for date in [
+            "",
+            "March 0 2023",
+            "February 29 2023",
+            "March 32 2023",
+            "May 2 2023 extra",
+            "private-value",
+        ] {
+            let page = CATBOX.replace("Uploaded 05 March 2023", &format!("Created {date}"));
+            let media = parse_catbox_album(page.as_bytes(), "alb1").unwrap();
+            assert_eq!(media.len(), expected.len());
+            for (actual, expected) in media.iter().zip(&expected) {
+                assert_eq!(meta(actual).timestamp, None);
+                assert_eq!(actual.url, expected.url);
+                assert_eq!(actual.archive_key(), expected.archive_key());
+            }
+        }
     }
 
     const IMGBOX_GALLERY: &str = r#"<h1>Holiday &quot;2024&quot;</h1>
@@ -1187,6 +1361,177 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("user-agent: gallery-dl-rs/")
         );
+    }
+
+    #[test]
+    fn pixeldrain_credentials_are_private_and_scoped_to_file_jobs() {
+        let client = ImageHosts::new(Duration::from_secs(2))
+            .unwrap()
+            .with_pixeldrain_api_key(Some("test:key-123"))
+            .unwrap();
+        let mut file = parse_pixeldrain_file(br#"{"id":"f1","name":"first.png"}"#, "f1")
+            .unwrap()
+            .remove(0);
+        client.apply_pixeldrain_auth(&mut file);
+        let authorization = format!("Basic {}", STANDARD.encode(":test:key-123"));
+        assert_eq!(file.headers.get("Authorization"), Some(&authorization));
+        let public = serde_json::to_string(&file).unwrap();
+        assert!(!public.contains("Authorization"));
+        assert!(!public.contains("test:key-123"));
+        assert!(!public.contains(&authorization));
+        assert!(
+            client
+                .pixeldrain_authorization
+                .as_ref()
+                .unwrap()
+                .is_sensitive()
+        );
+        for (category, url) in [
+            ("catbox", "https://files.catbox.moe/file.png"),
+            ("pixeldrain", "https://pixeldrain.com/u/f1"),
+            ("pixeldrain", "https://evil.example/api/file/f1"),
+            ("catbox", "https://pixeldrain.com/api/file/f1"),
+        ] {
+            file.headers.clear();
+            file.category = category.into();
+            file.url = Url::parse(url).unwrap();
+            client.apply_pixeldrain_auth(&mut file);
+            assert!(file.headers.is_empty(), "{category} {url}");
+        }
+        for key in ["secret\r\nx: injected", "secret key", "秘密"] {
+            let message = ImageHosts::new(Duration::from_secs(2))
+                .unwrap()
+                .with_pixeldrain_api_key(Some(key))
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(!message.contains(key));
+        }
+        assert!(
+            ImageHosts::new(Duration::from_secs(2))
+                .unwrap()
+                .with_pixeldrain_api_key(Some(&"x".repeat(4097)))
+                .is_err()
+        );
+        assert!(
+            ImageHosts::new(Duration::from_secs(2))
+                .unwrap()
+                .with_pixeldrain_api_key(Some(""))
+                .unwrap()
+                .pixeldrain_authorization
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticates_pixeldrain_api_and_download_jobs() {
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            br#"{"id":"f1","name":"first.png"}"#,
+        )]);
+        let media: Vec<_> = hosts(root)
+            .with_pixeldrain_api_key(Some("test-key"))
+            .unwrap()
+            .stream(&Url::parse("https://pixeldrain.com/u/f1").unwrap())
+            .collect()
+            .await;
+        let authorization = format!("Basic {}", STANDARD.encode(":test-key"));
+        assert_eq!(media.len(), 1);
+        assert_eq!(
+            media[0].as_ref().unwrap().headers.get("Authorization"),
+            Some(&authorization)
+        );
+        assert!(
+            server.join().unwrap()[0]
+                .to_ascii_lowercase()
+                .contains(&format!(
+                    "authorization: {}\r\n",
+                    authorization.to_ascii_lowercase()
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn pixeldrain_auth_is_not_sent_to_other_sites_or_non_api_redirects() {
+        let redirect = b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: /landing\r\nConnection: close\r\n\r\n".to_vec();
+        let (root, server) = serve(vec![
+            redirect,
+            response("200 OK", br#"{"id":"f1","name":"first.png"}"#),
+            response("200 OK", CATBOX.as_bytes()),
+        ]);
+        let client = hosts(root)
+            .with_pixeldrain_api_key(Some("test-key"))
+            .unwrap();
+        assert_eq!(
+            client
+                .stream(&Url::parse("https://pixeldrain.com/u/f1").unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .len(),
+            1
+        );
+        assert!(
+            client
+                .stream(&Url::parse("https://catbox.moe/c/album1").unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .all(|file| !file.unwrap().headers.contains_key("Authorization"))
+        );
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("authorization: basic ")
+        );
+        assert!(!requests[1].to_ascii_lowercase().contains("authorization:"));
+        assert!(!requests[2].to_ascii_lowercase().contains("authorization:"));
+    }
+
+    #[tokio::test]
+    async fn pixeldrain_auth_follows_api_redirects_but_rejects_cross_origin() {
+        let redirect = b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: /api/file/f1/redirected\r\nConnection: close\r\n\r\n".to_vec();
+        let cross_origin = b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: https://evil.example/api/file/f1\r\nConnection: close\r\n\r\n".to_vec();
+        let (root, server) = serve(vec![redirect, cross_origin]);
+        let files: Vec<_> = hosts(root)
+            .with_pixeldrain_api_key(Some("test-key"))
+            .unwrap()
+            .stream(&Url::parse("https://pixeldrain.com/u/f1").unwrap())
+            .collect()
+            .await;
+        assert_eq!(files.len(), 1);
+        let message = files[0].as_ref().unwrap_err().to_string();
+        assert!(message.contains("same origin"));
+        assert!(!message.contains("test-key"));
+        let requests = server.join().unwrap();
+        assert!(requests.iter().all(|request| {
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: basic ")
+        }));
+    }
+
+    #[tokio::test]
+    async fn fetches_selected_pixeldrain_list_item() {
+        let body = json!({"id": "L1", "files": [
+            {"id": "f1", "name": "first.png"},
+            {"id": "f2", "name": "second.jpg"}
+        ]})
+        .to_string();
+        let (root, server) = serve(vec![response("200 OK", body.as_bytes())]);
+        let media: Vec<_> = hosts(root)
+            .stream(&Url::parse("https://pixeldrain.com/l/L1#item=1").unwrap())
+            .collect()
+            .await;
+        assert_eq!(media.len(), 1, "{media:?}");
+        let file = media[0].as_ref().unwrap();
+        assert_eq!(file.filename, "L1_02.jpg");
+        assert_eq!(meta(file).index, 2);
+        assert_eq!(
+            file.url.as_str(),
+            "https://pixeldrain.com/api/file/f2?download"
+        );
+        assert!(server.join().unwrap()[0].starts_with("GET /api/list/L1 "));
     }
 
     #[tokio::test]

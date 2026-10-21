@@ -100,7 +100,7 @@ async fn post_filters_precede_post_ranges_without_file_specific_context() {
     );
 }
 #[tokio::test]
-async fn date_selection_precedes_post_filter_and_range_with_ordered_or_unordered_cutoff() {
+async fn post_filter_precedes_date_selection_and_range_with_ordered_or_unordered_cutoff() {
     let mut events = group("10", 1, 50);
     events.extend(group("20", 2, 200));
     let input = stream::iter(events.clone().into_iter().map(Ok)).boxed();
@@ -196,6 +196,7 @@ async fn extraction_errors_preserve_positions_and_bad_framing_is_private() {
 #[tokio::test]
 async fn unbounded_empty_posts_yield_for_cancellation() {
     let input = stream::repeat(ExtractionEvent::Post(Box::new(Post {
+        keywords: Default::default(),
         category: "twitter".into(),
         metadata: None,
         count: Some(0),

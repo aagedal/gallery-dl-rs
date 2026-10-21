@@ -1,0 +1,116 @@
+{
+  "source": "gallery_dl.extractor.common.Dispatch._dispatch_extractors",
+  "version": "1.32.17",
+  "catalog": [
+    "timeline",
+    "media",
+    "with-replies"
+  ],
+  "default": [
+    "timeline"
+  ],
+  "aliases": [
+    [
+      "replies",
+      "with-replies"
+    ]
+  ],
+  "cases": [
+    {
+      "case": "default",
+      "present": false,
+      "expected": [
+        "timeline"
+      ]
+    },
+    {
+      "case": "all",
+      "present": true,
+      "expected": [
+        "timeline",
+        "media",
+        "with-replies"
+      ],
+      "include": "all"
+    },
+    {
+      "case": "array-all-is-not-all",
+      "present": true,
+      "expected": [],
+      "include": [
+        "all"
+      ]
+    },
+    {
+      "case": "ordered-repeats",
+      "present": true,
+      "expected": [
+        "media",
+        "with-replies",
+        "media"
+      ],
+      "include": " media, replies ,media,missing"
+    },
+    {
+      "case": "list-spaces-are-literal",
+      "present": true,
+      "expected": [
+        "with-replies",
+        "media"
+      ],
+      "include": [
+        " media",
+        "replies",
+        "media",
+        "missing"
+      ]
+    },
+    {
+      "case": "false",
+      "present": true,
+      "expected": [],
+      "include": false
+    },
+    {
+      "case": "null",
+      "present": true,
+      "expected": [],
+      "include": null
+    },
+    {
+      "case": "empty-string",
+      "present": true,
+      "expected": [],
+      "include": ""
+    },
+    {
+      "case": "empty-array",
+      "present": true,
+      "expected": [],
+      "include": []
+    },
+    {
+      "case": "spaced-all-is-not-all",
+      "present": true,
+      "expected": [],
+      "include": " all "
+    },
+    {
+      "case": "tabs-not-stripped",
+      "present": true,
+      "expected": [
+        "with-replies"
+      ],
+      "include": "media\t,replies"
+    },
+    {
+      "case": "empty-elements",
+      "present": true,
+      "expected": [
+        "media",
+        "with-replies"
+      ],
+      "include": ",media,,replies,"
+    }
+  ]
+}

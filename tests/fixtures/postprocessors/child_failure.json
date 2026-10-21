@@ -1,0 +1,166 @@
+{
+  "version": "1.32.17",
+  "status": 1,
+  "options": [
+    {
+      "name": "metadata",
+      "mode": "modify",
+      "event": "child-after",
+      "fields": {
+        "kept": "partial",
+        "num": "{seed}",
+        "suffix": "changed"
+      },
+      "__init__": null
+    },
+    {
+      "name": "metadata",
+      "mode": "custom",
+      "event": "child-after",
+      "format": "é",
+      "encoding": "ascii",
+      "filename": "failed.txt",
+      "metadata-path": "attempt",
+      "__init__": null
+    },
+    {
+      "name": "metadata",
+      "mode": "modify",
+      "event": "post-after",
+      "fields": {
+        "post-after": "observed"
+      },
+      "__init__": null
+    },
+    {
+      "name": "metadata",
+      "mode": "modify",
+      "event": "finalize-error",
+      "fields": {
+        "finalize-error": "observed"
+      },
+      "__init__": null
+    },
+    {
+      "name": "metadata",
+      "mode": "modify",
+      "event": "finalize",
+      "fields": {
+        "finalize": "observed"
+      },
+      "__init__": null
+    }
+  ],
+  "records": [
+    {
+      "event": "child-after",
+      "phase": "before",
+      "keywords": {
+        "num": 1,
+        "suffix": "original"
+      }
+    },
+    {
+      "event": "child-after",
+      "phase": "after",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial"
+      }
+    },
+    {
+      "event": "child-after",
+      "phase": "before",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial"
+      }
+    },
+    {
+      "event": "child-after",
+      "phase": "UnicodeEncodeError",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial",
+        "attempt": "$WORK/failed.txt"
+      }
+    },
+    {
+      "event": "post-after",
+      "phase": "before",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial",
+        "attempt": "$WORK/failed.txt"
+      }
+    },
+    {
+      "event": "post-after",
+      "phase": "after",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial",
+        "attempt": "$WORK/failed.txt",
+        "post-after": "observed"
+      }
+    },
+    {
+      "event": "finalize-error",
+      "phase": "before",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial",
+        "attempt": "$WORK/failed.txt",
+        "post-after": "observed"
+      }
+    },
+    {
+      "event": "finalize-error",
+      "phase": "after",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial",
+        "attempt": "$WORK/failed.txt",
+        "post-after": "observed",
+        "finalize-error": "observed"
+      }
+    },
+    {
+      "event": "finalize",
+      "phase": "before",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial",
+        "attempt": "$WORK/failed.txt",
+        "post-after": "observed",
+        "finalize-error": "observed"
+      }
+    },
+    {
+      "event": "finalize",
+      "phase": "after",
+      "keywords": {
+        "num": 42,
+        "suffix": "changed",
+        "kept": "partial",
+        "attempt": "$WORK/failed.txt",
+        "post-after": "observed",
+        "finalize-error": "observed",
+        "finalize": "observed"
+      }
+    }
+  ],
+  "generator_source": "\"\"\"Record unmodified gallery-dl's shared queue state after a hook write fails.\"\"\"\nimport copy\nimport hashlib\nimport json\nimport logging\nimport re\nimport sys\nimport tempfile\nfrom pathlib import Path\nfrom unittest.mock import patch\n\nfrom gallery_dl import config, job, version\nfrom gallery_dl.extractor.common import Extractor, Message\n\n\nclass Empty(Extractor):\n    category = \"fixture-child\"\n    subcategory = \"empty\"\n\n    @classmethod\n    def from_url(cls, url):\n        return cls(re.match(\".*\", url))\n\n    def initialize(self):\n        pass\n\n    def items(self):\n        return iter(())\n\n    def cookies_store(self):\n        pass\n\n\nclass Parent(Empty):\n    category = \"fixture\"\n    subcategory = \"failure\"\n    directory_fmt = ()\n    filename_fmt = \"{id}.{extension}\"\n    archive_fmt = \"{id}\"\n\n    def items(self):\n        data = dict(id=42, num=0, seed=42, suffix=\"original\")\n        yield Message.Directory, \"\", data\n        data[\"num\"] += 1\n        data[\"_extractor\"] = Empty\n        yield Message.Queue, \"https://fixture.invalid/child\", data\n\n\ndef main(destination):\n    config.clear()\n    logging.disable(logging.CRITICAL)\n    records = []\n    options = [\n        dict(name=\"metadata\", mode=\"modify\", event=\"child-after\",\n             fields=dict(kept=\"partial\", num=\"{seed}\", suffix=\"changed\")),\n        dict(name=\"metadata\", mode=\"custom\", event=\"child-after\",\n             format=\"é\", encoding=\"ascii\", filename=\"failed.txt\",\n             **{\"metadata-path\": \"attempt\"}),\n    ]\n    for event in (\"post-after\", \"finalize-error\", \"finalize\"):\n        options.append(dict(name=\"metadata\", mode=\"modify\", event=event,\n                            fields={event: \"observed\"}))\n    register = job.DownloadJob.register_hooks\n\n    def register_hooks(self, hooks, options=None):\n        wrapped = {}\n        for event, callback in hooks.items():\n            def run(path, event=event, callback=callback):\n                def record(phase):\n                    data = {key: copy.deepcopy(path.kwdict[key]) for key in\n                            (\"num\", \"suffix\", \"kept\", \"attempt\", \"post-after\",\n                             \"finalize-error\", \"finalize\") if key in path.kwdict}\n                    records.append(dict(event=event, phase=phase, keywords=data))\n                record(\"before\")\n                try:\n                    callback(path)\n                except Exception as error:\n                    record(type(error).__name__)\n                    raise\n                record(\"after\")\n            wrapped[event] = run\n        return register(self, wrapped, options)\n\n    with tempfile.TemporaryDirectory() as work:\n        config.set((\"extractor\", \"fixture\"), \"base-directory\", work)\n        for name in (\"metadata-path\", \"metadata-extractor\", \"metadata-url\"):\n            config.set((\"extractor\", \"fixture\"), name, False)\n        config.set((\"extractor\", \"fixture\"), \"postprocessors\", options)\n        with patch.object(job.DownloadJob, \"register_hooks\", register_hooks):\n            actual = job.DownloadJob(Parent.from_url(\"https://fixture.invalid/parent\"))\n            status = actual.run()\n        result = dict(version=version.__version__, status=status, options=options,\n                      records=records, generator_source=Path(__file__).read_text(),\n                      source_sha256={name: hashlib.sha256(\n                          (Path(job.__file__).parent / name).read_bytes()).hexdigest()\n                          for name in (\"job.py\", \"postprocessor/metadata.py\")})\n        result = json.loads(json.dumps(result).replace(work, \"$WORK\"))\n    Path(destination).write_text(json.dumps(result, ensure_ascii=False, indent=2) + \"\\n\")\n\n\nif __name__ == \"__main__\":\n    main(sys.argv[1])\n",
+  "source_sha256": {
+    "job.py": "b1d630adb73404342d236f7af807041186f0a38a436cff6979749d411a5d9a75",
+    "postprocessor/metadata.py": "db7481267bbdbca3ed95ace30dcb05f3cec5511a84f75f1769a0362ae0fb53a5"
+  }
+}

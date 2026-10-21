@@ -14,6 +14,9 @@ fn invalid() -> crate::Error {
 pub(super) fn truthy(value: &Value) -> bool {
     match value {
         Value::None => false,
+        Value::SourceDate(value) => value.is_some(),
+        Value::SourceNullDate(_) => false,
+        Value::SourcePrimitive(value) => truthy(value),
         Value::Bool(v) => *v,
         Value::Int(v) => *v != 0,
         Value::Float(v) => *v != 0.0,
@@ -71,7 +74,14 @@ impl Evaluator<'_> {
     fn inner(&mut self, expression: &Expr) -> Result<Value> {
         Ok(match expression {
             Expr::Literal(value) => value.clone(),
-            Expr::Name(name) => self.context.get(name).cloned().ok_or_else(invalid)?,
+            Expr::Name(name) => {
+                let value = self.context.get(name).cloned().ok_or_else(invalid)?;
+                if let Value::SourcePrimitive(value) = value {
+                    (*value).clone()
+                } else {
+                    value
+                }
+            }
             Expr::List(values) => {
                 self.allocate_sequence(values.len())?;
                 if values.len() > ITEMS {
@@ -193,7 +203,16 @@ impl Evaluator<'_> {
     }
     fn index(&mut self, value: &Value, index: &Value) -> Result<Value> {
         match value {
-            Value::Map(values) => values.get(string(index)?).cloned().ok_or_else(invalid),
+            Value::Map(values) => values
+                .get(string(index)?)
+                .map(|value| {
+                    if let Value::SourcePrimitive(value) = value {
+                        (**value).clone()
+                    } else {
+                        value.clone()
+                    }
+                })
+                .ok_or_else(invalid),
             Value::List(values) | Value::Tuple(values) => values
                 .get(position(integer(index)?, values.len())?)
                 .cloned()
@@ -216,6 +235,14 @@ impl Evaluator<'_> {
         }
         Ok(match (left, right) {
             (Value::None, Value::None) => true,
+            (Value::SourceNullDate(a), Value::SourceNullDate(b)) => a == b,
+            (Value::SourceDate(a), Value::SourceNullDate(b))
+            | (Value::SourceNullDate(b), Value::SourceDate(a)) => {
+                a.unwrap_or(-62_135_596_800) == *b
+            }
+            (Value::SourceDate(a), Value::SourceDate(b)) => {
+                a.unwrap_or(-62_135_596_800) == b.unwrap_or(-62_135_596_800)
+            }
             (Value::String(a), Value::String(b)) => a == b,
             (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
                 if a.len() != b.len() {
@@ -259,6 +286,16 @@ impl Evaluator<'_> {
             return numeric_cmp(left, right);
         }
         match (left, right) {
+            (Value::SourceNullDate(a), Value::SourceNullDate(b)) => Ok(a.cmp(b)),
+            (Value::SourceDate(a), Value::SourceNullDate(b)) => {
+                Ok(a.unwrap_or(-62_135_596_800).cmp(b))
+            }
+            (Value::SourceNullDate(a), Value::SourceDate(b)) => {
+                Ok(a.cmp(&b.unwrap_or(-62_135_596_800)))
+            }
+            (Value::SourceDate(a), Value::SourceDate(b)) => Ok(a
+                .unwrap_or(-62_135_596_800)
+                .cmp(&b.unwrap_or(-62_135_596_800))),
             (Value::String(a), Value::String(b)) => Ok(a.cmp(b)),
             (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
                 for (a, b) in a.iter().zip(b.iter()) {
@@ -641,6 +678,9 @@ impl Evaluator<'_> {
         }
         let result = match value {
             Value::None => "None".into(),
+            Value::SourceDate(value) => super::source_date_text(*value),
+            Value::SourceNullDate(_) => super::source_date_text(None),
+            Value::SourcePrimitive(value) => self.display(value, nested, depth + 1)?,
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(value) => value.to_string(),

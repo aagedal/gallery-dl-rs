@@ -1,0 +1,637 @@
+{
+  "source": "gallery-dl",
+  "version": "1.32.17",
+  "generator": "generate.py",
+  "modules": {
+    "hash.py": {
+      "sha256": "cd4600223db51a1eda908e33e7c0753eba234e269ba58c2be9c464b1427445e8"
+    },
+    "mtime.py": {
+      "sha256": "280706c8132c474a190d5ecd12bc4f6238ae5690f31d2ce730d043f80ed8ece6"
+    }
+  },
+  "hash_cases": [
+    {
+      "name": "default",
+      "options": {},
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "all_fixed_hashlib_algorithms",
+      "options": {
+        "hashes": "md5,sha1,sha224,sha256,sha384,sha512,sha512_224,sha512_256,sha3_224,sha3_256,sha3_384,sha3_512,blake2b,blake2s"
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d",
+        "sha224": "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7",
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "sha384": "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7",
+        "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+        "sha512_224": "4634270f707b6a54daae7530460842e20e37ed265ceee9a43e8924aa",
+        "sha512_256": "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23",
+        "sha3_224": "e642824c3f8cf24ad09234ee7d3c766fc9a3a5168d0c94ad73b46fdf",
+        "sha3_256": "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532",
+        "sha3_384": "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b298d88cea927ac7f539f1edf228376d25",
+        "sha3_512": "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0",
+        "blake2b": "ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923",
+        "blake2s": "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "dictionary",
+      "options": {
+        "mode": {
+          "digest": "sha256",
+          "md5_alias": "md5"
+        }
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "digest": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "md5_alias": "900150983cd24fb0d6963f7d28e17f72"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "string_keys",
+      "options": {
+        "hashes": "sha256:custom,md5:"
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "custom": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "": "900150983cd24fb0d6963f7d28e17f72"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "pairs_duplicate_key",
+      "options": {
+        "mode": [
+          [
+            "digest",
+            "md5"
+          ],
+          [
+            "digest",
+            "sha1"
+          ]
+        ]
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "digest": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "mode_precedes_hashes",
+      "options": {
+        "mode": "sha1",
+        "hashes": "sha256"
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "empty_mode_falls_back",
+      "options": {
+        "mode": {},
+        "hashes": "sha256"
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "empty_hash_dictionary",
+      "options": {
+        "hashes": {}
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "empty_hash_list_defaults",
+      "options": {
+        "hashes": []
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "false_hash_defaults",
+      "options": {
+        "hashes": false
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "zero_chunk_hashes_empty",
+      "options": {
+        "chunk-size": 0
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "d41d8cd98f00b204e9800998ecf8427e",
+        "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "negative_chunk_reads_all",
+      "options": {
+        "chunk-size": -1
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "small_chunk",
+      "options": {
+        "chunk-size": 1
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "boolean_chunk",
+      "options": {
+        "chunk-size": true
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "false_chunk",
+      "options": {
+        "chunk-size": false
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "d41d8cd98f00b204e9800998ecf8427e",
+        "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "filename_rebuild",
+      "options": {
+        "filename": [
+          "enabled"
+        ]
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": true,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "filename_false",
+      "options": {
+        "filename": {}
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "openssl_aliases",
+      "options": {
+        "hashes": "SHA256,sha-512,sha3-256"
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "SHA256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "sha-512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+        "sha3-256": "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532"
+      },
+      "rebuild": false,
+      "hooks": [
+        "file"
+      ]
+    },
+    {
+      "name": "custom_events",
+      "options": {
+        "event": "prepare,after"
+      },
+      "input": "abc",
+      "context": {
+        "unchanged": "preserved"
+      },
+      "result": {
+        "unchanged": "preserved",
+        "md5": "900150983cd24fb0d6963f7d28e17f72",
+        "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d"
+      },
+      "rebuild": false,
+      "hooks": [
+        "prepare",
+        "after"
+      ]
+    }
+  ],
+  "mtime_cases": [
+    {
+      "name": "default_numeric",
+      "options": {},
+      "context": {
+        "date": 1704164646
+      },
+      "result": {
+        "date": 1704164646,
+        "_mtime_meta": 1704164646
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "default_numeric_string",
+      "options": {},
+      "context": {
+        "date": "1704164646"
+      },
+      "result": {
+        "date": "1704164646",
+        "_mtime_meta": 1704164646
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "missing_value",
+      "options": {},
+      "context": {},
+      "result": {
+        "_mtime_meta": null
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "zero_value",
+      "options": {},
+      "context": {
+        "date": 0
+      },
+      "result": {
+        "date": 0,
+        "_mtime_meta": null
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "null_value",
+      "options": {},
+      "context": {
+        "date": null
+      },
+      "result": {
+        "date": null,
+        "_mtime_meta": null
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "malformed_numeric",
+      "options": {},
+      "context": {
+        "date": "not-a-timestamp"
+      },
+      "result": {
+        "date": "not-a-timestamp",
+        "_mtime_meta": 0
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "float_truncation",
+      "options": {},
+      "context": {
+        "date": 1704164646.875
+      },
+      "result": {
+        "date": 1704164646.875,
+        "_mtime_meta": 1704164646
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "negative_float",
+      "options": {},
+      "context": {
+        "date": -123.75
+      },
+      "result": {
+        "date": -123.75,
+        "_mtime_meta": -123
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "datetime",
+      "options": {},
+      "context": {
+        "date": {
+          "$datetime": "2024-01-02T03:04:06"
+        }
+      },
+      "result": {
+        "date": {
+          "$datetime": "2024-01-02T03:04:06"
+        },
+        "_mtime_meta": 1704164646.0
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "custom_key",
+      "options": {
+        "key": "created"
+      },
+      "context": {
+        "created": 1704164646
+      },
+      "result": {
+        "created": 1704164646,
+        "_mtime_meta": 1704164646
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "template_value",
+      "options": {
+        "value": "{created}"
+      },
+      "context": {
+        "created": 1704164646
+      },
+      "result": {
+        "created": 1704164646,
+        "_mtime_meta": 1704164646
+      },
+      "hooks": [
+        "file"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "directory_target",
+      "options": {
+        "target": "directory"
+      },
+      "context": {
+        "date": 1704164646
+      },
+      "result": {
+        "date": 1704164646
+      },
+      "hooks": [
+        "post-after"
+      ],
+      "directory_mtime": 1704164646
+    },
+    {
+      "name": "directory_mode",
+      "options": {
+        "mode": "dir"
+      },
+      "context": {
+        "date": "1704164646"
+      },
+      "result": {
+        "date": "1704164646"
+      },
+      "hooks": [
+        "post-after"
+      ],
+      "directory_mtime": 1704164646
+    },
+    {
+      "name": "directory_zero_ignored",
+      "options": {
+        "target": "dir"
+      },
+      "context": {
+        "date": 0
+      },
+      "result": {
+        "date": 0
+      },
+      "hooks": [
+        "post-after"
+      ],
+      "directory_mtime": 1000000000
+    },
+    {
+      "name": "custom_events",
+      "options": {
+        "event": "prepare,after"
+      },
+      "context": {
+        "date": 1704164646
+      },
+      "result": {
+        "date": 1704164646,
+        "_mtime_meta": 1704164646
+      },
+      "hooks": [
+        "prepare",
+        "after"
+      ],
+      "directory_mtime": 1000000000
+    }
+  ]
+}

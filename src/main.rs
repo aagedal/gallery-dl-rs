@@ -9,7 +9,7 @@ use gallery_dl_rs::{
     browser::FirefoxProfile,
     config::{Config, Options as ConfigOptions},
     cookies::CookieJar,
-    date::{DateFilter, parse_date},
+    date::source_date_bound,
     download::{self, DownloadOptions, Outcome},
     error,
     event::{self, ExtractionEvent},
@@ -18,6 +18,7 @@ use gallery_dl_rs::{
     filter::FilterExpression,
     input::Inputs,
     instagram::Instagram,
+    job_selection::JobSelection,
     naming::{DirectoryTemplate, FilenameTemplate},
     network::NetworkOptions,
     post_selection::PostSelection,
@@ -33,6 +34,7 @@ use std::{
     cell::Cell,
     collections::{BTreeMap, HashSet},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 use tokio::sync::OnceCell;
@@ -58,18 +60,24 @@ struct Args {
     /// Maximum simultaneous downloads
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=32))]
     jobs: u8,
-    /// Select one-based file positions per input (e.g. 5, 8-20, or 1:24:3)
+    /// Select one-based file positions per extractor job (e.g. 5, 8-20, or 1:24:3)
     #[arg(long = "range", allow_hyphen_values = true)]
     file_range: Option<String>,
     /// Select files with a metadata expression; repeat to require all expressions
     #[arg(long = "filter", value_name = "EXPR", allow_hyphen_values = true)]
     file_filter: Vec<String>,
-    /// Select one-based post positions per input
+    /// Select one-based post positions per extractor job
     #[arg(long = "post-range", allow_hyphen_values = true)]
     post_range: Option<String>,
     /// Select posts before file filtering; repeat to require all expressions
     #[arg(long = "post-filter", value_name = "EXPR", allow_hyphen_values = true)]
     post_filter: Vec<String>,
+    /// Select one-based child extractor positions within each parent job
+    #[arg(long = "child-range", allow_hyphen_values = true)]
+    child_range: Option<String>,
+    /// Select child extractors before requests; repeat to require all expressions
+    #[arg(long = "child-filter", value_name = "EXPR", allow_hyphen_values = true)]
+    child_filter: Vec<String>,
     /// Emit metadata for native X posts without media
     #[arg(long, conflicts_with = "no_text_tweets")]
     text_tweets: bool,
@@ -77,11 +85,11 @@ struct Args {
     #[arg(long, conflicts_with = "text_tweets")]
     no_text_tweets: bool,
     /// Process posts created before this UTC date or Unix timestamp (exclusive)
-    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
-    date_before: Option<i64>,
+    #[arg(long, value_name = "DATE", allow_hyphen_values = true)]
+    date_before: Option<String>,
     /// Stop this input at a post on or before this UTC date or Unix timestamp
-    #[arg(long, value_parser = parse_date_arg, allow_hyphen_values = true)]
-    date_after: Option<i64>,
+    #[arg(long, value_name = "DATE", allow_hyphen_values = true)]
+    date_after: Option<String>,
     /// Minimum media size in bytes or binary units, e.g. 500k or 2.5M
     #[arg(long, value_parser = parse_size)]
     filesize_min: Option<u64>,
@@ -176,10 +184,6 @@ enum Extractor {
     Native,
 }
 
-fn parse_date_arg(value: &str) -> std::result::Result<i64, String> {
-    parse_date(value).map_err(|e| e.to_string())
-}
-
 fn parse_size(value: &str) -> std::result::Result<u64, String> {
     parse_bytes(value).map_err(|e| e.to_string())
 }
@@ -236,6 +240,63 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
     })
 }
 
+fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
+    match routed_site(url, extractor) {
+        Some("mastodon") => {
+            gallery_dl_rs::mastodon::instance_category(url.host_str().unwrap()).unwrap()
+        }
+        Some(category) => category,
+        None => "direct",
+    }
+}
+
+fn booru_subcategory(url: &url::Url) -> Option<&'static str> {
+    let category = extract::social_site(url)?;
+    let site = gallery_dl_rs::booru::Site::from_category(category)?;
+    match gallery_dl_rs::booru::target(site, url).ok()?.0 {
+        gallery_dl_rs::booru::Target::Artist { .. } => Some("artist"),
+        gallery_dl_rs::booru::Target::ArtistSearch { .. } => Some("artist-search"),
+        gallery_dl_rs::booru::Target::Tags { .. } if matches!(category, "danbooru" | "e621") => {
+            Some("tag")
+        }
+        _ => None,
+    }
+}
+fn class_key(category: &str, subcategory: &str) -> Option<&'static str> {
+    match (category, subcategory) {
+        ("danbooru", "artist") => Some("danbooru.artist"),
+        ("danbooru", "artist-search") => Some("danbooru.artist-search"),
+        ("danbooru", "tag") => Some("danbooru.tag"),
+        ("e621", "artist") => Some("e621.artist"),
+        ("e621", "artist-search") => Some("e621.artist-search"),
+        ("e621", "tag") => Some("e621.tag"),
+        _ => None,
+    }
+}
+fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
+    let category = settings_category(url, extractor);
+    if matches!(extractor, Extractor::Native) {
+        booru_subcategory(url)
+            .and_then(|class| class_key(category, class))
+            .unwrap_or(category)
+    } else {
+        category
+    }
+}
+fn media_settings_key(media: &extract::Media, extractor: Extractor) -> &str {
+    if matches!(extractor, Extractor::Native)
+        && media.metadata.as_ref().is_some_and(|metadata| {
+            metadata.booru_artist_parent.is_some()
+                || gallery_dl_rs::source_archive::for_media(media)
+                    .is_some_and(|descriptor| descriptor.format == "t_{search_tags}_{id}")
+        })
+    {
+        class_key(&media.category, "tag").unwrap_or(&media.category)
+    } else {
+        &media.category
+    }
+}
+
 fn parse_sleep(value: &str) -> std::result::Result<gallery_dl_rs::sleep::SleepRange, String> {
     gallery_dl_rs::sleep::SleepRange::parse(value).map_err(|e| e.to_string())
 }
@@ -250,14 +311,35 @@ fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
     Ok(timeout)
 }
 
-#[tokio::main]
-async fn main() {
+/// Stack for the thread that polls the top-level job future. Windows gives
+/// the main thread only 1 MiB, which the nested extractor/download futures
+/// exceed; this matches the common Unix main-thread default.
+const MAIN_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+fn main() {
     let args = Args::parse();
+    let worker = std::thread::Builder::new()
+        .name("main-runtime".into())
+        .stack_size(MAIN_STACK_SIZE)
+        .spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build the async runtime")
+                .block_on(async_main(args))
+        })
+        .expect("failed to start the main runtime thread");
+    if let Err(panic) = worker.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn async_main(args: Args) {
     // Leaving this scope drops the operation before exiting: temporary files
     // are removed and compatibility children use kill_on_drop(true).
     let (result, interrupted) = {
         tokio::select! {
-            result = run(args) => (result, false),
+            result = Box::pin(run(args)) => (result, false),
             signal = tokio::signal::ctrl_c() => (signal.map_err(Into::into), true),
         }
     };
@@ -294,16 +376,60 @@ async fn run(args: Args) -> Result<()> {
     let failed = Cell::new(0);
     // Inputs stopped by -A/--abort; their remaining media are neither
     // extracted nor downloaded.
-    let aborted = std::cell::RefCell::new(HashSet::<usize>::new());
+    let aborted = std::sync::Mutex::new(HashSet::<usize>::new());
+    let terminated = std::sync::atomic::AtomicBool::new(false);
     let mut seen = HashSet::new();
     // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
+    let job_configurations = std::sync::Arc::new(if args.dump_json || args.get_urls {
+        BTreeMap::new()
+    } else {
+        settings
+            .iter()
+            .filter_map(|(category, settings)| {
+                settings.postprocessors.as_ref().map(|processors| {
+                    (
+                        (*category).to_owned(),
+                        gallery_dl_rs::postprocess::jobs::JobConfiguration {
+                            processors: processors.clone(),
+                            root: settings.options.base_directory.clone().unwrap(),
+                            filename: settings.filename.clone(),
+                            directory: settings.directory.clone(),
+                            init: settings.options.init.unwrap_or(false),
+                        },
+                    )
+                })
+            })
+            .collect()
+    });
     let media = inputs
         .stream()
+        .take_while(|_| std::future::ready(!terminated.load(std::sync::atomic::Ordering::Acquire)))
         .enumerate()
         .flat_map(|(index, source)| {
             let failed = &failed;
             let aborted = &aborted;
+            let terminated = &terminated;
+            let root_category = source
+                .as_ref()
+                .ok()
+                .and_then(|source| extract::http_url(source).ok())
+                .map(|url| settings_category(&url, args.extractor).to_owned());
+            let root_subcategory = if matches!(args.extractor, Extractor::Native) {
+                source
+                    .as_ref()
+                    .ok()
+                    .and_then(|source| extract::http_url(source).ok())
+                    .and_then(|url| booru_subcategory(&url))
+                    .map(str::to_owned)
+            } else {
+                None
+            };
+            let archive_descriptor = source
+                .as_ref()
+                .ok()
+                .and_then(|source| extract::http_url(source).ok())
+                .and_then(|url| gallery_dl_rs::source_archive::for_url(&url));
             let input = match source {
                 Ok(source) => {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
@@ -312,6 +438,26 @@ async fn run(args: Args) -> Result<()> {
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || gallery_dl_rs::twitter::is_search_url(&url)
                             || gallery_dl_rs::twitter::is_collection_url(&url)
+                            || matches!(
+                                extract::social_site(&url),
+                                Some("bluesky" | "kemono" | "coomer")
+                            )
+                            || matches!(
+                                gallery_dl_rs::pixiv::target(&url),
+                                Ok(gallery_dl_rs::pixiv::Target::Bookmarks { .. }
+                                    | gallery_dl_rs::pixiv::Target::Ranking(_)
+                                    | gallery_dl_rs::pixiv::Target::Search(_)
+                                    | gallery_dl_rs::pixiv::Target::Series { .. }
+                                    | gallery_dl_rs::pixiv::Target::Pixivision(_)
+                                    | gallery_dl_rs::pixiv::Target::Sketch(_)
+                                    | gallery_dl_rs::pixiv::Target::Novel(
+                                        gallery_dl_rs::pixiv::novel::Target::Bookmarks { .. }
+                                    ))
+                            )
+                            || matches!(
+                                gallery_dl_rs::mastodon::target(&url),
+                                Ok(gallery_dl_rs::mastodon::Target::Collection { .. })
+                            )
                             || (extract::social_site(&url) == Some("twitter")
                                 && (settings["twitter"].options.quoted == Some(true)
                                     || settings["twitter"].options.expand == Some(true)
@@ -324,68 +470,75 @@ async fn run(args: Args) -> Result<()> {
                                             )
                                         ))))
                     });
-                    let selected_settings = extract::http_url(&source).ok().map(|url| {
-                        &settings[routed_site(&url, args.extractor).unwrap_or("direct")]
-                    });
+                    let selected_settings = extract::http_url(&source)
+                        .ok()
+                        .map(|url| &settings[settings_key(&url, args.extractor)]);
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
                     match selected_settings {
-                        Some(settings) => {
-                            let input = if let Some(selection) = &settings.post_selection {
-                                selection.apply(
-                                    input,
-                                    settings.options.date_before,
-                                    settings.options.date_after,
-                                    unordered_dates,
-                                )
+                        Some(selected) => {
+                            let classes = if matches!(
+                                root_subcategory.as_deref(),
+                                Some("artist" | "artist-search")
+                            ) {
+                                settings
+                                    .iter()
+                                    .filter(|(key, _)| {
+                                        key.starts_with("danbooru.") || key.starts_with("e621.")
+                                    })
+                                    .map(|(key, settings)| {
+                                        ((*key).to_owned(), settings.job_selection(false))
+                                    })
+                                    .collect()
                             } else {
-                                let input = event::media_only(input);
-                                if settings.options.date_before.is_some()
-                                    || settings.options.date_after.is_some()
-                                {
-                                    if unordered_dates {
-                                        settings.dates.apply_unordered(input)
-                                    } else {
-                                        settings.dates.apply(input)
-                                    }
-                                } else {
-                                    input
-                                }
+                                BTreeMap::new()
                             };
-                            let input = match &settings.filter {
-                                Some(filter) => filter.apply(input),
-                                None => input,
-                            };
-                            match &settings.selection {
-                                Some(selection) => selection.apply(input),
-                                None => input,
-                            }
+                            selected
+                                .job_selection(unordered_dates)
+                                .apply_events_with_classes(input, Arc::new(classes))
                         }
-                        None => event::media_only(input),
+                        None => input,
                     }
                 }
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
-            input
-                .take_while(move |_| std::future::ready(!aborted.borrow().contains(&index)))
-                .filter_map(move |result| {
-                    std::future::ready(match result {
-                        Ok(item) => Some((index, item)),
-                        Err(e) => {
-                            eprintln!("extraction failed for input {}: {e}", index + 1);
-                            failed.set(failed.get() + 1);
-                            None
-                        }
-                    })
+            let input = input
+                .take_while(move |_| {
+                    std::future::ready(
+                        !terminated.load(std::sync::atomic::Ordering::Acquire)
+                            && !aborted
+                                .lock()
+                                .expect("abort state lock poisoned")
+                                .contains(&index),
+                    )
                 })
+                .boxed();
+            gallery_dl_rs::postprocess::jobs::apply_with_source_class(
+                input,
+                job_configurations.clone(),
+                root_category,
+                root_subcategory,
+                archive_descriptor,
+            )
+            .filter_map(move |result| {
+                std::future::ready(match result {
+                    Ok(item) => Some((index, item)),
+                    Err(e) => {
+                        eprintln!("extraction failed for input {}: {e}", index + 1);
+                        failed.set(failed.get() + 1);
+                        None
+                    }
+                })
+            })
         })
-        .map(|(index, mut item)| {
-            settings[item.category.as_str()]
+        .map(|(index, mut job)| {
+            settings[media_settings_key(&job.media, args.extractor)]
                 .network
-                .apply_media(&mut item);
-            (index, item)
+                .apply_media(&mut job.media);
+            (index, job)
         })
-        .filter(|(_, item)| {
+        .filter(|(_, job)| {
+            let item = &job.media;
             if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
                 return std::future::ready(true);
             }
@@ -404,6 +557,9 @@ async fn run(args: Args) -> Result<()> {
                     | "gelbooru"
                     | "safebooru"
                     | "mastodon"
+                    | "mastodon.social"
+                    | "pawoo"
+                    | "baraag"
                     | "kemono"
                     | "coomer"
                     | "pixeldrain"
@@ -412,6 +568,7 @@ async fn run(args: Args) -> Result<()> {
                     | "postimg"
                     | "tumblr"
                     | "pixiv"
+                    | "pixiv-novel"
                     | "deviantart"
                     | "flickr"
                     | "wallhaven"
@@ -431,11 +588,11 @@ async fn run(args: Args) -> Result<()> {
         });
     tokio::pin!(media);
     if args.dump_json {
-        let media: Vec<_> = media.map(|(_, item)| item).collect().await;
+        let media: Vec<_> = media.map(|(_, job)| job.media).collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
     } else if args.get_urls {
         while let Some((_, item)) = media.next().await {
-            println!("{}", item.url);
+            println!("{}", item.media.url);
         }
     } else {
         let client = download::client(Duration::from_secs(60))?
@@ -445,9 +602,11 @@ async fn run(args: Args) -> Result<()> {
             .with_sleep(args.sleep)
             .with_rate_limit(args.limit_rate);
         let aborted = &aborted;
+        let terminated = &terminated;
         let results = media
-            .map(|(index, item)| {
-                let settings = &settings[item.category.as_str()];
+            .map(|(index, job)| {
+                let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
+                let settings = &settings[media_settings_key(&item, args.extractor)];
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap())
@@ -461,6 +620,8 @@ async fn run(args: Args) -> Result<()> {
                     .map(|path| (&archives[path], path));
                 let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
+                    postprocessor_scope: None,
+                    postprocessors: settings.postprocessors.as_deref(),
                     retries: settings.options.retries.unwrap(),
                     limits: settings.limits,
                     write_metadata: args.write_metadata,
@@ -468,10 +629,19 @@ async fn run(args: Args) -> Result<()> {
                 };
                 async move {
                     // Downloads queued before an abort are dropped unstarted.
-                    if aborted.borrow().contains(&index) {
+                    if terminated.load(std::sync::atomic::Ordering::Acquire)
+                        || aborted
+                            .lock()
+                            .expect("abort state lock poisoned")
+                            .contains(&index)
+                    {
                         return (index, None);
                     }
                     let result: Result<ArchiveOutcome> = async {
+                        let options = DownloadOptions {
+                            postprocessor_scope: scope.as_ref(),
+                            ..options
+                        };
                         let client = cell
                             .get_or_init(|| async { client.with_network(&settings.network) })
                             .await
@@ -512,6 +682,11 @@ async fn run(args: Args) -> Result<()> {
                         }
                     }
                     .await;
+                    if result.is_err()
+                        && let Some(scope) = &scope
+                    {
+                        scope.fail();
+                    }
                     (index, Some(result))
                 }
             })
@@ -536,7 +711,11 @@ async fn run(args: Args) -> Result<()> {
                 skipped = 0;
                 *input = 0;
             }
-            if args.abort.is_some_and(|limit| *input >= limit) && aborted.borrow_mut().insert(index)
+            if args.abort.is_some_and(|limit| *input >= limit)
+                && aborted
+                    .lock()
+                    .expect("abort state lock poisoned")
+                    .insert(index)
             {
                 eprintln!(
                     "stopping input {} after {input} consecutive skipped files",
@@ -565,10 +744,11 @@ async fn run(args: Args) -> Result<()> {
                     failed.set(failed.get() + 1);
                 }
             }
-            if args.terminate.is_some_and(|limit| skipped >= limit) {
-                // Dropping the stream cancels pending extraction and downloads.
+            if args.terminate.is_some_and(|limit| skipped >= limit)
+                && !terminated.swap(true, std::sync::atomic::Ordering::AcqRel)
+            {
+                // Stop new work while draining active files and finalization hooks.
                 eprintln!("stopping after {skipped} consecutive skipped files");
-                break;
             }
         }
     }
@@ -595,11 +775,15 @@ struct Extractors {
     bluesky: OnceCell<Result<gallery_dl_rs::bluesky::Bluesky>>,
     reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
-    mastodon: OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>,
-    kemono: OnceCell<Result<gallery_dl_rs::kemono::Kemono>>,
-    imagehosts: OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>,
+    booru_artist: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
+    booru_artist_search: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
+    mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 3],
+    kemono: [OnceCell<Result<gallery_dl_rs::kemono::Kemono>>; 2],
+    imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
     pixiv: OnceCell<Result<gallery_dl_rs::pixiv::Pixiv>>,
+    pixiv_novel: OnceCell<Result<Arc<gallery_dl_rs::pixiv::Pixiv>>>,
+    pixiv_artwork: OnceCell<Result<Arc<gallery_dl_rs::pixiv::Pixiv>>>,
     deviantart: OnceCell<Result<gallery_dl_rs::deviantart::DeviantArt>>,
     flickr: OnceCell<Result<gallery_dl_rs::flickr::Flickr>>,
     wallhaven: OnceCell<Result<gallery_dl_rs::wallhaven::Wallhaven>>,
@@ -630,12 +814,12 @@ fn extract_input<'a>(
     extractor: Extractor,
     settings: &'a BTreeMap<&str, Settings>,
 ) -> BoxStream<'a, Result<ExtractionEvent>> {
-    stream::once(async move {
+    let input = stream::once(async move {
         let url = extract::http_url(&source)?;
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
         {
-            let configured = &settings[category];
+            let configured = &settings[settings_key(&url, extractor)];
             let options = &configured.options;
             match extractor {
                 Extractor::Native if category == "instagram" => {
@@ -670,6 +854,7 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_include(options.include.clone())
                                     .with_expansion(ExpansionOptions {
                                         retweets: options.retweets.unwrap_or_default(),
                                         quoted: options.quoted.unwrap_or(false),
@@ -749,6 +934,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_mp4(options.mp4.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -765,7 +951,25 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::bluesky::Bluesky::new(backend.timeout).and_then(
                                 |native| {
+                                    if options.videos
+                                        == Some(gallery_dl_rs::twitter::VideoMode::Ytdl)
+                                    {
+                                        return Err(error(
+                                            "native Bluesky videos must be a boolean",
+                                        ));
+                                    }
                                     native
+                                        .with_api_server(options.api_server.as_deref())?
+                                        .with_likes_endpoint(
+                                            options.bluesky_endpoint.unwrap_or_default(),
+                                        )
+                                        .with_include(options.include.clone())
+                                        .with_selection(gallery_dl_rs::bluesky::Selection {
+                                            reposts: options.reposts.unwrap_or(false),
+                                            videos: options.videos
+                                                != Some(gallery_dl_rs::twitter::VideoMode::Skip),
+                                            quoted: options.quoted.unwrap_or(false),
+                                        })
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -794,12 +998,41 @@ fn extract_input<'a>(
                     native.events(&url)
                 }
                 Extractor::Native if category == "mastodon" => {
-                    let native = extractors
-                        .mastodon
+                    let host = url.host_str().expect("Mastodon input host");
+                    let slot = gallery_dl_rs::mastodon::INSTANCES
+                        .iter()
+                        .position(|candidate| *candidate == host)
+                        .expect("supported instance");
+                    let native = extractors.mastodon[slot]
                         .get_or_init(|| async {
                             gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
                                 |native| {
+                                    if options.replies
+                                        == Some(gallery_dl_rs::twitter::ReplyMode::SelfOnly)
+                                    {
+                                        return Err(error(
+                                            "native Mastodon replies must be a boolean",
+                                        ));
+                                    }
+                                    if options.cards == Some(gallery_dl_rs::twitter::CardMode::Ytdl)
+                                    {
+                                        return Err(error(
+                                            "native Mastodon cards must be a boolean",
+                                        ));
+                                    }
                                     native
+                                        .with_access_token_for(
+                                            host,
+                                            options.access_token.as_deref(),
+                                        )?
+                                        .with_selection(gallery_dl_rs::mastodon::SelectionOptions {
+                                            reblogs: options.reblogs.unwrap_or(false),
+                                            replies: options.replies
+                                                != Some(gallery_dl_rs::twitter::ReplyMode::Skip),
+                                            text_posts: options.text_posts.unwrap_or(false),
+                                            cards: options.cards
+                                                == Some(gallery_dl_rs::twitter::CardMode::Files),
+                                        })
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -814,11 +1047,28 @@ fn extract_input<'a>(
                     native.events(&url)
                 }
                 Extractor::Native if matches!(category, "kemono" | "coomer") => {
-                    let native = extractors
-                        .kemono
+                    let native = extractors.kemono[usize::from(category == "coomer")]
                         .get_or_init(|| async {
+                            let site = if category == "coomer" {
+                                "coomer.st"
+                            } else {
+                                "kemono.cr"
+                            };
+                            let jar = extractors.cookie_jar(configured, site).await?;
                             gallery_dl_rs::kemono::Kemono::new(backend.timeout).and_then(|native| {
+                                let native = native.with_cookies(jar);
                                 native
+                                    .with_expand(options.expand.unwrap_or(false))
+                                    .with_selection(options.kemono_selection())
+                                    .with_revisions(options.revisions.unwrap_or_default())
+                                    .with_revision_order(
+                                        options.order_revisions.unwrap_or_default(),
+                                    )
+                                    .with_endpoint(options.endpoint.unwrap_or_default())
+                                    .with_post_order(options.order_posts.unwrap_or_default())
+                                    .with_favorites(options.favorites.unwrap_or_default())
+                                    .with_max_posts(options.max_posts)
+                                    .with_metadata(options.metadata.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -835,6 +1085,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::tumblr::Tumblr::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_selection(options.tumblr_selection())
                                     .with_api_key(options.api_key.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1023,32 +1274,154 @@ fn extract_input<'a>(
                         })?;
                     native.events(&url)
                 }
-                Extractor::Native if category == "pixiv" => {
-                    let native = extractors
-                        .pixiv
+                Extractor::Native if matches!(category, "pixiv" | "pixiv-novel") => {
+                    let novel_settings = &settings["pixiv-novel"];
+                    let novel_options = &novel_settings.options;
+                    let artwork = if novel_options.embeds.unwrap_or(false) {
+                        let artwork_settings = &settings["pixiv"];
+                        let artwork_options = &artwork_settings.options;
+                        Some(
+                            extractors
+                                .pixiv_artwork
+                                .get_or_init(|| async {
+                                    let jar = extractors
+                                        .cookie_jar(artwork_settings, "pixiv.net")
+                                        .await?;
+                                    gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
+                                        |native| {
+                                            native
+                                                .with_cookies(jar)
+                                                .with_captions(
+                                                    artwork_options.captions.unwrap_or(false),
+                                                )
+                                                .with_sanity(artwork_options.sanity.unwrap_or(true))
+                                                .with_ugoira_mode(
+                                                    artwork_options.ugoira.unwrap_or_default(),
+                                                )
+                                                .with_metadata(
+                                                    artwork_options.metadata.unwrap_or(false),
+                                                )
+                                                .with_comments(
+                                                    artwork_options.comments.unwrap_or(false),
+                                                )
+                                                .with_metadata_bookmark(
+                                                    artwork_options
+                                                        .metadata_bookmark
+                                                        .unwrap_or(false),
+                                                )
+                                                .with_max_posts(artwork_options.max_posts)
+                                                .with_tags(artwork_options.tags.unwrap_or_default())
+                                                .with_cursor(artwork_options.cursor.clone())
+                                                .with_refresh_token(
+                                                    artwork_options.refresh_token.as_deref(),
+                                                )
+                                                .with_retries(artwork_options.retries.unwrap())
+                                                .with_request_timeout(
+                                                    artwork_options.timeout.unwrap(),
+                                                )
+                                                .with_network(&artwork_settings.network)
+                                                .map(Arc::new)
+                                        },
+                                    )
+                                })
+                                .await
+                                .as_ref()
+                                .map_err(|e| {
+                                    error(format!(
+                                        "native Pixiv artwork initialization failed: {e}"
+                                    ))
+                                })?,
+                        )
+                    } else {
+                        None
+                    };
+                    let novel = extractors
+                        .pixiv_novel
                         .get_or_init(|| async {
+                            let jar = extractors.cookie_jar(novel_settings, "pixiv.net").await?;
                             gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
+                                let native = native.with_cookies(jar);
+                                let native = match artwork {
+                                    Some(artwork) => {
+                                        native.with_artwork_extractor(Arc::clone(artwork))
+                                    }
+                                    None => native,
+                                };
                                 native
-                                    .with_refresh_token(options.refresh_token.as_deref())
-                                    .with_retries(options.retries.unwrap())
-                                    .with_request_timeout(options.timeout.unwrap())
-                                    .with_network(&configured.network)
+                                    .with_novel_options(gallery_dl_rs::pixiv::NovelOptions {
+                                        embeds: novel_options.embeds.unwrap_or(false),
+                                        covers: novel_options.covers.unwrap_or(false),
+                                        full_series: novel_options.full_series.unwrap_or(false),
+                                    })
+                                    .with_metadata(novel_options.metadata.unwrap_or(false))
+                                    .with_comments(novel_options.comments.unwrap_or(false))
+                                    .with_metadata_bookmark(
+                                        novel_options.metadata_bookmark.unwrap_or(false),
+                                    )
+                                    .with_max_posts(novel_options.max_posts)
+                                    .with_tags(novel_options.tags.unwrap_or_default())
+                                    .with_cursor(novel_options.cursor.clone())
+                                    .with_refresh_token(novel_options.refresh_token.as_deref())
+                                    .with_retries(novel_options.retries.unwrap())
+                                    .with_request_timeout(novel_options.timeout.unwrap())
+                                    .with_network(&novel_settings.network)
+                                    .map(Arc::new)
                             })
                         })
                         .await
                         .as_ref()
-                        .map_err(|e| error(format!("native Pixiv initialization failed: {e}")))?;
-                    native.events(&url)
+                        .map_err(|e| {
+                            error(format!("native Pixiv novel initialization failed: {e}"))
+                        })?;
+                    if category == "pixiv-novel" {
+                        novel.events(&url)
+                    } else {
+                        let native = extractors
+                            .pixiv
+                            .get_or_init(|| async {
+                                let jar = extractors.cookie_jar(configured, "pixiv.net").await?;
+                                gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
+                                    |native| {
+                                        native
+                                            .with_cookies(jar)
+                                            .with_captions(options.captions.unwrap_or(false))
+                                            .with_sanity(options.sanity.unwrap_or(true))
+                                            .with_novel_extractor(Arc::clone(novel))
+                                            .with_include(options.include.clone())
+                                            .with_ugoira_mode(options.ugoira.unwrap_or_default())
+                                            .with_metadata(options.metadata.unwrap_or(false))
+                                            .with_comments(options.comments.unwrap_or(false))
+                                            .with_metadata_bookmark(
+                                                options.metadata_bookmark.unwrap_or(false),
+                                            )
+                                            .with_max_posts(options.max_posts)
+                                            .with_tags(options.tags.unwrap_or_default())
+                                            .with_cursor(options.cursor.clone())
+                                            .with_refresh_token(options.refresh_token.as_deref())
+                                            .with_retries(options.retries.unwrap())
+                                            .with_request_timeout(options.timeout.unwrap())
+                                            .with_network(&configured.network)
+                                    },
+                                )
+                            })
+                            .await
+                            .as_ref()
+                            .map_err(|e| {
+                                error(format!("native Pixiv initialization failed: {e}"))
+                            })?;
+                        native.events(&url)
+                    }
                 }
                 Extractor::Native
-                    if gallery_dl_rs::imagehosts::Site::from_category(category).is_some() =>
+                    if let Some(site) =
+                        gallery_dl_rs::imagehosts::Site::from_category(category) =>
                 {
-                    let native = extractors
-                        .imagehosts
+                    let native = extractors.imagehosts[site as usize]
                         .get_or_init(|| async {
                             gallery_dl_rs::imagehosts::ImageHosts::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_pixeldrain_api_key(options.api_key.as_deref())?
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1065,11 +1438,32 @@ fn extract_input<'a>(
                 Extractor::Native
                     if let Some(site) = gallery_dl_rs::booru::Site::from_category(category) =>
                 {
-                    let native = extractors.booru[site as usize]
+                    let cache = match booru_subcategory(&url) {
+                        Some("artist") => &extractors.booru_artist,
+                        Some("artist-search") => &extractors.booru_artist_search,
+                        _ => &extractors.booru,
+                    };
+                    let native = cache[site as usize]
                         .get_or_init(|| async {
                             gallery_dl_rs::booru::Booru::new(site, backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_credentials(
+                                            options.username.as_deref(),
+                                            options.password.as_deref(),
+                                        )?
+                                        .with_api_credentials(
+                                            options.user_id.as_deref(),
+                                            options.api_key.as_deref(),
+                                        )?
+                                        .with_artist_parent_metadata(
+                                            options.artist_parent_metadata().cloned(),
+                                        )
+                                        .with_threshold(options.booru_threshold.flatten())
+                                        .with_favorite_order(options.booru_favorite_order.clone())
+                                        .with_pool_order(
+                                            options.booru_order_posts.unwrap_or_default(),
+                                        )
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1092,14 +1486,59 @@ fn extract_input<'a>(
                     backend.events_with_options(
                         &url,
                         BackendOptions {
+                            include: options.include.clone(),
+                            child_range: options.child_range.clone(),
+                            child_filter: options.child_filter.clone(),
                             browser: configured.browser_spec.clone(),
                             proxy: configured.network.proxy().map(str::to_owned),
                             user_agent: configured.network.user_agent().map(str::to_owned),
                             retweets: (category == "twitter")
                                 .then_some(options.retweets)
                                 .flatten(),
-                            quoted: (category == "twitter").then_some(options.quoted).flatten(),
-                            expand: (category == "twitter").then_some(options.expand).flatten(),
+                            quoted: matches!(category, "twitter" | "bluesky")
+                                .then_some(options.quoted)
+                                .flatten(),
+                            expand: matches!(category, "twitter" | "kemono" | "coomer")
+                                .then_some(options.expand)
+                                .flatten(),
+                            parent_metadata: options.parent_metadata.as_deref().cloned(),
+                            metadata_parent: options.metadata_parent.as_deref().cloned(),
+                            booru_threshold: matches!(category, "danbooru" | "e621")
+                                .then_some(options.booru_threshold)
+                                .flatten(),
+                            max_posts: matches!(
+                                category,
+                                "kemono" | "coomer" | "pixiv" | "pixiv-novel"
+                            )
+                            .then_some(options.max_posts)
+                            .flatten(),
+                            endpoint: matches!(category, "kemono" | "coomer")
+                                .then_some(options.endpoint)
+                                .flatten(),
+                            bluesky_endpoint: (category == "bluesky")
+                                .then_some(options.bluesky_endpoint)
+                                .flatten(),
+                            api_server: (category == "bluesky")
+                                .then(|| options.api_server.clone())
+                                .flatten(),
+                            favorites: matches!(category, "kemono" | "coomer")
+                                .then_some(options.favorites)
+                                .flatten(),
+                            booru_favorite_order: (category == "gelbooru")
+                                .then(|| options.booru_favorite_order.clone())
+                                .flatten(),
+                            booru_order_posts: (category == "danbooru")
+                                .then_some(options.booru_order_posts)
+                                .flatten(),
+                            order_posts: matches!(category, "kemono" | "coomer")
+                                .then_some(options.order_posts)
+                                .flatten(),
+                            metadata: matches!(
+                                category,
+                                "kemono" | "coomer" | "pixiv" | "pixiv-novel"
+                            )
+                            .then_some(options.metadata)
+                            .flatten(),
                             unique: (category == "twitter").then_some(options.unique).flatten(),
                             text_tweets: (category == "twitter")
                                 .then_some(options.text_tweets)
@@ -1110,15 +1549,80 @@ fn extract_input<'a>(
                             size: (category == "twitter")
                                 .then(|| options.size.clone())
                                 .flatten(),
+                            mp4: (category == "imgur").then_some(options.mp4).flatten(),
+                            api_key: options.api_key.clone(),
+                            username: options.username.clone(),
+                            password: options.password.clone(),
+                            user_id: options.user_id.clone(),
+                            tumblr_reblogs: (category == "tumblr"
+                                && (options.tumblr_reblogs.is_some() || options.reblogs.is_some()))
+                            .then(|| options.tumblr_selection().reblogs),
+                            posts: (category == "tumblr")
+                                .then(|| options.posts.clone())
+                                .flatten(),
+                            inline: (category == "tumblr").then_some(options.inline).flatten(),
+                            original: matches!(category, "tumblr" | "kemono" | "coomer")
+                                .then_some(options.original)
+                                .flatten(),
+                            files: matches!(category, "kemono" | "coomer")
+                                .then(|| options.files.clone())
+                                .flatten(),
+                            duplicates: matches!(category, "kemono" | "coomer")
+                                .then_some(options.duplicates)
+                                .flatten(),
+                            revisions: matches!(category, "kemono" | "coomer")
+                                .then_some(options.revisions)
+                                .flatten(),
+                            order_revisions: matches!(category, "kemono" | "coomer")
+                                .then_some(options.order_revisions)
+                                .flatten(),
+                            reposts: (category == "bluesky").then_some(options.reposts).flatten(),
+                            sanity: (category == "pixiv").then_some(options.sanity).flatten(),
+                            captions: (category == "pixiv").then_some(options.captions).flatten(),
+                            comments: matches!(category, "pixiv" | "pixiv-novel")
+                                .then_some(options.comments)
+                                .flatten(),
+                            metadata_bookmark: matches!(category, "pixiv" | "pixiv-novel")
+                                .then_some(options.metadata_bookmark)
+                                .flatten(),
+                            ugoira: (category == "pixiv").then_some(options.ugoira).flatten(),
+                            tags: matches!(category, "pixiv" | "pixiv-novel")
+                                .then_some(options.tags)
+                                .flatten(),
+                            cursor: matches!(category, "pixiv" | "pixiv-novel")
+                                .then(|| options.cursor.clone())
+                                .flatten(),
+                            embeds: (category == "pixiv-novel")
+                                .then_some(options.embeds)
+                                .flatten(),
+                            covers: (category == "pixiv-novel")
+                                .then_some(options.covers)
+                                .flatten(),
+                            full_series: (category == "pixiv-novel")
+                                .then_some(options.full_series)
+                                .flatten(),
+                            access_token: (category == "mastodon")
+                                .then(|| options.access_token.clone())
+                                .flatten(),
+                            reblogs: (category == "mastodon")
+                                .then_some(options.reblogs)
+                                .flatten(),
+                            text_posts: (category == "mastodon")
+                                .then_some(options.text_posts)
+                                .flatten(),
                             fallback: options.fallback,
                             articles: (category == "twitter")
                                 .then_some(options.articles)
                                 .flatten(),
-                            cards: (category == "twitter").then_some(options.cards).flatten(),
+                            cards: matches!(category, "twitter" | "mastodon")
+                                .then_some(options.cards)
+                                .flatten(),
                             cards_blacklist: (category == "twitter")
                                 .then(|| options.cards_blacklist.clone())
                                 .flatten(),
-                            videos: (category == "twitter").then_some(options.videos).flatten(),
+                            videos: matches!(category, "twitter" | "bluesky")
+                                .then_some(options.videos)
+                                .flatten(),
                             previews: (category == "twitter")
                                 .then_some(options.previews)
                                 .flatten(),
@@ -1129,7 +1633,9 @@ fn extract_input<'a>(
                                 .then_some(options.conversations)
                                 .flatten(),
                             pinned: (category == "twitter").then_some(options.pinned).flatten(),
-                            replies: (category == "twitter").then_some(options.replies).flatten(),
+                            replies: matches!(category, "twitter" | "mastodon")
+                                .then_some(options.replies)
+                                .flatten(),
                             strategy: (category == "twitter")
                                 .then_some(options.strategy)
                                 .flatten(),
@@ -1157,10 +1663,30 @@ fn extract_input<'a>(
                 "unsupported URL; expected a social URL or direct media file",
             ));
         };
+        let input = if routed_site(&url, extractor) == Some("mastodon") {
+            let category = settings_category(&url, extractor);
+            input
+                .map(move |event| {
+                    event.map(|mut event| {
+                        match &mut event {
+                            ExtractionEvent::Media(media) => media.category = category.into(),
+                            ExtractionEvent::Post(post) => post.category = category.into(),
+                            ExtractionEvent::EndPost
+                            | ExtractionEvent::BeginChild(_)
+                            | ExtractionEvent::EndChild(_) => {}
+                        }
+                        event
+                    })
+                })
+                .boxed()
+        } else {
+            input
+        };
         Ok(input)
     })
     .try_flatten()
-    .boxed()
+    .boxed();
+    event::with_extraction_budget(input, backend.timeout)
 }
 
 struct Settings {
@@ -1172,10 +1698,27 @@ struct Settings {
     selection: Option<RangeSelection>,
     filter: Option<FilterExpression>,
     post_selection: Option<PostSelection>,
-    dates: DateFilter,
+    child_range: Option<RangeSelection>,
+    child_filter: Option<FilterExpression>,
     network: NetworkOptions,
+    postprocessors: Option<std::sync::Arc<gallery_dl_rs::postprocess::Postprocessors>>,
     download_client: OnceCell<Result<download::DownloadClient>>,
     limits: SizeLimits,
+}
+
+impl Settings {
+    fn job_selection(&self, unordered: bool) -> JobSelection {
+        JobSelection {
+            post_selection: self.post_selection.clone(),
+            file_range: self.selection.clone(),
+            file_filter: self.filter.clone(),
+            child_range: self.child_range.clone(),
+            child_filter: self.child_filter.clone(),
+            before: self.options.date_before,
+            after: self.options.date_after,
+            unordered,
+        }
+    }
 }
 
 async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
@@ -1195,6 +1738,8 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         ..ConfigOptions::default()
     };
     let overrides = ConfigOptions {
+        init: None,
+        postprocessors: None,
         base_directory: args
             .exact_directory
             .clone()
@@ -1205,8 +1750,19 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         file_filter: (!args.file_filter.is_empty()).then(|| args.file_filter.clone()),
         post_range: args.post_range.clone(),
         post_filter: (!args.post_filter.is_empty()).then(|| args.post_filter.clone()),
-        date_before: args.date_before,
-        date_after: args.date_after,
+        child_range: args.child_range.clone(),
+        child_filter: (!args.child_filter.is_empty()).then(|| args.child_filter.clone()),
+        include: None,
+        date_before: args
+            .date_before
+            .as_ref()
+            .and_then(|value| source_date_bound(&serde_json::Value::String(value.clone()))),
+        date_after: args
+            .date_after
+            .as_ref()
+            .and_then(|value| source_date_bound(&serde_json::Value::String(value.clone()))),
+        date_before_set: args.date_before.is_some(),
+        date_after_set: args.date_after.is_some(),
         directory: if args.exact_directory.is_some() {
             Some(Vec::new())
         } else {
@@ -1221,6 +1777,36 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         unique: None,
         videos: None,
         previews: None,
+        mp4: None,
+        reblogs: None,
+        tumblr_reblogs: None,
+        posts: None,
+        inline: None,
+        original: None,
+        files: None,
+        duplicates: None,
+        revisions: None,
+        order_revisions: None,
+        endpoint: None,
+        bluesky_endpoint: None,
+        api_server: None,
+        order_posts: None,
+        booru_order_posts: None,
+        booru_favorite_order: None,
+        favorites: None,
+        username: None,
+        password: None,
+        user_id: None,
+        reposts: None,
+        sanity: None,
+        captions: None,
+        comments: None,
+        metadata_bookmark: None,
+        ugoira: None,
+        tags: None,
+        cursor: None,
+        access_token: None,
+        text_posts: None,
         unavailable: None,
         text_tweets: if args.text_tweets {
             Some(true)
@@ -1244,8 +1830,16 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         limit: None,
         search_limit: None,
         search_stop: None,
+        max_posts: None,
+        parent_metadata: None,
+        metadata_parent: None,
+        booru_threshold: None,
+        metadata: None,
         api_key: None,
         refresh_token: None,
+        embeds: None,
+        covers: None,
+        full_series: None,
         client_id: None,
         client_secret: None,
         proxy: args.proxy.clone(),
@@ -1269,6 +1863,9 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "gelbooru",
         "safebooru",
         "mastodon",
+        "mastodon.social",
+        "pawoo",
+        "baraag",
         "kemono",
         "coomer",
         "pixeldrain",
@@ -1277,6 +1874,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "postimg",
         "tumblr",
         "pixiv",
+        "pixiv-novel",
         "deviantart",
         "flickr",
         "wallhaven",
@@ -1287,10 +1885,21 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "weasyl",
         "vsco",
         "direct",
+        "danbooru.artist",
+        "danbooru.artist-search",
+        "danbooru.tag",
+        "e621.artist",
+        "e621.artist-search",
+        "e621.tag",
     ] {
-        let options = defaults
-            .overlay(&config.resolve(category)?)
-            .overlay(&overrides);
+        let class = category
+            .split_once('.')
+            .filter(|(base, _)| matches!(*base, "danbooru" | "e621"));
+        let resolved = match class {
+            Some((base, class)) => config.resolve_class(base, class)?,
+            None => config.resolve(category)?,
+        };
+        let options = defaults.overlay(&resolved).overlay(&overrides);
         let browser_spec = args.cookies_from_browser.clone().or_else(|| {
             options.browser_cookies.as_ref().map(|profile| {
                 // Config parsing has already checked that this path is UTF-8.
@@ -1306,25 +1915,25 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             None
         };
         let filename = match &options.filename_conditions {
-            Some(conditions) => Some(FilenameTemplate::parse_conditional(
+            Some(conditions) => Some(FilenameTemplate::parse_source_conditional(
                 conditions,
                 options.filename.as_deref(),
             )?),
             None => options
                 .filename
                 .as_deref()
-                .map(FilenameTemplate::parse)
+                .map(|template| FilenameTemplate::parse_source(template))
                 .transpose()?,
         };
         let directory = match &options.directory_conditions {
-            Some(conditions) => Some(DirectoryTemplate::parse_conditional(
+            Some(conditions) => Some(DirectoryTemplate::parse_source_conditional(
                 conditions,
                 options.directory.as_deref(),
             )?),
             None => options
                 .directory
                 .as_deref()
-                .map(DirectoryTemplate::parse)
+                .map(|components| DirectoryTemplate::parse_source(components))
                 .transpose()?,
         };
         let selection = options
@@ -1353,7 +1962,27 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .then(|| PostSelection::new(post_range, post_filter));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
-        let dates = DateFilter::new(options.date_before, options.date_after)?;
+        let child_range = options
+            .child_range
+            .as_deref()
+            .map(RangeSelection::parse)
+            .transpose()
+            .map_err(|_| error("invalid child range"))?;
+        let child_filter = options
+            .child_filter
+            .as_deref()
+            .filter(|clauses| !clauses.is_empty())
+            .map(FilterExpression::parse_all)
+            .transpose()?;
+        let postprocessors = options
+            .postprocessors
+            .as_ref()
+            .map(|config| {
+                config.specifications().map(|specs| {
+                    std::sync::Arc::new(gallery_dl_rs::postprocess::Postprocessors::new(specs))
+                })
+            })
+            .transpose()?;
         settings.insert(
             category,
             Settings {
@@ -1365,8 +1994,10 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
                 selection,
                 filter,
                 post_selection,
-                dates,
+                child_range,
+                child_filter,
                 network,
+                postprocessors,
                 download_client: OnceCell::new(),
                 limits,
             },

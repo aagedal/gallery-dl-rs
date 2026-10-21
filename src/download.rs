@@ -1,3 +1,5 @@
+#[path = "download_postprocess.rs"]
+pub(crate) mod processing;
 use crate::{
     Result, error,
     extract::{Media, MediaJob},
@@ -30,6 +32,7 @@ pub struct DownloadClient {
     network: NetworkOptions,
     mtime_http: bool,
     mtime_field: Option<String>,
+    response_mtime: Option<std::sync::Arc<std::sync::Mutex<Option<SystemTime>>>>,
     sleep: Option<crate::sleep::SleepRange>,
     /// Maximum body bytes per second for each download.
     rate: Option<u64>,
@@ -113,6 +116,17 @@ fn set_mtime(file: &std::fs::File, time: Option<SystemTime>) -> std::io::Result<
 }
 
 impl DownloadClient {
+    fn capture_http_mtime(&self, headers: &HeaderMap) {
+        if let Some(capture) = &self.response_mtime
+            && let Ok(mut timestamp) = capture.lock()
+        {
+            *timestamp = headers
+                .get(reqwest::header::LAST_MODIFIED)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| httpdate::parse_http_date(value).ok());
+        }
+    }
+
     /// Apply transport overrides while retaining shared per-origin cooldowns.
     pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
         if self.network.proxy() != network.proxy()
@@ -215,6 +229,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         network: NetworkOptions::default(),
         mtime_http: true,
         mtime_field: None,
+        response_mtime: None,
         sleep: None,
         rate: None,
     })
@@ -255,10 +270,7 @@ pub fn destination_with_template(
     media: &Media,
     template: &FilenameTemplate,
 ) -> Result<PathBuf> {
-    Ok(match template.render_optional(media)? {
-        Some(name) => root.join(safe_component(&media.category)).join(name),
-        None => destination(root, media),
-    })
+    destination_with_templates(root, media, Some(template), None)
 }
 
 /// Render a complete destination. An explicit directory replaces the default
@@ -269,11 +281,23 @@ pub fn destination_with_templates(
     filename: Option<&FilenameTemplate>,
     directory: Option<&DirectoryTemplate>,
 ) -> Result<PathBuf> {
-    let default = match filename {
-        Some(template) => destination_with_template(root, media, template)?,
+    let filename = crate::naming::effective_filename(media, filename);
+    let directory = crate::naming::effective_directory(media, directory);
+    let default = match filename
+        .as_ref()
+        .map(|template| template.render_optional(media))
+        .transpose()?
+        .flatten()
+    {
+        Some(name) => root.join(safe_component(&media.category)).join(name),
         None => destination(root, media),
     };
-    match directory.map(|d| d.render(media)).transpose()?.flatten() {
+    match directory
+        .as_ref()
+        .map(|d| d.render(media))
+        .transpose()?
+        .flatten()
+    {
         None => Ok(default),
         Some(directory) => Ok(root.join(directory).join(
             default
@@ -281,6 +305,48 @@ pub fn destination_with_templates(
                 .ok_or_else(|| error("invalid media filename"))?,
         )),
     }
+}
+
+/// Hook-aware destination rendering without reconstructing typed API metadata.
+pub(crate) fn destination_with_keyword_templates(
+    root: &Path,
+    media: &Media,
+    filename: Option<&FilenameTemplate>,
+    directory: Option<&DirectoryTemplate>,
+    keywords: &serde_json::Map<String, serde_json::Value>,
+) -> Result<PathBuf> {
+    let filename = crate::naming::effective_filename(media, filename);
+    let default = destination(root, media);
+    let name = filename
+        .as_ref()
+        .map(|template| template.render_keywords(media, keywords))
+        .transpose()?
+        .flatten();
+    let basename = name
+        .as_deref()
+        .map(std::ffi::OsStr::new)
+        .or_else(|| default.file_name())
+        .ok_or_else(|| error("invalid media filename"))?;
+    Ok(directory_with_keywords(root, media, directory, keywords)?.join(basename))
+}
+
+/// Render the directory checkpoint without evaluating any filename formatter.
+pub(crate) fn directory_with_keywords(
+    root: &Path,
+    media: &Media,
+    directory: Option<&DirectoryTemplate>,
+    keywords: &serde_json::Map<String, serde_json::Value>,
+) -> Result<PathBuf> {
+    let directory = crate::naming::effective_directory(media, directory);
+    let directory = directory
+        .as_ref()
+        .map(|template| template.render_keywords(media, keywords))
+        .transpose()?
+        .flatten();
+    Ok(match directory {
+        Some(directory) => root.join(directory),
+        None => root.join(safe_component(&media.category)),
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -302,6 +368,8 @@ impl Outcome {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DownloadOptions<'a> {
     pub retries: u8,
+    pub postprocessor_scope: Option<&'a crate::postprocess::jobs::ScopeLease>,
+    pub postprocessors: Option<&'a crate::postprocess::Postprocessors>,
     /// Override category folders with per-media directory components.
     pub directory: Option<&'a DirectoryTemplate>,
     /// Save versioned post metadata beside completed or already existing media.
@@ -346,27 +414,272 @@ pub async fn download_with_template(
 ) -> Result<Outcome> {
     let effective_media = client.effective_media(media);
     let media = effective_media.as_ref();
-    let outcome = download_media(
-        client,
-        root,
-        media,
-        options.retries,
-        template,
-        options.directory,
-        options.limits,
-    )
-    .await?;
+    let resolved_filename = crate::naming::effective_filename(media, template);
+    let template = resolved_filename.as_ref();
+    let source_booru = media
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.booru_keywords.is_some());
+    // Source filename preparation also runs when no hooks are configured.
+    let empty_processors = (source_booru && options.postprocessors.is_none())
+        .then(|| crate::postprocess::Postprocessors::new(Vec::new()));
+    let options = DownloadOptions {
+        postprocessors: options.postprocessors.or(empty_processors.as_ref()),
+        ..options
+    };
+    if source_booru || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
+        let prepared = processing::prepare(client, root, media, options, template).await?;
+        return processing::download(client, root, media, options, template, prepared).await;
+    }
+    let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
+    let output_media = prepared.as_ref().unwrap_or(media);
+    let original_frames = media
+        .metadata
+        .as_ref()
+        .is_some_and(|m| m.ugoira_frame_index.is_some());
+    let selected = options
+        .postprocessors
+        .map(|pp| pp.selected(media))
+        .unwrap_or_default();
+    if original_frames && !selected.is_empty() {
+        let path = destination_with_templates(root, media, template, options.directory)?;
+        options
+            .postprocessors
+            .unwrap()
+            .frames
+            .register(media, &path)?;
+    }
+    let mut converted_media = None;
+    let mut outcome = if !original_frames && !selected.is_empty() {
+        download_ugoira(
+            client,
+            root,
+            media,
+            output_media,
+            options,
+            template,
+            &selected,
+        )
+        .await?
+    } else {
+        download_media(client, root, media, options, template, None).await?
+    };
+    if original_frames
+        && !selected.is_empty()
+        && let Some((path, converted)) =
+            complete_original(client, root, media, &outcome, options, template).await?
+    {
+        outcome = Outcome::Downloaded(path);
+        converted_media = Some(converted);
+    }
     if options.write_metadata
         && let Some(path) = outcome.saved_path()
     {
-        write_metadata(path, media).await.map_err(|e| {
-            error(format!(
-                "media is saved at {}; metadata sidecar failed: {e}",
-                path.display()
-            ))
-        })?;
+        write_metadata(path, converted_media.as_ref().unwrap_or(output_media))
+            .await
+            .map_err(|e| {
+                error(format!(
+                    "media is saved at {}; metadata sidecar failed: {e}",
+                    path.display()
+                ))
+            })?;
     }
     Ok(outcome)
+}
+
+pub(crate) async fn complete_original(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    outcome: &Outcome,
+    options: DownloadOptions<'_>,
+    template: Option<&FilenameTemplate>,
+) -> Result<Option<(PathBuf, Media)>> {
+    if let Some(pp) = options.postprocessors
+        && let Some(path) = outcome.saved_path()
+        && let Some(collection) =
+            pp.frames
+                .complete(media, path, matches!(outcome, Outcome::Downloaded(_)))?
+    {
+        let mut converted_media = None;
+        let fingerprints = match &collection.input {
+            crate::postprocess::FrameInput::Files(frames) => frames
+                .iter()
+                .map(|frame| {
+                    std::fs::symlink_metadata(&frame.path)
+                        .ok()
+                        .map(|metadata| (frame.path.clone(), metadata))
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let mut last = None;
+        for spec in options.postprocessors.unwrap().selected(&collection.media) {
+            let converted = crate::postprocess::with_extension(&collection.media, spec.extension());
+            let path = destination_with_templates(root, &converted, template, options.directory)?;
+            crate::postprocess::convert(
+                spec,
+                &collection.input,
+                &converted,
+                &path,
+                client.wait_limit,
+            )
+            .await?;
+            last = Some(path);
+            converted_media = Some(converted);
+        }
+        // Delay removal until every converter has finished using the source frames.
+        if options
+            .postprocessors
+            .unwrap()
+            .selected(&collection.media)
+            .iter()
+            .any(|spec| !spec.keep_files())
+            && let crate::postprocess::FrameInput::Files(frames) = &collection.input
+        {
+            for (frame, before) in frames.iter().zip(fingerprints) {
+                if last.as_ref() != Some(&frame.path)
+                    && let Some((_, before)) = before
+                    && let Ok(after) = std::fs::symlink_metadata(&frame.path)
+                    && unchanged_file(&before, &after)
+                {
+                    tokio::fs::remove_file(&frame.path).await?;
+                }
+            }
+        }
+        let result = last.zip(converted_media);
+        if options.write_metadata
+            && let Some((path, media)) = &result
+        {
+            write_metadata(path, media).await.map_err(|e| {
+                error(format!(
+                    "media is saved at {}; metadata sidecar failed: {e}",
+                    path.display()
+                ))
+            })?;
+        }
+        return Ok(result);
+    }
+    Ok(None)
+}
+
+fn unchanged_file(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bool {
+    if !after.is_file()
+        || before.len() != after.len()
+        || before.modified().ok() != after.modified().ok()
+    {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if before.dev() != after.dev() || before.ino() != after.ino() {
+            return false;
+        }
+    }
+    true
+}
+
+/// Preserve a fully downloaded source even when the conversion future is cancelled.
+struct UgoiraSource {
+    directory: tempfile::TempDir,
+    source: Option<PathBuf>,
+    recovery: PathBuf,
+    recover_at_original: bool,
+}
+impl Drop for UgoiraSource {
+    fn drop(&mut self) {
+        if let Some(source) = &self.source
+            && (!self.recover_at_original || std::fs::hard_link(source, &self.recovery).is_err())
+            && let Some(parent) = self.recovery.parent()
+            && let Ok(file) = tempfile::Builder::new()
+                .prefix(".gallery-dl-ugoira-source-")
+                .suffix(&format!(
+                    ".{}",
+                    self.recovery
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .unwrap_or("bin")
+                ))
+                .tempfile_in(parent)
+        {
+            let path = file.into_temp_path();
+            if std::fs::rename(source, &path).is_ok() {
+                let _ = path.keep();
+            }
+        }
+    }
+}
+async fn download_ugoira(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    prepared: &Media,
+    options: DownloadOptions<'_>,
+    template: Option<&FilenameTemplate>,
+    selected: &[&crate::postprocess::UgoiraOptions],
+) -> Result<Outcome> {
+    let path = destination_with_templates(root, prepared, template, options.directory)?;
+    if crate::postprocess::regular_file(&path)? {
+        return Ok(Outcome::Skipped(path));
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| error("invalid postprocessor destination"))?;
+    tokio::fs::create_dir_all(parent).await?;
+    let recovery = destination_with_templates(root, media, template, options.directory)?;
+    if let Some(parent) = recovery.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut source = UgoiraSource {
+        directory: tempfile::TempDir::new_in(parent)?,
+        source: None,
+        recover_at_original: recovery != path,
+        recovery,
+    };
+    let downloaded = download_media(
+        client,
+        source.directory.path(),
+        media,
+        DownloadOptions {
+            directory: None,
+            ..options
+        },
+        None,
+        Some(&source.recovery),
+    )
+    .await?;
+    let Some(input_path) = downloaded.saved_path() else {
+        return Ok(downloaded);
+    };
+    source.source = Some(input_path.to_owned());
+    let frames = media
+        .metadata
+        .as_ref()
+        .and_then(|m| m.frames.clone())
+        .ok_or_else(|| error("ugoira frame metadata missing"))?;
+    let input = crate::postprocess::FrameInput::Zip {
+        path: input_path.to_owned(),
+        frames,
+    };
+    let mut published = std::collections::HashSet::new();
+    for spec in selected {
+        let converted = crate::postprocess::with_extension(prepared, spec.extension());
+        let output = destination_with_templates(root, &converted, template, options.directory)?;
+        crate::postprocess::convert(spec, &input, &converted, &output, client.wait_limit).await?;
+        published.insert(output);
+    }
+    if selected.iter().all(|spec| spec.keep_files()) && !published.contains(&path) {
+        match std::fs::hard_link(input_path, &path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                crate::postprocess::regular_file(&path)?;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    source.source = None;
+    Ok(Outcome::Downloaded(path))
 }
 
 /// Deliberately exclude URLs and private transport/adapter options, including
@@ -445,11 +758,16 @@ async fn download_media(
     client: &DownloadClient,
     root: &Path,
     media: &Media,
-    retries: u8,
+    options: DownloadOptions<'_>,
     template: Option<&FilenameTemplate>,
-    directory: Option<&DirectoryTemplate>,
-    limits: SizeLimits,
+    checkpoint_destination: Option<&Path>,
 ) -> Result<Outcome> {
+    let DownloadOptions {
+        retries,
+        directory,
+        limits,
+        ..
+    } = options;
     let primary_validation = validate_job(media);
     if let Err(failure) = &primary_validation
         && (!failure.fallback || !client.fallback || !media.handoff.contains_key("_fallback"))
@@ -516,7 +834,13 @@ async fn download_media(
                     headers.insert(name, HeaderValue::from_str(value)?);
                 }
                 partial = if client.resume {
-                    Some(crate::resume::Partial::open(&path, &candidate.identity()).await?)
+                    Some(
+                        crate::resume::Partial::open(
+                            checkpoint_destination.unwrap_or(&path),
+                            &candidate.identity(),
+                        )
+                        .await?,
+                    )
                 } else {
                     None
                 };
@@ -779,6 +1103,7 @@ async fn attempt_download(
         return Err(terminal("unexpected Content-Range in full media response"));
     }
     let expected = response.content_length();
+    client.capture_http_mtime(response.headers());
     let modified = mtime.select(response.headers());
     validate_media(&response)?;
     if let Some(rejection) = expected.and_then(|size| limits.check(size)) {
@@ -794,6 +1119,8 @@ async fn attempt_download(
         .await?;
     let mut stream = response.bytes_stream();
     let mut received = 0u64;
+    let check_placeholder = kemono_txt_resource(media);
+    let mut prefix = Vec::new();
     loop {
         io.set_remote(true);
         let chunk = stream.next().await;
@@ -809,6 +1136,9 @@ async fn attempt_download(
         if let Some(rejection) = limits.check_max(received) {
             return Ok(Outcome::Filtered(rejection));
         }
+        if check_placeholder && prefix.len() < 9 {
+            prefix.extend_from_slice(&chunk[..chunk.len().min(9 - prefix.len())]);
+        }
         file.write_all(&chunk).await?;
         io.throttle(chunk.len()).await;
     }
@@ -821,6 +1151,9 @@ async fn attempt_download(
     }
     if let Some(rejection) = limits.check(received) {
         return Ok(Outcome::Filtered(rejection));
+    }
+    if check_placeholder && received == 9 && prefix == b"not found" {
+        return Err(terminal("Kemono media returned a missing-file placeholder"));
     }
     file.flush().await?;
     let file = file.into_std().await;
@@ -850,11 +1183,10 @@ async fn request_media(
     headers: &HeaderMap,
 ) -> std::result::Result<reqwest::Response, Failure> {
     let mut target = media.url.clone();
-    // Kemono/Coomer serve files from the root host, which redirects to an
-    // `nN.` CDN subdomain; those requests carry no credentials.
-    let mut redirects = Redirects::new(&target).allow_subdomains(
-        matches!(media.category.as_str(), "kemono" | "coomer") && media.headers.is_empty(),
-    );
+    // Kemono/Coomer serve files through CDN redirects. Only their public
+    // resource headers may cross that origin boundary.
+    let mut redirects =
+        Redirects::new(&target).allow_subdomains(kemono_public_redirects(media, headers));
     let response = loop {
         client
             .rate_limits
@@ -890,6 +1222,99 @@ async fn request_media(
         }
     };
     Ok(response)
+}
+
+fn kemono_public_redirects(media: &Media, headers: &HeaderMap) -> bool {
+    use reqwest::header::{ACCEPT_ENCODING, IF_RANGE, RANGE, REFERER, USER_AGENT};
+    let category = media.category.as_str();
+    if !matches!(category, "kemono" | "coomer") {
+        return false;
+    }
+    let Some(host) = media.url.host_str() else {
+        return false;
+    };
+    let known_host = crate::kemono::category(host) == Some(category)
+        || host
+            .strip_prefix("img.")
+            .is_some_and(|domain| crate::kemono::HOSTS.contains(&(domain, category)));
+    if !known_host
+        || headers.keys().any(|name| {
+            !matches!(
+                *name,
+                USER_AGENT | ACCEPT_ENCODING | RANGE | IF_RANGE | REFERER
+            )
+        })
+    {
+        return false;
+    }
+    let mut referers = headers.get_all(REFERER).iter();
+    if let Some(referer) = referers.next() {
+        if referers.next().is_some() {
+            return false;
+        }
+        let Some(referer) = referer
+            .to_str()
+            .ok()
+            .and_then(|value| url::Url::parse(value).ok())
+        else {
+            return false;
+        };
+        if referer.scheme() != "https"
+            || referer.query().is_some()
+            || referer.fragment().is_some()
+            || referer.host_str().and_then(crate::kemono::category) != Some(category)
+            || !matches!(
+                crate::kemono::target(&referer),
+                Ok(crate::kemono::Target::Post { .. }
+                    | crate::kemono::Target::Discord {
+                        channel: Some(_),
+                        ..
+                    })
+            )
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn kemono_txt_resource(media: &Media) -> bool {
+    matches!(media.category.as_str(), "kemono" | "coomer")
+        && media
+            .url
+            .path()
+            .rsplit('.')
+            .next()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+        && media
+            .filename
+            .rsplit('.')
+            .next()
+            .is_some_and(|ext| !ext.eq_ignore_ascii_case("txt"))
+}
+
+async fn validate_kemono_partial(
+    media: &Media,
+    partial: &mut crate::resume::Partial,
+) -> std::result::Result<(), Failure> {
+    if kemono_txt_resource(media)
+        && partial
+            .has_content(b"not found")
+            .await
+            .map_err(|error| Failure {
+                error,
+                retry: false,
+                fallback: false,
+            })?
+    {
+        partial.reset(None).await.map_err(|error| Failure {
+            error,
+            retry: false,
+            fallback: false,
+        })?;
+        return Err(terminal("Kemono media returned a missing-file placeholder"));
+    }
+    Ok(())
 }
 
 fn check_status(
@@ -1057,6 +1482,7 @@ async fn attempt_resume(
                     _ => None,
                 };
                 let modified = mtime.fixed.or(saved);
+                validate_kemono_partial(media, partial).await?;
                 return partial
                     .publish(path, modified)
                     .await
@@ -1099,6 +1525,7 @@ async fn attempt_resume(
                 (offset, Some(end - offset + 1), Some(total))
             }
         };
+        client.capture_http_mtime(response.headers());
         let modified = mtime.select(response.headers());
         let mut stream = response.bytes_stream();
         let mut received = 0u64;
@@ -1141,6 +1568,7 @@ async fn attempt_resume(
             if let Some(rejection) = limits.check(completed) {
                 return filter_partial(partial, rejection).await;
             }
+            validate_kemono_partial(media, partial).await?;
             return partial
                 .publish(path, modified)
                 .await
@@ -1165,4 +1593,122 @@ async fn filter_partial(
         fallback: false,
     })?;
     Ok(Outcome::Filtered(rejection))
+}
+
+#[cfg(test)]
+mod kemono_redirect_tests {
+    use super::*;
+    use reqwest::{
+        StatusCode,
+        header::{ACCEPT_ENCODING, AUTHORIZATION, COOKIE, LOCATION, REFERER, USER_AGENT},
+    };
+
+    fn media() -> Media {
+        Media {
+            url: url::Url::parse("https://kemono.cr/data/aa/bb/file.jpg").unwrap(),
+            job: MediaJob::DirectHttp,
+            category: "kemono".into(),
+            filename: "file.jpg".into(),
+            metadata: None,
+            headers: Default::default(),
+            handoff: Default::default(),
+        }
+    }
+    #[test]
+    fn public_kemono_headers_follow_cdn_redirects_but_credentials_do_not() {
+        let media = media();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            REFERER,
+            HeaderValue::from_static("https://kemono.cr/patreon/user/42/post/7"),
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static("gallery-dl-rs fixture"),
+        );
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+        let mut location = HeaderMap::new();
+        location.insert(
+            LOCATION,
+            HeaderValue::from_static("https://n1.kemono.cr/data/aa/bb/file.jpg"),
+        );
+        let mut redirects =
+            Redirects::new(&media.url).allow_subdomains(kemono_public_redirects(&media, &headers));
+        assert!(
+            redirects
+                .next(&media.url, StatusCode::FOUND, &location)
+                .unwrap()
+                .is_some()
+        );
+        for credential in [COOKIE, AUTHORIZATION, HeaderName::from_static("x-api-key")] {
+            let mut headers = headers.clone();
+            headers.insert(credential, HeaderValue::from_static("PRIVATE_VALUE"));
+            let mut redirects = Redirects::new(&media.url)
+                .allow_subdomains(kemono_public_redirects(&media, &headers));
+            assert!(
+                redirects
+                    .next(&media.url, StatusCode::FOUND, &location)
+                    .is_err()
+            );
+        }
+    }
+    #[test]
+    fn discord_public_referers_allow_site_cdn_redirects_without_cookies() {
+        let media = media();
+        for referer in [
+            "https://kemono.cr/discord/server/100/200",
+            "https://kemono.cr/discord/server/100/channel/200",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(REFERER, HeaderValue::from_str(referer).unwrap());
+            let mut location = HeaderMap::new();
+            location.insert(
+                LOCATION,
+                HeaderValue::from_static("https://n1.kemono.cr/data/aa/bb/file.jpg"),
+            );
+            let mut redirects = Redirects::new(&media.url)
+                .allow_subdomains(kemono_public_redirects(&media, &headers));
+            assert!(
+                redirects
+                    .next(&media.url, StatusCode::FOUND, &location)
+                    .unwrap()
+                    .is_some()
+            );
+            headers.insert(COOKIE, HeaderValue::from_static("PRIVATE_SESSION"));
+            assert!(!kemono_public_redirects(&media, &headers));
+        }
+        for referer in [
+            "https://kemono.cr/discord/server/100",
+            "https://kemono.cr/discord/server/100/200?private=token",
+            "https://kemono.cr/discord/server/100#200",
+            "https://coomer.st/discord/server/100/200",
+            "https://kemono.cr/discord/server/100/not-a-channel",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(REFERER, HeaderValue::from_str(referer).unwrap());
+            assert!(!kemono_public_redirects(&media, &headers));
+        }
+    }
+    #[test]
+    fn kemono_redirect_allowance_rejects_private_or_foreign_referers_and_other_origins() {
+        let mut media = media();
+        for referer in [
+            "https://kemono.cr/patreon/user/42/post/7?token=private",
+            "https://private@kemono.cr/patreon/user/42/post/7",
+            "https://kemono.cr/patreon/user/42/post/7#private",
+            "https://coomer.st/onlyfans/user/42/post/7",
+            "https://evil.test/patreon/user/42/post/7",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(REFERER, HeaderValue::from_str(referer).unwrap());
+            assert!(!kemono_public_redirects(&media, &headers));
+        }
+        for url in [
+            "https://evil.test/file.jpg",
+            "https://kemono.cr.evil.test/file.jpg",
+        ] {
+            media.url = url::Url::parse(url).unwrap();
+            assert!(!kemono_public_redirects(&media, &HeaderMap::new()));
+        }
+    }
 }

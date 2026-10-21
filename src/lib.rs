@@ -8,6 +8,7 @@ pub mod config;
 pub mod cookies;
 pub mod date;
 pub mod deviantart;
+pub mod dispatch;
 pub mod download;
 pub mod event;
 pub mod exec;
@@ -24,6 +25,7 @@ pub mod imagehosts;
 pub mod imgur;
 pub mod input;
 pub mod instagram;
+pub mod job_selection;
 pub mod kemono;
 pub mod mastodon;
 mod messages;
@@ -33,12 +35,17 @@ pub mod newgrounds;
 pub mod pinterest;
 pub mod pixiv;
 pub mod post_selection;
+pub mod postprocess;
+pub mod profile_asset;
+mod python_unicode;
 mod range;
 pub mod reddit;
 mod resume;
 pub mod selection;
 pub mod size;
 pub mod sleep;
+mod source_date;
+mod source_date_json;
 mod transport;
 pub mod tumblr;
 pub mod twitter;
@@ -52,3 +59,5 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub fn error(message: impl Into<String>) -> Error {
     std::io::Error::other(message.into()).into()
 }
+
+pub mod source_archive;

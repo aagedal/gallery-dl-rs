@@ -3,10 +3,10 @@
 //! See <https://gdl-org.github.io/docs/configuration.html>. Extractor defaults
 //! are overridden by category settings, then by top-level global settings.
 //! Paths are literal, relative to the configuration directory; expansion,
-//! conditions, hooks, subcategories, and unsupported options are rejected.
+//! unsupported hooks, subcategories, and unsupported options are rejected.
 use crate::{
     Result,
-    date::parse_date,
+    date::source_date_bound,
     error,
     naming::{DirectoryTemplate, FilenameTemplate},
     network::NetworkOptions,
@@ -28,6 +28,9 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 /// Sparse settings: absent fields leave the caller's defaults unchanged.
 #[derive(Clone, Default, PartialEq)]
 pub struct Options {
+    /// Initialize job state before extraction; exact source string "lazy" disables it.
+    pub init: Option<bool>,
+    pub postprocessors: Option<crate::postprocess::Configuration>,
     pub base_directory: Option<PathBuf>,
     pub filename: Option<String>,
     /// Ordered `(filter, template)` pairs from an object-valued `filename`;
@@ -41,13 +44,21 @@ pub struct Options {
     pub post_range: Option<String>,
     /// AND-combined post metadata filters.
     pub post_filter: Option<Vec<String>>,
+    /// One-based child job ranges and metadata predicates.
+    pub child_range: Option<String>,
+    pub child_filter: Option<Vec<String>>,
+    /// Ordered profile child views; an explicit empty setting disables dispatch.
+    pub include: Option<crate::dispatch::Include>,
     pub date_before: Option<i64>,
     pub date_after: Option<i64>,
+    /// A present invalid/falsy source bound clears less specific settings.
+    pub date_before_set: bool,
+    pub date_after_set: bool,
     /// Whether to include reposts, optionally under the original author.
     pub retweets: Option<crate::twitter::RetweetMode>,
     /// Include media from quoted posts.
     pub quoted: Option<bool>,
-    /// Expand each source post's conversation once per input.
+    /// Expand Twitter conversations or fetch full Kemono/Coomer post details.
     pub expand: Option<bool>,
     /// Suppress duplicate Twitter posts.
     pub unique: Option<bool>,
@@ -55,6 +66,47 @@ pub struct Options {
     pub videos: Option<crate::twitter::VideoMode>,
     /// Include video and animated-GIF preview images.
     pub previews: Option<bool>,
+    /// Prefer MP4 over animated GIF files on Imgur.
+    pub mp4: Option<bool>,
+    /// Include Mastodon reblogs and their original attachments.
+    pub reblogs: Option<bool>,
+    pub tumblr_reblogs: Option<crate::tumblr::Reblogs>,
+    pub posts: Option<Vec<String>>,
+    pub inline: Option<crate::tumblr::Inline>,
+    pub original: Option<bool>,
+    pub files: Option<Vec<crate::kemono::FileKind>>,
+    pub duplicates: Option<crate::kemono::DuplicateOptions>,
+    pub revisions: Option<crate::kemono::RevisionMode>,
+    pub order_revisions: Option<crate::kemono::RevisionOrder>,
+    pub endpoint: Option<crate::kemono::Endpoint>,
+    /// Bluesky's category-scoped endpoint selects the likes API.
+    pub bluesky_endpoint: Option<crate::bluesky::LikesEndpoint>,
+    /// Explicit Bluesky AppView server; empty restores the default.
+    pub api_server: Option<String>,
+    pub order_posts: Option<crate::kemono::PostOrder>,
+    /// Danbooru pool member ordering, independent of Kemono post ordering.
+    pub booru_order_posts: Option<crate::booru::PoolOrder>,
+    /// Gelbooru favorites retain source JSON types and first-element rules.
+    pub booru_favorite_order: Option<Value>,
+    /// Raw common inheritance keys; the primary key wins by presence.
+    pub parent_metadata: Option<std::sync::Arc<Value>>,
+    pub metadata_parent: Option<std::sync::Arc<Value>>,
+    pub favorites: Option<crate::kemono::Favorites>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub user_id: Option<String>,
+    /// Include Bluesky reposts in author feeds.
+    pub reposts: Option<bool>,
+    /// Select Pixiv ugoira ZIPs, individual original frames, or skip animations.
+    pub ugoira: Option<crate::pixiv::UgoiraMode>,
+    /// Pixiv tag names: Japanese strings, original objects or translated strings.
+    pub tags: Option<crate::pixiv::TagMode>,
+    /// Initial Pixiv bookmark cursor; explicit null clears inherited values.
+    pub cursor: Option<crate::pixiv::BookmarkCursor>,
+    /// Explicit Mastodon bearer token, confined to API requests. Empty disables.
+    pub access_token: Option<String>,
+    /// Include Mastodon statuses without selected media.
+    pub text_posts: Option<bool>,
     /// Attempt explicitly unavailable Twitter media when a URL is provided.
     pub unavailable: Option<bool>,
     /// Emit Twitter posts without selected media as file-less post events.
@@ -85,10 +137,29 @@ pub struct Options {
     pub limit: Option<u8>,
     pub search_limit: Option<u8>,
     pub search_stop: Option<u8>,
-    /// Tumblr, Flickr or Wallhaven API key; only accepted in those categories.
+    /// Limit Kemono/Coomer or Pixiv source works; zero clears an inherited limit.
+    pub max_posts: Option<usize>,
+    /// Danbooru/e621 pagination threshold. Outer None is absent; inner None
+    /// explicitly restores the source's per-page default for noninteger input.
+    pub booru_threshold: Option<Option<usize>>,
+    /// Look up Kemono/Coomer creator profiles or Pixiv author metadata.
+    pub metadata: Option<bool>,
+    /// Include Pixiv illustration or novel comments.
+    pub comments: Option<bool>,
+    /// Include Pixiv illustration HTML captions as inline text files.
+    pub captions: Option<bool>,
+    /// Enable the Pixiv workaround for App API sanity restrictions.
+    pub sanity: Option<bool>,
+    /// Expand images embedded in Pixiv novels.
+    pub embeds: Option<bool>,
+    /// Include Pixiv illustration or novel bookmark metadata.
+    pub metadata_bookmark: Option<bool>,
+    /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
-    /// Pixiv OAuth refresh token; only accepted in the `pixiv` category.
+    /// Pixiv OAuth refresh token; accepted in pixiv and pixiv-novel scopes.
     pub refresh_token: Option<String>,
+    pub covers: Option<bool>,
+    pub full_series: Option<bool>,
     /// DeviantArt OAuth client ID; only accepted in the `deviantart` category.
     pub client_id: Option<String>,
     /// DeviantArt OAuth client secret; only accepted in the `deviantart` category.
@@ -118,10 +189,55 @@ impl std::fmt::Debug for Options {
 }
 
 impl Options {
+    pub fn kemono_selection(&self) -> crate::kemono::Selection {
+        crate::kemono::Selection {
+            files: self.files.clone(),
+            duplicates: self.duplicates.unwrap_or_default(),
+            original: self.original.unwrap_or(false),
+        }
+    }
+
+    pub fn tumblr_selection(&self) -> crate::tumblr::Selection {
+        crate::tumblr::Selection {
+            reblogs: self.tumblr_reblogs.unwrap_or_else(|| {
+                if self.reblogs == Some(false) {
+                    crate::tumblr::Reblogs::OriginalOnly
+                } else {
+                    crate::tumblr::Reblogs::All
+                }
+            }),
+            posts: self.posts.as_ref().and_then(|types| {
+                (types.as_slice() != ["all"]).then(|| types.iter().cloned().collect())
+            }),
+            inline: self.inline.unwrap_or_default(),
+            original: self.original.unwrap_or(true),
+        }
+    }
+
+    /// Select the primary inheritance key by presence, including explicit null.
+    pub fn artist_parent_metadata(&self) -> Option<&Value> {
+        self.parent_metadata
+            .as_deref()
+            .or(self.metadata_parent.as_deref())
+    }
+    pub fn artist_parent_keywords(&self) -> Vec<String> {
+        match self.artist_parent_metadata() {
+            Some(Value::String(key)) if !key.is_empty() => vec![key.clone()],
+            None => vec!["_parent".into()],
+            _ => Vec::new(),
+        }
+    }
     /// Return a copy with every present field in `overrides` taking precedence.
     /// This can apply explicit CLI values after configuration resolution.
+    /// Reblog fields are one setting; an explicit Tumblr mode takes precedence
+    /// when a programmatic override supplies both representations.
     pub fn overlay(&self, overrides: &Self) -> Self {
         Self {
+            init: overrides.init.or(self.init),
+            postprocessors: match (&self.postprocessors, &overrides.postprocessors) {
+                (Some(base), Some(specific)) => Some(base.overlaid(specific)),
+                (base, specific) => specific.clone().or_else(|| base.clone()),
+            },
             base_directory: overrides
                 .base_directory
                 .clone()
@@ -154,14 +270,100 @@ impl Options {
                 .post_filter
                 .clone()
                 .or_else(|| self.post_filter.clone()),
-            date_before: overrides.date_before.or(self.date_before),
-            date_after: overrides.date_after.or(self.date_after),
+            child_range: overrides
+                .child_range
+                .clone()
+                .or_else(|| self.child_range.clone()),
+            child_filter: overrides
+                .child_filter
+                .clone()
+                .or_else(|| self.child_filter.clone()),
+            include: overrides.include.clone().or_else(|| self.include.clone()),
+            date_before: if overrides.date_before_set {
+                overrides.date_before
+            } else {
+                overrides.date_before.or(self.date_before)
+            },
+            date_after: if overrides.date_after_set {
+                overrides.date_after
+            } else {
+                overrides.date_after.or(self.date_after)
+            },
+            date_before_set: self.date_before_set || overrides.date_before_set,
+            date_after_set: self.date_after_set || overrides.date_after_set,
             retweets: overrides.retweets.or(self.retweets),
             quoted: overrides.quoted.or(self.quoted),
             expand: overrides.expand.or(self.expand),
             unique: overrides.unique.or(self.unique),
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
+            mp4: overrides.mp4.or(self.mp4),
+            reblogs: if overrides.tumblr_reblogs.is_some() {
+                None
+            } else {
+                overrides.reblogs.or(self.reblogs)
+            },
+            tumblr_reblogs: if overrides.tumblr_reblogs.is_some() {
+                overrides.tumblr_reblogs
+            } else if overrides.reblogs.is_some() {
+                None
+            } else {
+                self.tumblr_reblogs
+            },
+            posts: overrides.posts.clone().or_else(|| self.posts.clone()),
+            inline: overrides.inline.or(self.inline),
+            original: overrides.original.or(self.original),
+            files: overrides.files.clone().or_else(|| self.files.clone()),
+            duplicates: overrides.duplicates.or(self.duplicates),
+            revisions: overrides.revisions.or(self.revisions),
+            order_revisions: overrides.order_revisions.or(self.order_revisions),
+            endpoint: overrides.endpoint.or(self.endpoint),
+            bluesky_endpoint: overrides.bluesky_endpoint.or(self.bluesky_endpoint),
+            api_server: overrides
+                .api_server
+                .clone()
+                .or_else(|| self.api_server.clone()),
+            order_posts: overrides.order_posts.or(self.order_posts),
+            booru_order_posts: overrides
+                .booru_order_posts
+                .or_else(|| {
+                    overrides.order_posts.map(|order| match order {
+                        crate::kemono::PostOrder::Forward => crate::booru::PoolOrder::Pool,
+                        crate::kemono::PostOrder::Reverse => crate::booru::PoolOrder::PoolReverse,
+                    })
+                })
+                .or(self.booru_order_posts),
+            booru_favorite_order: overrides
+                .booru_favorite_order
+                .clone()
+                .or_else(|| {
+                    overrides.order_posts.map(|order| match order {
+                        crate::kemono::PostOrder::Forward => Value::String("asc".into()),
+                        crate::kemono::PostOrder::Reverse => Value::String("desc".into()),
+                    })
+                })
+                .or_else(|| self.booru_favorite_order.clone()),
+            parent_metadata: overrides
+                .parent_metadata
+                .clone()
+                .or_else(|| self.parent_metadata.clone()),
+            metadata_parent: overrides
+                .metadata_parent
+                .clone()
+                .or_else(|| self.metadata_parent.clone()),
+            favorites: overrides.favorites.or(self.favorites),
+            username: overrides.username.clone().or_else(|| self.username.clone()),
+            password: overrides.password.clone().or_else(|| self.password.clone()),
+            user_id: overrides.user_id.clone().or_else(|| self.user_id.clone()),
+            reposts: overrides.reposts.or(self.reposts),
+            ugoira: overrides.ugoira.or(self.ugoira),
+            tags: overrides.tags.or(self.tags),
+            cursor: overrides.cursor.clone().or_else(|| self.cursor.clone()),
+            access_token: overrides
+                .access_token
+                .clone()
+                .or_else(|| self.access_token.clone()),
+            text_posts: overrides.text_posts.or(self.text_posts),
             unavailable: overrides.unavailable.or(self.unavailable),
             text_tweets: overrides.text_tweets.or(self.text_tweets),
             size: overrides.size.clone().or_else(|| self.size.clone()),
@@ -182,11 +384,21 @@ impl Options {
             limit: overrides.limit.or(self.limit),
             search_limit: overrides.search_limit.or(self.search_limit),
             search_stop: overrides.search_stop.or(self.search_stop),
+            max_posts: overrides.max_posts.or(self.max_posts),
+            booru_threshold: overrides.booru_threshold.or(self.booru_threshold),
+            metadata: overrides.metadata.or(self.metadata),
+            comments: overrides.comments.or(self.comments),
+            captions: overrides.captions.or(self.captions),
+            sanity: overrides.sanity.or(self.sanity),
+            embeds: overrides.embeds.or(self.embeds),
+            metadata_bookmark: overrides.metadata_bookmark.or(self.metadata_bookmark),
             api_key: overrides.api_key.clone().or_else(|| self.api_key.clone()),
             refresh_token: overrides
                 .refresh_token
                 .clone()
                 .or_else(|| self.refresh_token.clone()),
+            covers: overrides.covers.or(self.covers),
+            full_series: overrides.full_series.or(self.full_series),
             client_id: overrides
                 .client_id
                 .clone()
@@ -241,6 +453,8 @@ pub struct Config {
     global: Options,
     extractor: Options,
     categories: BTreeMap<String, Options>,
+    classes: BTreeMap<(String, String), Options>,
+    parent_keywords: Vec<String>,
 }
 
 // Separate structs deliberately avoid serde flatten: duplicate and unknown
@@ -248,6 +462,10 @@ pub struct Config {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawRoot {
+    postprocessor: Field,
+    init: Field,
+    postprocessors: Field,
+    postprocessor_options: Field,
     base_directory: Field,
     filename: Field,
     file_range: Field,
@@ -255,6 +473,9 @@ struct RawRoot {
     image_filter: Field,
     post_range: Field,
     post_filter: Field,
+    child_range: Field,
+    child_filter: Field,
+    include: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -263,6 +484,25 @@ struct RawRoot {
     unique: Field,
     videos: Field,
     previews: Field,
+    mp4: Field,
+    reblogs: Field,
+    posts: Field,
+    inline: Field,
+    original: Field,
+    files: Field,
+    duplicates: Field,
+    revisions: Field,
+    order_revisions: Field,
+    endpoint: Field,
+    order_posts: Field,
+    parent_metadata: Field,
+    metadata_parent: Field,
+    favorites: Field,
+    reposts: Field,
+    ugoira: Field,
+    tags: Field,
+    cursor: Field,
+    text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
     size: Field,
@@ -280,6 +520,16 @@ struct RawRoot {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    max_posts: Field,
+    threshold: Field,
+    metadata: Field,
+    comments: Field,
+    captions: Field,
+    sanity: Field,
+    embeds: Field,
+    metadata_bookmark: Field,
+    covers: Field,
+    full_series: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -295,6 +545,9 @@ struct RawRoot {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawExtractor {
+    init: Field,
+    postprocessors: Field,
+    postprocessor_options: Field,
     base_directory: Field,
     filename: Field,
     file_range: Field,
@@ -302,6 +555,9 @@ struct RawExtractor {
     image_filter: Field,
     post_range: Field,
     post_filter: Field,
+    child_range: Field,
+    child_filter: Field,
+    include: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -310,6 +566,25 @@ struct RawExtractor {
     unique: Field,
     videos: Field,
     previews: Field,
+    mp4: Field,
+    reblogs: Field,
+    posts: Field,
+    inline: Field,
+    original: Field,
+    files: Field,
+    duplicates: Field,
+    revisions: Field,
+    order_revisions: Field,
+    endpoint: Field,
+    order_posts: Field,
+    parent_metadata: Field,
+    metadata_parent: Field,
+    favorites: Field,
+    reposts: Field,
+    ugoira: Field,
+    tags: Field,
+    cursor: Field,
+    text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
     size: Field,
@@ -327,6 +602,16 @@ struct RawExtractor {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    max_posts: Field,
+    threshold: Field,
+    metadata: Field,
+    comments: Field,
+    captions: Field,
+    sanity: Field,
+    embeds: Field,
+    metadata_bookmark: Field,
+    covers: Field,
+    full_series: Field,
     directory: Field,
     cookies: Field,
     proxy: Field,
@@ -347,6 +632,10 @@ struct RawExtractor {
     gelbooru: Box<RawOptions>,
     safebooru: Box<RawOptions>,
     mastodon: Box<RawOptions>,
+    #[serde(rename = "mastodon.social")]
+    mastodon_social: Box<RawOptions>,
+    pawoo: Box<RawOptions>,
+    baraag: Box<RawOptions>,
     kemono: Box<RawOptions>,
     coomer: Box<RawOptions>,
     pixeldrain: Box<RawOptions>,
@@ -355,6 +644,7 @@ struct RawExtractor {
     postimg: Box<RawOptions>,
     tumblr: Box<RawOptions>,
     pixiv: Box<RawOptions>,
+    pixiv_novel: Box<RawOptions>,
     deviantart: Box<RawOptions>,
     flickr: Box<RawOptions>,
     wallhaven: Box<RawOptions>,
@@ -370,6 +660,14 @@ struct RawExtractor {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct RawOptions {
+    tag: Option<Box<RawOptions>>,
+    artist: Option<Box<RawOptions>>,
+    artist_search: Option<Box<RawOptions>>,
+    #[serde(skip)]
+    postprocessor_definitions: Field,
+    init: Field,
+    postprocessors: Field,
+    postprocessor_options: Field,
     base_directory: Field,
     filename: Field,
     file_range: Field,
@@ -377,6 +675,9 @@ struct RawOptions {
     image_filter: Field,
     post_range: Field,
     post_filter: Field,
+    child_range: Field,
+    child_filter: Field,
+    include: Field,
     date_before: Field,
     date_after: Field,
     retweets: Field,
@@ -385,6 +686,25 @@ struct RawOptions {
     unique: Field,
     videos: Field,
     previews: Field,
+    mp4: Field,
+    reblogs: Field,
+    posts: Field,
+    inline: Field,
+    original: Field,
+    files: Field,
+    duplicates: Field,
+    revisions: Field,
+    order_revisions: Field,
+    endpoint: Field,
+    order_posts: Field,
+    parent_metadata: Field,
+    metadata_parent: Field,
+    favorites: Field,
+    reposts: Field,
+    ugoira: Field,
+    tags: Field,
+    cursor: Field,
+    text_posts: Field,
     unavailable: Field,
     text_tweets: Field,
     size: Field,
@@ -402,8 +722,23 @@ struct RawOptions {
     limit: Field,
     search_limit: Field,
     search_stop: Field,
+    max_posts: Field,
+    threshold: Field,
+    metadata: Field,
+    comments: Field,
+    captions: Field,
+    sanity: Field,
+    embeds: Field,
+    metadata_bookmark: Field,
+    covers: Field,
+    full_series: Field,
     api_key: Field,
+    username: Field,
+    password: Field,
+    user_id: Field,
+    access_token: Field,
     refresh_token: Field,
+    api_server: Field,
     client_id: Field,
     client_secret: Field,
     directory: Field,
@@ -464,11 +799,13 @@ impl Config {
         if !directory.is_absolute() {
             return Err(error("native configuration directory must be absolute"));
         }
+        let normalized = crate::source_date_json::normalize(bytes);
+        let bytes = normalized.as_deref().unwrap_or(bytes);
         // Do not forward serde's diagnostics: they can quote private values or
         // a malicious unknown key. Known setting failures are reported below.
         // serde's struct deserializer also accepts positional arrays. Restrict
         // every configuration scope to JSON objects before typed decoding.
-        let shape: Value = serde_json::from_slice(bytes)
+        let mut shape: Value = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let object = shape
             .as_object()
@@ -489,6 +826,9 @@ impl Config {
                 "gelbooru",
                 "safebooru",
                 "mastodon",
+                "mastodon.social",
+                "pawoo",
+                "baraag",
                 "kemono",
                 "coomer",
                 "pixeldrain",
@@ -497,6 +837,7 @@ impl Config {
                 "postimg",
                 "tumblr",
                 "pixiv",
+                "pixiv-novel",
                 "deviantart",
                 "flickr",
                 "wallhaven",
@@ -511,12 +852,101 @@ impl Config {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
+                if !matches!(name, "danbooru" | "e621")
+                    && extractor
+                        .get(name)
+                        .and_then(Value::as_object)
+                        .is_some_and(|settings| {
+                            ["tag", "artist", "artist-search"]
+                                .iter()
+                                .any(|key| settings.contains_key(*key))
+                        })
+                {
+                    return Err(error(
+                        "native class settings are only supported for danbooru and e621",
+                    ));
+                }
             }
         }
-        drop(shape);
+        let mut raw_classes = Vec::new();
+        if let Some(extractor) = shape.get_mut("extractor").and_then(Value::as_object_mut) {
+            for category in ["danbooru", "e621"] {
+                if let Some(settings) = extractor.get_mut(category).and_then(Value::as_object_mut) {
+                    for subcategory in ["artist", "artist-search", "tag"] {
+                        if let Some(value) = settings.remove(subcategory) {
+                            let fields = value.as_object().ok_or_else(|| {
+                                error("native configuration class must be a JSON object")
+                            })?;
+                            if fields.keys().any(|key| {
+                                !matches!(
+                                    key.as_str(),
+                                    "parent-metadata"
+                                        | "metadata-parent"
+                                        | "init"
+                                        | "postprocessors"
+                                        | "postprocessor-options"
+                                        | "base-directory"
+                                        | "filename"
+                                        | "directory"
+                                        | "child-filter"
+                                        | "child-range"
+                                        | "post-filter"
+                                        | "post-range"
+                                        | "date-before"
+                                        | "date-after"
+                                )
+                            }) {
+                                return Err(error("unsupported native booru class option"));
+                            }
+                            let raw: RawOptions = serde_json::from_value(value)
+                                .map_err(|_| error("invalid native booru class settings"))?;
+                            raw_classes.push((category.to_owned(), subcategory.to_owned(), raw));
+                        }
+                    }
+                }
+            }
+        }
+        let mut parent_keywords = vec!["_parent".to_owned()];
+        fn parent_keys(value: &Value, keys: &mut Vec<String>) {
+            if let Some(fields) = value.as_object() {
+                for (key, value) in fields {
+                    if matches!(key.as_str(), "parent-metadata" | "metadata-parent")
+                        && let Some(key) = value.as_str().filter(|s| !s.is_empty())
+                    {
+                        keys.push(key.into());
+                    }
+                }
+            }
+        }
+        parent_keys(&shape, &mut parent_keywords);
+        if let Some(extractor) = shape.get("extractor") {
+            parent_keys(extractor, &mut parent_keywords);
+            for category in ["danbooru", "e621"] {
+                if let Some(settings) = extractor.get(category) {
+                    parent_keys(settings, &mut parent_keywords);
+                }
+            }
+        }
+        for (_, _, raw) in &raw_classes {
+            for field in [&raw.parent_metadata, &raw.metadata_parent] {
+                if let Some(Value::String(key)) = &field.0 {
+                    parent_keywords.push(key.clone());
+                }
+            }
+        }
+        parent_keywords.sort();
+        parent_keywords.dedup();
+        // Decode the original bytes to keep duplicate-key rejection intact.
         let root: RawRoot = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let global = RawOptions {
+            tag: None,
+            artist: None,
+            artist_search: None,
+            init: root.init,
+            postprocessors: root.postprocessors,
+            postprocessor_options: root.postprocessor_options,
+            postprocessor_definitions: root.postprocessor,
             base_directory: root.base_directory,
             filename: root.filename,
             file_range: root.file_range,
@@ -524,6 +954,9 @@ impl Config {
             image_filter: root.image_filter,
             post_range: root.post_range,
             post_filter: root.post_filter,
+            child_range: root.child_range,
+            child_filter: root.child_filter,
+            include: root.include,
             date_before: root.date_before,
             date_after: root.date_after,
             retweets: root.retweets,
@@ -532,6 +965,25 @@ impl Config {
             unique: root.unique,
             videos: root.videos,
             previews: root.previews,
+            mp4: root.mp4,
+            reblogs: root.reblogs,
+            posts: root.posts,
+            inline: root.inline,
+            original: root.original,
+            files: root.files,
+            duplicates: root.duplicates,
+            revisions: root.revisions,
+            order_revisions: root.order_revisions,
+            endpoint: root.endpoint,
+            order_posts: root.order_posts,
+            parent_metadata: root.parent_metadata,
+            metadata_parent: root.metadata_parent,
+            favorites: root.favorites,
+            reposts: root.reposts,
+            ugoira: root.ugoira,
+            tags: root.tags,
+            cursor: root.cursor,
+            text_posts: root.text_posts,
             unavailable: root.unavailable,
             text_tweets: root.text_tweets,
             size: root.size,
@@ -549,8 +1001,23 @@ impl Config {
             limit: root.limit,
             search_limit: root.search_limit,
             search_stop: root.search_stop,
+            max_posts: root.max_posts,
+            threshold: root.threshold,
+            metadata: root.metadata,
+            comments: root.comments,
+            captions: root.captions,
+            sanity: root.sanity,
+            embeds: root.embeds,
+            metadata_bookmark: root.metadata_bookmark,
             api_key: Field::default(),
+            username: Field::default(),
+            password: Field::default(),
+            user_id: Field::default(),
+            access_token: Field::default(),
             refresh_token: Field::default(),
+            covers: root.covers,
+            full_series: root.full_series,
+            api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
             directory: root.directory,
@@ -563,9 +1030,16 @@ impl Config {
             retries: root.retries,
             timeout: root.timeout,
         }
-        .resolve(directory)?;
+        .resolve(directory, &parent_keywords)?;
         let extractor = root.extractor;
         let defaults = RawOptions {
+            tag: None,
+            artist: None,
+            artist_search: None,
+            init: extractor.init,
+            postprocessors: extractor.postprocessors,
+            postprocessor_options: extractor.postprocessor_options,
+            postprocessor_definitions: Field::default(),
             base_directory: extractor.base_directory,
             filename: extractor.filename,
             file_range: extractor.file_range,
@@ -573,6 +1047,9 @@ impl Config {
             image_filter: extractor.image_filter,
             post_range: extractor.post_range,
             post_filter: extractor.post_filter,
+            child_range: extractor.child_range,
+            child_filter: extractor.child_filter,
+            include: extractor.include,
             date_before: extractor.date_before,
             date_after: extractor.date_after,
             retweets: extractor.retweets,
@@ -581,6 +1058,25 @@ impl Config {
             unique: extractor.unique,
             videos: extractor.videos,
             previews: extractor.previews,
+            mp4: extractor.mp4,
+            reblogs: extractor.reblogs,
+            posts: extractor.posts,
+            inline: extractor.inline,
+            original: extractor.original,
+            files: extractor.files,
+            duplicates: extractor.duplicates,
+            revisions: extractor.revisions,
+            order_revisions: extractor.order_revisions,
+            endpoint: extractor.endpoint,
+            order_posts: extractor.order_posts,
+            parent_metadata: extractor.parent_metadata,
+            metadata_parent: extractor.metadata_parent,
+            favorites: extractor.favorites,
+            reposts: extractor.reposts,
+            ugoira: extractor.ugoira,
+            tags: extractor.tags,
+            cursor: extractor.cursor,
+            text_posts: extractor.text_posts,
             unavailable: extractor.unavailable,
             text_tweets: extractor.text_tweets,
             size: extractor.size,
@@ -598,8 +1094,23 @@ impl Config {
             limit: extractor.limit,
             search_limit: extractor.search_limit,
             search_stop: extractor.search_stop,
+            max_posts: extractor.max_posts,
+            threshold: extractor.threshold,
+            metadata: extractor.metadata,
+            comments: extractor.comments,
+            captions: extractor.captions,
+            sanity: extractor.sanity,
+            embeds: extractor.embeds,
+            metadata_bookmark: extractor.metadata_bookmark,
             api_key: Field::default(),
+            username: Field::default(),
+            password: Field::default(),
+            user_id: Field::default(),
+            access_token: Field::default(),
             refresh_token: Field::default(),
+            covers: extractor.covers,
+            full_series: extractor.full_series,
+            api_server: Field::default(),
             client_id: Field::default(),
             client_secret: Field::default(),
             directory: extractor.directory,
@@ -612,9 +1123,9 @@ impl Config {
             retries: extractor.retries,
             timeout: extractor.timeout,
         }
-        .resolve(directory)?;
+        .resolve(directory, &parent_keywords)?;
         let mut categories = BTreeMap::new();
-        for (name, settings) in [
+        for (name, mut settings) in [
             ("instagram", extractor.instagram),
             ("twitter", extractor.twitter),
             ("facebook", extractor.facebook),
@@ -626,6 +1137,9 @@ impl Config {
             ("gelbooru", extractor.gelbooru),
             ("safebooru", extractor.safebooru),
             ("mastodon", extractor.mastodon),
+            ("mastodon.social", extractor.mastodon_social),
+            ("pawoo", extractor.pawoo),
+            ("baraag", extractor.baraag),
             ("kemono", extractor.kemono),
             ("coomer", extractor.coomer),
             ("pixeldrain", extractor.pixeldrain),
@@ -634,6 +1148,7 @@ impl Config {
             ("postimg", extractor.postimg),
             ("tumblr", extractor.tumblr),
             ("pixiv", extractor.pixiv),
+            ("pixiv-novel", extractor.pixiv_novel),
             ("deviantart", extractor.deviantart),
             ("flickr", extractor.flickr),
             ("wallhaven", extractor.wallhaven),
@@ -645,16 +1160,101 @@ impl Config {
             ("vsco", extractor.vsco),
             ("direct", extractor.direct),
         ] {
-            if !matches!(name, "tumblr" | "flickr" | "wallhaven" | "weasyl")
-                && settings.api_key.0.is_some()
+            if !matches!(name, "danbooru" | "e621")
+                && (settings.tag.is_some()
+                    || settings.artist.is_some()
+                    || settings.artist_search.is_some())
             {
                 return Err(error(
-                    "native configuration api-key is only supported for tumblr, flickr, wallhaven and weasyl",
+                    "native class settings are only supported for danbooru and e621",
                 ));
             }
-            if name != "pixiv" && settings.refresh_token.0.is_some() {
+            if !matches!(
+                name,
+                "tumblr"
+                    | "flickr"
+                    | "wallhaven"
+                    | "weasyl"
+                    | "pixeldrain"
+                    | "gelbooru"
+                    | "safebooru"
+            ) && settings.api_key.0.is_some()
+            {
                 return Err(error(
-                    "native configuration refresh-token is only supported for pixiv",
+                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain, gelbooru and safebooru",
+                ));
+            }
+            if !matches!(name, "danbooru" | "e621") && settings.threshold.0.is_some() {
+                return Err(error(
+                    "native configuration threshold is only supported for danbooru and e621",
+                ));
+            }
+            if !matches!(name, "danbooru" | "e621")
+                && (settings.username.0.is_some() || settings.password.0.is_some())
+            {
+                return Err(error(
+                    "native configuration username/password are only supported for danbooru and e621",
+                ));
+            }
+            if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
+                return Err(error(
+                    "native configuration user-id is only supported for gelbooru and safebooru",
+                ));
+            }
+            if name != "bluesky" && settings.api_server.0.is_some() {
+                return Err(error(
+                    "native configuration api-server is only supported for bluesky",
+                ));
+            }
+            let bluesky_endpoint = if name == "bluesky" {
+                match settings.endpoint.0.take() {
+                    None => None,
+                    Some(Value::String(value)) if value.len() <= 128 && !value.contains('\0') => {
+                        Some(if value == "getActorLikes" {
+                            crate::bluesky::LikesEndpoint::ActorLikes
+                        } else {
+                            crate::bluesky::LikesEndpoint::Records
+                        })
+                    }
+                    Some(Value::Null | Value::Bool(false)) => {
+                        Some(crate::bluesky::LikesEndpoint::Records)
+                    }
+                    Some(_) => {
+                        return Err(error(
+                            "native configuration Bluesky endpoint must be a bounded string, false or null",
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            let tumblr_reblogs = if name == "tumblr" {
+                match settings.reblogs.0.take() {
+                    None => None,
+                    Some(Value::Bool(true)) => Some(crate::tumblr::Reblogs::All),
+                    Some(Value::Bool(false)) => Some(crate::tumblr::Reblogs::OriginalOnly),
+                    Some(Value::String(value)) if value == "same-blog" => {
+                        Some(crate::tumblr::Reblogs::SameBlog)
+                    }
+                    Some(_) => {
+                        return Err(error(
+                            "native configuration Tumblr reblogs must be a boolean or same-blog",
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            if !matches!(name, "mastodon.social" | "pawoo" | "baraag")
+                && settings.access_token.0.is_some()
+            {
+                return Err(error(
+                    "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
+                ));
+            }
+            if !matches!(name, "pixiv" | "pixiv-novel") && settings.refresh_token.0.is_some() {
+                return Err(error(
+                    "native configuration refresh-token is only supported for pixiv or pixiv-novel",
                 ));
             }
             if name != "deviantart"
@@ -664,13 +1264,65 @@ impl Config {
                     "native configuration client-id and client-secret are only supported for deviantart",
                 ));
             }
+            let opaque_key = if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
+                match settings.api_key.0.take() {
+                    None => None,
+                    Some(Value::String(key))
+                        if key.len() <= 4096 && key.bytes().all(|b| b.is_ascii_graphic()) =>
+                    {
+                        Some(key)
+                    }
+                    Some(_) => {
+                        return Err(error(
+                            "native configuration api-key must contain at most 4096 printable ASCII characters without spaces",
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            let booru_favorite_order = if name == "gelbooru" {
+                settings.order_posts.0.take()
+            } else {
+                None
+            };
+            let booru_order_posts = if name == "danbooru" {
+                settings
+                    .order_posts
+                    .0
+                    .take()
+                    .map(danbooru_pool_order)
+                    .transpose()?
+            } else {
+                if name == "e621" {
+                    settings.order_posts.0.take();
+                }
+                None
+            };
             // Boxed: unoptimized builds overflow the stack with inline settings.
-            categories.insert(name.into(), (*settings).resolve(directory)?);
+            let mut resolved = (*settings).resolve(directory, &parent_keywords)?;
+            resolved.bluesky_endpoint = bluesky_endpoint;
+            resolved.booru_order_posts = booru_order_posts;
+            resolved.booru_favorite_order = booru_favorite_order;
+            if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
+                resolved.api_key = opaque_key;
+            }
+            resolved.tumblr_reblogs = tumblr_reblogs;
+            categories.insert(name.into(), resolved);
         }
+        let classes = raw_classes
+            .into_iter()
+            .map(|(category, subcategory, raw)| {
+                raw.resolve(directory, &parent_keywords)
+                    .map(|settings| ((category, subcategory), settings))
+            })
+            .collect::<Result<_>>()?;
         Ok(Self {
             global,
             extractor: defaults,
             categories,
+            classes,
+            parent_keywords,
         })
     }
 
@@ -688,6 +1340,9 @@ impl Config {
                 | "gelbooru"
                 | "safebooru"
                 | "mastodon"
+                | "mastodon.social"
+                | "pawoo"
+                | "baraag"
                 | "kemono"
                 | "coomer"
                 | "pixeldrain"
@@ -696,6 +1351,7 @@ impl Config {
                 | "postimg"
                 | "tumblr"
                 | "pixiv"
+                | "pixiv-novel"
                 | "deviantart"
                 | "flickr"
                 | "wallhaven"
@@ -709,16 +1365,53 @@ impl Config {
         ) {
             return Err(error("unsupported native configuration category"));
         }
-        let settings = self.categories.get(category).map_or_else(
-            || self.extractor.clone(),
-            |specific| self.extractor.overlay(specific),
-        );
-        Ok(settings.overlay(&self.global))
+        let mut settings = self.extractor.clone();
+        if matches!(category, "mastodon.social" | "pawoo" | "baraag")
+            && let Some(base) = self.categories.get("mastodon")
+        {
+            settings = settings.overlay(base);
+        }
+        if let Some(specific) = self.categories.get(category) {
+            settings = settings.overlay(specific);
+        }
+        let mut resolved = settings.overlay(&self.global);
+        // Postprocessor lists accumulate most-specific first, unlike scalar overrides.
+        resolved.postprocessors = match (&self.global.postprocessors, &settings.postprocessors) {
+            (Some(global), Some(specific)) => {
+                Some(global.overlaid(specific).with_global_options(global))
+            }
+            (global, specific) => specific.clone().or_else(|| global.clone()),
+        };
+        Ok(resolved)
+    }
+    pub fn parent_keywords(&self) -> &[String] {
+        &self.parent_keywords
+    }
+    pub fn resolve_class(&self, category: &str, subcategory: &str) -> Result<Options> {
+        let mut resolved = self.resolve(category)?;
+        if let Some(class) = self.classes.get(&(category.into(), subcategory.into())) {
+            resolved = resolved.overlay(class).overlay(&self.global);
+            let category_settings = self.categories.get(category);
+            let mut processors = self.extractor.postprocessors.clone();
+            for settings in [category_settings, Some(class)].into_iter().flatten() {
+                processors = match (processors, &settings.postprocessors) {
+                    (Some(base), Some(specific)) => Some(base.overlaid(specific)),
+                    (base, specific) => specific.clone().or(base),
+                };
+            }
+            resolved.postprocessors = match (&self.global.postprocessors, processors) {
+                (Some(global), Some(specific)) => {
+                    Some(global.overlaid(&specific).with_global_options(global))
+                }
+                (global, specific) => specific.or_else(|| global.clone()),
+            };
+        }
+        Ok(resolved)
     }
 }
 
 impl RawOptions {
-    fn resolve(self, directory: &Path) -> Result<Options> {
+    fn resolve(self, directory: &Path, _parent_keywords: &[String]) -> Result<Options> {
         let primary_filter = filter_clauses(self.file_filter, "file-filter")?;
         let alias_filter = filter_clauses(self.image_filter, "image-filter")?;
         let file_filter = match primary_filter {
@@ -727,6 +1420,15 @@ impl RawOptions {
         };
         let post_filter = filter_clauses(self.post_filter, "post-filter")?;
         let post_range = range_spec(self.post_range, "post-range")?;
+        let child_range = range_spec(self.child_range, "child-range")?;
+        let child_filter = filter_clauses(self.child_filter, "child-filter")?;
+        let include = self
+            .include
+            .0
+            .as_ref()
+            .map(crate::dispatch::Include::parse)
+            .transpose()
+            .map_err(|_| error("invalid native configuration include selection"))?;
         let retweets = match self.retweets.0 {
             None => None,
             Some(Value::Bool(false)) => Some(crate::twitter::RetweetMode::Skip),
@@ -771,6 +1473,148 @@ impl RawOptions {
             Some(Value::Bool(value)) => Some(value),
             Some(_) => return Err(error("native configuration previews must be a boolean")),
         };
+        let mp4 = boolean(self.mp4, "mp4")?;
+        let reblogs = boolean(self.reblogs, "reblogs")?;
+        let posts = tumblr_posts(self.posts)?;
+        let original = boolean(self.original, "original")?;
+        let files = kemono_files(self.files)?;
+        let duplicates = kemono_duplicates(self.duplicates)?;
+        let revisions = match self.revisions.0 {
+            None => None,
+            Some(Value::Bool(false)) => Some(crate::kemono::RevisionMode::None),
+            Some(Value::Bool(true)) => Some(crate::kemono::RevisionMode::All),
+            Some(Value::String(value)) if value == "unique" => {
+                Some(crate::kemono::RevisionMode::Unique)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration revisions must be a boolean or unique",
+                ));
+            }
+        };
+        let order_revisions = match self.order_revisions.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "asc" | "reverse" => crate::kemono::RevisionOrder::Oldest,
+                "desc" => crate::kemono::RevisionOrder::Newest,
+                _ => {
+                    return Err(error(
+                        "native configuration order-revisions must be asc, reverse or desc",
+                    ));
+                }
+            }),
+            Some(_) => {
+                return Err(error(
+                    "native configuration order-revisions must be asc, reverse or desc",
+                ));
+            }
+        };
+        let endpoint = match self.endpoint.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "posts" | "legacy" => crate::kemono::Endpoint::Posts,
+                "posts+" | "legacy+" => crate::kemono::Endpoint::Expanded,
+                _ => {
+                    return Err(error(
+                        "native configuration endpoint must be posts, legacy, posts+ or legacy+",
+                    ));
+                }
+            }),
+            Some(_) => return Err(error("native configuration endpoint must be a string")),
+        };
+        let favorites = match self.favorites.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "artist" => crate::kemono::Favorites::Artist,
+                "post" => crate::kemono::Favorites::Post,
+                _ => {
+                    return Err(error(
+                        "native configuration favorites must be artist or post",
+                    ));
+                }
+            }),
+            Some(_) => return Err(error("native configuration favorites must be a string")),
+        };
+        let booru_favorite_order = self.order_posts.0.clone();
+        let order_posts = match self.order_posts.0 {
+            None => None,
+            Some(Value::String(value)) => Some(match value.as_str() {
+                "asc" => crate::kemono::PostOrder::Forward,
+                "desc" | "reverse" => crate::kemono::PostOrder::Reverse,
+                _ => {
+                    return Err(error(
+                        "native configuration order-posts must be asc, desc or reverse",
+                    ));
+                }
+            }),
+            Some(_) => return Err(error("native configuration order-posts must be a string")),
+        };
+        let inline = match self.inline.0 {
+            None => None,
+            Some(Value::Bool(true)) => Some(crate::tumblr::Inline::All),
+            Some(Value::Bool(false)) => Some(crate::tumblr::Inline::Disabled),
+            Some(Value::String(value)) if value == "reblog" => Some(crate::tumblr::Inline::Reblog),
+            Some(Value::String(value)) if value == "original" => {
+                Some(crate::tumblr::Inline::Original)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration inline must be a boolean, reblog or original",
+                ));
+            }
+        };
+        let username = private_string(self.username, "username", 256, true)?;
+        let password = private_string(self.password, "password", 4096, false)?;
+        let user_id = match self.user_id.0 {
+            None => None,
+            Some(Value::String(value))
+                if value.is_empty()
+                    || (value.len() <= 20
+                        && value.bytes().all(|b| b.is_ascii_digit())
+                        && value.bytes().any(|b| b != b'0')) =>
+            {
+                Some(value)
+            }
+            Some(Value::Number(value)) if value.as_u64().is_some_and(|n| n > 0) => {
+                Some(value.to_string())
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration user-id must be a positive decimal ID or empty string",
+                ));
+            }
+        };
+        let reposts = boolean(self.reposts, "reposts")?;
+        let ugoira = self.ugoira.0.as_ref().map(crate::pixiv::UgoiraMode::parse);
+        // Upstream has special behavior for exactly two strings; every other
+        // present value uses Japanese names and overrides inherited settings.
+        let tags = self
+            .tags
+            .0
+            .map(|value| crate::pixiv::TagMode::parse(value.as_str().unwrap_or("")));
+        let cursor = self.cursor.0.as_ref().map(|value| {
+            crate::pixiv::BookmarkCursor::parse(value)
+                .ok_or_else(|| error("native configuration cursor must be null, a string or an integer of at most 1024 bytes"))
+        }).transpose()?;
+        let access_token = match self.access_token.0 {
+            None => None,
+            Some(Value::Bool(false)) => Some(String::new()),
+            Some(Value::String(value))
+                if value != "cache"
+                    && value.len() <= 4096
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b)) =>
+            {
+                Some(value)
+            }
+            Some(_) => {
+                return Err(error(
+                    "native configuration Mastodon access-token must be a bearer token string or false; OAuth cache discovery is not implemented",
+                ));
+            }
+        };
+        let text_posts = boolean(self.text_posts, "text-posts")?;
         let unavailable = match self.unavailable.0 {
             None => None,
             Some(Value::Bool(value)) => Some(value),
@@ -948,6 +1792,49 @@ impl RawOptions {
             Some(Value::String(value)) if value == "auto" => Some(3),
             value => bounded_integer(Field(value), 0, 128, "search-stop")?,
         };
+        let metadata = self.metadata.0.as_ref().map(value_truthy);
+        let comments = self.comments.0.as_ref().map(value_truthy);
+        let captions = self.captions.0.as_ref().map(value_truthy);
+        let sanity = self.sanity.0.as_ref().map(value_truthy);
+        let embeds = self.embeds.0.as_ref().map(value_truthy);
+        let metadata_bookmark = self.metadata_bookmark.0.as_ref().map(value_truthy);
+        let booru_threshold = self
+            .threshold
+            .0
+            .map(|value| -> Result<Option<usize>> {
+                if let Value::Number(number) = value {
+                    let raw = number.to_string();
+                    // Python accepts only int here, excluding bool and float even
+                    // when a floating-point value has an integral numeric value.
+                    if !raw.contains(['.', 'e', 'E']) {
+                        if raw.starts_with('-') {
+                            return Ok(Some(1));
+                        }
+                        let threshold = raw.parse::<usize>().map_err(|_| {
+                            error("native configuration threshold integer exceeds the supported range")
+                        })?;
+                        return Ok(Some(threshold.max(1)));
+                    }
+                }
+                Ok(None)
+            })
+            .transpose()?;
+        let max_posts = match self.max_posts.0 {
+            None => None,
+            Some(Value::Number(value)) => Some(
+                value
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .ok_or_else(|| {
+                        error("native configuration max-posts must be a nonnegative integer")
+                    })?,
+            ),
+            Some(_) => {
+                return Err(error(
+                    "native configuration max-posts must be a nonnegative integer",
+                ));
+            }
+        };
         let api_key = match self.api_key.0 {
             None => None,
             Some(Value::String(key))
@@ -1007,7 +1894,7 @@ impl RawOptions {
         let (filename, filename_conditions) = match self.filename.0 {
             None => (None, None),
             Some(Value::String(value)) => {
-                FilenameTemplate::parse(&value)
+                FilenameTemplate::parse_source(&value)
                     .map_err(|_| error("unsupported native configuration filename template"))?;
                 (Some(value), None)
             }
@@ -1026,7 +1913,7 @@ impl RawOptions {
                         conditions.push((filter, template));
                     }
                 }
-                FilenameTemplate::parse_conditional(&conditions, default.as_deref())
+                FilenameTemplate::parse_source_conditional(&conditions, default.as_deref())
                     .map_err(|_| error("unsupported native configuration filename template"))?;
                 (default, Some(conditions))
             }
@@ -1060,13 +1947,13 @@ impl RawOptions {
                         conditions.push((filter, value));
                     }
                 }
-                DirectoryTemplate::parse_conditional(&conditions, default.as_deref())
+                DirectoryTemplate::parse_source_conditional(&conditions, default.as_deref())
                     .map_err(|_| error("unsupported native configuration directory template"))?;
                 (default, Some(conditions))
             }
             Some(value) => {
                 let value = components(value)?;
-                DirectoryTemplate::parse(&value)
+                DirectoryTemplate::parse_source(&value)
                     .map_err(|_| error("unsupported native configuration directory template"))?;
                 (Some(value), None)
             }
@@ -1097,10 +1984,49 @@ impl RawOptions {
             }
         };
         let proxy = network_string(self.proxy)?;
+        let api_server = match self.api_server.0 {
+            None => None,
+            Some(Value::Null | Value::Bool(false)) => Some(String::new()),
+            Some(Value::String(value)) if value.is_empty() => Some(value),
+            Some(Value::String(value))
+                if value.len() <= 4096
+                    && value.trim() == value
+                    && !value.chars().any(char::is_control) =>
+            {
+                let url = url::Url::parse(&value)
+                    .map_err(|_| error("invalid native configuration api-server"))?;
+                if !matches!(url.scheme(), "http" | "https")
+                    || url.host_str().is_none()
+                    || !url.username().is_empty()
+                    || url.password().is_some()
+                    || url.query().is_some()
+                    || url.fragment().is_some()
+                {
+                    return Err(error("invalid native configuration api-server"));
+                }
+                Some(value)
+            }
+            Some(_) => return Err(error("invalid native configuration api-server")),
+        };
         let user_agent = network_string(self.user_agent)?;
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
+            init: self
+                .init
+                .0
+                .as_ref()
+                .map(|value| value_truthy(value) && value.as_str() != Some("lazy")),
+            postprocessors: crate::postprocess::Configuration::parse(
+                self.postprocessors.0,
+                self.postprocessor_options.0,
+                self.postprocessor_definitions.0,
+                directory,
+            )?,
+            covers: self.covers.0.as_ref().map(value_truthy),
+            full_series: self.full_series.0.as_ref().map(value_truthy),
+            api_server,
+            bluesky_endpoint: None,
             proxy,
             user_agent,
             base_directory: path(self.base_directory, directory, "base-directory")?,
@@ -1113,14 +2039,48 @@ impl RawOptions {
             file_filter,
             post_range,
             post_filter,
-            date_before: date(self.date_before)?,
-            date_after: date(self.date_after)?,
+            child_range,
+            child_filter,
+            include,
+            date_before_set: self.date_before.0.is_some(),
+            date_after_set: self.date_after.0.is_some(),
+            date_before: date(self.date_before),
+            date_after: date(self.date_after),
             retweets,
             quoted,
             expand,
             unique,
             videos,
             previews,
+            mp4,
+            reblogs,
+            tumblr_reblogs: None,
+            posts,
+            inline,
+            original,
+            files,
+            duplicates,
+            revisions,
+            order_revisions,
+            endpoint,
+            booru_favorite_order,
+            parent_metadata: self.parent_metadata.0.map(std::sync::Arc::new),
+            metadata_parent: self.metadata_parent.0.map(std::sync::Arc::new),
+            booru_order_posts: order_posts.map(|order| match order {
+                crate::kemono::PostOrder::Forward => crate::booru::PoolOrder::Pool,
+                crate::kemono::PostOrder::Reverse => crate::booru::PoolOrder::PoolReverse,
+            }),
+            order_posts,
+            favorites,
+            username,
+            password,
+            user_id,
+            reposts,
+            ugoira,
+            tags,
+            cursor,
+            access_token,
+            text_posts,
             unavailable,
             text_tweets,
             size: image_size,
@@ -1138,6 +2098,14 @@ impl RawOptions {
             limit,
             search_limit,
             search_stop,
+            max_posts,
+            booru_threshold,
+            metadata,
+            comments,
+            captions,
+            sanity,
+            embeds,
+            metadata_bookmark,
             api_key,
             refresh_token,
             client_id,
@@ -1339,20 +2307,8 @@ fn size(field: Field) -> Result<Option<u64>> {
     }
 }
 
-fn date(field: Field) -> Result<Option<i64>> {
-    let Some(value) = field.0 else {
-        return Ok(None);
-    };
-    let invalid = || {
-        error(
-            "native configuration date limit must be a supported ISO date or integer Unix timestamp",
-        )
-    };
-    match value {
-        Value::String(value) => parse_date(&value).map(Some).map_err(|_| invalid()),
-        Value::Number(value) => value.as_i64().map(Some).ok_or_else(invalid),
-        _ => Err(invalid()),
-    }
+fn date(field: Field) -> Option<i64> {
+    source_date_bound(field.0.as_ref()?)
 }
 
 fn network_string(field: Field) -> Result<Option<String>> {
@@ -1378,5 +2334,157 @@ fn bounded_integer(field: Field, min: u64, max: u64, name: &str) -> Result<Optio
         Some(_) => Err(error(format!(
             "native configuration {name} must be an integer from {min} to {max}"
         ))),
+    }
+}
+
+fn boolean(field: Field, name: &str) -> Result<Option<bool>> {
+    match field.0 {
+        None => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(value)),
+        Some(_) => Err(error(format!(
+            "native configuration {name} must be a boolean"
+        ))),
+    }
+}
+
+fn private_string(field: Field, name: &str, max: usize, username: bool) -> Result<Option<String>> {
+    match field.0 {
+        None => Ok(None),
+        Some(Value::String(value))
+            if value.len() <= max
+                && !value.chars().any(char::is_control)
+                && !(username && value.contains(':')) =>
+        {
+            Ok(Some(value))
+        }
+        Some(_) => Err(error(format!(
+            "native configuration {name} must be a bounded string without control characters"
+        ))),
+    }
+}
+
+fn tumblr_posts(field: Field) -> Result<Option<Vec<String>>> {
+    let invalid =
+        || error("native configuration posts must be all, false, or supported Tumblr post types");
+    let types = match field.0 {
+        None => return Ok(None),
+        Some(Value::String(value)) if value == "all" => return Ok(Some(vec![value])),
+        Some(Value::Bool(false)) => Vec::new(),
+        Some(Value::String(value)) if value.len() <= 1024 => {
+            if value.is_empty() {
+                Vec::new()
+            } else {
+                value.split(',').map(|s| s.trim().to_owned()).collect()
+            }
+        }
+        Some(Value::Array(values)) if values.len() <= 64 => values
+            .into_iter()
+            .map(|value| value.as_str().map(str::to_owned).ok_or_else(invalid))
+            .collect::<Result<Vec<_>>>()?,
+        _ => return Err(invalid()),
+    };
+    crate::tumblr::Selection::default()
+        .with_posts(types.clone())
+        .map_err(|_| invalid())?;
+    Ok(Some(types))
+}
+
+fn kemono_files(field: Field) -> Result<Option<Vec<crate::kemono::FileKind>>> {
+    use crate::kemono::FileKind;
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
+    let invalid = || {
+        error(
+            "native configuration files must be a comma-separated string or list of file, attachments, inline",
+        )
+    };
+    let names = selection_names(value).ok_or_else(invalid)?;
+    let files = names
+        .into_iter()
+        .map(|name| match name.as_str() {
+            "file" => Ok(FileKind::File),
+            "attachments" => Ok(FileKind::Attachments),
+            "inline" => Ok(FileKind::Inline),
+            _ => Err(invalid()),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(files))
+}
+
+fn kemono_duplicates(field: Field) -> Result<Option<crate::kemono::DuplicateOptions>> {
+    use crate::kemono::DuplicateOptions;
+    let Some(value) = field.0 else {
+        return Ok(None);
+    };
+    match value {
+        Value::Bool(true) => return Ok(Some(DuplicateOptions::all())),
+        Value::Bool(false) => return Ok(Some(DuplicateOptions::default())),
+        _ => {}
+    }
+    let invalid = || {
+        error(
+            "native configuration duplicates must be a boolean, comma-separated string or list of file, attachment, inline",
+        )
+    };
+    let names = if value.as_str() == Some("") {
+        Vec::new()
+    } else {
+        selection_names(value).ok_or_else(invalid)?
+    };
+    let mut selected = DuplicateOptions::default();
+    for name in names {
+        match name.as_str() {
+            "file" => selected.file = true,
+            "attachment" => selected.attachment = true,
+            "inline" => selected.inline = true,
+            _ => return Err(invalid()),
+        }
+    }
+    Ok(Some(selected))
+}
+
+fn selection_names(value: Value) -> Option<Vec<String>> {
+    match value {
+        Value::String(value) if value.len() <= 1024 => Some(
+            value
+                .split(',')
+                .map(|name| name.trim().to_owned())
+                .collect(),
+        ),
+        Value::Array(names) if names.len() <= 64 => names
+            .into_iter()
+            .map(|name| name.as_str().map(str::to_owned))
+            .collect(),
+        _ => None,
+    }
+}
+
+/// Resolve the source Danbooru collection ordering aliases.
+fn danbooru_pool_order(value: Value) -> Result<crate::booru::PoolOrder> {
+    use crate::booru::PoolOrder;
+    if !value_truthy(&value) {
+        return Ok(PoolOrder::Pool);
+    }
+    match value.as_str() {
+        Some("asc" | "pool" | "pool_asc" | "asc_pool") => Ok(PoolOrder::Pool),
+        Some("desc" | "desc_pool" | "pool_desc") => Ok(PoolOrder::PoolReverse),
+        Some("id" | "desc_id" | "id_desc") => Ok(PoolOrder::IdDescending),
+        Some("asc_id" | "id_asc") => Ok(PoolOrder::IdAscending),
+        _ => Err(error(
+            "native configuration Danbooru order-posts must select pool or ID ordering",
+        )),
+    }
+}
+
+/// Match Python truthiness for configuration switches that accept arbitrary JSON.
+fn value_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64() != Some(0.),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
     }
 }

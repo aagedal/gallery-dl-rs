@@ -15,7 +15,7 @@ use crate::{
     Result,
     cookies::CookieJar,
     error,
-    event::{ExtractionEvent, group},
+    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     imagehosts::{
@@ -354,7 +354,11 @@ impl FurAffinity {
         for item in &mut items {
             self.network.apply_media(item);
         }
-        Ok(group(items, "furaffinity"))
+        let mut keywords = KeywordPolicy::shared(&["num", "index", "media_id"]);
+        if let Some(media) = items.first() {
+            keywords = keywords.with_post_fields(media, &["filename", "name", "extension"]);
+        }
+        Ok(group_with_keywords(items, "furaffinity", keywords))
     }
 
     async fn next_page(&self, state: &mut GalleryState) -> Result<()> {
@@ -678,13 +682,19 @@ by <a href="/user/alice/"><strong>Alice</strong></a>
             ".furaffinity.net\tTRUE\t/\tTRUE\t0\ta\tsecret-a\n.furaffinity.net\tTRUE\t/\tTRUE\t0\tb\tsecret-b\n",
         )
         .unwrap();
-        let media: Vec<_> = furaffinity(root, jar)
+        let events: Vec<_> = furaffinity(root, jar)
             .with_retries(1)
-            .stream(&Url::parse("https://www.furaffinity.net/full/42/").unwrap())
+            .events(&Url::parse("https://www.furaffinity.net/full/42/").unwrap())
             .collect()
             .await;
-        assert_eq!(media.len(), 1);
-        assert!(media[0].is_ok());
+        assert_eq!(events.len(), 3);
+        let ExtractionEvent::Post(post) = events[0].as_ref().unwrap() else {
+            panic!("missing source post")
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("FurAffinity must reuse Directory keywords")
+        };
+        assert_eq!(file_fields.as_ref(), &["num", "index", "media_id"]);
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with("GET /view/42/ "));
         assert!(requests[1].contains("a=secret-a"), "{}", requests[1]);

@@ -1,0 +1,5052 @@
+{
+  "source": "gallery_dl.postprocessor.ugoira.UgoiraPP + DownloadJob.handle_url + PathFormat.set_filename/set_extension/fix_extension/finalize",
+  "version": "1.32.17",
+  "source_path": "/private/tmp/gdlvenv/lib/python3.15/site-packages/gallery_dl/postprocessor/ugoira.py",
+  "source_sha256": "a0d46c0ff939ac16ea1c6001c351e9f34ee291855b65443ee8a8252ae7f6baa6",
+  "job_source_sha256": "b1d630adb73404342d236f7af807041186f0a38a436cff6979749d411a5d9a75",
+  "generator": "Actual source postprocessor and job lifecycle methods, synthetic frames, fake Popen/path/archive/download adapters. Isolated temporary files contain synthetic bytes; no real encoder or network invoked. UTC timezone fixed; temporary root paths normalized to $WORK (internal temporary conversion paths normalized separately).",
+  "option_cases": [
+    {
+      "name": "defaults_without_mkvmerge",
+      "options": {},
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "defaults_with_mkvmerge",
+      "options": {},
+      "mkvmerge_detected": true,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_mkvmerge",
+        "finalize": "_finalize_mkvmerge",
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "auto_mp4_uses_concat",
+      "options": {
+        "extension": "mp4"
+      },
+      "mkvmerge_detected": true,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "mp4",
+        "prevent_odd": true,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-vf",
+          "crop=iw-mod(iw\\,2):ih-mod(ih\\,2)"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "auto_mkv",
+      "options": {
+        "extension": "mkv"
+      },
+      "mkvmerge_detected": true,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "mkv",
+        "prevent_odd": true,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-vf",
+          "crop=iw-mod(iw\\,2):ih-mod(ih\\,2)"
+        ],
+        "process": "_process_mkvmerge",
+        "finalize": "_finalize_mkvmerge",
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "explicit_mkvmerge_location",
+      "options": {
+        "mkvmerge-location": "/fixture/mkvmerge"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "/fixture/mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_mkvmerge",
+        "finalize": "_finalize_mkvmerge",
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "demuxer_alias",
+      "options": {
+        "ffmpeg-demuxer": "image2"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_image2",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "false_mode_uses_alias",
+      "options": {
+        "mode": false,
+        "ffmpeg-demuxer": "archive"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "zip",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": null,
+        "finalize": null,
+        "convert_impl": "convert_to_archive"
+      },
+      "error": null
+    },
+    {
+      "name": "unknown_mode_concat",
+      "options": {
+        "mode": "unknown"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "archive_defaults_zip",
+      "options": {
+        "mode": "archive"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "zip",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": null,
+        "finalize": null,
+        "convert_impl": "convert_to_archive"
+      },
+      "error": null
+    },
+    {
+      "name": "archive_extension",
+      "options": {
+        "mode": "archive",
+        "extension": "cbz"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "cbz",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": null,
+        "finalize": null,
+        "convert_impl": "convert_to_archive"
+      },
+      "error": null
+    },
+    {
+      "name": "image2_mode",
+      "options": {
+        "mode": "image2"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_image2",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "empty_ffmpeg_args_fallback",
+      "options": {
+        "ffmpeg-args": []
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "explicit_ffmpeg_args",
+      "options": {
+        "ffmpeg-args": [
+          "-c:v",
+          "libx264",
+          "-crf",
+          "20"
+        ]
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-c:v",
+          "libx264",
+          "-crf",
+          "20"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": true,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-vf",
+          "crop=iw-mod(iw\\,2):ih-mod(ih\\,2)"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "last_video_codec_wins",
+      "options": {
+        "ffmpeg-args": [
+          "-c:v",
+          "libx264",
+          "-c:a",
+          "opus",
+          "-codec:v:0",
+          "libvpx-vp9"
+        ]
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-c:v",
+          "libx264",
+          "-c:a",
+          "opus",
+          "-codec:v:0",
+          "libvpx-vp9"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "odd_filter_disabled",
+      "options": {
+        "extension": "mp4",
+        "libx264-prevent-odd": false
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "mp4",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "truthy_keep_files",
+      "options": {
+        "keep-files": "false"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": false,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "null_repeat_metadata_mtime",
+      "options": {
+        "repeat-last-frame": null,
+        "metadata": null,
+        "mtime": null
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": null,
+        "metadata": null,
+        "mtime": null,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "numeric_framerate",
+      "options": {
+        "framerate": 24
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "uniform_framerate",
+      "options": {
+        "framerate": "uniform"
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": false,
+        "output": "error",
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": true,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [
+          "-hide_banner",
+          "-loglevel",
+          "error"
+        ],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    },
+    {
+      "name": "output_false_twopass",
+      "options": {
+        "ffmpeg-output": false,
+        "ffmpeg-twopass": true
+      },
+      "mkvmerge_detected": false,
+      "normalized": {
+        "args": [
+          "-pix_fmt",
+          "yuv420p"
+        ],
+        "twopass": true,
+        "output": false,
+        "delete": true,
+        "repeat": true,
+        "metadata": true,
+        "mtime": true,
+        "mkvmerge_args": [],
+        "mkvmerge_mtime": false,
+        "mkvmerge_output": false,
+        "mkvmerge_metadata": true,
+        "skip": true,
+        "uniform": false,
+        "ffmpeg": "ffmpeg",
+        "mkvmerge": "mkvmerge",
+        "extension": "webm",
+        "prevent_odd": false,
+        "args_pp": [],
+        "process": "_process_concat",
+        "finalize": null,
+        "convert_impl": "convert_to_animation"
+      },
+      "error": null
+    }
+  ],
+  "rate_cases": [
+    {
+      "name": "uniform",
+      "options": {
+        "framerate": "auto"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 50
+        }
+      ],
+      "rate": [
+        "1000/50",
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "uniform",
+      "options": {
+        "framerate": "uniform"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 50
+        }
+      ],
+      "rate": [
+        "1000/50",
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "uniform",
+      "options": {
+        "framerate": "30000/1001"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 50
+        }
+      ],
+      "rate": [
+        null,
+        "30000/1001"
+      ],
+      "error": null
+    },
+    {
+      "name": "uniform",
+      "options": {
+        "framerate": 24
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 50
+        }
+      ],
+      "rate": [
+        null,
+        24
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd25",
+      "options": {
+        "framerate": "auto"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "rate": [
+        null,
+        "1000/25"
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd25",
+      "options": {
+        "framerate": "uniform"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "rate": [
+        null,
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd25",
+      "options": {
+        "framerate": "30000/1001"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "rate": [
+        null,
+        "30000/1001"
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd25",
+      "options": {
+        "framerate": 24
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "rate": [
+        null,
+        24
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd1",
+      "options": {
+        "framerate": "auto"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 17
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 19
+        }
+      ],
+      "rate": [
+        null,
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd1",
+      "options": {
+        "framerate": "uniform"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 17
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 19
+        }
+      ],
+      "rate": [
+        null,
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd1",
+      "options": {
+        "framerate": "30000/1001"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 17
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 19
+        }
+      ],
+      "rate": [
+        null,
+        "30000/1001"
+      ],
+      "error": null
+    },
+    {
+      "name": "nonuniform_gcd1",
+      "options": {
+        "framerate": 24
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 17
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 19
+        }
+      ],
+      "rate": [
+        null,
+        24
+      ],
+      "error": null
+    },
+    {
+      "name": "one_frame",
+      "options": {
+        "framerate": "auto"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 40
+        }
+      ],
+      "rate": [
+        "1000/40",
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "one_frame",
+      "options": {
+        "framerate": "uniform"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 40
+        }
+      ],
+      "rate": [
+        "1000/40",
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "one_frame",
+      "options": {
+        "framerate": "30000/1001"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 40
+        }
+      ],
+      "rate": [
+        null,
+        "30000/1001"
+      ],
+      "error": null
+    },
+    {
+      "name": "one_frame",
+      "options": {
+        "framerate": 24
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 40
+        }
+      ],
+      "rate": [
+        null,
+        24
+      ],
+      "error": null
+    },
+    {
+      "name": "zero_delay",
+      "options": {
+        "framerate": "auto"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 0
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 0
+        }
+      ],
+      "rate": [
+        "1000/0",
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "zero_delay",
+      "options": {
+        "framerate": "uniform"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 0
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 0
+        }
+      ],
+      "rate": [
+        "1000/0",
+        null
+      ],
+      "error": null
+    },
+    {
+      "name": "zero_delay",
+      "options": {
+        "framerate": "30000/1001"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 0
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 0
+        }
+      ],
+      "rate": [
+        null,
+        "30000/1001"
+      ],
+      "error": null
+    },
+    {
+      "name": "zero_delay",
+      "options": {
+        "framerate": 24
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 0
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 0
+        }
+      ],
+      "rate": [
+        null,
+        24
+      ],
+      "error": null
+    },
+    {
+      "name": "empty",
+      "options": {
+        "framerate": "auto"
+      },
+      "frames": [],
+      "rate": null,
+      "error": "IndexError"
+    },
+    {
+      "name": "empty",
+      "options": {
+        "framerate": "uniform"
+      },
+      "frames": [],
+      "rate": null,
+      "error": "IndexError"
+    },
+    {
+      "name": "empty",
+      "options": {
+        "framerate": "30000/1001"
+      },
+      "frames": [],
+      "rate": [
+        null,
+        "30000/1001"
+      ],
+      "error": null
+    },
+    {
+      "name": "empty",
+      "options": {
+        "framerate": 24
+      },
+      "frames": [],
+      "rate": [
+        null,
+        24
+      ],
+      "error": null
+    }
+  ],
+  "command_cases": [
+    {
+      "name": "concat_default",
+      "options": {},
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\nfile '000001.jpg'\n"
+      },
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "concat_no_repeat",
+      "options": {
+        "repeat-last-frame": false
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\n"
+      },
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "concat_uniform_rate",
+      "options": {
+        "framerate": "uniform"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\nfile '000001.jpg'\n"
+      },
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "concat_explicit_rate",
+      "options": {
+        "framerate": "30000/1001"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "30000/1001",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\nfile '000001.jpg'\n"
+      },
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "image2_nonuniform_repeat",
+      "options": {
+        "mode": "image2"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 100
+        },
+        {
+          "file": "000002.jpg",
+          "delay": 100
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "image2",
+            "-ts_from_file",
+            "2",
+            "-pattern_type",
+            "sequence",
+            "-i",
+            "$WORK/frames/%06d.jpg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [
+        {
+          "path": "$WORK/frames/000000.jpg",
+          "ns": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": "$WORK/frames/000001.jpg",
+          "ns": [
+            50000000,
+            50000000
+          ]
+        },
+        {
+          "path": "$WORK/frames/000002.jpg",
+          "ns": [
+            150000000,
+            150000000
+          ]
+        }
+      ],
+      "text_files": {},
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "image2_no_repeat",
+      "options": {
+        "mode": "image2",
+        "repeat-last-frame": false
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "image2",
+            "-ts_from_file",
+            "2",
+            "-pattern_type",
+            "sequence",
+            "-i",
+            "$WORK/frames/%06d.jpg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [
+        {
+          "path": "$WORK/frames/000000.jpg",
+          "ns": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": "$WORK/frames/000001.jpg",
+          "ns": [
+            50000000,
+            50000000
+          ]
+        }
+      ],
+      "text_files": {},
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "mkvmerge_default",
+      "options": {
+        "mode": "mkvmerge"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-r",
+            "25",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/frames/temp.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        },
+        {
+          "args": [
+            "mkvmerge",
+            "-o",
+            "$WORK/out/42_p0.webm",
+            "--timecodes",
+            "0:$WORK/frames/timecodes.tc",
+            "--quiet",
+            "--webm",
+            "=",
+            "$WORK/frames/temp.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nfile '000001.jpg'\nfile '000001.jpg'\n",
+        "timecodes.tc": "# timecode format v2\n0\n50\n175\n"
+      },
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "mkvmerge_options",
+      "options": {
+        "mode": "mkvmerge",
+        "extension": "mkv",
+        "mkvmerge-mtime": true,
+        "mkvmerge-output": true,
+        "mkvmerge-metadata": false,
+        "mkvmerge-args": [
+          "--title",
+          "Fixture"
+        ]
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-r",
+            "25",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-vf",
+            "crop=iw-mod(iw\\,2):ih-mod(ih\\,2)",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/frames/temp.mkv"
+          ],
+          "stdout": null,
+          "stderr": null
+        },
+        {
+          "args": [
+            "mkvmerge",
+            "-o",
+            "$WORK/out/42_p0.mkv",
+            "--timecodes",
+            "0:$WORK/frames/timecodes.tc",
+            "--date",
+            "2024-01-02 03:04:06",
+            "--disable-track-statistics-tags",
+            "--title",
+            "Fixture",
+            "=",
+            "$WORK/frames/temp.mkv"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "mkv",
+          "kw_extension": "mkv"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.mkv",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "mkv",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.mkv"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nfile '000001.jpg'\nfile '000001.jpg'\n",
+        "timecodes.tc": "# timecode format v2\n0\n50\n175\n"
+      },
+      "final_path": "$WORK/out/42_p0.mkv",
+      "final_extension": "mkv"
+    },
+    {
+      "name": "twopass",
+      "options": {
+        "ffmpeg-twopass": true,
+        "extension": "mp4"
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-vf",
+            "crop=iw-mod(iw\\,2):ih-mod(ih\\,2)",
+            "-pix_fmt",
+            "yuv420p",
+            "-f",
+            "mp4",
+            "-passlogfile",
+            "$WORK/frames/ffmpeg2pass",
+            "-pass",
+            "1",
+            "-y",
+            "/dev/null"
+          ],
+          "stdout": null,
+          "stderr": null
+        },
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-vf",
+            "crop=iw-mod(iw\\,2):ih-mod(ih\\,2)",
+            "-pix_fmt",
+            "yuv420p",
+            "-f",
+            "mp4",
+            "-passlogfile",
+            "$WORK/frames/ffmpeg2pass",
+            "-pass",
+            "2",
+            "$WORK/out/42_p0.mp4"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "mp4",
+          "kw_extension": "mp4"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.mp4",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "mp4",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.mp4"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\nfile '000001.jpg'\n"
+      },
+      "final_path": "$WORK/out/42_p0.mp4",
+      "final_extension": "mp4"
+    },
+    {
+      "name": "twopass_explicit_format",
+      "options": {
+        "ffmpeg-twopass": true,
+        "ffmpeg-args": [
+          "-f",
+          "gif"
+        ]
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": false,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "gif",
+            "-passlogfile",
+            "$WORK/frames/ffmpeg2pass",
+            "-pass",
+            "1",
+            "-y",
+            "/dev/null"
+          ],
+          "stdout": null,
+          "stderr": null
+        },
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "gif",
+            "-passlogfile",
+            "$WORK/frames/ffmpeg2pass",
+            "-pass",
+            "2",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\nfile '000001.jpg'\n"
+      },
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "nonzero_failure",
+      "options": {},
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 7,
+      "existing": false,
+      "result": null,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\nfile '000001.jpg'\n"
+      },
+      "final_path": "$WORK/source.zip.part",
+      "final_extension": "webm"
+    },
+    {
+      "name": "existing_output_skips",
+      "options": {},
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": true,
+      "result": true,
+      "error": null,
+      "calls": [],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": true
+        }
+      ],
+      "utimes": [],
+      "text_files": {},
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    },
+    {
+      "name": "existing_skip_false",
+      "options": {
+        "skip": false
+      },
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "mutated_frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "retcode": 0,
+      "existing": true,
+      "result": true,
+      "error": null,
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$WORK/frames/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "path_events": [
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/source.zip.part"
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "utimes": [],
+      "text_files": {
+        "ffconcat.txt": "ffconcat version 1.0\nfile '000000.jpg'\nduration 0.05\nfile '000001.jpg'\nduration 0.125\nfile '000001.jpg'\n"
+      },
+      "final_path": "$WORK/out/42_p0.webm",
+      "final_extension": "webm"
+    }
+  ],
+  "archive_cases": [
+    {
+      "name": "zip_default",
+      "options": {
+        "mode": "archive"
+      },
+      "zip_source": true,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        },
+        {
+          "name": "animation.json",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "5b7b2266696c65223a223030303030302e6a7067222c2264656c6179223a35307d2c7b2266696c65223a223030303030312e6a7067222c2264656c6179223a3132357d5d"
+        }
+      ],
+      "delete_after": false,
+      "result": true
+    },
+    {
+      "name": "zip_metadata_off",
+      "options": {
+        "mode": "archive",
+        "metadata": false
+      },
+      "zip_source": true,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        }
+      ],
+      "delete_after": false,
+      "result": true
+    },
+    {
+      "name": "zip_custom_metadata_name",
+      "options": {
+        "mode": "archive",
+        "metadata": "frames.json"
+      },
+      "zip_source": true,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        },
+        {
+          "name": "frames.json",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "5b7b2266696c65223a223030303030302e6a7067222c2264656c6179223a35307d2c7b2266696c65223a223030303030312e6a7067222c2264656c6179223a3132357d5d"
+        }
+      ],
+      "delete_after": false,
+      "result": true
+    },
+    {
+      "name": "zip_mtime_false",
+      "options": {
+        "mode": "archive",
+        "mtime": false
+      },
+      "zip_source": true,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        },
+        {
+          "name": "animation.json",
+          "date_time": [
+            1980,
+            1,
+            1,
+            0,
+            0,
+            0
+          ],
+          "compression": 0,
+          "data_hex": "5b7b2266696c65223a223030303030302e6a7067222c2264656c6179223a35307d2c7b2266696c65223a223030303030312e6a7067222c2264656c6179223a3132357d5d"
+        }
+      ],
+      "delete_after": false,
+      "result": true
+    },
+    {
+      "name": "zip_keep_custom_extension",
+      "options": {
+        "mode": "archive",
+        "keep-files": true,
+        "extension": "cbz"
+      },
+      "zip_source": true,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        },
+        {
+          "name": "animation.json",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "5b7b2266696c65223a223030303030302e6a7067222c2264656c6179223a35307d2c7b2266696c65223a223030303030312e6a7067222c2264656c6179223a3132357d5d"
+        }
+      ],
+      "delete_after": false,
+      "result": true
+    },
+    {
+      "name": "original_frames_default",
+      "options": {
+        "mode": "archive"
+      },
+      "zip_source": false,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        },
+        {
+          "name": "animation.json",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "5b7b2266696c65223a223030303030302e6a7067222c2264656c6179223a35307d2c7b2266696c65223a223030303030312e6a7067222c2264656c6179223a3132357d5d"
+        }
+      ],
+      "delete_after": true,
+      "result": true
+    },
+    {
+      "name": "original_frames_mtime_false",
+      "options": {
+        "mode": "archive",
+        "mtime": false
+      },
+      "zip_source": false,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2023,
+            11,
+            14,
+            22,
+            13,
+            20
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2023,
+            11,
+            14,
+            22,
+            13,
+            20
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        },
+        {
+          "name": "animation.json",
+          "date_time": [
+            1980,
+            1,
+            1,
+            0,
+            0,
+            0
+          ],
+          "compression": 0,
+          "data_hex": "5b7b2266696c65223a223030303030302e6a7067222c2264656c6179223a35307d2c7b2266696c65223a223030303030312e6a7067222c2264656c6179223a3132357d5d"
+        }
+      ],
+      "delete_after": true,
+      "result": true
+    },
+    {
+      "name": "original_frames_metadata_off",
+      "options": {
+        "mode": "archive",
+        "metadata": false
+      },
+      "zip_source": false,
+      "frames": [
+        {
+          "file": "000000.jpg",
+          "delay": 50
+        },
+        {
+          "file": "000001.jpg",
+          "delay": 125
+        }
+      ],
+      "entries": [
+        {
+          "name": "000000.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030302e6a7067"
+        },
+        {
+          "name": "000001.jpg",
+          "date_time": [
+            2024,
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "compression": 0,
+          "data_hex": "66697874757265203030303030312e6a7067"
+        }
+      ],
+      "delete_after": true,
+      "result": true
+    }
+  ],
+  "lifecycle_cases": [
+    {
+      "name": "zip_delete_success",
+      "options": {},
+      "kind": "zip",
+      "indices": [
+        null
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "zip"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "archive_check",
+          "extension": "webm",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "webm",
+          "temppath": "$WORK/out/42_p0.webm.part"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "finalize",
+          "extension": "webm",
+          "realpath": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm.part",
+          "delete": true
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "archive_add",
+          "extension": "webm",
+          "num": 0
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.webm": "73796e74686574696320636f6e76657274656420616e696d6174696f6e"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm"
+    },
+    {
+      "name": "zip_keep_success",
+      "options": {
+        "keep-files": true
+      },
+      "kind": "zip",
+      "indices": [
+        null
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "zip"
+        },
+        {
+          "event": "archive_check",
+          "extension": "zip",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "exists",
+          "extension": "zip",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "zip",
+          "temppath": "$WORK/out/42_p0.zip.part"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "set_extension",
+          "extension": "zip",
+          "kw_extension": "zip"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "zip",
+          "realpath": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "archive_add",
+          "extension": "zip",
+          "num": 0
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.webm": "73796e74686574696320636f6e76657274656420616e696d6174696f6e",
+        "out/42_p0.zip": "504b030414000000000083182258e26bd00912000000120000000a0000003030303030302e6a706766697874757265203030303030302e6a7067504b0304140000000000831822585242b03412000000120000000a0000003030303030312e6a706766697874757265203030303030312e6a7067504b0102140314000000000083182258e26bd00912000000120000000a00000000000000000000008001000000003030303030302e6a7067504b01021403140000000000831822585242b03412000000120000000a000000000000000000000080013a0000003030303030312e6a7067504b0506000000000200020070000000740000000000"
+      },
+      "error": null,
+      "final_extension": "zip",
+      "final_realpath": "$WORK/out/42_p0.zip"
+    },
+    {
+      "name": "zip_failure_preserves_source",
+      "options": {},
+      "kind": "zip",
+      "indices": [
+        null
+      ],
+      "skip": null,
+      "retcode": 7,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "zip"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "archive_check",
+          "extension": "webm",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "webm",
+          "temppath": "$WORK/out/42_p0.webm.part"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "finalize",
+          "extension": "webm",
+          "realpath": "$WORK/out/42_p0.webm.part",
+          "temppath": "$WORK/out/42_p0.webm.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm.part"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "archive_add",
+          "extension": "webm",
+          "num": 0
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.webm.part": "504b030414000000000083182258e26bd00912000000120000000a0000003030303030302e6a706766697874757265203030303030302e6a7067504b0304140000000000831822585242b03412000000120000000a0000003030303030312e6a706766697874757265203030303030312e6a7067504b0102140314000000000083182258e26bd00912000000120000000a00000000000000000000008001000000003030303030302e6a7067504b01021403140000000000831822585242b03412000000120000000a000000000000000000000080013a0000003030303030312e6a7067504b0506000000000200020070000000740000000000"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm.part"
+    },
+    {
+      "name": "zip_archived_skips",
+      "options": {},
+      "kind": "zip",
+      "indices": [
+        null
+      ],
+      "skip": "archive",
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "zip"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "archive_check",
+          "extension": "webm",
+          "num": 0,
+          "result": true
+        },
+        {
+          "event": "fix_extension"
+        },
+        {
+          "event": "skip",
+          "extension": "webm"
+        }
+      ],
+      "calls": [],
+      "outputs": {},
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm"
+    },
+    {
+      "name": "zip_existing_output_skips",
+      "options": {},
+      "kind": "zip",
+      "indices": [
+        null
+      ],
+      "skip": "exists",
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "set_filename",
+          "extension": "zip"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "archive_check",
+          "extension": "webm",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": true
+        },
+        {
+          "event": "skip",
+          "extension": "webm"
+        }
+      ],
+      "calls": [],
+      "outputs": {
+        "out/42_p0.webm": "6578697374696e67"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm"
+    },
+    {
+      "name": "zip_archive_mode",
+      "options": {
+        "mode": "archive"
+      },
+      "kind": "zip",
+      "indices": [
+        null
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "zip"
+        },
+        {
+          "event": "set_extension",
+          "extension": "zip",
+          "kw_extension": "zip"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "archive_check",
+          "extension": "zip",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "exists",
+          "extension": "zip",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "zip",
+          "temppath": "$WORK/out/42_p0.zip.part"
+        },
+        {
+          "event": "set_extension",
+          "extension": "zip",
+          "kw_extension": "zip"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip.part"
+        },
+        {
+          "event": "exists",
+          "extension": "zip",
+          "result": false
+        },
+        {
+          "event": "finalize",
+          "extension": "zip",
+          "realpath": "$WORK/out/42_p0.zip",
+          "temppath": "$WORK/out/42_p0.zip.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.zip"
+        },
+        {
+          "event": "archive_add",
+          "extension": "zip",
+          "num": 0
+        }
+      ],
+      "calls": [],
+      "outputs": {
+        "out/42_p0.zip": "504b030414000000000083182258e26bd00912000000120000000a0000003030303030302e6a706766697874757265203030303030302e6a7067504b0304140000000000831822585242b03412000000120000000a0000003030303030312e6a706766697874757265203030303030312e6a7067504b0304140000000000831822587a58e0cc44000000440000000e000000616e696d6174696f6e2e6a736f6e5b7b2266696c65223a223030303030302e6a7067222c2264656c6179223a35307d2c7b2266696c65223a223030303030312e6a7067222c2264656c6179223a3132357d5d504b0102140314000000000083182258e26bd00912000000120000000a00000000000000000000008001000000003030303030302e6a7067504b01021403140000000000831822585242b03412000000120000000a000000000000000000000080013a0000003030303030312e6a7067504b01021403140000000000831822587a58e0cc44000000440000000e0000000000000000000000800174000000616e696d6174696f6e2e6a736f6e504b05060000000003000300ac000000e40000000000"
+      },
+      "error": null,
+      "final_extension": "zip",
+      "final_realpath": "$WORK/out/42_p0.zip"
+    },
+    {
+      "name": "frames_success",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 1,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 1
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.webm": "73796e74686574696320636f6e76657274656420616e696d6174696f6e"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm"
+    },
+    {
+      "name": "frames_jpeg_input_extensions",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpeg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpeg",
+          "temppath": "$WORK/out/42_p0.jpeg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpeg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpeg",
+          "temppath": "$WORK/out/42_p0.jpeg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpeg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpeg",
+          "temppath": "$WORK/out/42_p0.jpeg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpeg",
+          "temppath": "$WORK/out/42_p0.jpeg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpeg",
+          "realpath": "$WORK/out/42_p0.jpeg",
+          "temppath": "$WORK/out/42_p0.jpeg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpeg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpeg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpeg",
+          "num": 0
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpeg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpeg",
+          "temppath": "$WORK/out/42_p1.jpeg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpeg",
+          "num": 1,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpeg",
+          "temppath": "$WORK/out/42_p1.jpeg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpeg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpeg",
+          "temppath": "$WORK/out/42_p1.jpeg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpeg",
+          "temppath": "$WORK/out/42_p1.jpeg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpeg",
+          "realpath": "$WORK/out/42_p1.jpeg",
+          "temppath": "$WORK/out/42_p1.jpeg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p1.jpeg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p1.jpeg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpeg",
+          "num": 1
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p1.jpeg.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.webm": "73796e74686574696320636f6e76657274656420616e696d6174696f6e"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm"
+    },
+    {
+      "name": "frames_keep_success",
+      "options": {
+        "keep-files": true
+      },
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 1,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 1
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.jpg": "66697874757265206672616d65",
+        "out/42_p0.webm": "73796e74686574696320636f6e76657274656420616e696d6174696f6e",
+        "out/42_p1.jpg": "66697874757265206672616d65"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm"
+    },
+    {
+      "name": "frames_failure_preserves_sources",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": null,
+      "retcode": 7,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 1,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 1
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.jpg": "66697874757265206672616d65",
+        "out/42_p1.jpg": "66697874757265206672616d65"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p1.jpg.part"
+    },
+    {
+      "name": "frames_first_archived_missing_copy_soft",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": "archive_first",
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": true
+        },
+        {
+          "event": "fix_extension"
+        },
+        {
+          "event": "skip",
+          "extension": "jpg"
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 1,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 1
+        }
+      ],
+      "calls": [],
+      "outputs": {
+        "out/42_p1.jpg": "66697874757265206672616d65"
+      },
+      "error": null,
+      "final_extension": "jpg",
+      "final_realpath": "$WORK/out/42_p1.jpg"
+    },
+    {
+      "name": "frames_final_archived_no_conversion",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": "archive_last",
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 1,
+          "result": true
+        },
+        {
+          "event": "fix_extension"
+        },
+        {
+          "event": "skip",
+          "extension": "jpg"
+        }
+      ],
+      "calls": [],
+      "outputs": {
+        "out/42_p0.jpg": "66697874757265206672616d65"
+      },
+      "error": null,
+      "final_extension": "jpg",
+      "final_realpath": "$WORK/out/42_p1.jpg"
+    },
+    {
+      "name": "frames_final_exists_no_conversion",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": "exists_last",
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 1,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": true
+        },
+        {
+          "event": "skip",
+          "extension": "jpg"
+        }
+      ],
+      "calls": [],
+      "outputs": {
+        "out/42_p0.jpg": "66697874757265206672616d65",
+        "out/42_p1.jpg": "6578697374696e67"
+      },
+      "error": null,
+      "final_extension": "jpg",
+      "final_realpath": "$WORK/out/42_p1.jpg"
+    },
+    {
+      "name": "frames_only_first_no_conversion",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        }
+      ],
+      "calls": [],
+      "outputs": {
+        "out/42_p0.jpg": "66697874757265206672616d65"
+      },
+      "error": null,
+      "final_extension": "jpg",
+      "final_realpath": "$WORK/out/42_p0.jpg"
+    },
+    {
+      "name": "frames_only_last_prepare_error",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        1
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        }
+      ],
+      "calls": [],
+      "outputs": {},
+      "error": "AttributeError",
+      "final_extension": "jpg",
+      "final_realpath": "$WORK/out/42_p1.jpg"
+    },
+    {
+      "name": "frames_archive_after_observes_conversion",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0,
+        1
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": true,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        },
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 1,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p1.jpg",
+          "temppath": "$WORK/out/42_p1.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p1.jpg"
+        },
+        {
+          "event": "set_extension",
+          "extension": "webm",
+          "kw_extension": "webm"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.webm",
+          "temppath": "$WORK/out/42_p1.jpg.part"
+        },
+        {
+          "event": "exists",
+          "extension": "webm",
+          "result": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.webm"
+        },
+        {
+          "event": "archive_add",
+          "extension": "webm",
+          "num": 0
+        }
+      ],
+      "calls": [
+        {
+          "args": [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            "$TEMP/ffconcat.txt",
+            "-r",
+            "1000/25",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-pix_fmt",
+            "yuv420p",
+            "$WORK/out/42_p0.webm"
+          ],
+          "stdout": null,
+          "stderr": null
+        }
+      ],
+      "outputs": {
+        "out/42_p0.webm": "73796e74686574696320636f6e76657274656420616e696d6174696f6e"
+      },
+      "error": null,
+      "final_extension": "webm",
+      "final_realpath": "$WORK/out/42_p0.webm"
+    },
+    {
+      "name": "single_frame_original_no_conversion",
+      "options": {},
+      "kind": "frames",
+      "indices": [
+        0
+      ],
+      "skip": null,
+      "retcode": 0,
+      "archive_after": false,
+      "events": [
+        {
+          "event": "set_filename",
+          "extension": "jpg"
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_check",
+          "extension": "jpg",
+          "num": 0,
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "exists",
+          "extension": "jpg",
+          "result": false
+        },
+        {
+          "event": "build_path",
+          "path": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "download",
+          "url": "https://i.pximg.net/fixture",
+          "extension": "jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part"
+        },
+        {
+          "event": "finalize",
+          "extension": "jpg",
+          "realpath": "$WORK/out/42_p0.jpg",
+          "temppath": "$WORK/out/42_p0.jpg.part",
+          "delete": false
+        },
+        {
+          "event": "set_mtime",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "success",
+          "path": "$WORK/out/42_p0.jpg"
+        },
+        {
+          "event": "archive_add",
+          "extension": "jpg",
+          "num": 0
+        }
+      ],
+      "calls": [],
+      "outputs": {
+        "out/42_p0.jpg": "66697874757265206672616d65"
+      },
+      "error": null,
+      "final_extension": "jpg",
+      "final_realpath": "$WORK/out/42_p0.jpg"
+    }
+  ],
+  "category_filter_vectors": [
+    {
+      "name": "comma_pixiv",
+      "whitelist": "pixiv,pixiv-novel",
+      "blacklist": null,
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "comma_novel",
+      "whitelist": "pixiv,pixiv-novel",
+      "blacklist": null,
+      "category": "pixiv-novel",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "comma_other",
+      "whitelist": "pixiv,pixiv-novel",
+      "blacklist": null,
+      "category": "direct",
+      "subcategory": "work",
+      "allowed": false,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "whitelist_star",
+      "whitelist": [
+        "*"
+      ],
+      "blacklist": null,
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": false,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "whitelist_all_literal",
+      "whitelist": [
+        "all"
+      ],
+      "blacklist": null,
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": false,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "blacklist_star",
+      "whitelist": null,
+      "blacklist": [
+        "*"
+      ],
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "blacklist_all_literal",
+      "whitelist": null,
+      "blacklist": [
+        "all"
+      ],
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "category_wildcard",
+      "whitelist": [
+        "pixiv:*"
+      ],
+      "blacklist": null,
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "category_wildcard_other",
+      "whitelist": [
+        "pixiv:*"
+      ],
+      "blacklist": null,
+      "category": "pixiv-novel",
+      "subcategory": "work",
+      "allowed": false,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "category_empty_suffix",
+      "whitelist": [
+        "pixiv:"
+      ],
+      "blacklist": null,
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "empty_string_white_overrides_black",
+      "whitelist": "",
+      "blacklist": [
+        "pixiv"
+      ],
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "empty_list_white_overrides_black",
+      "whitelist": [],
+      "blacklist": [
+        "pixiv"
+      ],
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "no_whitespace_trim",
+      "whitelist": " pixiv",
+      "blacklist": null,
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": false,
+      "unsupported_qualifier": false
+    },
+    {
+      "name": "qualified_source_work",
+      "whitelist": [
+        "pixiv:work"
+      ],
+      "blacklist": null,
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": true,
+      "unsupported_qualifier": true
+    },
+    {
+      "name": "null_white_uses_black",
+      "whitelist": null,
+      "blacklist": [
+        "pixiv"
+      ],
+      "category": "pixiv",
+      "subcategory": "work",
+      "allowed": false,
+      "unsupported_qualifier": false
+    }
+  ],
+  "util_source_sha256": "e83f82ac40e18485e374f947d437bb5466bd2748db8fec1a96a90aebd528b725",
+  "config_scope_vectors": [
+    {
+      "name": "root_common_wins",
+      "config": {
+        "postprocessors": [
+          {
+            "name": "ugoira",
+            "extension": "gif"
+          }
+        ],
+        "extractor": {
+          "postprocessors": [
+            {
+              "name": "ugoira",
+              "extension": "webm"
+            }
+          ],
+          "postprocessor-options": {
+            "extension": "mkv"
+          },
+          "pixiv": {
+            "postprocessors": [
+              {
+                "name": "ugoira",
+                "extension": "mp4"
+              }
+            ],
+            "postprocessor-options": {
+              "extension": "mp4"
+            }
+          }
+        },
+        "postprocessor-options": {
+          "extension": "avi"
+        }
+      },
+      "accumulated": [
+        {
+          "name": "ugoira",
+          "extension": "mp4"
+        },
+        {
+          "name": "ugoira",
+          "extension": "webm"
+        },
+        {
+          "name": "ugoira",
+          "extension": "gif"
+        }
+      ],
+      "common_options": {
+        "extension": "avi"
+      }
+    },
+    {
+      "name": "root_null_clears",
+      "config": {
+        "postprocessors": [
+          {
+            "name": "ugoira",
+            "extension": "gif"
+          }
+        ],
+        "extractor": {
+          "postprocessors": [
+            {
+              "name": "ugoira",
+              "extension": "webm"
+            }
+          ],
+          "postprocessor-options": {
+            "extension": "mkv"
+          },
+          "pixiv": {
+            "postprocessors": [
+              {
+                "name": "ugoira",
+                "extension": "mp4"
+              }
+            ],
+            "postprocessor-options": {
+              "extension": "mp4"
+            }
+          }
+        },
+        "postprocessor-options": null
+      },
+      "accumulated": [
+        {
+          "name": "ugoira",
+          "extension": "mp4"
+        },
+        {
+          "name": "ugoira",
+          "extension": "webm"
+        },
+        {
+          "name": "ugoira",
+          "extension": "gif"
+        }
+      ],
+      "common_options": null
+    },
+    {
+      "name": "category_null_clears",
+      "config": {
+        "postprocessors": [
+          {
+            "name": "ugoira",
+            "extension": "gif"
+          }
+        ],
+        "extractor": {
+          "postprocessors": [
+            {
+              "name": "ugoira",
+              "extension": "webm"
+            }
+          ],
+          "postprocessor-options": {
+            "extension": "mkv"
+          },
+          "pixiv": {
+            "postprocessors": [
+              {
+                "name": "ugoira",
+                "extension": "mp4"
+              }
+            ],
+            "postprocessor-options": null
+          }
+        }
+      },
+      "accumulated": [
+        {
+          "name": "ugoira",
+          "extension": "mp4"
+        },
+        {
+          "name": "ugoira",
+          "extension": "webm"
+        },
+        {
+          "name": "ugoira",
+          "extension": "gif"
+        }
+      ],
+      "common_options": null
+    }
+  ],
+  "config_source_sha256": "b25267b22dd7cda77163d09fbcbd94673e400dca4a1fb4af1dfd1ef24a7a74fd"
+}

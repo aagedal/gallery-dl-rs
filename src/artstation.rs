@@ -10,7 +10,7 @@
 //! are skipped.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -182,6 +182,9 @@ fn extension(url: &Url) -> String {
 
 /// Parse a `projects/HASH.json` response into its image assets.
 pub fn parse_project(bytes: &[u8], hash: &str) -> Result<Vec<Media>> {
+    parse_project_data(bytes, hash).map(|(media, _)| media)
+}
+fn parse_project_data(bytes: &[u8], hash: &str) -> Result<(Vec<Media>, usize)> {
     let project: Value =
         serde_json::from_slice(bytes).map_err(|_| error("ArtStation returned invalid JSON"))?;
     if text(&project, "hash_id").as_deref() != Some(hash) {
@@ -198,7 +201,7 @@ pub fn parse_project(bytes: &[u8], hash: &str) -> Result<Vec<Media>> {
         .and_then(Value::as_array)
         .ok_or_else(|| error("ArtStation project contains no asset list"))?;
     let mut items = Vec::new();
-    for asset in assets {
+    for (position, asset) in assets.iter().enumerate() {
         if text(asset, "asset_type").as_deref() != Some("image")
             || asset.get("has_image").and_then(Value::as_bool) == Some(false)
         {
@@ -226,7 +229,7 @@ pub fn parse_project(bytes: &[u8], hash: &str) -> Result<Vec<Media>> {
                 username: username.clone(),
                 caption: caption.clone(),
                 timestamp,
-                index: items.len() + 1,
+                index: position + 1,
                 ..PostMetadata::default()
             }),
             url,
@@ -234,7 +237,7 @@ pub fn parse_project(bytes: &[u8], hash: &str) -> Result<Vec<Media>> {
             handoff: BTreeMap::new(),
         });
     }
-    Ok(items)
+    Ok((items, assets.len()))
 }
 
 /// Parse a `users/USER/projects.json` page into project hashes and
@@ -321,11 +324,31 @@ impl ArtStation {
 
     async fn project(&self, hash: &str) -> Result<VecDeque<ExtractionEvent>> {
         let body = self.call(&format!("projects/{hash}.json")).await?;
-        let mut items = parse_project(&body, hash)?;
+        let (mut items, count) = parse_project_data(&body, hash)?;
         for item in &mut items {
             self.network.apply_media(item);
         }
-        Ok(group(items, "artstation"))
+        // Upstream emits Directory for each asset, even within one project.
+        // Each asset's Url then reuses that Directory dictionary.
+        Ok(items
+            .into_iter()
+            .flat_map(|item| {
+                let policy = KeywordPolicy::shared(&[
+                    "num",
+                    "index",
+                    "media_id",
+                    "filename",
+                    "name",
+                    "extension",
+                ])
+                .with_post_fields(&item, &["num", "index"]);
+                let mut events = group_with_keywords(vec![item], "artstation", policy);
+                if let Some(ExtractionEvent::Post(post)) = events.front_mut() {
+                    post.count = Some(count);
+                }
+                events
+            })
+            .collect())
     }
 
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
@@ -536,8 +559,8 @@ mod tests {
         );
         assert_eq!(meta.username.as_deref(), Some("alice"));
         assert_eq!(meta.caption.as_deref(), Some("Ship"));
-        assert_eq!((meta.timestamp, meta.index), (Some(1704067200), 1));
-        assert_eq!(items[1].metadata.as_ref().unwrap().index, 2);
+        assert_eq!((meta.timestamp, meta.index), (Some(1704067200), 2));
+        assert_eq!(items[1].metadata.as_ref().unwrap().index, 6);
         let file = meta.file.as_ref().unwrap();
         assert_eq!((file.width, file.height), (Some(1920), Some(1080)));
         let key = items[0].archive_key().unwrap();
@@ -635,12 +658,35 @@ mod tests {
             response("503 Service Unavailable", b""),
             ok(project("LQVJr")),
         ]);
-        let media: Vec<_> = artstation(root)
+        let events: Vec<_> = artstation(root)
             .with_retries(1)
-            .stream(&Url::parse("https://www.artstation.com/artwork/LQVJr").unwrap())
+            .events(&Url::parse("https://www.artstation.com/artwork/LQVJr").unwrap())
             .collect()
             .await;
-        assert_eq!(media.len(), 2);
+        assert_eq!(events.len(), 6);
+        for (position, group) in events.as_chunks::<3>().0.iter().enumerate() {
+            let ExtractionEvent::Post(post) = group[0].as_ref().unwrap() else {
+                panic!("one source Directory per asset")
+            };
+            assert_eq!(post.count, Some(6));
+            let KeywordPolicy::Shared {
+                file_fields,
+                post_fields,
+                ..
+            } = &post.keywords
+            else {
+                panic!("ArtStation asset must reuse Directory keywords")
+            };
+            assert_eq!(post_fields["num"], [2, 6][position]);
+            let filter = crate::filter::FilterExpression::parse("num == 2 and count == 6").unwrap();
+            assert_eq!(filter.matches_post(post).unwrap(), position == 0);
+            assert_eq!(
+                file_fields.as_ref(),
+                &["num", "index", "media_id", "filename", "name", "extension"]
+            );
+            assert!(matches!(group[1], Ok(ExtractionEvent::Media(_))));
+            assert!(matches!(group[2], Ok(ExtractionEvent::EndPost)));
+        }
         let requests = server.join().unwrap();
         let request = requests[1].to_ascii_lowercase();
         assert!(

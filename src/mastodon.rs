@@ -2,13 +2,13 @@
 //!
 //! Mirrors gallery_dl/extractor/mastodon.py for the instances upstream ships
 //! (mastodon.social, pawoo.net, baraag.net) using the public REST API. All
-//! instances share the single `mastodon` category; the instance host is kept
+//! instances use their upstream categories; the instance host is kept
 //! in the `instance` metadata field and the archive key. Media attachments are
 //! served from instance-chosen CDNs, so any HTTPS host is accepted for files;
 //! no API headers or cookies are attached to media requests.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ExtractionEvent, KeywordPolicy, Post, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -21,7 +21,7 @@ use futures_util::{
 use reqwest::{Client, StatusCode, header};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -38,10 +38,72 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const PAGE_LIMIT: &str = "40";
 const MAX_PAGES: usize = 100;
 
+/// Upstream category for each supported instance (also the credential scope).
+pub fn instance_category(host: &str) -> Option<&'static str> {
+    match host {
+        "mastodon.social" => Some("mastodon.social"),
+        "pawoo.net" => Some("pawoo"),
+        "baraag.net" => Some("baraag"),
+        _ => None,
+    }
+}
+
+/// Upstream Mastodon status selection defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SelectionOptions {
+    pub reblogs: bool,
+    pub replies: bool,
+    pub text_posts: bool,
+    pub cards: bool,
+}
+
+impl Default for SelectionOptions {
+    fn default() -> Self {
+        Self {
+            reblogs: false,
+            replies: true,
+            text_posts: false,
+            cards: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Status { host: String, id: String },
     User { host: String, acct: String },
+    Collection { host: String, feed: Collection },
+}
+
+/// Mastodon collections use server-provided cursors; bookmark IDs are not status IDs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Collection {
+    Bookmarks,
+    Favourites,
+    List(String),
+    Hashtag(String),
+}
+
+fn hashtag(raw: &str) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut input = raw.bytes();
+    while let Some(b) = input.next() {
+        bytes.push(if b == b'%' {
+            let high = (input.next()? as char).to_digit(16)? as u8;
+            let low = (input.next()? as char).to_digit(16)? as u8;
+            high * 16 + low
+        } else {
+            b
+        });
+        if bytes.len() > 512 {
+            return None;
+        }
+    }
+    let tag = String::from_utf8(bytes).ok()?;
+    (!tag.is_empty()
+        && tag.chars().count() <= 128
+        && tag.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    .then_some(tag)
 }
 
 /// Status and attachment IDs are decimal snowflakes.
@@ -49,8 +111,44 @@ pub fn valid_id(id: &str) -> bool {
     (1..=24).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// Preview-card identities follow upstream's instance-owned thumbnail IDs.
+pub fn valid_media_id(id: &str) -> bool {
+    valid_id(id) || id.strip_prefix("card").is_some_and(valid_id)
+}
+
+fn card_id(url: &Url) -> String {
+    let count = url.path_segments().map_or(0, Iterator::count);
+    let mut id = String::new();
+    if count >= 5 {
+        for segment in url
+            .path_segments()
+            .into_iter()
+            .flatten()
+            .skip(3)
+            .take(count - 5)
+        {
+            for byte in segment.bytes() {
+                if !byte.is_ascii_digit() {
+                    return "card".into();
+                }
+                if id.is_empty() && byte == b'0' {
+                    continue;
+                }
+                id.push(byte as char);
+                if id.len() > 24 {
+                    return "card".into();
+                }
+            }
+        }
+    }
+    format!("card{id}")
+}
+
 /// `user` or `user@domain`.
 fn valid_acct(acct: &str) -> bool {
+    if let Some(id) = acct.strip_prefix("id:") {
+        return valid_id(id);
+    }
     let (user, domain) = acct.split_once('@').unwrap_or((acct, ""));
     (1..=64).contains(&user.len())
         && user
@@ -66,7 +164,7 @@ fn valid_acct(acct: &str) -> bool {
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Mastodon URL; expected a status (/@USER/ID, /web/statuses/ID) or user (/@USER[/media]) link on mastodon.social, pawoo.net or baraag.net",
+            "unsupported Mastodon URL; expected a status, user, bookmarks, favourites, list or hashtag link on mastodon.social, pawoo.net or baraag.net",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -82,6 +180,7 @@ pub fn target(url: &Url) -> Result<Target> {
         .path_segments()
         .map(|segments| segments.filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
+    let segments = segments.strip_prefix(&["web"]).unwrap_or(&segments);
     let host = host.to_owned();
     let status = |id: &str| {
         valid_id(id)
@@ -92,7 +191,7 @@ pub fn target(url: &Url) -> Result<Target> {
             .ok_or_else(unsupported)
     };
     let user = |name: &str| {
-        let acct = name.strip_prefix('@').ok_or_else(unsupported)?;
+        let acct = name.strip_prefix('@').unwrap_or(name);
         valid_acct(acct)
             .then(|| Target::User {
                 host: host.clone(),
@@ -100,13 +199,24 @@ pub fn target(url: &Url) -> Result<Target> {
             })
             .ok_or_else(unsupported)
     };
-    match segments.as_slice() {
-        ["web", "statuses", id] | ["users", _, "statuses", id] => status(id),
-        [name, id] | ["web", name, id] if name.starts_with('@') && *id != "media" => {
+    let collection = |feed| {
+        Ok(Target::Collection {
+            host: host.clone(),
+            feed,
+        })
+    };
+    match segments {
+        ["statuses", id] | ["notice", id] | ["users", _, "statuses", id] => status(id),
+        ["users", name] | ["users", name, "media"] => user(name),
+        [name, id] if name.starts_with('@') && *id != "media" => {
             user(name)?;
             status(id)
         }
-        [name] | [name, "media"] | ["web", name] | ["web", name, "media"] => user(name),
+        [name] | [name, "media"] if name.starts_with('@') => user(name),
+        ["bookmarks"] => collection(Collection::Bookmarks),
+        ["favourites"] => collection(Collection::Favourites),
+        ["lists", id] if valid_id(id) => collection(Collection::List((*id).into())),
+        ["tags", raw] => collection(Collection::Hashtag(hashtag(raw).ok_or_else(unsupported)?)),
         _ => Err(unsupported()),
     }
 }
@@ -182,15 +292,13 @@ fn extension(url: &Url, kind: &str) -> String {
         })
 }
 
-/// Parse one status object. Reblogs and statuses without supported media
-/// yield an empty list.
-pub fn parse_status(status: &Value, instance: &str) -> Vec<Media> {
-    let Some(id) = id_of(status) else {
-        return Vec::new();
-    };
-    if status.get("reblog").is_some_and(|v| !v.is_null()) {
-        return Vec::new();
-    }
+fn selected(status: &Value, options: SelectionOptions) -> bool {
+    id_of(status).is_some()
+        && (options.reblogs || status.get("reblog").is_none_or(Value::is_null))
+        && (options.replies || status.get("in_reply_to_id").is_none_or(Value::is_null))
+}
+
+fn post_metadata(status: &Value, instance: &str) -> PostMetadata {
     let username: Option<Arc<str>> = status
         .get("account")
         .and_then(|account| string(account, "acct"))
@@ -200,11 +308,45 @@ pub fn parse_status(status: &Value, instance: &str) -> Vec<Media> {
         .filter(|c| !c.is_empty())
         .map(Arc::from);
     let timestamp = string(status, "created_at").and_then(|d| crate::date::parse_date(d).ok());
+    PostMetadata {
+        post_id: id_of(status).unwrap_or_default().into(),
+        username,
+        caption,
+        timestamp,
+        instance: Some(instance.into()),
+        ..PostMetadata::default()
+    }
+}
+
+/// Parse one status using the default media-only selection.
+pub fn parse_status(status: &Value, instance: &str) -> Vec<Media> {
+    parse_status_with_options(status, instance, SelectionOptions::default())
+}
+
+pub fn parse_status_with_options(
+    status: &Value,
+    instance: &str,
+    options: SelectionOptions,
+) -> Vec<Media> {
+    if !selected(status, options) {
+        return Vec::new();
+    }
+    let id = id_of(status).expect("selected status ID");
+    let metadata = post_metadata(status, instance);
     let attachments = status
         .get("media_attachments")
         .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
+        .into_iter()
+        .flatten()
+        .chain(
+            status
+                .get("reblog")
+                .and_then(|s| s.get("media_attachments"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        );
+    let mut seen = HashSet::new();
     let mut media = Vec::new();
     for attachment in attachments {
         let Some(kind) = string(attachment, "type")
@@ -221,6 +363,9 @@ pub fn parse_status(status: &Value, instance: &str) -> Vec<Media> {
         else {
             continue;
         };
+        if !seen.insert(media_id) {
+            continue;
+        }
         let original = attachment.pointer("/meta/original").unwrap_or(&Value::Null);
         let positive = |key: &str| original.get(key).and_then(Value::as_u64).filter(|v| *v > 0);
         let index = media.len() + 1;
@@ -228,7 +373,7 @@ pub fn parse_status(status: &Value, instance: &str) -> Vec<Media> {
         media.push(Media {
             url,
             job: MediaJob::DirectHttp,
-            category: "mastodon".into(),
+            category: instance_category(instance).unwrap_or("mastodon").into(),
             filename: format!("{id}_{media_id}.{ext}"),
             metadata: Some(PostMetadata {
                 file: Some(FileMetadata {
@@ -244,12 +389,38 @@ pub fn parse_status(status: &Value, instance: &str) -> Vec<Media> {
                 }),
                 post_id: id.into(),
                 media_id: media_id.into(),
-                username: username.clone(),
-                caption: caption.clone(),
-                timestamp,
                 index,
-                instance: Some(instance.into()),
-                ..PostMetadata::default()
+                ..metadata.clone()
+            }),
+            headers: BTreeMap::new(),
+            handoff: BTreeMap::new(),
+        });
+    }
+    if options.cards
+        && let Some(card) = status.get("card")
+        && let Some(url) = string(card, "image").and_then(media_url)
+    {
+        let media_id = card_id(&url);
+        let ext = extension(&url, "image");
+        let positive = |key| card.get(key).and_then(Value::as_u64).filter(|n| *n > 0);
+        media.push(Media {
+            filename: format!("{id}_{media_id}.{ext}"),
+            url,
+            job: MediaJob::DirectHttp,
+            category: instance_category(instance).unwrap_or("mastodon").into(),
+            metadata: Some(PostMetadata {
+                media_id,
+                index: media.len() + 1,
+                file: Some(FileMetadata {
+                    width: positive("width"),
+                    height: positive("height"),
+                    media_type: Some("card".into()),
+                    description: string(card, "description")
+                        .or_else(|| string(card, "title"))
+                        .map(Arc::from),
+                    ..FileMetadata::default()
+                }),
+                ..metadata
             }),
             headers: BTreeMap::new(),
             handoff: BTreeMap::new(),
@@ -323,12 +494,16 @@ pub struct Mastodon {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    selection: SelectionOptions,
+    access_token: Option<(String, header::HeaderValue)>,
 }
 
 struct TimelineState {
     root: Url,
     host: String,
-    account: String,
+    path: String,
+    account_query: bool,
+    seen_cursors: HashSet<String>,
     max_id: Option<String>,
     pages: usize,
     done: bool,
@@ -345,7 +520,42 @@ impl Mastodon {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            selection: SelectionOptions::default(),
+            access_token: None,
         })
+    }
+
+    /// Explicit bearer credentials are sent only to this extractor's API origin.
+    pub fn with_access_token_for(mut self, instance: &str, token: Option<&str>) -> Result<Self> {
+        if instance_category(instance).is_none() {
+            return Err(error("unsupported Mastodon credential instance"));
+        }
+        self.access_token = match token.filter(|token| !token.is_empty()) {
+            None => None,
+            Some(token)
+                if token != "cache"
+                    && token.len() <= 4096
+                    && token
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b)) =>
+            {
+                let mut value = header::HeaderValue::from_str(&format!("Bearer {token}"))
+                    .map_err(|_| error("invalid Mastodon access token"))?;
+                value.set_sensitive(true);
+                Some((instance.into(), value))
+            }
+            Some(_) => {
+                return Err(error(
+                    "invalid Mastodon access token; OAuth cache discovery is not implemented",
+                ));
+            }
+        };
+        Ok(self)
+    }
+
+    pub fn with_selection(mut self, selection: SelectionOptions) -> Self {
+        self.selection = selection;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -398,28 +608,90 @@ impl Mastodon {
         for item in &mut media {
             self.network.apply_media(item);
         }
-        group(media, "mastodon")
+        let category = media
+            .first()
+            .map_or("mastodon", |m| m.category.as_str())
+            .to_owned();
+        group(media, &category)
+    }
+
+    fn status_events(&self, status: &Value, host: &str) -> VecDeque<ExtractionEvent> {
+        if !selected(status, self.selection) {
+            return VecDeque::new();
+        }
+        let media = parse_status_with_options(status, host, self.selection);
+        if !media.is_empty() {
+            return self.finish(media);
+        }
+        if !self.selection.text_posts {
+            return VecDeque::new();
+        }
+        VecDeque::from([
+            ExtractionEvent::Post(Box::new(Post {
+                keywords: Default::default(),
+                category: instance_category(host).unwrap_or("mastodon").into(),
+                metadata: Some(post_metadata(status, host)),
+                count: Some(0),
+            })),
+            ExtractionEvent::EndPost,
+        ])
     }
 
     async fn next_page(&self, state: &mut TimelineState) -> Result<()> {
-        let mut query = vec![
-            ("only_media", "true"),
-            ("exclude_reblogs", "true"),
-            ("limit", PAGE_LIMIT),
-        ];
+        let mut query = if state.account_query {
+            vec![
+                (
+                    "only_media",
+                    if self.selection.reblogs || self.selection.text_posts || self.selection.cards {
+                        "false"
+                    } else {
+                        "true"
+                    },
+                ),
+                (
+                    "exclude_reblogs",
+                    if self.selection.reblogs {
+                        "false"
+                    } else {
+                        "true"
+                    },
+                ),
+                (
+                    "exclude_replies",
+                    if self.selection.replies {
+                        "false"
+                    } else {
+                        "true"
+                    },
+                ),
+                ("limit", PAGE_LIMIT),
+            ]
+        } else {
+            vec![("limit", PAGE_LIMIT)]
+        };
         if let Some(max_id) = &state.max_id {
             query.push(("max_id", max_id));
         }
-        let path = format!("api/v1/accounts/{}/statuses", state.account);
-        let (body, link) = self.call(&state.root, &path, &query).await?;
-        let page = parse_timeline(&body, &state.host)?;
+        let (body, link) = self.call(&state.root, &state.path, &query).await?;
+        let body = json(&body)?;
+        let entries = body
+            .as_array()
+            .ok_or_else(|| error("Mastodon response is not a status list"))?;
+        let last_id = entries.last().and_then(id_of).map(str::to_owned);
         state.pages += 1;
-        let next = link.as_deref().and_then(next_max_id).or(page.last_id);
-        state.done = next.is_none() || next == state.max_id || state.pages >= MAX_PAGES;
+        let next = link
+            .as_deref()
+            .and_then(next_max_id)
+            .or_else(|| state.account_query.then_some(last_id).flatten());
+        state.done = next
+            .as_ref()
+            .is_none_or(|cursor| !state.seen_cursors.insert(cursor.clone()))
+            || state.pages >= MAX_PAGES;
         state.max_id = next;
-        for media in page.statuses {
-            let events = self.finish(media);
-            state.pending.extend(events);
+        for status in entries {
+            state
+                .pending
+                .extend(self.status_events(status, &state.host));
         }
         Ok(())
     }
@@ -440,8 +712,17 @@ impl Mastodon {
                 let (body, _) = self
                     .call(&root, &format!("api/v1/statuses/{id}"), &[])
                     .await?;
-                let media = parse_single(&body, &id, &host)?;
-                Ok::<_, crate::Error>(stream::iter(self.finish(media).into_iter().map(Ok)))
+                let status = json(&body)?;
+                if id_of(&status) != Some(id.as_str()) {
+                    return Err(error(
+                        "Mastodon response does not match the requested status",
+                    ));
+                }
+                let events = self.status_events(&status, &host);
+                if events.is_empty() && selected(&status, self.selection) {
+                    return Err(error("Mastodon status contains no supported media"));
+                }
+                Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)))
             })
             .map(|result| match result {
                 Ok(events) => events.boxed(),
@@ -449,51 +730,79 @@ impl Mastodon {
             })
             .flatten()
             .boxed(),
-            Target::User { host, acct } => {
-                stream::unfold(Some((host, acct, None)), move |state| async move {
-                    let (host, acct, state) = state?;
-                    let mut state: TimelineState = match state {
-                        Some(state) => state,
-                        None => match self.lookup(&host, &acct).await {
-                            Ok(state) => state,
-                            Err(e) => return Some((Err(e), None)),
-                        },
-                    };
-                    loop {
-                        if let Some(event) = state.pending.pop_front() {
-                            return Some((Ok(event), Some((host, acct, Some(state)))));
-                        }
-                        if state.done {
-                            return None;
-                        }
-                        if let Err(e) = self.next_page(&mut state).await {
-                            return Some((Err(e), None));
-                        }
+            target => stream::unfold(Some((target, None)), move |state| async move {
+                let (target, state) = state?;
+                let mut state: TimelineState = match state {
+                    Some(state) => state,
+                    None => match self.timeline(&target).await {
+                        Ok(state) => state,
+                        Err(e) => return Some((Err(e), None)),
+                    },
+                };
+                loop {
+                    if let Some(event) = state.pending.pop_front() {
+                        return Some((Ok(event), Some((target, Some(state)))));
                     }
-                })
-                .boxed()
-            }
+                    if state.done {
+                        return None;
+                    }
+                    if let Err(e) = self.next_page(&mut state).await {
+                        return Some((Err(e), None));
+                    }
+                }
+            })
+            .boxed(),
         }
     }
 
-    async fn lookup(&self, host: &str, acct: &str) -> Result<TimelineState> {
-        let root = self.root(host);
-        let (body, _) = self
-            .call(&root, "api/v1/accounts/lookup", &[("acct", acct)])
-            .await?;
-        let account = json(&body)?;
-        let id = id_of(&account)
-            .ok_or_else(|| error("Mastodon account lookup returned no account ID"))?
-            .to_owned();
+    async fn timeline(&self, target: &Target) -> Result<TimelineState> {
+        let (host, path, account_query) = match target {
+            Target::User { host, acct } => {
+                let id = if let Some(id) = acct.strip_prefix("id:") {
+                    id.to_owned()
+                } else {
+                    let (body, _) = self
+                        .call(
+                            &self.root(host),
+                            "api/v1/accounts/lookup",
+                            &[("acct", acct)],
+                        )
+                        .await?;
+                    let account = json(&body)?;
+                    id_of(&account)
+                        .ok_or_else(|| error("Mastodon account lookup returned no account ID"))?
+                        .to_owned()
+                };
+                (host, format!("api/v1/accounts/{id}/statuses"), true)
+            }
+            Target::Collection { host, feed } => {
+                let path = match feed {
+                    Collection::Bookmarks => "api/v1/bookmarks".into(),
+                    Collection::Favourites => "api/v1/favourites".into(),
+                    Collection::List(id) => format!("api/v1/timelines/list/{id}"),
+                    Collection::Hashtag(tag) => format!("api/v1/timelines/tag/{tag}"),
+                };
+                (host, path, false)
+            }
+            Target::Status { .. } => unreachable!("statuses do not have timeline state"),
+        };
         Ok(TimelineState {
-            root,
-            host: host.into(),
-            account: id,
+            root: self.root(host),
+            host: host.clone(),
+            path,
+            account_query,
+            seen_cursors: HashSet::new(),
             max_id: None,
             pages: 0,
             done: false,
             pending: VecDeque::new(),
         })
+    }
+
+    fn authorization(&self, target: &Url) -> Option<&header::HeaderValue> {
+        let (instance, token) = self.access_token.as_ref()?;
+        (target.path().starts_with("/api/") && target.origin() == self.root(instance).origin())
+            .then_some(token)
     }
 
     async fn request(&self, endpoint: &Url) -> Result<(Vec<u8>, Option<String>)> {
@@ -518,11 +827,15 @@ impl Mastodon {
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let response = self
+            let mut request = self
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout)
-                .header(header::ACCEPT, "application/json")
+                .header(header::ACCEPT, "application/json");
+            if let Some(token) = self.authorization(&target) {
+                request = request.header(header::AUTHORIZATION, token.clone());
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Mastodon request failed; check network access"))?;
@@ -555,18 +868,20 @@ impl Mastodon {
         }
         if matches!(status.as_u16(), 401 | 403) {
             return Err(error(
-                "Mastodon refused access (private, suspended or authorization-required content)",
+                "Mastodon refused access; configure a valid mastodon access-token for private or authorization-required content",
             )
             .into());
         }
         if !status.is_success() {
             return Err(error(format!("Mastodon returned HTTP {status}")).into());
         }
-        let link = response
+        let links = response
             .headers()
-            .get(header::LINK)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
+            .get_all(header::LINK)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect::<Vec<_>>();
+        let link = (!links.is_empty()).then(|| links.join(","));
         let mut body = Vec::new();
         while let Some(chunk) = response
             .chunk()
@@ -609,6 +924,28 @@ impl From<crate::Error> for Failure {
     }
 }
 
+// MastodonExtractor.items reuses status, assigns media, and derives its name.
+// Include native file aliases without resetting unrelated post-level fields.
+fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
+    group_with_keywords(
+        media,
+        category,
+        KeywordPolicy::shared(&[
+            "num",
+            "index",
+            "media_id",
+            "filename",
+            "name",
+            "extension",
+            "url",
+            "_url",
+            "_filesize",
+            "media",
+            "file",
+        ]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,10 +973,34 @@ mod tests {
     }
 
     #[test]
+    fn shared_keyword_policy_declares_source_file_assignments() {
+        let media = parse_single(
+            status("100").to_string().as_bytes(),
+            "100",
+            "mastodon.social",
+        )
+        .unwrap();
+        let events = group(media, "mastodon.social");
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("missing post");
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("expected shared Mastodon keywords");
+        };
+        for field in ["num", "index", "media_id", "media", "filename", "extension"] {
+            assert!(file_fields.iter().any(|f| f == field));
+        }
+        for field in ["width", "height", "description", "caption"] {
+            assert!(!file_fields.iter().any(|f| f == field));
+        }
+    }
+
+    #[test]
     fn parses_status_metadata() {
         let body = status("100").to_string();
         let media = parse_single(body.as_bytes(), "100", "mastodon.social").unwrap();
         assert_eq!(media.len(), 2);
+        assert_eq!(media[0].category, "mastodon.social");
         assert_eq!(
             media[0].url.as_str(),
             "https://files.mastodon.social/media_attachments/files/1/original/a.jpeg"
@@ -664,6 +1025,11 @@ mod tests {
         assert!(media[0].headers.is_empty());
         let key = media[0].archive_key().unwrap();
         assert!(key.starts_with("mastodon:"), "{key}");
+        let mut legacy = media[0].clone();
+        legacy.category = "mastodon".into();
+        assert_eq!(legacy.archive_key(), Some(key.clone()));
+        legacy.category = "pawoo".into();
+        assert!(legacy.archive_key().is_none());
         assert_ne!(Some(key.clone()), media[1].archive_key());
         let other = parse_status(&status("100"), "pawoo.net");
         assert_ne!(Some(key), other[0].archive_key());
@@ -745,6 +1111,489 @@ mod tests {
         ] {
             assert!(t(raw).is_err(), "{raw}");
         }
+    }
+
+    #[test]
+    fn selects_reblogs_and_replies_without_changing_attachment_identity() {
+        let mut outer = status("100");
+        outer["reblog"] = status("200");
+        assert!(parse_status(&outer, "mastodon.social").is_empty());
+        let options = SelectionOptions {
+            reblogs: true,
+            ..SelectionOptions::default()
+        };
+        let media = parse_status_with_options(&outer, "mastodon.social", options);
+        assert_eq!(media.len(), 4);
+        assert_eq!(media[2].filename, "100_2001.jpg");
+        let meta = media[2].metadata.as_ref().unwrap();
+        assert_eq!(meta.post_id, "100");
+        assert_eq!(meta.index, 3);
+        assert_eq!(meta.username.as_deref(), Some("alice"));
+        assert_eq!(
+            media[2].archive_key(),
+            parse_status(&status("200"), "mastodon.social")[0].archive_key()
+        );
+        outer["in_reply_to_id"] = serde_json::json!("50");
+        assert!(
+            parse_status_with_options(
+                &outer,
+                "mastodon.social",
+                SelectionOptions {
+                    replies: false,
+                    ..options
+                }
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            parse_status_with_options(&outer, "mastodon.social", options).len(),
+            4
+        );
+    }
+
+    #[tokio::test]
+    async fn text_posts_emit_metadata_boundaries_and_preserve_later_media() {
+        let mut text = status("32");
+        text["media_attachments"] = serde_json::json!([]);
+        let mut reply = status("31");
+        reply["in_reply_to_id"] = serde_json::json!("30");
+        let (root, server) = serve(vec![
+            response("200 OK", "", br#"{"id":"9","acct":"alice"}"#),
+            response(
+                "200 OK",
+                "",
+                serde_json::json!([text, reply, status("30")])
+                    .to_string()
+                    .as_bytes(),
+            ),
+            response("200 OK", "", b"[]"),
+        ]);
+        let native = mastodon(root).with_selection(SelectionOptions {
+            text_posts: true,
+            replies: false,
+            ..SelectionOptions::default()
+        });
+        let events = native
+            .events(&Url::parse("https://mastodon.social/@alice").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(events.len(), 6, "{events:?}");
+        let Ok(ExtractionEvent::Post(post)) = &events[0] else {
+            panic!("missing text post")
+        };
+        assert_eq!(post.count, Some(0));
+        assert_eq!(post.metadata.as_ref().unwrap().post_id, "32");
+        assert_eq!(
+            post.metadata.as_ref().unwrap().caption.as_deref(),
+            Some("Hello & world\nline\ntwo")
+        );
+        assert!(matches!(events[1], Ok(ExtractionEvent::EndPost)));
+        let Ok(ExtractionEvent::Post(post)) = &events[2] else {
+            panic!("missing media post")
+        };
+        assert_eq!(post.metadata.as_ref().unwrap().post_id, "30");
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("only_media=false&exclude_reblogs=true&exclude_replies=true"));
+        assert!(requests[2].contains("max_id=30"));
+    }
+
+    #[tokio::test]
+    async fn selected_reblogs_request_non_media_pages_and_stop_lazily() {
+        let mut outer = status("100");
+        outer["media_attachments"] = serde_json::json!([]);
+        outer["reblog"] = status("200");
+        let (root, server) = serve(vec![
+            response("200 OK", "", br#"{"id":"9","acct":"alice"}"#),
+            response(
+                "200 OK",
+                "Link: <https://mastodon.social/?max_id=100>; rel=next\r\n",
+                serde_json::json!([outer]).to_string().as_bytes(),
+            ),
+        ]);
+        let native = mastodon(root).with_selection(SelectionOptions {
+            reblogs: true,
+            ..SelectionOptions::default()
+        });
+        let url = Url::parse("https://mastodon.social/@alice").unwrap();
+        let mut events = native.events(&url);
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::Post(_)
+        ));
+        drop(events);
+        let requests = server.join().unwrap();
+        assert!(
+            requests[1].contains("only_media=false&exclude_reblogs=false&exclude_replies=false")
+        );
+    }
+
+    #[tokio::test]
+    async fn single_text_posts_and_explicitly_excluded_replies_are_supported() {
+        let mut text = status("100");
+        text["media_attachments"] = serde_json::json!([]);
+        let (root, server) = serve(vec![response("200 OK", "", text.to_string().as_bytes())]);
+        let native = mastodon(root).with_selection(SelectionOptions {
+            text_posts: true,
+            ..SelectionOptions::default()
+        });
+        let url = Url::parse("https://mastodon.social/@alice/100").unwrap();
+        let events = native.events(&url).collect::<Vec<_>>().await;
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], Ok(ExtractionEvent::Post(_))));
+        server.join().unwrap();
+        text["in_reply_to_id"] = serde_json::json!("99");
+        let (root, server) = serve(vec![response("200 OK", "", text.to_string().as_bytes())]);
+        let native = mastodon(root).with_selection(SelectionOptions {
+            replies: false,
+            ..SelectionOptions::default()
+        });
+        assert!(native.events(&url).collect::<Vec<_>>().await.is_empty());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn recognizes_collections_numeric_accounts_and_unicode_hashtags() {
+        for (path, feed) in [
+            ("bookmarks", Collection::Bookmarks),
+            ("web/favourites", Collection::Favourites),
+            ("lists/42", Collection::List("42".into())),
+            ("tags/rust_lang", Collection::Hashtag("rust_lang".into())),
+            (
+                "tags/%E6%97%A5%E6%9C%AC",
+                Collection::Hashtag("日本".into()),
+            ),
+        ] {
+            let url = Url::parse(&format!("https://mastodon.social/{path}")).unwrap();
+            assert_eq!(
+                target(&url).unwrap(),
+                Target::Collection {
+                    host: "mastodon.social".into(),
+                    feed
+                }
+            );
+        }
+        for path in ["@id:42/media", "users/id:42", "web/users/id:42/media"] {
+            assert_eq!(
+                target(&Url::parse(&format!("https://pawoo.net/{path}")).unwrap()).unwrap(),
+                Target::User {
+                    host: "pawoo.net".into(),
+                    acct: "id:42".into()
+                }
+            );
+        }
+        for path in [
+            "lists/other",
+            "lists/42/extra",
+            "tags/a%2Fb",
+            "tags/a%26b",
+            "tags/%FF",
+            "tags/a%3Fb",
+            "tags/a+b",
+            "@id:invalid",
+        ] {
+            assert!(
+                target(&Url::parse(&format!("https://pawoo.net/{path}")).unwrap()).is_err(),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn collection_routes_use_bearer_auth_without_leaking_it_to_media() {
+        for (path, endpoint) in [
+            ("bookmarks", "bookmarks"),
+            ("favourites", "favourites"),
+            ("lists/42", "timelines/list/42"),
+            ("tags/rust_lang", "timelines/tag/rust_lang"),
+        ] {
+            let (root, server) = serve(vec![response(
+                "200 OK",
+                "",
+                serde_json::json!([status("100")]).to_string().as_bytes(),
+            )]);
+            let native = mastodon(root)
+                .with_access_token_for("mastodon.social", Some("test-token_123"))
+                .unwrap();
+            let media = native
+                .stream(&Url::parse(&format!("https://mastodon.social/{path}")).unwrap())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(media.len(), 2, "{media:?}");
+            for file in media {
+                let file = file.unwrap();
+                assert!(!file.headers.contains_key("Authorization"));
+                assert!(!serde_json::to_string(&file).unwrap().contains("test-token"));
+                assert_eq!(
+                    file.archive_key(),
+                    parse_status(&status("100"), "mastodon.social")
+                        .into_iter()
+                        .find(|m| m.filename == file.filename)
+                        .unwrap()
+                        .archive_key()
+                );
+            }
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert!(
+                requests[0].starts_with(&format!("GET /api/v1/{endpoint}?limit=40 ")),
+                "{}",
+                requests[0]
+            );
+            assert!(
+                requests[0]
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer test-token_123\r\n")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn bookmarks_follow_bookmark_cursors_and_stop_on_repeated_cursor() {
+        let body = |id| serde_json::json!([status(id)]).to_string();
+        let (root, server) = serve(vec![
+            response(
+                "200 OK",
+                "Link: <https://mastodon.social/api/v1/bookmarks?max_id=7>; rel=next\r\n",
+                body("100").as_bytes(),
+            ),
+            response(
+                "200 OK",
+                "Link: <https://mastodon.social/api/v1/bookmarks?max_id=8>; rel=next\r\n",
+                body("90").as_bytes(),
+            ),
+            response(
+                "200 OK",
+                "Link: <https://mastodon.social/api/v1/bookmarks?max_id=7>; rel=next\r\n",
+                body("80").as_bytes(),
+            ),
+        ]);
+        let native = mastodon(root)
+            .with_access_token_for("mastodon.social", Some("test-token"))
+            .unwrap();
+        let media = native
+            .stream(&Url::parse("https://mastodon.social/bookmarks").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(media.len(), 6, "{media:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /api/v1/bookmarks?limit=40&max_id=7 "));
+        assert!(requests[2].starts_with("GET /api/v1/bookmarks?limit=40&max_id=8 "));
+    }
+
+    #[tokio::test]
+    async fn numeric_users_skip_lookup_and_collection_cancellation_skips_later_pages() {
+        for (path, expected) in [
+            ("@id:9/media", "/api/v1/accounts/9/statuses?"),
+            ("bookmarks", "/api/v1/bookmarks?"),
+        ] {
+            let (root, server) = serve(vec![response(
+                "200 OK",
+                "Link: <https://mastodon.social/?max_id=3>; rel=next\r\n",
+                serde_json::json!([status("100")]).to_string().as_bytes(),
+            )]);
+            let native = mastodon(root);
+            let url = Url::parse(&format!("https://mastodon.social/{path}")).unwrap();
+            let mut stream = native.events(&url);
+            assert!(matches!(
+                stream.next().await.unwrap().unwrap(),
+                ExtractionEvent::Post(_)
+            ));
+            drop(stream);
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert!(requests[0].starts_with(&format!("GET {expected}")));
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_is_removed_from_non_api_redirects_and_failures_are_private() {
+        let (root, server) = serve(vec![
+            response("302 Found", "Location: /landing\r\n", b""),
+            response("200 OK", "", status("100").to_string().as_bytes()),
+        ]);
+        let native = mastodon(root)
+            .with_access_token_for("mastodon.social", Some("private-token"))
+            .unwrap();
+        assert!(native.access_token.as_ref().unwrap().1.is_sensitive());
+        let media = native
+            .stream(&Url::parse("https://mastodon.social/@alice/100").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(media.len(), 2);
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer ")
+        );
+        assert!(!requests[1].to_ascii_lowercase().contains("authorization:"));
+        let (root, server) = serve(vec![response(
+            "401 Unauthorized",
+            "",
+            br#"{"error":"private-token"}"#,
+        )]);
+        let native = mastodon(root)
+            .with_access_token_for("mastodon.social", Some("private-token"))
+            .unwrap()
+            .with_retries(3);
+        let error = native
+            .stream(&Url::parse("https://mastodon.social/bookmarks").unwrap())
+            .next()
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("access-token"));
+        assert!(!error.contains("private-token"));
+        assert_eq!(server.join().unwrap().len(), 1);
+        for token in ["cache", "private token", "private\r\ntoken", "秘密"] {
+            let error = mastodon(Url::parse("http://127.0.0.1:9/").unwrap())
+                .with_access_token_for("mastodon.social", Some(token))
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(!error.contains("private"));
+        }
+    }
+
+    #[test]
+    fn tokens_are_bound_to_an_explicit_instance_origin() {
+        let native = Mastodon::new(Duration::from_secs(1))
+            .unwrap()
+            .with_access_token_for("mastodon.social", Some("test-token"))
+            .unwrap();
+        assert!(
+            native
+                .authorization(&Url::parse("https://mastodon.social/api/v1/bookmarks").unwrap())
+                .is_some()
+        );
+        for url in [
+            "https://pawoo.net/api/v1/bookmarks",
+            "https://baraag.net/api/v1/bookmarks",
+            "http://mastodon.social/api/v1/bookmarks",
+            "https://mastodon.social:444/api/v1/bookmarks",
+            "https://mastodon.social/landing",
+        ] {
+            assert!(
+                native.authorization(&Url::parse(url).unwrap()).is_none(),
+                "{url}"
+            );
+        }
+        assert!(
+            Mastodon::new(Duration::from_secs(1))
+                .unwrap()
+                .with_access_token_for("unknown.example", Some("test-token"))
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn collection_paging_reads_all_link_header_fields() {
+        let (root, server) = serve(vec![
+            response(
+                "200 OK",
+                "Link: <https://mastodon.social/api/v1/bookmarks?min_id=100>; rel=prev\r\nLink: <https://mastodon.social/api/v1/bookmarks?max_id=5>; rel=next\r\n",
+                serde_json::json!([status("100")]).to_string().as_bytes(),
+            ),
+            response("200 OK", "", b"[]"),
+        ]);
+        let media = mastodon(root)
+            .stream(&Url::parse("https://mastodon.social/bookmarks").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(media.len(), 2);
+        assert!(server.join().unwrap()[1].contains("&max_id=5 "));
+    }
+
+    #[test]
+    fn cards_are_opt_in_and_keep_upstream_thumbnail_archive_identity() {
+        let mut post = status("100");
+        post["card"] = serde_json::json!({
+            "image":"https://files.mastodon.social/cache/preview_cards/images/000/123/456/original/thumb.jpeg",
+            "url":"https://article.example/page?private=ignored", "title":"Article", "description":"Preview", "width":400, "height":300
+        });
+        let options = SelectionOptions {
+            cards: true,
+            ..SelectionOptions::default()
+        };
+        assert_eq!(parse_status(&post, "mastodon.social").len(), 2);
+        let media = parse_status_with_options(&post, "mastodon.social", options);
+        assert_eq!(media.len(), 3);
+        let card = &media[2];
+        assert_eq!(card.filename, "100_card123456.jpg");
+        assert!(card.headers.is_empty());
+        let metadata = card.metadata.as_ref().unwrap();
+        assert_eq!(metadata.media_id, "card123456");
+        assert_eq!(metadata.index, 3);
+        let file = metadata.file.as_ref().unwrap();
+        assert_eq!(file.width, Some(400));
+        assert_eq!(file.height, Some(300));
+        assert_eq!(file.description.as_deref(), Some("Preview"));
+        assert!(
+            !serde_json::to_string(card)
+                .unwrap()
+                .contains("private=ignored")
+        );
+        let mut other = post.clone();
+        other["id"] = serde_json::json!("200");
+        assert_eq!(
+            card.archive_key(),
+            parse_status_with_options(&other, "mastodon.social", options)[2].archive_key()
+        );
+        assert_ne!(
+            card.archive_key(),
+            parse_status_with_options(&post, "pawoo.net", options)[2].archive_key()
+        );
+        post["card"]["image"] = serde_json::json!("https://cdn.example/thumbnail.jpg");
+        let unknown = parse_status_with_options(&post, "mastodon.social", options);
+        assert_eq!(unknown.len(), 3);
+        assert!(unknown[2].archive_key().is_none());
+        for raw in [
+            "http://cdn.example/image.jpg",
+            "https://user:pass@cdn.example/image.jpg",
+            "https://cdn.example:444/image.jpg",
+        ] {
+            post["card"]["image"] = serde_json::json!(raw);
+            assert_eq!(
+                parse_status_with_options(&post, "mastodon.social", options).len(),
+                2
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn card_only_timelines_disable_media_only_queries() {
+        let mut post = status("100");
+        post["media_attachments"] = serde_json::json!([]);
+        post["card"] = serde_json::json!({"image":"https://files.mastodon.social/cache/preview_cards/images/000/123/456/original/thumb.jpg"});
+        let (root, server) = serve(vec![
+            response(
+                "200 OK",
+                "",
+                serde_json::json!([post]).to_string().as_bytes(),
+            ),
+            response("200 OK", "", b"[]"),
+        ]);
+        let native = mastodon(root).with_selection(SelectionOptions {
+            cards: true,
+            ..SelectionOptions::default()
+        });
+        let media = native
+            .stream(&Url::parse("https://mastodon.social/@id:9").unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(media.len(), 1);
+        assert_eq!(
+            media[0]
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()
+                .media_id,
+            "card123456"
+        );
+        assert!(server.join().unwrap()[0].contains("only_media=false"));
     }
 
     #[test]
@@ -835,7 +1684,7 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /api/v1/accounts/lookup?acct=alice "));
         assert!(requests[1].starts_with(
-            "GET /api/v1/accounts/9/statuses?only_media=true&exclude_reblogs=true&limit=40 "
+            "GET /api/v1/accounts/9/statuses?only_media=true&exclude_reblogs=true&exclude_replies=false&limit=40 "
         ));
         assert!(requests[2].contains("&max_id=30 "));
     }

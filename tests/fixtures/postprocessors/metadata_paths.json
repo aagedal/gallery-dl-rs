@@ -1,0 +1,301 @@
+{
+  "version": "1.32.17",
+  "source": "Actual MetadataPP constructor/_directory/_filename/_filename_extfmt and PathFormat.build_filename. Synthetic public dictionaries and clean filename adapters; no file writes/network. $ROOT is a symbolic base directory.",
+  "source_sha256": {
+    "metadata.py": "db7481267bbdbca3ed95ace30dcb05f3cec5511a84f75f1769a0362ae0fb53a5",
+    "path.py": "7ff87004d4fbab80ccd0e525882c0bb010ddaced357aa6bee1657f28ca6b7fb6"
+  },
+  "generator_source": "import copy,hashlib,json,logging,sys\nfrom pathlib import Path\nfrom types import SimpleNamespace\nfrom gallery_dl import formatter,version\nfrom gallery_dl.postprocessor.metadata import MetadataPP\nfrom gallery_dl.path import PathFormat\nclass Job:\n def get_logger(self,n):return logging.getLogger(n)\n def register_hooks(self,*a):pass\nclass P(SimpleNamespace):\n def clean_path(self,s):return s\n def clean_segment(self,s):return s.replace('/','_')\n def build_filename(self,kwdict):return PathFormat.build_filename(self,kwdict)\ncases=[]\nfor name,filename,ext,directory,keywords,options in [\n ('first_init',None,'','$ROOT/artist1',{'id':1,'num':0},{}),\n ('first_post',None,'','$ROOT/artist1',{'id':1,'num':0},{}),\n ('after_file','1_1.jpg','jpg','$ROOT/artist1',{'id':1,'num':1,'extension':'jpg'},{}),\n ('empty_next_post_retains_filename','1_1.jpg','jpg','$ROOT/artist2',{'id':2,'num':0,'extension':'png'},{}),\n ('empty_next_extension_format_rebuild','1_1.jpg','jpg','$ROOT/artist2',{'id':2,'num':0,'extension':'png'},{'extension-format':'{extension}.json'}),\n ('first_post_missing_extension_format',None,'','$ROOT/artist1',{'id':1,'num':0},{'extension-format':'{extension}.json'}),\n ('empty_next_missing_extension_format','1_1.jpg','jpg','$ROOT/artist2',{'id':2,'num':0},{'extension-format':'{extension}.json'}),\n ('first_post_extension_format','', '', '$ROOT/artist1',{'id':1,'num':0,'extension':'png'},{'extension-format':'{extension}.json'}),\n ('empty_next_custom_filename','1_1.jpg','jpg','$ROOT/artist2',{'id':2,'num':0},{'filename':'{id}_info.json'}),\n ('empty_next_root_base','1_1.jpg','jpg','$ROOT/artist2',{'id':2,'num':0},{'base-directory':True}),\n ('empty_next_literal_directory','1_1.jpg','jpg','$ROOT/artist2',{'id':2,'num':0},{'directory':'meta'}),\n ('empty_next_jsonl','1_1.jpg','jpg','$ROOT/artist2',{'id':2,'num':0},{'mode':'jsonl'}),\n ('uppercase_extension_source_retained','1_1.JPEG','JPEG','$ROOT/artist2',{'id':2,'num':0,'extension':'png'},{'extension-format':'{extension}.json'}),\n]:\n pp=MetadataPP(Job(),copy.deepcopy(options));kw=copy.deepcopy(keywords)\n path=P(filename=filename or '',extension=ext,realdirectory=directory+'/',basedirectory='$ROOT/',prefix='',kwdict=kw,filename_conditions=None,filename_formatter=formatter.parse('{id}_{num}.{extension}').format_map)\n output=pp._directory(path)+pp._filename(path)\n cases.append({'name':name,'paths':{'directory':directory,'filename':filename,'extension':ext,'realpath':('$ROOT/artist1/'+filename) if filename else None},'keywords':keywords,'options':options,'filename_template':'{id}_{num}.{extension}','expected_path':output,'keywords_after':kw})\nresult={'version':version.__version__,'source':'Actual MetadataPP constructor/_directory/_filename/_filename_extfmt and PathFormat.build_filename. Synthetic public dictionaries and clean filename adapters; no file writes/network. $ROOT is a symbolic base directory.','source_sha256':{'metadata.py':hashlib.sha256(Path(__import__('gallery_dl.postprocessor.metadata',fromlist=['x']).__file__).read_bytes()).hexdigest(),'path.py':hashlib.sha256(Path(__import__('gallery_dl.path',fromlist=['x']).__file__).read_bytes()).hexdigest()},'generator_source':Path(__file__).read_text(),'cases':cases}\nPath(sys.argv[1]).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\\n');print(len(cases))\n",
+  "cases": [
+    {
+      "name": "first_init",
+      "paths": {
+        "directory": "$ROOT/artist1",
+        "filename": null,
+        "extension": "",
+        "realpath": null
+      },
+      "keywords": {
+        "id": 1,
+        "num": 0
+      },
+      "options": {},
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist1/metadata.json",
+      "keywords_after": {
+        "id": 1,
+        "num": 0
+      }
+    },
+    {
+      "name": "first_post",
+      "paths": {
+        "directory": "$ROOT/artist1",
+        "filename": null,
+        "extension": "",
+        "realpath": null
+      },
+      "keywords": {
+        "id": 1,
+        "num": 0
+      },
+      "options": {},
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist1/metadata.json",
+      "keywords_after": {
+        "id": 1,
+        "num": 0
+      }
+    },
+    {
+      "name": "after_file",
+      "paths": {
+        "directory": "$ROOT/artist1",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 1,
+        "num": 1,
+        "extension": "jpg"
+      },
+      "options": {},
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist1/1_1.jpg.json",
+      "keywords_after": {
+        "id": 1,
+        "num": 1,
+        "extension": "jpg"
+      }
+    },
+    {
+      "name": "empty_next_post_retains_filename",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0,
+        "extension": "png"
+      },
+      "options": {},
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist2/1_1.jpg.json",
+      "keywords_after": {
+        "id": 2,
+        "num": 0,
+        "extension": "png"
+      }
+    },
+    {
+      "name": "empty_next_extension_format_rebuild",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0,
+        "extension": "png"
+      },
+      "options": {
+        "extension-format": "{extension}.json"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist2/2_0.jpg.json",
+      "keywords_after": {
+        "id": 2,
+        "num": 0,
+        "extension": "png"
+      }
+    },
+    {
+      "name": "first_post_missing_extension_format",
+      "paths": {
+        "directory": "$ROOT/artist1",
+        "filename": null,
+        "extension": "",
+        "realpath": null
+      },
+      "keywords": {
+        "id": 1,
+        "num": 0
+      },
+      "options": {
+        "extension-format": "{extension}.json"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist1/1_0..json",
+      "keywords_after": {
+        "id": 1,
+        "num": 0,
+        "extension": null
+      }
+    },
+    {
+      "name": "empty_next_missing_extension_format",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0
+      },
+      "options": {
+        "extension-format": "{extension}.json"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist2/2_0.jpg.json",
+      "keywords_after": {
+        "id": 2,
+        "num": 0,
+        "extension": null
+      }
+    },
+    {
+      "name": "first_post_extension_format",
+      "paths": {
+        "directory": "$ROOT/artist1",
+        "filename": "",
+        "extension": "",
+        "realpath": null
+      },
+      "keywords": {
+        "id": 1,
+        "num": 0,
+        "extension": "png"
+      },
+      "options": {
+        "extension-format": "{extension}.json"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist1/1_0..json",
+      "keywords_after": {
+        "id": 1,
+        "num": 0,
+        "extension": "png"
+      }
+    },
+    {
+      "name": "empty_next_custom_filename",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0
+      },
+      "options": {
+        "filename": "{id}_info.json"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist2/2_info.json",
+      "keywords_after": {
+        "id": 2,
+        "num": 0
+      }
+    },
+    {
+      "name": "empty_next_root_base",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0
+      },
+      "options": {
+        "base-directory": true
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/1_1.jpg.json",
+      "keywords_after": {
+        "id": 2,
+        "num": 0
+      }
+    },
+    {
+      "name": "empty_next_literal_directory",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0
+      },
+      "options": {
+        "directory": "meta"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist2/meta/1_1.jpg.json",
+      "keywords_after": {
+        "id": 2,
+        "num": 0
+      }
+    },
+    {
+      "name": "empty_next_jsonl",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.jpg",
+        "extension": "jpg",
+        "realpath": "$ROOT/artist1/1_1.jpg"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0
+      },
+      "options": {
+        "mode": "jsonl"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist2/data.jsonl",
+      "keywords_after": {
+        "id": 2,
+        "num": 0
+      }
+    },
+    {
+      "name": "uppercase_extension_source_retained",
+      "paths": {
+        "directory": "$ROOT/artist2",
+        "filename": "1_1.JPEG",
+        "extension": "JPEG",
+        "realpath": "$ROOT/artist1/1_1.JPEG"
+      },
+      "keywords": {
+        "id": 2,
+        "num": 0,
+        "extension": "png"
+      },
+      "options": {
+        "extension-format": "{extension}.json"
+      },
+      "filename_template": "{id}_{num}.{extension}",
+      "expected_path": "$ROOT/artist2/2_0.JPEG.json",
+      "keywords_after": {
+        "id": 2,
+        "num": 0,
+        "extension": "png"
+      }
+    }
+  ]
+}

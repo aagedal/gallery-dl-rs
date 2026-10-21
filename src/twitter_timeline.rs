@@ -10,6 +10,9 @@ pub(super) enum ProfileInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProfileTab {
+    Info,
+    Avatar,
+    Background,
     Media,
     Tweets,
     Replies,
@@ -24,6 +27,15 @@ pub fn is_media_timeline_url(url: &Url) -> bool {
 
 pub fn is_profile_timeline_url(url: &Url) -> bool {
     profile_input(url).is_ok()
+}
+
+/// A user dispatcher queues the default timeline; an explicit tab is a root job.
+pub(super) fn is_user_dispatch(url: &Url) -> bool {
+    let parts: Vec<_> = url.path().trim_matches('/').split('/').collect();
+    matches!(
+        parts.as_slice(),
+        [_] | ["i", "user", _] | ["intent", "user"]
+    ) && profile_input(url).is_ok()
 }
 
 #[cfg(test)]
@@ -84,6 +96,9 @@ pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
         ["", user, tab] => (
             *user,
             match *tab {
+                "info" => ProfileTab::Info,
+                "photo" => ProfileTab::Avatar,
+                "header_photo" => ProfileTab::Background,
                 "media" => ProfileTab::Media,
                 "tweets" => ProfileTab::Tweets,
                 "with_replies" => ProfileTab::Replies,

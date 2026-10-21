@@ -1,0 +1,8984 @@
+{
+  "source": "PixivPixivisionExtractor.metadata/works + html.unescape",
+  "version": "1.32.17",
+  "url": "http://pixivision.net/a/77?ignored=1",
+  "html": "<html><title>  Cats &copy; &NotEqualTilde; &#x80; &#0; &#xD800; &notit; &amp; &nbsp; </title><body>\n<a href=\"https://www.pixiv.net/en/artworks/42?x\">a</a>\n<a href=\"https://www.pixiv.net/en/artworks/42?x\">adjacent</a>\n<a href=\"https://www.pixiv.net/en/artworks/42?y\">query variant</a>\n<a href=\"https://www.pixiv.net/en/artworks/43\">b</a>\n<a href=\"https://www.pixiv.net/en/artworks/42?x\">nonadjacent</a>\n<a href='https://www.pixiv.net/en/artworks/90'>ignored singlequote</a>\n<a href=\"https://www.pixiv.net/artworks/91\">ignored non-en</a>\n<a class=\"x\" href=\"https://www.pixiv.net/en/artworks/92\">ignored attrs</a>\n<!-- <a href=\"https://www.pixiv.net/en/artworks/44?x&amp;y\">literal comment match</a> -->\n<a href=\"https://evil.test/en/artworks/93\">ignored host</a>\n<a href=\"https://www.pixiv.net/en/artworks/99",
+  "requests": [
+    {
+      "url": "https://www.pixivision.net/en/a/77",
+      "headers": {
+        "User-Agent": "Mozilla/5.0"
+      }
+    }
+  ],
+  "metadata": {
+    "pixivision_id": "77",
+    "pixivision_title": "  Cats © ≂̸ € � � ¬it; &   "
+  },
+  "detail_ids": [
+    "42",
+    "42",
+    "43",
+    "42",
+    "44"
+  ],
+  "works": [
+    {
+      "id": 42
+    },
+    {
+      "id": 42
+    },
+    {
+      "id": 43
+    },
+    {
+      "id": 42
+    },
+    {
+      "id": 44
+    }
+  ],
+  "entity_cases": [
+    {
+      "input": "&copy; &NotEqualTilde; &#x80; &#0; &#xD800; &notit;",
+      "output": "© ≂̸ € � � ¬it;"
+    },
+    {
+      "input": "&AMP &ampfoo &unknown; &lt;b&gt;",
+      "output": "& &foo &unknown; <b>"
+    },
+    {
+      "input": "&#13;&#9;&#10;&#12;&#1;&#xFFFF;&#xFDD0;",
+      "output": "\r\t\n\f"
+    },
+    {
+      "input": "&#x110000; &#x1F642; &CounterClockwiseContourIntegral;",
+      "output": "� 🙂 ∳"
+    },
+    {
+      "input": "&AElig",
+      "output": "Æ"
+    },
+    {
+      "input": "&AElig;",
+      "output": "Æ"
+    },
+    {
+      "input": "&AMP",
+      "output": "&"
+    },
+    {
+      "input": "&AMP;",
+      "output": "&"
+    },
+    {
+      "input": "&Aacute",
+      "output": "Á"
+    },
+    {
+      "input": "&Aacute;",
+      "output": "Á"
+    },
+    {
+      "input": "&Abreve;",
+      "output": "Ă"
+    },
+    {
+      "input": "&Acirc",
+      "output": "Â"
+    },
+    {
+      "input": "&Acirc;",
+      "output": "Â"
+    },
+    {
+      "input": "&Acy;",
+      "output": "А"
+    },
+    {
+      "input": "&Afr;",
+      "output": "𝔄"
+    },
+    {
+      "input": "&Agrave",
+      "output": "À"
+    },
+    {
+      "input": "&Agrave;",
+      "output": "À"
+    },
+    {
+      "input": "&Alpha;",
+      "output": "Α"
+    },
+    {
+      "input": "&Amacr;",
+      "output": "Ā"
+    },
+    {
+      "input": "&And;",
+      "output": "⩓"
+    },
+    {
+      "input": "&Aogon;",
+      "output": "Ą"
+    },
+    {
+      "input": "&Aopf;",
+      "output": "𝔸"
+    },
+    {
+      "input": "&ApplyFunction;",
+      "output": "⁡"
+    },
+    {
+      "input": "&Aring",
+      "output": "Å"
+    },
+    {
+      "input": "&Aring;",
+      "output": "Å"
+    },
+    {
+      "input": "&Ascr;",
+      "output": "𝒜"
+    },
+    {
+      "input": "&Assign;",
+      "output": "≔"
+    },
+    {
+      "input": "&Atilde",
+      "output": "Ã"
+    },
+    {
+      "input": "&Atilde;",
+      "output": "Ã"
+    },
+    {
+      "input": "&Auml",
+      "output": "Ä"
+    },
+    {
+      "input": "&Auml;",
+      "output": "Ä"
+    },
+    {
+      "input": "&Backslash;",
+      "output": "∖"
+    },
+    {
+      "input": "&Barv;",
+      "output": "⫧"
+    },
+    {
+      "input": "&Barwed;",
+      "output": "⌆"
+    },
+    {
+      "input": "&Bcy;",
+      "output": "Б"
+    },
+    {
+      "input": "&Because;",
+      "output": "∵"
+    },
+    {
+      "input": "&Bernoullis;",
+      "output": "ℬ"
+    },
+    {
+      "input": "&Beta;",
+      "output": "Β"
+    },
+    {
+      "input": "&Bfr;",
+      "output": "𝔅"
+    },
+    {
+      "input": "&Bopf;",
+      "output": "𝔹"
+    },
+    {
+      "input": "&Breve;",
+      "output": "˘"
+    },
+    {
+      "input": "&Bscr;",
+      "output": "ℬ"
+    },
+    {
+      "input": "&Bumpeq;",
+      "output": "≎"
+    },
+    {
+      "input": "&CHcy;",
+      "output": "Ч"
+    },
+    {
+      "input": "&COPY",
+      "output": "©"
+    },
+    {
+      "input": "&COPY;",
+      "output": "©"
+    },
+    {
+      "input": "&Cacute;",
+      "output": "Ć"
+    },
+    {
+      "input": "&Cap;",
+      "output": "⋒"
+    },
+    {
+      "input": "&CapitalDifferentialD;",
+      "output": "ⅅ"
+    },
+    {
+      "input": "&Cayleys;",
+      "output": "ℭ"
+    },
+    {
+      "input": "&Ccaron;",
+      "output": "Č"
+    },
+    {
+      "input": "&Ccedil",
+      "output": "Ç"
+    },
+    {
+      "input": "&Ccedil;",
+      "output": "Ç"
+    },
+    {
+      "input": "&Ccirc;",
+      "output": "Ĉ"
+    },
+    {
+      "input": "&Cconint;",
+      "output": "∰"
+    },
+    {
+      "input": "&Cdot;",
+      "output": "Ċ"
+    },
+    {
+      "input": "&Cedilla;",
+      "output": "¸"
+    },
+    {
+      "input": "&CenterDot;",
+      "output": "·"
+    },
+    {
+      "input": "&Cfr;",
+      "output": "ℭ"
+    },
+    {
+      "input": "&Chi;",
+      "output": "Χ"
+    },
+    {
+      "input": "&CircleDot;",
+      "output": "⊙"
+    },
+    {
+      "input": "&CircleMinus;",
+      "output": "⊖"
+    },
+    {
+      "input": "&CirclePlus;",
+      "output": "⊕"
+    },
+    {
+      "input": "&CircleTimes;",
+      "output": "⊗"
+    },
+    {
+      "input": "&ClockwiseContourIntegral;",
+      "output": "∲"
+    },
+    {
+      "input": "&CloseCurlyDoubleQuote;",
+      "output": "”"
+    },
+    {
+      "input": "&CloseCurlyQuote;",
+      "output": "’"
+    },
+    {
+      "input": "&Colon;",
+      "output": "∷"
+    },
+    {
+      "input": "&Colone;",
+      "output": "⩴"
+    },
+    {
+      "input": "&Congruent;",
+      "output": "≡"
+    },
+    {
+      "input": "&Conint;",
+      "output": "∯"
+    },
+    {
+      "input": "&ContourIntegral;",
+      "output": "∮"
+    },
+    {
+      "input": "&Copf;",
+      "output": "ℂ"
+    },
+    {
+      "input": "&Coproduct;",
+      "output": "∐"
+    },
+    {
+      "input": "&CounterClockwiseContourIntegral;",
+      "output": "∳"
+    },
+    {
+      "input": "&Cross;",
+      "output": "⨯"
+    },
+    {
+      "input": "&Cscr;",
+      "output": "𝒞"
+    },
+    {
+      "input": "&Cup;",
+      "output": "⋓"
+    },
+    {
+      "input": "&CupCap;",
+      "output": "≍"
+    },
+    {
+      "input": "&DD;",
+      "output": "ⅅ"
+    },
+    {
+      "input": "&DDotrahd;",
+      "output": "⤑"
+    },
+    {
+      "input": "&DJcy;",
+      "output": "Ђ"
+    },
+    {
+      "input": "&DScy;",
+      "output": "Ѕ"
+    },
+    {
+      "input": "&DZcy;",
+      "output": "Џ"
+    },
+    {
+      "input": "&Dagger;",
+      "output": "‡"
+    },
+    {
+      "input": "&Darr;",
+      "output": "↡"
+    },
+    {
+      "input": "&Dashv;",
+      "output": "⫤"
+    },
+    {
+      "input": "&Dcaron;",
+      "output": "Ď"
+    },
+    {
+      "input": "&Dcy;",
+      "output": "Д"
+    },
+    {
+      "input": "&Del;",
+      "output": "∇"
+    },
+    {
+      "input": "&Delta;",
+      "output": "Δ"
+    },
+    {
+      "input": "&Dfr;",
+      "output": "𝔇"
+    },
+    {
+      "input": "&DiacriticalAcute;",
+      "output": "´"
+    },
+    {
+      "input": "&DiacriticalDot;",
+      "output": "˙"
+    },
+    {
+      "input": "&DiacriticalDoubleAcute;",
+      "output": "˝"
+    },
+    {
+      "input": "&DiacriticalGrave;",
+      "output": "`"
+    },
+    {
+      "input": "&DiacriticalTilde;",
+      "output": "˜"
+    },
+    {
+      "input": "&Diamond;",
+      "output": "⋄"
+    },
+    {
+      "input": "&DifferentialD;",
+      "output": "ⅆ"
+    },
+    {
+      "input": "&Dopf;",
+      "output": "𝔻"
+    },
+    {
+      "input": "&Dot;",
+      "output": "¨"
+    },
+    {
+      "input": "&DotDot;",
+      "output": "⃜"
+    },
+    {
+      "input": "&DotEqual;",
+      "output": "≐"
+    },
+    {
+      "input": "&DoubleContourIntegral;",
+      "output": "∯"
+    },
+    {
+      "input": "&DoubleDot;",
+      "output": "¨"
+    },
+    {
+      "input": "&DoubleDownArrow;",
+      "output": "⇓"
+    },
+    {
+      "input": "&DoubleLeftArrow;",
+      "output": "⇐"
+    },
+    {
+      "input": "&DoubleLeftRightArrow;",
+      "output": "⇔"
+    },
+    {
+      "input": "&DoubleLeftTee;",
+      "output": "⫤"
+    },
+    {
+      "input": "&DoubleLongLeftArrow;",
+      "output": "⟸"
+    },
+    {
+      "input": "&DoubleLongLeftRightArrow;",
+      "output": "⟺"
+    },
+    {
+      "input": "&DoubleLongRightArrow;",
+      "output": "⟹"
+    },
+    {
+      "input": "&DoubleRightArrow;",
+      "output": "⇒"
+    },
+    {
+      "input": "&DoubleRightTee;",
+      "output": "⊨"
+    },
+    {
+      "input": "&DoubleUpArrow;",
+      "output": "⇑"
+    },
+    {
+      "input": "&DoubleUpDownArrow;",
+      "output": "⇕"
+    },
+    {
+      "input": "&DoubleVerticalBar;",
+      "output": "∥"
+    },
+    {
+      "input": "&DownArrow;",
+      "output": "↓"
+    },
+    {
+      "input": "&DownArrowBar;",
+      "output": "⤓"
+    },
+    {
+      "input": "&DownArrowUpArrow;",
+      "output": "⇵"
+    },
+    {
+      "input": "&DownBreve;",
+      "output": "̑"
+    },
+    {
+      "input": "&DownLeftRightVector;",
+      "output": "⥐"
+    },
+    {
+      "input": "&DownLeftTeeVector;",
+      "output": "⥞"
+    },
+    {
+      "input": "&DownLeftVector;",
+      "output": "↽"
+    },
+    {
+      "input": "&DownLeftVectorBar;",
+      "output": "⥖"
+    },
+    {
+      "input": "&DownRightTeeVector;",
+      "output": "⥟"
+    },
+    {
+      "input": "&DownRightVector;",
+      "output": "⇁"
+    },
+    {
+      "input": "&DownRightVectorBar;",
+      "output": "⥗"
+    },
+    {
+      "input": "&DownTee;",
+      "output": "⊤"
+    },
+    {
+      "input": "&DownTeeArrow;",
+      "output": "↧"
+    },
+    {
+      "input": "&Downarrow;",
+      "output": "⇓"
+    },
+    {
+      "input": "&Dscr;",
+      "output": "𝒟"
+    },
+    {
+      "input": "&Dstrok;",
+      "output": "Đ"
+    },
+    {
+      "input": "&ENG;",
+      "output": "Ŋ"
+    },
+    {
+      "input": "&ETH",
+      "output": "Ð"
+    },
+    {
+      "input": "&ETH;",
+      "output": "Ð"
+    },
+    {
+      "input": "&Eacute",
+      "output": "É"
+    },
+    {
+      "input": "&Eacute;",
+      "output": "É"
+    },
+    {
+      "input": "&Ecaron;",
+      "output": "Ě"
+    },
+    {
+      "input": "&Ecirc",
+      "output": "Ê"
+    },
+    {
+      "input": "&Ecirc;",
+      "output": "Ê"
+    },
+    {
+      "input": "&Ecy;",
+      "output": "Э"
+    },
+    {
+      "input": "&Edot;",
+      "output": "Ė"
+    },
+    {
+      "input": "&Efr;",
+      "output": "𝔈"
+    },
+    {
+      "input": "&Egrave",
+      "output": "È"
+    },
+    {
+      "input": "&Egrave;",
+      "output": "È"
+    },
+    {
+      "input": "&Element;",
+      "output": "∈"
+    },
+    {
+      "input": "&Emacr;",
+      "output": "Ē"
+    },
+    {
+      "input": "&EmptySmallSquare;",
+      "output": "◻"
+    },
+    {
+      "input": "&EmptyVerySmallSquare;",
+      "output": "▫"
+    },
+    {
+      "input": "&Eogon;",
+      "output": "Ę"
+    },
+    {
+      "input": "&Eopf;",
+      "output": "𝔼"
+    },
+    {
+      "input": "&Epsilon;",
+      "output": "Ε"
+    },
+    {
+      "input": "&Equal;",
+      "output": "⩵"
+    },
+    {
+      "input": "&EqualTilde;",
+      "output": "≂"
+    },
+    {
+      "input": "&Equilibrium;",
+      "output": "⇌"
+    },
+    {
+      "input": "&Escr;",
+      "output": "ℰ"
+    },
+    {
+      "input": "&Esim;",
+      "output": "⩳"
+    },
+    {
+      "input": "&Eta;",
+      "output": "Η"
+    },
+    {
+      "input": "&Euml",
+      "output": "Ë"
+    },
+    {
+      "input": "&Euml;",
+      "output": "Ë"
+    },
+    {
+      "input": "&Exists;",
+      "output": "∃"
+    },
+    {
+      "input": "&ExponentialE;",
+      "output": "ⅇ"
+    },
+    {
+      "input": "&Fcy;",
+      "output": "Ф"
+    },
+    {
+      "input": "&Ffr;",
+      "output": "𝔉"
+    },
+    {
+      "input": "&FilledSmallSquare;",
+      "output": "◼"
+    },
+    {
+      "input": "&FilledVerySmallSquare;",
+      "output": "▪"
+    },
+    {
+      "input": "&Fopf;",
+      "output": "𝔽"
+    },
+    {
+      "input": "&ForAll;",
+      "output": "∀"
+    },
+    {
+      "input": "&Fouriertrf;",
+      "output": "ℱ"
+    },
+    {
+      "input": "&Fscr;",
+      "output": "ℱ"
+    },
+    {
+      "input": "&GJcy;",
+      "output": "Ѓ"
+    },
+    {
+      "input": "&GT",
+      "output": ">"
+    },
+    {
+      "input": "&GT;",
+      "output": ">"
+    },
+    {
+      "input": "&Gamma;",
+      "output": "Γ"
+    },
+    {
+      "input": "&Gammad;",
+      "output": "Ϝ"
+    },
+    {
+      "input": "&Gbreve;",
+      "output": "Ğ"
+    },
+    {
+      "input": "&Gcedil;",
+      "output": "Ģ"
+    },
+    {
+      "input": "&Gcirc;",
+      "output": "Ĝ"
+    },
+    {
+      "input": "&Gcy;",
+      "output": "Г"
+    },
+    {
+      "input": "&Gdot;",
+      "output": "Ġ"
+    },
+    {
+      "input": "&Gfr;",
+      "output": "𝔊"
+    },
+    {
+      "input": "&Gg;",
+      "output": "⋙"
+    },
+    {
+      "input": "&Gopf;",
+      "output": "𝔾"
+    },
+    {
+      "input": "&GreaterEqual;",
+      "output": "≥"
+    },
+    {
+      "input": "&GreaterEqualLess;",
+      "output": "⋛"
+    },
+    {
+      "input": "&GreaterFullEqual;",
+      "output": "≧"
+    },
+    {
+      "input": "&GreaterGreater;",
+      "output": "⪢"
+    },
+    {
+      "input": "&GreaterLess;",
+      "output": "≷"
+    },
+    {
+      "input": "&GreaterSlantEqual;",
+      "output": "⩾"
+    },
+    {
+      "input": "&GreaterTilde;",
+      "output": "≳"
+    },
+    {
+      "input": "&Gscr;",
+      "output": "𝒢"
+    },
+    {
+      "input": "&Gt;",
+      "output": "≫"
+    },
+    {
+      "input": "&HARDcy;",
+      "output": "Ъ"
+    },
+    {
+      "input": "&Hacek;",
+      "output": "ˇ"
+    },
+    {
+      "input": "&Hat;",
+      "output": "^"
+    },
+    {
+      "input": "&Hcirc;",
+      "output": "Ĥ"
+    },
+    {
+      "input": "&Hfr;",
+      "output": "ℌ"
+    },
+    {
+      "input": "&HilbertSpace;",
+      "output": "ℋ"
+    },
+    {
+      "input": "&Hopf;",
+      "output": "ℍ"
+    },
+    {
+      "input": "&HorizontalLine;",
+      "output": "─"
+    },
+    {
+      "input": "&Hscr;",
+      "output": "ℋ"
+    },
+    {
+      "input": "&Hstrok;",
+      "output": "Ħ"
+    },
+    {
+      "input": "&HumpDownHump;",
+      "output": "≎"
+    },
+    {
+      "input": "&HumpEqual;",
+      "output": "≏"
+    },
+    {
+      "input": "&IEcy;",
+      "output": "Е"
+    },
+    {
+      "input": "&IJlig;",
+      "output": "Ĳ"
+    },
+    {
+      "input": "&IOcy;",
+      "output": "Ё"
+    },
+    {
+      "input": "&Iacute",
+      "output": "Í"
+    },
+    {
+      "input": "&Iacute;",
+      "output": "Í"
+    },
+    {
+      "input": "&Icirc",
+      "output": "Î"
+    },
+    {
+      "input": "&Icirc;",
+      "output": "Î"
+    },
+    {
+      "input": "&Icy;",
+      "output": "И"
+    },
+    {
+      "input": "&Idot;",
+      "output": "İ"
+    },
+    {
+      "input": "&Ifr;",
+      "output": "ℑ"
+    },
+    {
+      "input": "&Igrave",
+      "output": "Ì"
+    },
+    {
+      "input": "&Igrave;",
+      "output": "Ì"
+    },
+    {
+      "input": "&Im;",
+      "output": "ℑ"
+    },
+    {
+      "input": "&Imacr;",
+      "output": "Ī"
+    },
+    {
+      "input": "&ImaginaryI;",
+      "output": "ⅈ"
+    },
+    {
+      "input": "&Implies;",
+      "output": "⇒"
+    },
+    {
+      "input": "&Int;",
+      "output": "∬"
+    },
+    {
+      "input": "&Integral;",
+      "output": "∫"
+    },
+    {
+      "input": "&Intersection;",
+      "output": "⋂"
+    },
+    {
+      "input": "&InvisibleComma;",
+      "output": "⁣"
+    },
+    {
+      "input": "&InvisibleTimes;",
+      "output": "⁢"
+    },
+    {
+      "input": "&Iogon;",
+      "output": "Į"
+    },
+    {
+      "input": "&Iopf;",
+      "output": "𝕀"
+    },
+    {
+      "input": "&Iota;",
+      "output": "Ι"
+    },
+    {
+      "input": "&Iscr;",
+      "output": "ℐ"
+    },
+    {
+      "input": "&Itilde;",
+      "output": "Ĩ"
+    },
+    {
+      "input": "&Iukcy;",
+      "output": "І"
+    },
+    {
+      "input": "&Iuml",
+      "output": "Ï"
+    },
+    {
+      "input": "&Iuml;",
+      "output": "Ï"
+    },
+    {
+      "input": "&Jcirc;",
+      "output": "Ĵ"
+    },
+    {
+      "input": "&Jcy;",
+      "output": "Й"
+    },
+    {
+      "input": "&Jfr;",
+      "output": "𝔍"
+    },
+    {
+      "input": "&Jopf;",
+      "output": "𝕁"
+    },
+    {
+      "input": "&Jscr;",
+      "output": "𝒥"
+    },
+    {
+      "input": "&Jsercy;",
+      "output": "Ј"
+    },
+    {
+      "input": "&Jukcy;",
+      "output": "Є"
+    },
+    {
+      "input": "&KHcy;",
+      "output": "Х"
+    },
+    {
+      "input": "&KJcy;",
+      "output": "Ќ"
+    },
+    {
+      "input": "&Kappa;",
+      "output": "Κ"
+    },
+    {
+      "input": "&Kcedil;",
+      "output": "Ķ"
+    },
+    {
+      "input": "&Kcy;",
+      "output": "К"
+    },
+    {
+      "input": "&Kfr;",
+      "output": "𝔎"
+    },
+    {
+      "input": "&Kopf;",
+      "output": "𝕂"
+    },
+    {
+      "input": "&Kscr;",
+      "output": "𝒦"
+    },
+    {
+      "input": "&LJcy;",
+      "output": "Љ"
+    },
+    {
+      "input": "&LT",
+      "output": "<"
+    },
+    {
+      "input": "&LT;",
+      "output": "<"
+    },
+    {
+      "input": "&Lacute;",
+      "output": "Ĺ"
+    },
+    {
+      "input": "&Lambda;",
+      "output": "Λ"
+    },
+    {
+      "input": "&Lang;",
+      "output": "⟪"
+    },
+    {
+      "input": "&Laplacetrf;",
+      "output": "ℒ"
+    },
+    {
+      "input": "&Larr;",
+      "output": "↞"
+    },
+    {
+      "input": "&Lcaron;",
+      "output": "Ľ"
+    },
+    {
+      "input": "&Lcedil;",
+      "output": "Ļ"
+    },
+    {
+      "input": "&Lcy;",
+      "output": "Л"
+    },
+    {
+      "input": "&LeftAngleBracket;",
+      "output": "⟨"
+    },
+    {
+      "input": "&LeftArrow;",
+      "output": "←"
+    },
+    {
+      "input": "&LeftArrowBar;",
+      "output": "⇤"
+    },
+    {
+      "input": "&LeftArrowRightArrow;",
+      "output": "⇆"
+    },
+    {
+      "input": "&LeftCeiling;",
+      "output": "⌈"
+    },
+    {
+      "input": "&LeftDoubleBracket;",
+      "output": "⟦"
+    },
+    {
+      "input": "&LeftDownTeeVector;",
+      "output": "⥡"
+    },
+    {
+      "input": "&LeftDownVector;",
+      "output": "⇃"
+    },
+    {
+      "input": "&LeftDownVectorBar;",
+      "output": "⥙"
+    },
+    {
+      "input": "&LeftFloor;",
+      "output": "⌊"
+    },
+    {
+      "input": "&LeftRightArrow;",
+      "output": "↔"
+    },
+    {
+      "input": "&LeftRightVector;",
+      "output": "⥎"
+    },
+    {
+      "input": "&LeftTee;",
+      "output": "⊣"
+    },
+    {
+      "input": "&LeftTeeArrow;",
+      "output": "↤"
+    },
+    {
+      "input": "&LeftTeeVector;",
+      "output": "⥚"
+    },
+    {
+      "input": "&LeftTriangle;",
+      "output": "⊲"
+    },
+    {
+      "input": "&LeftTriangleBar;",
+      "output": "⧏"
+    },
+    {
+      "input": "&LeftTriangleEqual;",
+      "output": "⊴"
+    },
+    {
+      "input": "&LeftUpDownVector;",
+      "output": "⥑"
+    },
+    {
+      "input": "&LeftUpTeeVector;",
+      "output": "⥠"
+    },
+    {
+      "input": "&LeftUpVector;",
+      "output": "↿"
+    },
+    {
+      "input": "&LeftUpVectorBar;",
+      "output": "⥘"
+    },
+    {
+      "input": "&LeftVector;",
+      "output": "↼"
+    },
+    {
+      "input": "&LeftVectorBar;",
+      "output": "⥒"
+    },
+    {
+      "input": "&Leftarrow;",
+      "output": "⇐"
+    },
+    {
+      "input": "&Leftrightarrow;",
+      "output": "⇔"
+    },
+    {
+      "input": "&LessEqualGreater;",
+      "output": "⋚"
+    },
+    {
+      "input": "&LessFullEqual;",
+      "output": "≦"
+    },
+    {
+      "input": "&LessGreater;",
+      "output": "≶"
+    },
+    {
+      "input": "&LessLess;",
+      "output": "⪡"
+    },
+    {
+      "input": "&LessSlantEqual;",
+      "output": "⩽"
+    },
+    {
+      "input": "&LessTilde;",
+      "output": "≲"
+    },
+    {
+      "input": "&Lfr;",
+      "output": "𝔏"
+    },
+    {
+      "input": "&Ll;",
+      "output": "⋘"
+    },
+    {
+      "input": "&Lleftarrow;",
+      "output": "⇚"
+    },
+    {
+      "input": "&Lmidot;",
+      "output": "Ŀ"
+    },
+    {
+      "input": "&LongLeftArrow;",
+      "output": "⟵"
+    },
+    {
+      "input": "&LongLeftRightArrow;",
+      "output": "⟷"
+    },
+    {
+      "input": "&LongRightArrow;",
+      "output": "⟶"
+    },
+    {
+      "input": "&Longleftarrow;",
+      "output": "⟸"
+    },
+    {
+      "input": "&Longleftrightarrow;",
+      "output": "⟺"
+    },
+    {
+      "input": "&Longrightarrow;",
+      "output": "⟹"
+    },
+    {
+      "input": "&Lopf;",
+      "output": "𝕃"
+    },
+    {
+      "input": "&LowerLeftArrow;",
+      "output": "↙"
+    },
+    {
+      "input": "&LowerRightArrow;",
+      "output": "↘"
+    },
+    {
+      "input": "&Lscr;",
+      "output": "ℒ"
+    },
+    {
+      "input": "&Lsh;",
+      "output": "↰"
+    },
+    {
+      "input": "&Lstrok;",
+      "output": "Ł"
+    },
+    {
+      "input": "&Lt;",
+      "output": "≪"
+    },
+    {
+      "input": "&Map;",
+      "output": "⤅"
+    },
+    {
+      "input": "&Mcy;",
+      "output": "М"
+    },
+    {
+      "input": "&MediumSpace;",
+      "output": " "
+    },
+    {
+      "input": "&Mellintrf;",
+      "output": "ℳ"
+    },
+    {
+      "input": "&Mfr;",
+      "output": "𝔐"
+    },
+    {
+      "input": "&MinusPlus;",
+      "output": "∓"
+    },
+    {
+      "input": "&Mopf;",
+      "output": "𝕄"
+    },
+    {
+      "input": "&Mscr;",
+      "output": "ℳ"
+    },
+    {
+      "input": "&Mu;",
+      "output": "Μ"
+    },
+    {
+      "input": "&NJcy;",
+      "output": "Њ"
+    },
+    {
+      "input": "&Nacute;",
+      "output": "Ń"
+    },
+    {
+      "input": "&Ncaron;",
+      "output": "Ň"
+    },
+    {
+      "input": "&Ncedil;",
+      "output": "Ņ"
+    },
+    {
+      "input": "&Ncy;",
+      "output": "Н"
+    },
+    {
+      "input": "&NegativeMediumSpace;",
+      "output": "​"
+    },
+    {
+      "input": "&NegativeThickSpace;",
+      "output": "​"
+    },
+    {
+      "input": "&NegativeThinSpace;",
+      "output": "​"
+    },
+    {
+      "input": "&NegativeVeryThinSpace;",
+      "output": "​"
+    },
+    {
+      "input": "&NestedGreaterGreater;",
+      "output": "≫"
+    },
+    {
+      "input": "&NestedLessLess;",
+      "output": "≪"
+    },
+    {
+      "input": "&NewLine;",
+      "output": "\n"
+    },
+    {
+      "input": "&Nfr;",
+      "output": "𝔑"
+    },
+    {
+      "input": "&NoBreak;",
+      "output": "⁠"
+    },
+    {
+      "input": "&NonBreakingSpace;",
+      "output": " "
+    },
+    {
+      "input": "&Nopf;",
+      "output": "ℕ"
+    },
+    {
+      "input": "&Not;",
+      "output": "⫬"
+    },
+    {
+      "input": "&NotCongruent;",
+      "output": "≢"
+    },
+    {
+      "input": "&NotCupCap;",
+      "output": "≭"
+    },
+    {
+      "input": "&NotDoubleVerticalBar;",
+      "output": "∦"
+    },
+    {
+      "input": "&NotElement;",
+      "output": "∉"
+    },
+    {
+      "input": "&NotEqual;",
+      "output": "≠"
+    },
+    {
+      "input": "&NotEqualTilde;",
+      "output": "≂̸"
+    },
+    {
+      "input": "&NotExists;",
+      "output": "∄"
+    },
+    {
+      "input": "&NotGreater;",
+      "output": "≯"
+    },
+    {
+      "input": "&NotGreaterEqual;",
+      "output": "≱"
+    },
+    {
+      "input": "&NotGreaterFullEqual;",
+      "output": "≧̸"
+    },
+    {
+      "input": "&NotGreaterGreater;",
+      "output": "≫̸"
+    },
+    {
+      "input": "&NotGreaterLess;",
+      "output": "≹"
+    },
+    {
+      "input": "&NotGreaterSlantEqual;",
+      "output": "⩾̸"
+    },
+    {
+      "input": "&NotGreaterTilde;",
+      "output": "≵"
+    },
+    {
+      "input": "&NotHumpDownHump;",
+      "output": "≎̸"
+    },
+    {
+      "input": "&NotHumpEqual;",
+      "output": "≏̸"
+    },
+    {
+      "input": "&NotLeftTriangle;",
+      "output": "⋪"
+    },
+    {
+      "input": "&NotLeftTriangleBar;",
+      "output": "⧏̸"
+    },
+    {
+      "input": "&NotLeftTriangleEqual;",
+      "output": "⋬"
+    },
+    {
+      "input": "&NotLess;",
+      "output": "≮"
+    },
+    {
+      "input": "&NotLessEqual;",
+      "output": "≰"
+    },
+    {
+      "input": "&NotLessGreater;",
+      "output": "≸"
+    },
+    {
+      "input": "&NotLessLess;",
+      "output": "≪̸"
+    },
+    {
+      "input": "&NotLessSlantEqual;",
+      "output": "⩽̸"
+    },
+    {
+      "input": "&NotLessTilde;",
+      "output": "≴"
+    },
+    {
+      "input": "&NotNestedGreaterGreater;",
+      "output": "⪢̸"
+    },
+    {
+      "input": "&NotNestedLessLess;",
+      "output": "⪡̸"
+    },
+    {
+      "input": "&NotPrecedes;",
+      "output": "⊀"
+    },
+    {
+      "input": "&NotPrecedesEqual;",
+      "output": "⪯̸"
+    },
+    {
+      "input": "&NotPrecedesSlantEqual;",
+      "output": "⋠"
+    },
+    {
+      "input": "&NotReverseElement;",
+      "output": "∌"
+    },
+    {
+      "input": "&NotRightTriangle;",
+      "output": "⋫"
+    },
+    {
+      "input": "&NotRightTriangleBar;",
+      "output": "⧐̸"
+    },
+    {
+      "input": "&NotRightTriangleEqual;",
+      "output": "⋭"
+    },
+    {
+      "input": "&NotSquareSubset;",
+      "output": "⊏̸"
+    },
+    {
+      "input": "&NotSquareSubsetEqual;",
+      "output": "⋢"
+    },
+    {
+      "input": "&NotSquareSuperset;",
+      "output": "⊐̸"
+    },
+    {
+      "input": "&NotSquareSupersetEqual;",
+      "output": "⋣"
+    },
+    {
+      "input": "&NotSubset;",
+      "output": "⊂⃒"
+    },
+    {
+      "input": "&NotSubsetEqual;",
+      "output": "⊈"
+    },
+    {
+      "input": "&NotSucceeds;",
+      "output": "⊁"
+    },
+    {
+      "input": "&NotSucceedsEqual;",
+      "output": "⪰̸"
+    },
+    {
+      "input": "&NotSucceedsSlantEqual;",
+      "output": "⋡"
+    },
+    {
+      "input": "&NotSucceedsTilde;",
+      "output": "≿̸"
+    },
+    {
+      "input": "&NotSuperset;",
+      "output": "⊃⃒"
+    },
+    {
+      "input": "&NotSupersetEqual;",
+      "output": "⊉"
+    },
+    {
+      "input": "&NotTilde;",
+      "output": "≁"
+    },
+    {
+      "input": "&NotTildeEqual;",
+      "output": "≄"
+    },
+    {
+      "input": "&NotTildeFullEqual;",
+      "output": "≇"
+    },
+    {
+      "input": "&NotTildeTilde;",
+      "output": "≉"
+    },
+    {
+      "input": "&NotVerticalBar;",
+      "output": "∤"
+    },
+    {
+      "input": "&Nscr;",
+      "output": "𝒩"
+    },
+    {
+      "input": "&Ntilde",
+      "output": "Ñ"
+    },
+    {
+      "input": "&Ntilde;",
+      "output": "Ñ"
+    },
+    {
+      "input": "&Nu;",
+      "output": "Ν"
+    },
+    {
+      "input": "&OElig;",
+      "output": "Œ"
+    },
+    {
+      "input": "&Oacute",
+      "output": "Ó"
+    },
+    {
+      "input": "&Oacute;",
+      "output": "Ó"
+    },
+    {
+      "input": "&Ocirc",
+      "output": "Ô"
+    },
+    {
+      "input": "&Ocirc;",
+      "output": "Ô"
+    },
+    {
+      "input": "&Ocy;",
+      "output": "О"
+    },
+    {
+      "input": "&Odblac;",
+      "output": "Ő"
+    },
+    {
+      "input": "&Ofr;",
+      "output": "𝔒"
+    },
+    {
+      "input": "&Ograve",
+      "output": "Ò"
+    },
+    {
+      "input": "&Ograve;",
+      "output": "Ò"
+    },
+    {
+      "input": "&Omacr;",
+      "output": "Ō"
+    },
+    {
+      "input": "&Omega;",
+      "output": "Ω"
+    },
+    {
+      "input": "&Omicron;",
+      "output": "Ο"
+    },
+    {
+      "input": "&Oopf;",
+      "output": "𝕆"
+    },
+    {
+      "input": "&OpenCurlyDoubleQuote;",
+      "output": "“"
+    },
+    {
+      "input": "&OpenCurlyQuote;",
+      "output": "‘"
+    },
+    {
+      "input": "&Or;",
+      "output": "⩔"
+    },
+    {
+      "input": "&Oscr;",
+      "output": "𝒪"
+    },
+    {
+      "input": "&Oslash",
+      "output": "Ø"
+    },
+    {
+      "input": "&Oslash;",
+      "output": "Ø"
+    },
+    {
+      "input": "&Otilde",
+      "output": "Õ"
+    },
+    {
+      "input": "&Otilde;",
+      "output": "Õ"
+    },
+    {
+      "input": "&Otimes;",
+      "output": "⨷"
+    },
+    {
+      "input": "&Ouml",
+      "output": "Ö"
+    },
+    {
+      "input": "&Ouml;",
+      "output": "Ö"
+    },
+    {
+      "input": "&OverBar;",
+      "output": "‾"
+    },
+    {
+      "input": "&OverBrace;",
+      "output": "⏞"
+    },
+    {
+      "input": "&OverBracket;",
+      "output": "⎴"
+    },
+    {
+      "input": "&OverParenthesis;",
+      "output": "⏜"
+    },
+    {
+      "input": "&PartialD;",
+      "output": "∂"
+    },
+    {
+      "input": "&Pcy;",
+      "output": "П"
+    },
+    {
+      "input": "&Pfr;",
+      "output": "𝔓"
+    },
+    {
+      "input": "&Phi;",
+      "output": "Φ"
+    },
+    {
+      "input": "&Pi;",
+      "output": "Π"
+    },
+    {
+      "input": "&PlusMinus;",
+      "output": "±"
+    },
+    {
+      "input": "&Poincareplane;",
+      "output": "ℌ"
+    },
+    {
+      "input": "&Popf;",
+      "output": "ℙ"
+    },
+    {
+      "input": "&Pr;",
+      "output": "⪻"
+    },
+    {
+      "input": "&Precedes;",
+      "output": "≺"
+    },
+    {
+      "input": "&PrecedesEqual;",
+      "output": "⪯"
+    },
+    {
+      "input": "&PrecedesSlantEqual;",
+      "output": "≼"
+    },
+    {
+      "input": "&PrecedesTilde;",
+      "output": "≾"
+    },
+    {
+      "input": "&Prime;",
+      "output": "″"
+    },
+    {
+      "input": "&Product;",
+      "output": "∏"
+    },
+    {
+      "input": "&Proportion;",
+      "output": "∷"
+    },
+    {
+      "input": "&Proportional;",
+      "output": "∝"
+    },
+    {
+      "input": "&Pscr;",
+      "output": "𝒫"
+    },
+    {
+      "input": "&Psi;",
+      "output": "Ψ"
+    },
+    {
+      "input": "&QUOT",
+      "output": "\""
+    },
+    {
+      "input": "&QUOT;",
+      "output": "\""
+    },
+    {
+      "input": "&Qfr;",
+      "output": "𝔔"
+    },
+    {
+      "input": "&Qopf;",
+      "output": "ℚ"
+    },
+    {
+      "input": "&Qscr;",
+      "output": "𝒬"
+    },
+    {
+      "input": "&RBarr;",
+      "output": "⤐"
+    },
+    {
+      "input": "&REG",
+      "output": "®"
+    },
+    {
+      "input": "&REG;",
+      "output": "®"
+    },
+    {
+      "input": "&Racute;",
+      "output": "Ŕ"
+    },
+    {
+      "input": "&Rang;",
+      "output": "⟫"
+    },
+    {
+      "input": "&Rarr;",
+      "output": "↠"
+    },
+    {
+      "input": "&Rarrtl;",
+      "output": "⤖"
+    },
+    {
+      "input": "&Rcaron;",
+      "output": "Ř"
+    },
+    {
+      "input": "&Rcedil;",
+      "output": "Ŗ"
+    },
+    {
+      "input": "&Rcy;",
+      "output": "Р"
+    },
+    {
+      "input": "&Re;",
+      "output": "ℜ"
+    },
+    {
+      "input": "&ReverseElement;",
+      "output": "∋"
+    },
+    {
+      "input": "&ReverseEquilibrium;",
+      "output": "⇋"
+    },
+    {
+      "input": "&ReverseUpEquilibrium;",
+      "output": "⥯"
+    },
+    {
+      "input": "&Rfr;",
+      "output": "ℜ"
+    },
+    {
+      "input": "&Rho;",
+      "output": "Ρ"
+    },
+    {
+      "input": "&RightAngleBracket;",
+      "output": "⟩"
+    },
+    {
+      "input": "&RightArrow;",
+      "output": "→"
+    },
+    {
+      "input": "&RightArrowBar;",
+      "output": "⇥"
+    },
+    {
+      "input": "&RightArrowLeftArrow;",
+      "output": "⇄"
+    },
+    {
+      "input": "&RightCeiling;",
+      "output": "⌉"
+    },
+    {
+      "input": "&RightDoubleBracket;",
+      "output": "⟧"
+    },
+    {
+      "input": "&RightDownTeeVector;",
+      "output": "⥝"
+    },
+    {
+      "input": "&RightDownVector;",
+      "output": "⇂"
+    },
+    {
+      "input": "&RightDownVectorBar;",
+      "output": "⥕"
+    },
+    {
+      "input": "&RightFloor;",
+      "output": "⌋"
+    },
+    {
+      "input": "&RightTee;",
+      "output": "⊢"
+    },
+    {
+      "input": "&RightTeeArrow;",
+      "output": "↦"
+    },
+    {
+      "input": "&RightTeeVector;",
+      "output": "⥛"
+    },
+    {
+      "input": "&RightTriangle;",
+      "output": "⊳"
+    },
+    {
+      "input": "&RightTriangleBar;",
+      "output": "⧐"
+    },
+    {
+      "input": "&RightTriangleEqual;",
+      "output": "⊵"
+    },
+    {
+      "input": "&RightUpDownVector;",
+      "output": "⥏"
+    },
+    {
+      "input": "&RightUpTeeVector;",
+      "output": "⥜"
+    },
+    {
+      "input": "&RightUpVector;",
+      "output": "↾"
+    },
+    {
+      "input": "&RightUpVectorBar;",
+      "output": "⥔"
+    },
+    {
+      "input": "&RightVector;",
+      "output": "⇀"
+    },
+    {
+      "input": "&RightVectorBar;",
+      "output": "⥓"
+    },
+    {
+      "input": "&Rightarrow;",
+      "output": "⇒"
+    },
+    {
+      "input": "&Ropf;",
+      "output": "ℝ"
+    },
+    {
+      "input": "&RoundImplies;",
+      "output": "⥰"
+    },
+    {
+      "input": "&Rrightarrow;",
+      "output": "⇛"
+    },
+    {
+      "input": "&Rscr;",
+      "output": "ℛ"
+    },
+    {
+      "input": "&Rsh;",
+      "output": "↱"
+    },
+    {
+      "input": "&RuleDelayed;",
+      "output": "⧴"
+    },
+    {
+      "input": "&SHCHcy;",
+      "output": "Щ"
+    },
+    {
+      "input": "&SHcy;",
+      "output": "Ш"
+    },
+    {
+      "input": "&SOFTcy;",
+      "output": "Ь"
+    },
+    {
+      "input": "&Sacute;",
+      "output": "Ś"
+    },
+    {
+      "input": "&Sc;",
+      "output": "⪼"
+    },
+    {
+      "input": "&Scaron;",
+      "output": "Š"
+    },
+    {
+      "input": "&Scedil;",
+      "output": "Ş"
+    },
+    {
+      "input": "&Scirc;",
+      "output": "Ŝ"
+    },
+    {
+      "input": "&Scy;",
+      "output": "С"
+    },
+    {
+      "input": "&Sfr;",
+      "output": "𝔖"
+    },
+    {
+      "input": "&ShortDownArrow;",
+      "output": "↓"
+    },
+    {
+      "input": "&ShortLeftArrow;",
+      "output": "←"
+    },
+    {
+      "input": "&ShortRightArrow;",
+      "output": "→"
+    },
+    {
+      "input": "&ShortUpArrow;",
+      "output": "↑"
+    },
+    {
+      "input": "&Sigma;",
+      "output": "Σ"
+    },
+    {
+      "input": "&SmallCircle;",
+      "output": "∘"
+    },
+    {
+      "input": "&Sopf;",
+      "output": "𝕊"
+    },
+    {
+      "input": "&Sqrt;",
+      "output": "√"
+    },
+    {
+      "input": "&Square;",
+      "output": "□"
+    },
+    {
+      "input": "&SquareIntersection;",
+      "output": "⊓"
+    },
+    {
+      "input": "&SquareSubset;",
+      "output": "⊏"
+    },
+    {
+      "input": "&SquareSubsetEqual;",
+      "output": "⊑"
+    },
+    {
+      "input": "&SquareSuperset;",
+      "output": "⊐"
+    },
+    {
+      "input": "&SquareSupersetEqual;",
+      "output": "⊒"
+    },
+    {
+      "input": "&SquareUnion;",
+      "output": "⊔"
+    },
+    {
+      "input": "&Sscr;",
+      "output": "𝒮"
+    },
+    {
+      "input": "&Star;",
+      "output": "⋆"
+    },
+    {
+      "input": "&Sub;",
+      "output": "⋐"
+    },
+    {
+      "input": "&Subset;",
+      "output": "⋐"
+    },
+    {
+      "input": "&SubsetEqual;",
+      "output": "⊆"
+    },
+    {
+      "input": "&Succeeds;",
+      "output": "≻"
+    },
+    {
+      "input": "&SucceedsEqual;",
+      "output": "⪰"
+    },
+    {
+      "input": "&SucceedsSlantEqual;",
+      "output": "≽"
+    },
+    {
+      "input": "&SucceedsTilde;",
+      "output": "≿"
+    },
+    {
+      "input": "&SuchThat;",
+      "output": "∋"
+    },
+    {
+      "input": "&Sum;",
+      "output": "∑"
+    },
+    {
+      "input": "&Sup;",
+      "output": "⋑"
+    },
+    {
+      "input": "&Superset;",
+      "output": "⊃"
+    },
+    {
+      "input": "&SupersetEqual;",
+      "output": "⊇"
+    },
+    {
+      "input": "&Supset;",
+      "output": "⋑"
+    },
+    {
+      "input": "&THORN",
+      "output": "Þ"
+    },
+    {
+      "input": "&THORN;",
+      "output": "Þ"
+    },
+    {
+      "input": "&TRADE;",
+      "output": "™"
+    },
+    {
+      "input": "&TSHcy;",
+      "output": "Ћ"
+    },
+    {
+      "input": "&TScy;",
+      "output": "Ц"
+    },
+    {
+      "input": "&Tab;",
+      "output": "\t"
+    },
+    {
+      "input": "&Tau;",
+      "output": "Τ"
+    },
+    {
+      "input": "&Tcaron;",
+      "output": "Ť"
+    },
+    {
+      "input": "&Tcedil;",
+      "output": "Ţ"
+    },
+    {
+      "input": "&Tcy;",
+      "output": "Т"
+    },
+    {
+      "input": "&Tfr;",
+      "output": "𝔗"
+    },
+    {
+      "input": "&Therefore;",
+      "output": "∴"
+    },
+    {
+      "input": "&Theta;",
+      "output": "Θ"
+    },
+    {
+      "input": "&ThickSpace;",
+      "output": "  "
+    },
+    {
+      "input": "&ThinSpace;",
+      "output": " "
+    },
+    {
+      "input": "&Tilde;",
+      "output": "∼"
+    },
+    {
+      "input": "&TildeEqual;",
+      "output": "≃"
+    },
+    {
+      "input": "&TildeFullEqual;",
+      "output": "≅"
+    },
+    {
+      "input": "&TildeTilde;",
+      "output": "≈"
+    },
+    {
+      "input": "&Topf;",
+      "output": "𝕋"
+    },
+    {
+      "input": "&TripleDot;",
+      "output": "⃛"
+    },
+    {
+      "input": "&Tscr;",
+      "output": "𝒯"
+    },
+    {
+      "input": "&Tstrok;",
+      "output": "Ŧ"
+    },
+    {
+      "input": "&Uacute",
+      "output": "Ú"
+    },
+    {
+      "input": "&Uacute;",
+      "output": "Ú"
+    },
+    {
+      "input": "&Uarr;",
+      "output": "↟"
+    },
+    {
+      "input": "&Uarrocir;",
+      "output": "⥉"
+    },
+    {
+      "input": "&Ubrcy;",
+      "output": "Ў"
+    },
+    {
+      "input": "&Ubreve;",
+      "output": "Ŭ"
+    },
+    {
+      "input": "&Ucirc",
+      "output": "Û"
+    },
+    {
+      "input": "&Ucirc;",
+      "output": "Û"
+    },
+    {
+      "input": "&Ucy;",
+      "output": "У"
+    },
+    {
+      "input": "&Udblac;",
+      "output": "Ű"
+    },
+    {
+      "input": "&Ufr;",
+      "output": "𝔘"
+    },
+    {
+      "input": "&Ugrave",
+      "output": "Ù"
+    },
+    {
+      "input": "&Ugrave;",
+      "output": "Ù"
+    },
+    {
+      "input": "&Umacr;",
+      "output": "Ū"
+    },
+    {
+      "input": "&UnderBar;",
+      "output": "_"
+    },
+    {
+      "input": "&UnderBrace;",
+      "output": "⏟"
+    },
+    {
+      "input": "&UnderBracket;",
+      "output": "⎵"
+    },
+    {
+      "input": "&UnderParenthesis;",
+      "output": "⏝"
+    },
+    {
+      "input": "&Union;",
+      "output": "⋃"
+    },
+    {
+      "input": "&UnionPlus;",
+      "output": "⊎"
+    },
+    {
+      "input": "&Uogon;",
+      "output": "Ų"
+    },
+    {
+      "input": "&Uopf;",
+      "output": "𝕌"
+    },
+    {
+      "input": "&UpArrow;",
+      "output": "↑"
+    },
+    {
+      "input": "&UpArrowBar;",
+      "output": "⤒"
+    },
+    {
+      "input": "&UpArrowDownArrow;",
+      "output": "⇅"
+    },
+    {
+      "input": "&UpDownArrow;",
+      "output": "↕"
+    },
+    {
+      "input": "&UpEquilibrium;",
+      "output": "⥮"
+    },
+    {
+      "input": "&UpTee;",
+      "output": "⊥"
+    },
+    {
+      "input": "&UpTeeArrow;",
+      "output": "↥"
+    },
+    {
+      "input": "&Uparrow;",
+      "output": "⇑"
+    },
+    {
+      "input": "&Updownarrow;",
+      "output": "⇕"
+    },
+    {
+      "input": "&UpperLeftArrow;",
+      "output": "↖"
+    },
+    {
+      "input": "&UpperRightArrow;",
+      "output": "↗"
+    },
+    {
+      "input": "&Upsi;",
+      "output": "ϒ"
+    },
+    {
+      "input": "&Upsilon;",
+      "output": "Υ"
+    },
+    {
+      "input": "&Uring;",
+      "output": "Ů"
+    },
+    {
+      "input": "&Uscr;",
+      "output": "𝒰"
+    },
+    {
+      "input": "&Utilde;",
+      "output": "Ũ"
+    },
+    {
+      "input": "&Uuml",
+      "output": "Ü"
+    },
+    {
+      "input": "&Uuml;",
+      "output": "Ü"
+    },
+    {
+      "input": "&VDash;",
+      "output": "⊫"
+    },
+    {
+      "input": "&Vbar;",
+      "output": "⫫"
+    },
+    {
+      "input": "&Vcy;",
+      "output": "В"
+    },
+    {
+      "input": "&Vdash;",
+      "output": "⊩"
+    },
+    {
+      "input": "&Vdashl;",
+      "output": "⫦"
+    },
+    {
+      "input": "&Vee;",
+      "output": "⋁"
+    },
+    {
+      "input": "&Verbar;",
+      "output": "‖"
+    },
+    {
+      "input": "&Vert;",
+      "output": "‖"
+    },
+    {
+      "input": "&VerticalBar;",
+      "output": "∣"
+    },
+    {
+      "input": "&VerticalLine;",
+      "output": "|"
+    },
+    {
+      "input": "&VerticalSeparator;",
+      "output": "❘"
+    },
+    {
+      "input": "&VerticalTilde;",
+      "output": "≀"
+    },
+    {
+      "input": "&VeryThinSpace;",
+      "output": " "
+    },
+    {
+      "input": "&Vfr;",
+      "output": "𝔙"
+    },
+    {
+      "input": "&Vopf;",
+      "output": "𝕍"
+    },
+    {
+      "input": "&Vscr;",
+      "output": "𝒱"
+    },
+    {
+      "input": "&Vvdash;",
+      "output": "⊪"
+    },
+    {
+      "input": "&Wcirc;",
+      "output": "Ŵ"
+    },
+    {
+      "input": "&Wedge;",
+      "output": "⋀"
+    },
+    {
+      "input": "&Wfr;",
+      "output": "𝔚"
+    },
+    {
+      "input": "&Wopf;",
+      "output": "𝕎"
+    },
+    {
+      "input": "&Wscr;",
+      "output": "𝒲"
+    },
+    {
+      "input": "&Xfr;",
+      "output": "𝔛"
+    },
+    {
+      "input": "&Xi;",
+      "output": "Ξ"
+    },
+    {
+      "input": "&Xopf;",
+      "output": "𝕏"
+    },
+    {
+      "input": "&Xscr;",
+      "output": "𝒳"
+    },
+    {
+      "input": "&YAcy;",
+      "output": "Я"
+    },
+    {
+      "input": "&YIcy;",
+      "output": "Ї"
+    },
+    {
+      "input": "&YUcy;",
+      "output": "Ю"
+    },
+    {
+      "input": "&Yacute",
+      "output": "Ý"
+    },
+    {
+      "input": "&Yacute;",
+      "output": "Ý"
+    },
+    {
+      "input": "&Ycirc;",
+      "output": "Ŷ"
+    },
+    {
+      "input": "&Ycy;",
+      "output": "Ы"
+    },
+    {
+      "input": "&Yfr;",
+      "output": "𝔜"
+    },
+    {
+      "input": "&Yopf;",
+      "output": "𝕐"
+    },
+    {
+      "input": "&Yscr;",
+      "output": "𝒴"
+    },
+    {
+      "input": "&Yuml;",
+      "output": "Ÿ"
+    },
+    {
+      "input": "&ZHcy;",
+      "output": "Ж"
+    },
+    {
+      "input": "&Zacute;",
+      "output": "Ź"
+    },
+    {
+      "input": "&Zcaron;",
+      "output": "Ž"
+    },
+    {
+      "input": "&Zcy;",
+      "output": "З"
+    },
+    {
+      "input": "&Zdot;",
+      "output": "Ż"
+    },
+    {
+      "input": "&ZeroWidthSpace;",
+      "output": "​"
+    },
+    {
+      "input": "&Zeta;",
+      "output": "Ζ"
+    },
+    {
+      "input": "&Zfr;",
+      "output": "ℨ"
+    },
+    {
+      "input": "&Zopf;",
+      "output": "ℤ"
+    },
+    {
+      "input": "&Zscr;",
+      "output": "𝒵"
+    },
+    {
+      "input": "&aacute",
+      "output": "á"
+    },
+    {
+      "input": "&aacute;",
+      "output": "á"
+    },
+    {
+      "input": "&abreve;",
+      "output": "ă"
+    },
+    {
+      "input": "&ac;",
+      "output": "∾"
+    },
+    {
+      "input": "&acE;",
+      "output": "∾̳"
+    },
+    {
+      "input": "&acd;",
+      "output": "∿"
+    },
+    {
+      "input": "&acirc",
+      "output": "â"
+    },
+    {
+      "input": "&acirc;",
+      "output": "â"
+    },
+    {
+      "input": "&acute",
+      "output": "´"
+    },
+    {
+      "input": "&acute;",
+      "output": "´"
+    },
+    {
+      "input": "&acy;",
+      "output": "а"
+    },
+    {
+      "input": "&aelig",
+      "output": "æ"
+    },
+    {
+      "input": "&aelig;",
+      "output": "æ"
+    },
+    {
+      "input": "&af;",
+      "output": "⁡"
+    },
+    {
+      "input": "&afr;",
+      "output": "𝔞"
+    },
+    {
+      "input": "&agrave",
+      "output": "à"
+    },
+    {
+      "input": "&agrave;",
+      "output": "à"
+    },
+    {
+      "input": "&alefsym;",
+      "output": "ℵ"
+    },
+    {
+      "input": "&aleph;",
+      "output": "ℵ"
+    },
+    {
+      "input": "&alpha;",
+      "output": "α"
+    },
+    {
+      "input": "&amacr;",
+      "output": "ā"
+    },
+    {
+      "input": "&amalg;",
+      "output": "⨿"
+    },
+    {
+      "input": "&amp",
+      "output": "&"
+    },
+    {
+      "input": "&amp;",
+      "output": "&"
+    },
+    {
+      "input": "&and;",
+      "output": "∧"
+    },
+    {
+      "input": "&andand;",
+      "output": "⩕"
+    },
+    {
+      "input": "&andd;",
+      "output": "⩜"
+    },
+    {
+      "input": "&andslope;",
+      "output": "⩘"
+    },
+    {
+      "input": "&andv;",
+      "output": "⩚"
+    },
+    {
+      "input": "&ang;",
+      "output": "∠"
+    },
+    {
+      "input": "&ange;",
+      "output": "⦤"
+    },
+    {
+      "input": "&angle;",
+      "output": "∠"
+    },
+    {
+      "input": "&angmsd;",
+      "output": "∡"
+    },
+    {
+      "input": "&angmsdaa;",
+      "output": "⦨"
+    },
+    {
+      "input": "&angmsdab;",
+      "output": "⦩"
+    },
+    {
+      "input": "&angmsdac;",
+      "output": "⦪"
+    },
+    {
+      "input": "&angmsdad;",
+      "output": "⦫"
+    },
+    {
+      "input": "&angmsdae;",
+      "output": "⦬"
+    },
+    {
+      "input": "&angmsdaf;",
+      "output": "⦭"
+    },
+    {
+      "input": "&angmsdag;",
+      "output": "⦮"
+    },
+    {
+      "input": "&angmsdah;",
+      "output": "⦯"
+    },
+    {
+      "input": "&angrt;",
+      "output": "∟"
+    },
+    {
+      "input": "&angrtvb;",
+      "output": "⊾"
+    },
+    {
+      "input": "&angrtvbd;",
+      "output": "⦝"
+    },
+    {
+      "input": "&angsph;",
+      "output": "∢"
+    },
+    {
+      "input": "&angst;",
+      "output": "Å"
+    },
+    {
+      "input": "&angzarr;",
+      "output": "⍼"
+    },
+    {
+      "input": "&aogon;",
+      "output": "ą"
+    },
+    {
+      "input": "&aopf;",
+      "output": "𝕒"
+    },
+    {
+      "input": "&ap;",
+      "output": "≈"
+    },
+    {
+      "input": "&apE;",
+      "output": "⩰"
+    },
+    {
+      "input": "&apacir;",
+      "output": "⩯"
+    },
+    {
+      "input": "&ape;",
+      "output": "≊"
+    },
+    {
+      "input": "&apid;",
+      "output": "≋"
+    },
+    {
+      "input": "&apos;",
+      "output": "'"
+    },
+    {
+      "input": "&approx;",
+      "output": "≈"
+    },
+    {
+      "input": "&approxeq;",
+      "output": "≊"
+    },
+    {
+      "input": "&aring",
+      "output": "å"
+    },
+    {
+      "input": "&aring;",
+      "output": "å"
+    },
+    {
+      "input": "&ascr;",
+      "output": "𝒶"
+    },
+    {
+      "input": "&ast;",
+      "output": "*"
+    },
+    {
+      "input": "&asymp;",
+      "output": "≈"
+    },
+    {
+      "input": "&asympeq;",
+      "output": "≍"
+    },
+    {
+      "input": "&atilde",
+      "output": "ã"
+    },
+    {
+      "input": "&atilde;",
+      "output": "ã"
+    },
+    {
+      "input": "&auml",
+      "output": "ä"
+    },
+    {
+      "input": "&auml;",
+      "output": "ä"
+    },
+    {
+      "input": "&awconint;",
+      "output": "∳"
+    },
+    {
+      "input": "&awint;",
+      "output": "⨑"
+    },
+    {
+      "input": "&bNot;",
+      "output": "⫭"
+    },
+    {
+      "input": "&backcong;",
+      "output": "≌"
+    },
+    {
+      "input": "&backepsilon;",
+      "output": "϶"
+    },
+    {
+      "input": "&backprime;",
+      "output": "‵"
+    },
+    {
+      "input": "&backsim;",
+      "output": "∽"
+    },
+    {
+      "input": "&backsimeq;",
+      "output": "⋍"
+    },
+    {
+      "input": "&barvee;",
+      "output": "⊽"
+    },
+    {
+      "input": "&barwed;",
+      "output": "⌅"
+    },
+    {
+      "input": "&barwedge;",
+      "output": "⌅"
+    },
+    {
+      "input": "&bbrk;",
+      "output": "⎵"
+    },
+    {
+      "input": "&bbrktbrk;",
+      "output": "⎶"
+    },
+    {
+      "input": "&bcong;",
+      "output": "≌"
+    },
+    {
+      "input": "&bcy;",
+      "output": "б"
+    },
+    {
+      "input": "&bdquo;",
+      "output": "„"
+    },
+    {
+      "input": "&becaus;",
+      "output": "∵"
+    },
+    {
+      "input": "&because;",
+      "output": "∵"
+    },
+    {
+      "input": "&bemptyv;",
+      "output": "⦰"
+    },
+    {
+      "input": "&bepsi;",
+      "output": "϶"
+    },
+    {
+      "input": "&bernou;",
+      "output": "ℬ"
+    },
+    {
+      "input": "&beta;",
+      "output": "β"
+    },
+    {
+      "input": "&beth;",
+      "output": "ℶ"
+    },
+    {
+      "input": "&between;",
+      "output": "≬"
+    },
+    {
+      "input": "&bfr;",
+      "output": "𝔟"
+    },
+    {
+      "input": "&bigcap;",
+      "output": "⋂"
+    },
+    {
+      "input": "&bigcirc;",
+      "output": "◯"
+    },
+    {
+      "input": "&bigcup;",
+      "output": "⋃"
+    },
+    {
+      "input": "&bigodot;",
+      "output": "⨀"
+    },
+    {
+      "input": "&bigoplus;",
+      "output": "⨁"
+    },
+    {
+      "input": "&bigotimes;",
+      "output": "⨂"
+    },
+    {
+      "input": "&bigsqcup;",
+      "output": "⨆"
+    },
+    {
+      "input": "&bigstar;",
+      "output": "★"
+    },
+    {
+      "input": "&bigtriangledown;",
+      "output": "▽"
+    },
+    {
+      "input": "&bigtriangleup;",
+      "output": "△"
+    },
+    {
+      "input": "&biguplus;",
+      "output": "⨄"
+    },
+    {
+      "input": "&bigvee;",
+      "output": "⋁"
+    },
+    {
+      "input": "&bigwedge;",
+      "output": "⋀"
+    },
+    {
+      "input": "&bkarow;",
+      "output": "⤍"
+    },
+    {
+      "input": "&blacklozenge;",
+      "output": "⧫"
+    },
+    {
+      "input": "&blacksquare;",
+      "output": "▪"
+    },
+    {
+      "input": "&blacktriangle;",
+      "output": "▴"
+    },
+    {
+      "input": "&blacktriangledown;",
+      "output": "▾"
+    },
+    {
+      "input": "&blacktriangleleft;",
+      "output": "◂"
+    },
+    {
+      "input": "&blacktriangleright;",
+      "output": "▸"
+    },
+    {
+      "input": "&blank;",
+      "output": "␣"
+    },
+    {
+      "input": "&blk12;",
+      "output": "▒"
+    },
+    {
+      "input": "&blk14;",
+      "output": "░"
+    },
+    {
+      "input": "&blk34;",
+      "output": "▓"
+    },
+    {
+      "input": "&block;",
+      "output": "█"
+    },
+    {
+      "input": "&bne;",
+      "output": "=⃥"
+    },
+    {
+      "input": "&bnequiv;",
+      "output": "≡⃥"
+    },
+    {
+      "input": "&bnot;",
+      "output": "⌐"
+    },
+    {
+      "input": "&bopf;",
+      "output": "𝕓"
+    },
+    {
+      "input": "&bot;",
+      "output": "⊥"
+    },
+    {
+      "input": "&bottom;",
+      "output": "⊥"
+    },
+    {
+      "input": "&bowtie;",
+      "output": "⋈"
+    },
+    {
+      "input": "&boxDL;",
+      "output": "╗"
+    },
+    {
+      "input": "&boxDR;",
+      "output": "╔"
+    },
+    {
+      "input": "&boxDl;",
+      "output": "╖"
+    },
+    {
+      "input": "&boxDr;",
+      "output": "╓"
+    },
+    {
+      "input": "&boxH;",
+      "output": "═"
+    },
+    {
+      "input": "&boxHD;",
+      "output": "╦"
+    },
+    {
+      "input": "&boxHU;",
+      "output": "╩"
+    },
+    {
+      "input": "&boxHd;",
+      "output": "╤"
+    },
+    {
+      "input": "&boxHu;",
+      "output": "╧"
+    },
+    {
+      "input": "&boxUL;",
+      "output": "╝"
+    },
+    {
+      "input": "&boxUR;",
+      "output": "╚"
+    },
+    {
+      "input": "&boxUl;",
+      "output": "╜"
+    },
+    {
+      "input": "&boxUr;",
+      "output": "╙"
+    },
+    {
+      "input": "&boxV;",
+      "output": "║"
+    },
+    {
+      "input": "&boxVH;",
+      "output": "╬"
+    },
+    {
+      "input": "&boxVL;",
+      "output": "╣"
+    },
+    {
+      "input": "&boxVR;",
+      "output": "╠"
+    },
+    {
+      "input": "&boxVh;",
+      "output": "╫"
+    },
+    {
+      "input": "&boxVl;",
+      "output": "╢"
+    },
+    {
+      "input": "&boxVr;",
+      "output": "╟"
+    },
+    {
+      "input": "&boxbox;",
+      "output": "⧉"
+    },
+    {
+      "input": "&boxdL;",
+      "output": "╕"
+    },
+    {
+      "input": "&boxdR;",
+      "output": "╒"
+    },
+    {
+      "input": "&boxdl;",
+      "output": "┐"
+    },
+    {
+      "input": "&boxdr;",
+      "output": "┌"
+    },
+    {
+      "input": "&boxh;",
+      "output": "─"
+    },
+    {
+      "input": "&boxhD;",
+      "output": "╥"
+    },
+    {
+      "input": "&boxhU;",
+      "output": "╨"
+    },
+    {
+      "input": "&boxhd;",
+      "output": "┬"
+    },
+    {
+      "input": "&boxhu;",
+      "output": "┴"
+    },
+    {
+      "input": "&boxminus;",
+      "output": "⊟"
+    },
+    {
+      "input": "&boxplus;",
+      "output": "⊞"
+    },
+    {
+      "input": "&boxtimes;",
+      "output": "⊠"
+    },
+    {
+      "input": "&boxuL;",
+      "output": "╛"
+    },
+    {
+      "input": "&boxuR;",
+      "output": "╘"
+    },
+    {
+      "input": "&boxul;",
+      "output": "┘"
+    },
+    {
+      "input": "&boxur;",
+      "output": "└"
+    },
+    {
+      "input": "&boxv;",
+      "output": "│"
+    },
+    {
+      "input": "&boxvH;",
+      "output": "╪"
+    },
+    {
+      "input": "&boxvL;",
+      "output": "╡"
+    },
+    {
+      "input": "&boxvR;",
+      "output": "╞"
+    },
+    {
+      "input": "&boxvh;",
+      "output": "┼"
+    },
+    {
+      "input": "&boxvl;",
+      "output": "┤"
+    },
+    {
+      "input": "&boxvr;",
+      "output": "├"
+    },
+    {
+      "input": "&bprime;",
+      "output": "‵"
+    },
+    {
+      "input": "&breve;",
+      "output": "˘"
+    },
+    {
+      "input": "&brvbar",
+      "output": "¦"
+    },
+    {
+      "input": "&brvbar;",
+      "output": "¦"
+    },
+    {
+      "input": "&bscr;",
+      "output": "𝒷"
+    },
+    {
+      "input": "&bsemi;",
+      "output": "⁏"
+    },
+    {
+      "input": "&bsim;",
+      "output": "∽"
+    },
+    {
+      "input": "&bsime;",
+      "output": "⋍"
+    },
+    {
+      "input": "&bsol;",
+      "output": "\\"
+    },
+    {
+      "input": "&bsolb;",
+      "output": "⧅"
+    },
+    {
+      "input": "&bsolhsub;",
+      "output": "⟈"
+    },
+    {
+      "input": "&bull;",
+      "output": "•"
+    },
+    {
+      "input": "&bullet;",
+      "output": "•"
+    },
+    {
+      "input": "&bump;",
+      "output": "≎"
+    },
+    {
+      "input": "&bumpE;",
+      "output": "⪮"
+    },
+    {
+      "input": "&bumpe;",
+      "output": "≏"
+    },
+    {
+      "input": "&bumpeq;",
+      "output": "≏"
+    },
+    {
+      "input": "&cacute;",
+      "output": "ć"
+    },
+    {
+      "input": "&cap;",
+      "output": "∩"
+    },
+    {
+      "input": "&capand;",
+      "output": "⩄"
+    },
+    {
+      "input": "&capbrcup;",
+      "output": "⩉"
+    },
+    {
+      "input": "&capcap;",
+      "output": "⩋"
+    },
+    {
+      "input": "&capcup;",
+      "output": "⩇"
+    },
+    {
+      "input": "&capdot;",
+      "output": "⩀"
+    },
+    {
+      "input": "&caps;",
+      "output": "∩︀"
+    },
+    {
+      "input": "&caret;",
+      "output": "⁁"
+    },
+    {
+      "input": "&caron;",
+      "output": "ˇ"
+    },
+    {
+      "input": "&ccaps;",
+      "output": "⩍"
+    },
+    {
+      "input": "&ccaron;",
+      "output": "č"
+    },
+    {
+      "input": "&ccedil",
+      "output": "ç"
+    },
+    {
+      "input": "&ccedil;",
+      "output": "ç"
+    },
+    {
+      "input": "&ccirc;",
+      "output": "ĉ"
+    },
+    {
+      "input": "&ccups;",
+      "output": "⩌"
+    },
+    {
+      "input": "&ccupssm;",
+      "output": "⩐"
+    },
+    {
+      "input": "&cdot;",
+      "output": "ċ"
+    },
+    {
+      "input": "&cedil",
+      "output": "¸"
+    },
+    {
+      "input": "&cedil;",
+      "output": "¸"
+    },
+    {
+      "input": "&cemptyv;",
+      "output": "⦲"
+    },
+    {
+      "input": "&cent",
+      "output": "¢"
+    },
+    {
+      "input": "&cent;",
+      "output": "¢"
+    },
+    {
+      "input": "&centerdot;",
+      "output": "·"
+    },
+    {
+      "input": "&cfr;",
+      "output": "𝔠"
+    },
+    {
+      "input": "&chcy;",
+      "output": "ч"
+    },
+    {
+      "input": "&check;",
+      "output": "✓"
+    },
+    {
+      "input": "&checkmark;",
+      "output": "✓"
+    },
+    {
+      "input": "&chi;",
+      "output": "χ"
+    },
+    {
+      "input": "&cir;",
+      "output": "○"
+    },
+    {
+      "input": "&cirE;",
+      "output": "⧃"
+    },
+    {
+      "input": "&circ;",
+      "output": "ˆ"
+    },
+    {
+      "input": "&circeq;",
+      "output": "≗"
+    },
+    {
+      "input": "&circlearrowleft;",
+      "output": "↺"
+    },
+    {
+      "input": "&circlearrowright;",
+      "output": "↻"
+    },
+    {
+      "input": "&circledR;",
+      "output": "®"
+    },
+    {
+      "input": "&circledS;",
+      "output": "Ⓢ"
+    },
+    {
+      "input": "&circledast;",
+      "output": "⊛"
+    },
+    {
+      "input": "&circledcirc;",
+      "output": "⊚"
+    },
+    {
+      "input": "&circleddash;",
+      "output": "⊝"
+    },
+    {
+      "input": "&cire;",
+      "output": "≗"
+    },
+    {
+      "input": "&cirfnint;",
+      "output": "⨐"
+    },
+    {
+      "input": "&cirmid;",
+      "output": "⫯"
+    },
+    {
+      "input": "&cirscir;",
+      "output": "⧂"
+    },
+    {
+      "input": "&clubs;",
+      "output": "♣"
+    },
+    {
+      "input": "&clubsuit;",
+      "output": "♣"
+    },
+    {
+      "input": "&colon;",
+      "output": ":"
+    },
+    {
+      "input": "&colone;",
+      "output": "≔"
+    },
+    {
+      "input": "&coloneq;",
+      "output": "≔"
+    },
+    {
+      "input": "&comma;",
+      "output": ","
+    },
+    {
+      "input": "&commat;",
+      "output": "@"
+    },
+    {
+      "input": "&comp;",
+      "output": "∁"
+    },
+    {
+      "input": "&compfn;",
+      "output": "∘"
+    },
+    {
+      "input": "&complement;",
+      "output": "∁"
+    },
+    {
+      "input": "&complexes;",
+      "output": "ℂ"
+    },
+    {
+      "input": "&cong;",
+      "output": "≅"
+    },
+    {
+      "input": "&congdot;",
+      "output": "⩭"
+    },
+    {
+      "input": "&conint;",
+      "output": "∮"
+    },
+    {
+      "input": "&copf;",
+      "output": "𝕔"
+    },
+    {
+      "input": "&coprod;",
+      "output": "∐"
+    },
+    {
+      "input": "&copy",
+      "output": "©"
+    },
+    {
+      "input": "&copy;",
+      "output": "©"
+    },
+    {
+      "input": "&copysr;",
+      "output": "℗"
+    },
+    {
+      "input": "&crarr;",
+      "output": "↵"
+    },
+    {
+      "input": "&cross;",
+      "output": "✗"
+    },
+    {
+      "input": "&cscr;",
+      "output": "𝒸"
+    },
+    {
+      "input": "&csub;",
+      "output": "⫏"
+    },
+    {
+      "input": "&csube;",
+      "output": "⫑"
+    },
+    {
+      "input": "&csup;",
+      "output": "⫐"
+    },
+    {
+      "input": "&csupe;",
+      "output": "⫒"
+    },
+    {
+      "input": "&ctdot;",
+      "output": "⋯"
+    },
+    {
+      "input": "&cudarrl;",
+      "output": "⤸"
+    },
+    {
+      "input": "&cudarrr;",
+      "output": "⤵"
+    },
+    {
+      "input": "&cuepr;",
+      "output": "⋞"
+    },
+    {
+      "input": "&cuesc;",
+      "output": "⋟"
+    },
+    {
+      "input": "&cularr;",
+      "output": "↶"
+    },
+    {
+      "input": "&cularrp;",
+      "output": "⤽"
+    },
+    {
+      "input": "&cup;",
+      "output": "∪"
+    },
+    {
+      "input": "&cupbrcap;",
+      "output": "⩈"
+    },
+    {
+      "input": "&cupcap;",
+      "output": "⩆"
+    },
+    {
+      "input": "&cupcup;",
+      "output": "⩊"
+    },
+    {
+      "input": "&cupdot;",
+      "output": "⊍"
+    },
+    {
+      "input": "&cupor;",
+      "output": "⩅"
+    },
+    {
+      "input": "&cups;",
+      "output": "∪︀"
+    },
+    {
+      "input": "&curarr;",
+      "output": "↷"
+    },
+    {
+      "input": "&curarrm;",
+      "output": "⤼"
+    },
+    {
+      "input": "&curlyeqprec;",
+      "output": "⋞"
+    },
+    {
+      "input": "&curlyeqsucc;",
+      "output": "⋟"
+    },
+    {
+      "input": "&curlyvee;",
+      "output": "⋎"
+    },
+    {
+      "input": "&curlywedge;",
+      "output": "⋏"
+    },
+    {
+      "input": "&curren",
+      "output": "¤"
+    },
+    {
+      "input": "&curren;",
+      "output": "¤"
+    },
+    {
+      "input": "&curvearrowleft;",
+      "output": "↶"
+    },
+    {
+      "input": "&curvearrowright;",
+      "output": "↷"
+    },
+    {
+      "input": "&cuvee;",
+      "output": "⋎"
+    },
+    {
+      "input": "&cuwed;",
+      "output": "⋏"
+    },
+    {
+      "input": "&cwconint;",
+      "output": "∲"
+    },
+    {
+      "input": "&cwint;",
+      "output": "∱"
+    },
+    {
+      "input": "&cylcty;",
+      "output": "⌭"
+    },
+    {
+      "input": "&dArr;",
+      "output": "⇓"
+    },
+    {
+      "input": "&dHar;",
+      "output": "⥥"
+    },
+    {
+      "input": "&dagger;",
+      "output": "†"
+    },
+    {
+      "input": "&daleth;",
+      "output": "ℸ"
+    },
+    {
+      "input": "&darr;",
+      "output": "↓"
+    },
+    {
+      "input": "&dash;",
+      "output": "‐"
+    },
+    {
+      "input": "&dashv;",
+      "output": "⊣"
+    },
+    {
+      "input": "&dbkarow;",
+      "output": "⤏"
+    },
+    {
+      "input": "&dblac;",
+      "output": "˝"
+    },
+    {
+      "input": "&dcaron;",
+      "output": "ď"
+    },
+    {
+      "input": "&dcy;",
+      "output": "д"
+    },
+    {
+      "input": "&dd;",
+      "output": "ⅆ"
+    },
+    {
+      "input": "&ddagger;",
+      "output": "‡"
+    },
+    {
+      "input": "&ddarr;",
+      "output": "⇊"
+    },
+    {
+      "input": "&ddotseq;",
+      "output": "⩷"
+    },
+    {
+      "input": "&deg",
+      "output": "°"
+    },
+    {
+      "input": "&deg;",
+      "output": "°"
+    },
+    {
+      "input": "&delta;",
+      "output": "δ"
+    },
+    {
+      "input": "&demptyv;",
+      "output": "⦱"
+    },
+    {
+      "input": "&dfisht;",
+      "output": "⥿"
+    },
+    {
+      "input": "&dfr;",
+      "output": "𝔡"
+    },
+    {
+      "input": "&dharl;",
+      "output": "⇃"
+    },
+    {
+      "input": "&dharr;",
+      "output": "⇂"
+    },
+    {
+      "input": "&diam;",
+      "output": "⋄"
+    },
+    {
+      "input": "&diamond;",
+      "output": "⋄"
+    },
+    {
+      "input": "&diamondsuit;",
+      "output": "♦"
+    },
+    {
+      "input": "&diams;",
+      "output": "♦"
+    },
+    {
+      "input": "&die;",
+      "output": "¨"
+    },
+    {
+      "input": "&digamma;",
+      "output": "ϝ"
+    },
+    {
+      "input": "&disin;",
+      "output": "⋲"
+    },
+    {
+      "input": "&div;",
+      "output": "÷"
+    },
+    {
+      "input": "&divide",
+      "output": "÷"
+    },
+    {
+      "input": "&divide;",
+      "output": "÷"
+    },
+    {
+      "input": "&divideontimes;",
+      "output": "⋇"
+    },
+    {
+      "input": "&divonx;",
+      "output": "⋇"
+    },
+    {
+      "input": "&djcy;",
+      "output": "ђ"
+    },
+    {
+      "input": "&dlcorn;",
+      "output": "⌞"
+    },
+    {
+      "input": "&dlcrop;",
+      "output": "⌍"
+    },
+    {
+      "input": "&dollar;",
+      "output": "$"
+    },
+    {
+      "input": "&dopf;",
+      "output": "𝕕"
+    },
+    {
+      "input": "&dot;",
+      "output": "˙"
+    },
+    {
+      "input": "&doteq;",
+      "output": "≐"
+    },
+    {
+      "input": "&doteqdot;",
+      "output": "≑"
+    },
+    {
+      "input": "&dotminus;",
+      "output": "∸"
+    },
+    {
+      "input": "&dotplus;",
+      "output": "∔"
+    },
+    {
+      "input": "&dotsquare;",
+      "output": "⊡"
+    },
+    {
+      "input": "&doublebarwedge;",
+      "output": "⌆"
+    },
+    {
+      "input": "&downarrow;",
+      "output": "↓"
+    },
+    {
+      "input": "&downdownarrows;",
+      "output": "⇊"
+    },
+    {
+      "input": "&downharpoonleft;",
+      "output": "⇃"
+    },
+    {
+      "input": "&downharpoonright;",
+      "output": "⇂"
+    },
+    {
+      "input": "&drbkarow;",
+      "output": "⤐"
+    },
+    {
+      "input": "&drcorn;",
+      "output": "⌟"
+    },
+    {
+      "input": "&drcrop;",
+      "output": "⌌"
+    },
+    {
+      "input": "&dscr;",
+      "output": "𝒹"
+    },
+    {
+      "input": "&dscy;",
+      "output": "ѕ"
+    },
+    {
+      "input": "&dsol;",
+      "output": "⧶"
+    },
+    {
+      "input": "&dstrok;",
+      "output": "đ"
+    },
+    {
+      "input": "&dtdot;",
+      "output": "⋱"
+    },
+    {
+      "input": "&dtri;",
+      "output": "▿"
+    },
+    {
+      "input": "&dtrif;",
+      "output": "▾"
+    },
+    {
+      "input": "&duarr;",
+      "output": "⇵"
+    },
+    {
+      "input": "&duhar;",
+      "output": "⥯"
+    },
+    {
+      "input": "&dwangle;",
+      "output": "⦦"
+    },
+    {
+      "input": "&dzcy;",
+      "output": "џ"
+    },
+    {
+      "input": "&dzigrarr;",
+      "output": "⟿"
+    },
+    {
+      "input": "&eDDot;",
+      "output": "⩷"
+    },
+    {
+      "input": "&eDot;",
+      "output": "≑"
+    },
+    {
+      "input": "&eacute",
+      "output": "é"
+    },
+    {
+      "input": "&eacute;",
+      "output": "é"
+    },
+    {
+      "input": "&easter;",
+      "output": "⩮"
+    },
+    {
+      "input": "&ecaron;",
+      "output": "ě"
+    },
+    {
+      "input": "&ecir;",
+      "output": "≖"
+    },
+    {
+      "input": "&ecirc",
+      "output": "ê"
+    },
+    {
+      "input": "&ecirc;",
+      "output": "ê"
+    },
+    {
+      "input": "&ecolon;",
+      "output": "≕"
+    },
+    {
+      "input": "&ecy;",
+      "output": "э"
+    },
+    {
+      "input": "&edot;",
+      "output": "ė"
+    },
+    {
+      "input": "&ee;",
+      "output": "ⅇ"
+    },
+    {
+      "input": "&efDot;",
+      "output": "≒"
+    },
+    {
+      "input": "&efr;",
+      "output": "𝔢"
+    },
+    {
+      "input": "&eg;",
+      "output": "⪚"
+    },
+    {
+      "input": "&egrave",
+      "output": "è"
+    },
+    {
+      "input": "&egrave;",
+      "output": "è"
+    },
+    {
+      "input": "&egs;",
+      "output": "⪖"
+    },
+    {
+      "input": "&egsdot;",
+      "output": "⪘"
+    },
+    {
+      "input": "&el;",
+      "output": "⪙"
+    },
+    {
+      "input": "&elinters;",
+      "output": "⏧"
+    },
+    {
+      "input": "&ell;",
+      "output": "ℓ"
+    },
+    {
+      "input": "&els;",
+      "output": "⪕"
+    },
+    {
+      "input": "&elsdot;",
+      "output": "⪗"
+    },
+    {
+      "input": "&emacr;",
+      "output": "ē"
+    },
+    {
+      "input": "&empty;",
+      "output": "∅"
+    },
+    {
+      "input": "&emptyset;",
+      "output": "∅"
+    },
+    {
+      "input": "&emptyv;",
+      "output": "∅"
+    },
+    {
+      "input": "&emsp13;",
+      "output": " "
+    },
+    {
+      "input": "&emsp14;",
+      "output": " "
+    },
+    {
+      "input": "&emsp;",
+      "output": " "
+    },
+    {
+      "input": "&eng;",
+      "output": "ŋ"
+    },
+    {
+      "input": "&ensp;",
+      "output": " "
+    },
+    {
+      "input": "&eogon;",
+      "output": "ę"
+    },
+    {
+      "input": "&eopf;",
+      "output": "𝕖"
+    },
+    {
+      "input": "&epar;",
+      "output": "⋕"
+    },
+    {
+      "input": "&eparsl;",
+      "output": "⧣"
+    },
+    {
+      "input": "&eplus;",
+      "output": "⩱"
+    },
+    {
+      "input": "&epsi;",
+      "output": "ε"
+    },
+    {
+      "input": "&epsilon;",
+      "output": "ε"
+    },
+    {
+      "input": "&epsiv;",
+      "output": "ϵ"
+    },
+    {
+      "input": "&eqcirc;",
+      "output": "≖"
+    },
+    {
+      "input": "&eqcolon;",
+      "output": "≕"
+    },
+    {
+      "input": "&eqsim;",
+      "output": "≂"
+    },
+    {
+      "input": "&eqslantgtr;",
+      "output": "⪖"
+    },
+    {
+      "input": "&eqslantless;",
+      "output": "⪕"
+    },
+    {
+      "input": "&equals;",
+      "output": "="
+    },
+    {
+      "input": "&equest;",
+      "output": "≟"
+    },
+    {
+      "input": "&equiv;",
+      "output": "≡"
+    },
+    {
+      "input": "&equivDD;",
+      "output": "⩸"
+    },
+    {
+      "input": "&eqvparsl;",
+      "output": "⧥"
+    },
+    {
+      "input": "&erDot;",
+      "output": "≓"
+    },
+    {
+      "input": "&erarr;",
+      "output": "⥱"
+    },
+    {
+      "input": "&escr;",
+      "output": "ℯ"
+    },
+    {
+      "input": "&esdot;",
+      "output": "≐"
+    },
+    {
+      "input": "&esim;",
+      "output": "≂"
+    },
+    {
+      "input": "&eta;",
+      "output": "η"
+    },
+    {
+      "input": "&eth",
+      "output": "ð"
+    },
+    {
+      "input": "&eth;",
+      "output": "ð"
+    },
+    {
+      "input": "&euml",
+      "output": "ë"
+    },
+    {
+      "input": "&euml;",
+      "output": "ë"
+    },
+    {
+      "input": "&euro;",
+      "output": "€"
+    },
+    {
+      "input": "&excl;",
+      "output": "!"
+    },
+    {
+      "input": "&exist;",
+      "output": "∃"
+    },
+    {
+      "input": "&expectation;",
+      "output": "ℰ"
+    },
+    {
+      "input": "&exponentiale;",
+      "output": "ⅇ"
+    },
+    {
+      "input": "&fallingdotseq;",
+      "output": "≒"
+    },
+    {
+      "input": "&fcy;",
+      "output": "ф"
+    },
+    {
+      "input": "&female;",
+      "output": "♀"
+    },
+    {
+      "input": "&ffilig;",
+      "output": "ﬃ"
+    },
+    {
+      "input": "&fflig;",
+      "output": "ﬀ"
+    },
+    {
+      "input": "&ffllig;",
+      "output": "ﬄ"
+    },
+    {
+      "input": "&ffr;",
+      "output": "𝔣"
+    },
+    {
+      "input": "&filig;",
+      "output": "ﬁ"
+    },
+    {
+      "input": "&fjlig;",
+      "output": "fj"
+    },
+    {
+      "input": "&flat;",
+      "output": "♭"
+    },
+    {
+      "input": "&fllig;",
+      "output": "ﬂ"
+    },
+    {
+      "input": "&fltns;",
+      "output": "▱"
+    },
+    {
+      "input": "&fnof;",
+      "output": "ƒ"
+    },
+    {
+      "input": "&fopf;",
+      "output": "𝕗"
+    },
+    {
+      "input": "&forall;",
+      "output": "∀"
+    },
+    {
+      "input": "&fork;",
+      "output": "⋔"
+    },
+    {
+      "input": "&forkv;",
+      "output": "⫙"
+    },
+    {
+      "input": "&fpartint;",
+      "output": "⨍"
+    },
+    {
+      "input": "&frac12",
+      "output": "½"
+    },
+    {
+      "input": "&frac12;",
+      "output": "½"
+    },
+    {
+      "input": "&frac13;",
+      "output": "⅓"
+    },
+    {
+      "input": "&frac14",
+      "output": "¼"
+    },
+    {
+      "input": "&frac14;",
+      "output": "¼"
+    },
+    {
+      "input": "&frac15;",
+      "output": "⅕"
+    },
+    {
+      "input": "&frac16;",
+      "output": "⅙"
+    },
+    {
+      "input": "&frac18;",
+      "output": "⅛"
+    },
+    {
+      "input": "&frac23;",
+      "output": "⅔"
+    },
+    {
+      "input": "&frac25;",
+      "output": "⅖"
+    },
+    {
+      "input": "&frac34",
+      "output": "¾"
+    },
+    {
+      "input": "&frac34;",
+      "output": "¾"
+    },
+    {
+      "input": "&frac35;",
+      "output": "⅗"
+    },
+    {
+      "input": "&frac38;",
+      "output": "⅜"
+    },
+    {
+      "input": "&frac45;",
+      "output": "⅘"
+    },
+    {
+      "input": "&frac56;",
+      "output": "⅚"
+    },
+    {
+      "input": "&frac58;",
+      "output": "⅝"
+    },
+    {
+      "input": "&frac78;",
+      "output": "⅞"
+    },
+    {
+      "input": "&frasl;",
+      "output": "⁄"
+    },
+    {
+      "input": "&frown;",
+      "output": "⌢"
+    },
+    {
+      "input": "&fscr;",
+      "output": "𝒻"
+    },
+    {
+      "input": "&gE;",
+      "output": "≧"
+    },
+    {
+      "input": "&gEl;",
+      "output": "⪌"
+    },
+    {
+      "input": "&gacute;",
+      "output": "ǵ"
+    },
+    {
+      "input": "&gamma;",
+      "output": "γ"
+    },
+    {
+      "input": "&gammad;",
+      "output": "ϝ"
+    },
+    {
+      "input": "&gap;",
+      "output": "⪆"
+    },
+    {
+      "input": "&gbreve;",
+      "output": "ğ"
+    },
+    {
+      "input": "&gcirc;",
+      "output": "ĝ"
+    },
+    {
+      "input": "&gcy;",
+      "output": "г"
+    },
+    {
+      "input": "&gdot;",
+      "output": "ġ"
+    },
+    {
+      "input": "&ge;",
+      "output": "≥"
+    },
+    {
+      "input": "&gel;",
+      "output": "⋛"
+    },
+    {
+      "input": "&geq;",
+      "output": "≥"
+    },
+    {
+      "input": "&geqq;",
+      "output": "≧"
+    },
+    {
+      "input": "&geqslant;",
+      "output": "⩾"
+    },
+    {
+      "input": "&ges;",
+      "output": "⩾"
+    },
+    {
+      "input": "&gescc;",
+      "output": "⪩"
+    },
+    {
+      "input": "&gesdot;",
+      "output": "⪀"
+    },
+    {
+      "input": "&gesdoto;",
+      "output": "⪂"
+    },
+    {
+      "input": "&gesdotol;",
+      "output": "⪄"
+    },
+    {
+      "input": "&gesl;",
+      "output": "⋛︀"
+    },
+    {
+      "input": "&gesles;",
+      "output": "⪔"
+    },
+    {
+      "input": "&gfr;",
+      "output": "𝔤"
+    },
+    {
+      "input": "&gg;",
+      "output": "≫"
+    },
+    {
+      "input": "&ggg;",
+      "output": "⋙"
+    },
+    {
+      "input": "&gimel;",
+      "output": "ℷ"
+    },
+    {
+      "input": "&gjcy;",
+      "output": "ѓ"
+    },
+    {
+      "input": "&gl;",
+      "output": "≷"
+    },
+    {
+      "input": "&glE;",
+      "output": "⪒"
+    },
+    {
+      "input": "&gla;",
+      "output": "⪥"
+    },
+    {
+      "input": "&glj;",
+      "output": "⪤"
+    },
+    {
+      "input": "&gnE;",
+      "output": "≩"
+    },
+    {
+      "input": "&gnap;",
+      "output": "⪊"
+    },
+    {
+      "input": "&gnapprox;",
+      "output": "⪊"
+    },
+    {
+      "input": "&gne;",
+      "output": "⪈"
+    },
+    {
+      "input": "&gneq;",
+      "output": "⪈"
+    },
+    {
+      "input": "&gneqq;",
+      "output": "≩"
+    },
+    {
+      "input": "&gnsim;",
+      "output": "⋧"
+    },
+    {
+      "input": "&gopf;",
+      "output": "𝕘"
+    },
+    {
+      "input": "&grave;",
+      "output": "`"
+    },
+    {
+      "input": "&gscr;",
+      "output": "ℊ"
+    },
+    {
+      "input": "&gsim;",
+      "output": "≳"
+    },
+    {
+      "input": "&gsime;",
+      "output": "⪎"
+    },
+    {
+      "input": "&gsiml;",
+      "output": "⪐"
+    },
+    {
+      "input": "&gt",
+      "output": ">"
+    },
+    {
+      "input": "&gt;",
+      "output": ">"
+    },
+    {
+      "input": "&gtcc;",
+      "output": "⪧"
+    },
+    {
+      "input": "&gtcir;",
+      "output": "⩺"
+    },
+    {
+      "input": "&gtdot;",
+      "output": "⋗"
+    },
+    {
+      "input": "&gtlPar;",
+      "output": "⦕"
+    },
+    {
+      "input": "&gtquest;",
+      "output": "⩼"
+    },
+    {
+      "input": "&gtrapprox;",
+      "output": "⪆"
+    },
+    {
+      "input": "&gtrarr;",
+      "output": "⥸"
+    },
+    {
+      "input": "&gtrdot;",
+      "output": "⋗"
+    },
+    {
+      "input": "&gtreqless;",
+      "output": "⋛"
+    },
+    {
+      "input": "&gtreqqless;",
+      "output": "⪌"
+    },
+    {
+      "input": "&gtrless;",
+      "output": "≷"
+    },
+    {
+      "input": "&gtrsim;",
+      "output": "≳"
+    },
+    {
+      "input": "&gvertneqq;",
+      "output": "≩︀"
+    },
+    {
+      "input": "&gvnE;",
+      "output": "≩︀"
+    },
+    {
+      "input": "&hArr;",
+      "output": "⇔"
+    },
+    {
+      "input": "&hairsp;",
+      "output": " "
+    },
+    {
+      "input": "&half;",
+      "output": "½"
+    },
+    {
+      "input": "&hamilt;",
+      "output": "ℋ"
+    },
+    {
+      "input": "&hardcy;",
+      "output": "ъ"
+    },
+    {
+      "input": "&harr;",
+      "output": "↔"
+    },
+    {
+      "input": "&harrcir;",
+      "output": "⥈"
+    },
+    {
+      "input": "&harrw;",
+      "output": "↭"
+    },
+    {
+      "input": "&hbar;",
+      "output": "ℏ"
+    },
+    {
+      "input": "&hcirc;",
+      "output": "ĥ"
+    },
+    {
+      "input": "&hearts;",
+      "output": "♥"
+    },
+    {
+      "input": "&heartsuit;",
+      "output": "♥"
+    },
+    {
+      "input": "&hellip;",
+      "output": "…"
+    },
+    {
+      "input": "&hercon;",
+      "output": "⊹"
+    },
+    {
+      "input": "&hfr;",
+      "output": "𝔥"
+    },
+    {
+      "input": "&hksearow;",
+      "output": "⤥"
+    },
+    {
+      "input": "&hkswarow;",
+      "output": "⤦"
+    },
+    {
+      "input": "&hoarr;",
+      "output": "⇿"
+    },
+    {
+      "input": "&homtht;",
+      "output": "∻"
+    },
+    {
+      "input": "&hookleftarrow;",
+      "output": "↩"
+    },
+    {
+      "input": "&hookrightarrow;",
+      "output": "↪"
+    },
+    {
+      "input": "&hopf;",
+      "output": "𝕙"
+    },
+    {
+      "input": "&horbar;",
+      "output": "―"
+    },
+    {
+      "input": "&hscr;",
+      "output": "𝒽"
+    },
+    {
+      "input": "&hslash;",
+      "output": "ℏ"
+    },
+    {
+      "input": "&hstrok;",
+      "output": "ħ"
+    },
+    {
+      "input": "&hybull;",
+      "output": "⁃"
+    },
+    {
+      "input": "&hyphen;",
+      "output": "‐"
+    },
+    {
+      "input": "&iacute",
+      "output": "í"
+    },
+    {
+      "input": "&iacute;",
+      "output": "í"
+    },
+    {
+      "input": "&ic;",
+      "output": "⁣"
+    },
+    {
+      "input": "&icirc",
+      "output": "î"
+    },
+    {
+      "input": "&icirc;",
+      "output": "î"
+    },
+    {
+      "input": "&icy;",
+      "output": "и"
+    },
+    {
+      "input": "&iecy;",
+      "output": "е"
+    },
+    {
+      "input": "&iexcl",
+      "output": "¡"
+    },
+    {
+      "input": "&iexcl;",
+      "output": "¡"
+    },
+    {
+      "input": "&iff;",
+      "output": "⇔"
+    },
+    {
+      "input": "&ifr;",
+      "output": "𝔦"
+    },
+    {
+      "input": "&igrave",
+      "output": "ì"
+    },
+    {
+      "input": "&igrave;",
+      "output": "ì"
+    },
+    {
+      "input": "&ii;",
+      "output": "ⅈ"
+    },
+    {
+      "input": "&iiiint;",
+      "output": "⨌"
+    },
+    {
+      "input": "&iiint;",
+      "output": "∭"
+    },
+    {
+      "input": "&iinfin;",
+      "output": "⧜"
+    },
+    {
+      "input": "&iiota;",
+      "output": "℩"
+    },
+    {
+      "input": "&ijlig;",
+      "output": "ĳ"
+    },
+    {
+      "input": "&imacr;",
+      "output": "ī"
+    },
+    {
+      "input": "&image;",
+      "output": "ℑ"
+    },
+    {
+      "input": "&imagline;",
+      "output": "ℐ"
+    },
+    {
+      "input": "&imagpart;",
+      "output": "ℑ"
+    },
+    {
+      "input": "&imath;",
+      "output": "ı"
+    },
+    {
+      "input": "&imof;",
+      "output": "⊷"
+    },
+    {
+      "input": "&imped;",
+      "output": "Ƶ"
+    },
+    {
+      "input": "&in;",
+      "output": "∈"
+    },
+    {
+      "input": "&incare;",
+      "output": "℅"
+    },
+    {
+      "input": "&infin;",
+      "output": "∞"
+    },
+    {
+      "input": "&infintie;",
+      "output": "⧝"
+    },
+    {
+      "input": "&inodot;",
+      "output": "ı"
+    },
+    {
+      "input": "&int;",
+      "output": "∫"
+    },
+    {
+      "input": "&intcal;",
+      "output": "⊺"
+    },
+    {
+      "input": "&integers;",
+      "output": "ℤ"
+    },
+    {
+      "input": "&intercal;",
+      "output": "⊺"
+    },
+    {
+      "input": "&intlarhk;",
+      "output": "⨗"
+    },
+    {
+      "input": "&intprod;",
+      "output": "⨼"
+    },
+    {
+      "input": "&iocy;",
+      "output": "ё"
+    },
+    {
+      "input": "&iogon;",
+      "output": "į"
+    },
+    {
+      "input": "&iopf;",
+      "output": "𝕚"
+    },
+    {
+      "input": "&iota;",
+      "output": "ι"
+    },
+    {
+      "input": "&iprod;",
+      "output": "⨼"
+    },
+    {
+      "input": "&iquest",
+      "output": "¿"
+    },
+    {
+      "input": "&iquest;",
+      "output": "¿"
+    },
+    {
+      "input": "&iscr;",
+      "output": "𝒾"
+    },
+    {
+      "input": "&isin;",
+      "output": "∈"
+    },
+    {
+      "input": "&isinE;",
+      "output": "⋹"
+    },
+    {
+      "input": "&isindot;",
+      "output": "⋵"
+    },
+    {
+      "input": "&isins;",
+      "output": "⋴"
+    },
+    {
+      "input": "&isinsv;",
+      "output": "⋳"
+    },
+    {
+      "input": "&isinv;",
+      "output": "∈"
+    },
+    {
+      "input": "&it;",
+      "output": "⁢"
+    },
+    {
+      "input": "&itilde;",
+      "output": "ĩ"
+    },
+    {
+      "input": "&iukcy;",
+      "output": "і"
+    },
+    {
+      "input": "&iuml",
+      "output": "ï"
+    },
+    {
+      "input": "&iuml;",
+      "output": "ï"
+    },
+    {
+      "input": "&jcirc;",
+      "output": "ĵ"
+    },
+    {
+      "input": "&jcy;",
+      "output": "й"
+    },
+    {
+      "input": "&jfr;",
+      "output": "𝔧"
+    },
+    {
+      "input": "&jmath;",
+      "output": "ȷ"
+    },
+    {
+      "input": "&jopf;",
+      "output": "𝕛"
+    },
+    {
+      "input": "&jscr;",
+      "output": "𝒿"
+    },
+    {
+      "input": "&jsercy;",
+      "output": "ј"
+    },
+    {
+      "input": "&jukcy;",
+      "output": "є"
+    },
+    {
+      "input": "&kappa;",
+      "output": "κ"
+    },
+    {
+      "input": "&kappav;",
+      "output": "ϰ"
+    },
+    {
+      "input": "&kcedil;",
+      "output": "ķ"
+    },
+    {
+      "input": "&kcy;",
+      "output": "к"
+    },
+    {
+      "input": "&kfr;",
+      "output": "𝔨"
+    },
+    {
+      "input": "&kgreen;",
+      "output": "ĸ"
+    },
+    {
+      "input": "&khcy;",
+      "output": "х"
+    },
+    {
+      "input": "&kjcy;",
+      "output": "ќ"
+    },
+    {
+      "input": "&kopf;",
+      "output": "𝕜"
+    },
+    {
+      "input": "&kscr;",
+      "output": "𝓀"
+    },
+    {
+      "input": "&lAarr;",
+      "output": "⇚"
+    },
+    {
+      "input": "&lArr;",
+      "output": "⇐"
+    },
+    {
+      "input": "&lAtail;",
+      "output": "⤛"
+    },
+    {
+      "input": "&lBarr;",
+      "output": "⤎"
+    },
+    {
+      "input": "&lE;",
+      "output": "≦"
+    },
+    {
+      "input": "&lEg;",
+      "output": "⪋"
+    },
+    {
+      "input": "&lHar;",
+      "output": "⥢"
+    },
+    {
+      "input": "&lacute;",
+      "output": "ĺ"
+    },
+    {
+      "input": "&laemptyv;",
+      "output": "⦴"
+    },
+    {
+      "input": "&lagran;",
+      "output": "ℒ"
+    },
+    {
+      "input": "&lambda;",
+      "output": "λ"
+    },
+    {
+      "input": "&lang;",
+      "output": "⟨"
+    },
+    {
+      "input": "&langd;",
+      "output": "⦑"
+    },
+    {
+      "input": "&langle;",
+      "output": "⟨"
+    },
+    {
+      "input": "&lap;",
+      "output": "⪅"
+    },
+    {
+      "input": "&laquo",
+      "output": "«"
+    },
+    {
+      "input": "&laquo;",
+      "output": "«"
+    },
+    {
+      "input": "&larr;",
+      "output": "←"
+    },
+    {
+      "input": "&larrb;",
+      "output": "⇤"
+    },
+    {
+      "input": "&larrbfs;",
+      "output": "⤟"
+    },
+    {
+      "input": "&larrfs;",
+      "output": "⤝"
+    },
+    {
+      "input": "&larrhk;",
+      "output": "↩"
+    },
+    {
+      "input": "&larrlp;",
+      "output": "↫"
+    },
+    {
+      "input": "&larrpl;",
+      "output": "⤹"
+    },
+    {
+      "input": "&larrsim;",
+      "output": "⥳"
+    },
+    {
+      "input": "&larrtl;",
+      "output": "↢"
+    },
+    {
+      "input": "&lat;",
+      "output": "⪫"
+    },
+    {
+      "input": "&latail;",
+      "output": "⤙"
+    },
+    {
+      "input": "&late;",
+      "output": "⪭"
+    },
+    {
+      "input": "&lates;",
+      "output": "⪭︀"
+    },
+    {
+      "input": "&lbarr;",
+      "output": "⤌"
+    },
+    {
+      "input": "&lbbrk;",
+      "output": "❲"
+    },
+    {
+      "input": "&lbrace;",
+      "output": "{"
+    },
+    {
+      "input": "&lbrack;",
+      "output": "["
+    },
+    {
+      "input": "&lbrke;",
+      "output": "⦋"
+    },
+    {
+      "input": "&lbrksld;",
+      "output": "⦏"
+    },
+    {
+      "input": "&lbrkslu;",
+      "output": "⦍"
+    },
+    {
+      "input": "&lcaron;",
+      "output": "ľ"
+    },
+    {
+      "input": "&lcedil;",
+      "output": "ļ"
+    },
+    {
+      "input": "&lceil;",
+      "output": "⌈"
+    },
+    {
+      "input": "&lcub;",
+      "output": "{"
+    },
+    {
+      "input": "&lcy;",
+      "output": "л"
+    },
+    {
+      "input": "&ldca;",
+      "output": "⤶"
+    },
+    {
+      "input": "&ldquo;",
+      "output": "“"
+    },
+    {
+      "input": "&ldquor;",
+      "output": "„"
+    },
+    {
+      "input": "&ldrdhar;",
+      "output": "⥧"
+    },
+    {
+      "input": "&ldrushar;",
+      "output": "⥋"
+    },
+    {
+      "input": "&ldsh;",
+      "output": "↲"
+    },
+    {
+      "input": "&le;",
+      "output": "≤"
+    },
+    {
+      "input": "&leftarrow;",
+      "output": "←"
+    },
+    {
+      "input": "&leftarrowtail;",
+      "output": "↢"
+    },
+    {
+      "input": "&leftharpoondown;",
+      "output": "↽"
+    },
+    {
+      "input": "&leftharpoonup;",
+      "output": "↼"
+    },
+    {
+      "input": "&leftleftarrows;",
+      "output": "⇇"
+    },
+    {
+      "input": "&leftrightarrow;",
+      "output": "↔"
+    },
+    {
+      "input": "&leftrightarrows;",
+      "output": "⇆"
+    },
+    {
+      "input": "&leftrightharpoons;",
+      "output": "⇋"
+    },
+    {
+      "input": "&leftrightsquigarrow;",
+      "output": "↭"
+    },
+    {
+      "input": "&leftthreetimes;",
+      "output": "⋋"
+    },
+    {
+      "input": "&leg;",
+      "output": "⋚"
+    },
+    {
+      "input": "&leq;",
+      "output": "≤"
+    },
+    {
+      "input": "&leqq;",
+      "output": "≦"
+    },
+    {
+      "input": "&leqslant;",
+      "output": "⩽"
+    },
+    {
+      "input": "&les;",
+      "output": "⩽"
+    },
+    {
+      "input": "&lescc;",
+      "output": "⪨"
+    },
+    {
+      "input": "&lesdot;",
+      "output": "⩿"
+    },
+    {
+      "input": "&lesdoto;",
+      "output": "⪁"
+    },
+    {
+      "input": "&lesdotor;",
+      "output": "⪃"
+    },
+    {
+      "input": "&lesg;",
+      "output": "⋚︀"
+    },
+    {
+      "input": "&lesges;",
+      "output": "⪓"
+    },
+    {
+      "input": "&lessapprox;",
+      "output": "⪅"
+    },
+    {
+      "input": "&lessdot;",
+      "output": "⋖"
+    },
+    {
+      "input": "&lesseqgtr;",
+      "output": "⋚"
+    },
+    {
+      "input": "&lesseqqgtr;",
+      "output": "⪋"
+    },
+    {
+      "input": "&lessgtr;",
+      "output": "≶"
+    },
+    {
+      "input": "&lesssim;",
+      "output": "≲"
+    },
+    {
+      "input": "&lfisht;",
+      "output": "⥼"
+    },
+    {
+      "input": "&lfloor;",
+      "output": "⌊"
+    },
+    {
+      "input": "&lfr;",
+      "output": "𝔩"
+    },
+    {
+      "input": "&lg;",
+      "output": "≶"
+    },
+    {
+      "input": "&lgE;",
+      "output": "⪑"
+    },
+    {
+      "input": "&lhard;",
+      "output": "↽"
+    },
+    {
+      "input": "&lharu;",
+      "output": "↼"
+    },
+    {
+      "input": "&lharul;",
+      "output": "⥪"
+    },
+    {
+      "input": "&lhblk;",
+      "output": "▄"
+    },
+    {
+      "input": "&ljcy;",
+      "output": "љ"
+    },
+    {
+      "input": "&ll;",
+      "output": "≪"
+    },
+    {
+      "input": "&llarr;",
+      "output": "⇇"
+    },
+    {
+      "input": "&llcorner;",
+      "output": "⌞"
+    },
+    {
+      "input": "&llhard;",
+      "output": "⥫"
+    },
+    {
+      "input": "&lltri;",
+      "output": "◺"
+    },
+    {
+      "input": "&lmidot;",
+      "output": "ŀ"
+    },
+    {
+      "input": "&lmoust;",
+      "output": "⎰"
+    },
+    {
+      "input": "&lmoustache;",
+      "output": "⎰"
+    },
+    {
+      "input": "&lnE;",
+      "output": "≨"
+    },
+    {
+      "input": "&lnap;",
+      "output": "⪉"
+    },
+    {
+      "input": "&lnapprox;",
+      "output": "⪉"
+    },
+    {
+      "input": "&lne;",
+      "output": "⪇"
+    },
+    {
+      "input": "&lneq;",
+      "output": "⪇"
+    },
+    {
+      "input": "&lneqq;",
+      "output": "≨"
+    },
+    {
+      "input": "&lnsim;",
+      "output": "⋦"
+    },
+    {
+      "input": "&loang;",
+      "output": "⟬"
+    },
+    {
+      "input": "&loarr;",
+      "output": "⇽"
+    },
+    {
+      "input": "&lobrk;",
+      "output": "⟦"
+    },
+    {
+      "input": "&longleftarrow;",
+      "output": "⟵"
+    },
+    {
+      "input": "&longleftrightarrow;",
+      "output": "⟷"
+    },
+    {
+      "input": "&longmapsto;",
+      "output": "⟼"
+    },
+    {
+      "input": "&longrightarrow;",
+      "output": "⟶"
+    },
+    {
+      "input": "&looparrowleft;",
+      "output": "↫"
+    },
+    {
+      "input": "&looparrowright;",
+      "output": "↬"
+    },
+    {
+      "input": "&lopar;",
+      "output": "⦅"
+    },
+    {
+      "input": "&lopf;",
+      "output": "𝕝"
+    },
+    {
+      "input": "&loplus;",
+      "output": "⨭"
+    },
+    {
+      "input": "&lotimes;",
+      "output": "⨴"
+    },
+    {
+      "input": "&lowast;",
+      "output": "∗"
+    },
+    {
+      "input": "&lowbar;",
+      "output": "_"
+    },
+    {
+      "input": "&loz;",
+      "output": "◊"
+    },
+    {
+      "input": "&lozenge;",
+      "output": "◊"
+    },
+    {
+      "input": "&lozf;",
+      "output": "⧫"
+    },
+    {
+      "input": "&lpar;",
+      "output": "("
+    },
+    {
+      "input": "&lparlt;",
+      "output": "⦓"
+    },
+    {
+      "input": "&lrarr;",
+      "output": "⇆"
+    },
+    {
+      "input": "&lrcorner;",
+      "output": "⌟"
+    },
+    {
+      "input": "&lrhar;",
+      "output": "⇋"
+    },
+    {
+      "input": "&lrhard;",
+      "output": "⥭"
+    },
+    {
+      "input": "&lrm;",
+      "output": "‎"
+    },
+    {
+      "input": "&lrtri;",
+      "output": "⊿"
+    },
+    {
+      "input": "&lsaquo;",
+      "output": "‹"
+    },
+    {
+      "input": "&lscr;",
+      "output": "𝓁"
+    },
+    {
+      "input": "&lsh;",
+      "output": "↰"
+    },
+    {
+      "input": "&lsim;",
+      "output": "≲"
+    },
+    {
+      "input": "&lsime;",
+      "output": "⪍"
+    },
+    {
+      "input": "&lsimg;",
+      "output": "⪏"
+    },
+    {
+      "input": "&lsqb;",
+      "output": "["
+    },
+    {
+      "input": "&lsquo;",
+      "output": "‘"
+    },
+    {
+      "input": "&lsquor;",
+      "output": "‚"
+    },
+    {
+      "input": "&lstrok;",
+      "output": "ł"
+    },
+    {
+      "input": "&lt",
+      "output": "<"
+    },
+    {
+      "input": "&lt;",
+      "output": "<"
+    },
+    {
+      "input": "&ltcc;",
+      "output": "⪦"
+    },
+    {
+      "input": "&ltcir;",
+      "output": "⩹"
+    },
+    {
+      "input": "&ltdot;",
+      "output": "⋖"
+    },
+    {
+      "input": "&lthree;",
+      "output": "⋋"
+    },
+    {
+      "input": "&ltimes;",
+      "output": "⋉"
+    },
+    {
+      "input": "&ltlarr;",
+      "output": "⥶"
+    },
+    {
+      "input": "&ltquest;",
+      "output": "⩻"
+    },
+    {
+      "input": "&ltrPar;",
+      "output": "⦖"
+    },
+    {
+      "input": "&ltri;",
+      "output": "◃"
+    },
+    {
+      "input": "&ltrie;",
+      "output": "⊴"
+    },
+    {
+      "input": "&ltrif;",
+      "output": "◂"
+    },
+    {
+      "input": "&lurdshar;",
+      "output": "⥊"
+    },
+    {
+      "input": "&luruhar;",
+      "output": "⥦"
+    },
+    {
+      "input": "&lvertneqq;",
+      "output": "≨︀"
+    },
+    {
+      "input": "&lvnE;",
+      "output": "≨︀"
+    },
+    {
+      "input": "&mDDot;",
+      "output": "∺"
+    },
+    {
+      "input": "&macr",
+      "output": "¯"
+    },
+    {
+      "input": "&macr;",
+      "output": "¯"
+    },
+    {
+      "input": "&male;",
+      "output": "♂"
+    },
+    {
+      "input": "&malt;",
+      "output": "✠"
+    },
+    {
+      "input": "&maltese;",
+      "output": "✠"
+    },
+    {
+      "input": "&map;",
+      "output": "↦"
+    },
+    {
+      "input": "&mapsto;",
+      "output": "↦"
+    },
+    {
+      "input": "&mapstodown;",
+      "output": "↧"
+    },
+    {
+      "input": "&mapstoleft;",
+      "output": "↤"
+    },
+    {
+      "input": "&mapstoup;",
+      "output": "↥"
+    },
+    {
+      "input": "&marker;",
+      "output": "▮"
+    },
+    {
+      "input": "&mcomma;",
+      "output": "⨩"
+    },
+    {
+      "input": "&mcy;",
+      "output": "м"
+    },
+    {
+      "input": "&mdash;",
+      "output": "—"
+    },
+    {
+      "input": "&measuredangle;",
+      "output": "∡"
+    },
+    {
+      "input": "&mfr;",
+      "output": "𝔪"
+    },
+    {
+      "input": "&mho;",
+      "output": "℧"
+    },
+    {
+      "input": "&micro",
+      "output": "µ"
+    },
+    {
+      "input": "&micro;",
+      "output": "µ"
+    },
+    {
+      "input": "&mid;",
+      "output": "∣"
+    },
+    {
+      "input": "&midast;",
+      "output": "*"
+    },
+    {
+      "input": "&midcir;",
+      "output": "⫰"
+    },
+    {
+      "input": "&middot",
+      "output": "·"
+    },
+    {
+      "input": "&middot;",
+      "output": "·"
+    },
+    {
+      "input": "&minus;",
+      "output": "−"
+    },
+    {
+      "input": "&minusb;",
+      "output": "⊟"
+    },
+    {
+      "input": "&minusd;",
+      "output": "∸"
+    },
+    {
+      "input": "&minusdu;",
+      "output": "⨪"
+    },
+    {
+      "input": "&mlcp;",
+      "output": "⫛"
+    },
+    {
+      "input": "&mldr;",
+      "output": "…"
+    },
+    {
+      "input": "&mnplus;",
+      "output": "∓"
+    },
+    {
+      "input": "&models;",
+      "output": "⊧"
+    },
+    {
+      "input": "&mopf;",
+      "output": "𝕞"
+    },
+    {
+      "input": "&mp;",
+      "output": "∓"
+    },
+    {
+      "input": "&mscr;",
+      "output": "𝓂"
+    },
+    {
+      "input": "&mstpos;",
+      "output": "∾"
+    },
+    {
+      "input": "&mu;",
+      "output": "μ"
+    },
+    {
+      "input": "&multimap;",
+      "output": "⊸"
+    },
+    {
+      "input": "&mumap;",
+      "output": "⊸"
+    },
+    {
+      "input": "&nGg;",
+      "output": "⋙̸"
+    },
+    {
+      "input": "&nGt;",
+      "output": "≫⃒"
+    },
+    {
+      "input": "&nGtv;",
+      "output": "≫̸"
+    },
+    {
+      "input": "&nLeftarrow;",
+      "output": "⇍"
+    },
+    {
+      "input": "&nLeftrightarrow;",
+      "output": "⇎"
+    },
+    {
+      "input": "&nLl;",
+      "output": "⋘̸"
+    },
+    {
+      "input": "&nLt;",
+      "output": "≪⃒"
+    },
+    {
+      "input": "&nLtv;",
+      "output": "≪̸"
+    },
+    {
+      "input": "&nRightarrow;",
+      "output": "⇏"
+    },
+    {
+      "input": "&nVDash;",
+      "output": "⊯"
+    },
+    {
+      "input": "&nVdash;",
+      "output": "⊮"
+    },
+    {
+      "input": "&nabla;",
+      "output": "∇"
+    },
+    {
+      "input": "&nacute;",
+      "output": "ń"
+    },
+    {
+      "input": "&nang;",
+      "output": "∠⃒"
+    },
+    {
+      "input": "&nap;",
+      "output": "≉"
+    },
+    {
+      "input": "&napE;",
+      "output": "⩰̸"
+    },
+    {
+      "input": "&napid;",
+      "output": "≋̸"
+    },
+    {
+      "input": "&napos;",
+      "output": "ŉ"
+    },
+    {
+      "input": "&napprox;",
+      "output": "≉"
+    },
+    {
+      "input": "&natur;",
+      "output": "♮"
+    },
+    {
+      "input": "&natural;",
+      "output": "♮"
+    },
+    {
+      "input": "&naturals;",
+      "output": "ℕ"
+    },
+    {
+      "input": "&nbsp",
+      "output": " "
+    },
+    {
+      "input": "&nbsp;",
+      "output": " "
+    },
+    {
+      "input": "&nbump;",
+      "output": "≎̸"
+    },
+    {
+      "input": "&nbumpe;",
+      "output": "≏̸"
+    },
+    {
+      "input": "&ncap;",
+      "output": "⩃"
+    },
+    {
+      "input": "&ncaron;",
+      "output": "ň"
+    },
+    {
+      "input": "&ncedil;",
+      "output": "ņ"
+    },
+    {
+      "input": "&ncong;",
+      "output": "≇"
+    },
+    {
+      "input": "&ncongdot;",
+      "output": "⩭̸"
+    },
+    {
+      "input": "&ncup;",
+      "output": "⩂"
+    },
+    {
+      "input": "&ncy;",
+      "output": "н"
+    },
+    {
+      "input": "&ndash;",
+      "output": "–"
+    },
+    {
+      "input": "&ne;",
+      "output": "≠"
+    },
+    {
+      "input": "&neArr;",
+      "output": "⇗"
+    },
+    {
+      "input": "&nearhk;",
+      "output": "⤤"
+    },
+    {
+      "input": "&nearr;",
+      "output": "↗"
+    },
+    {
+      "input": "&nearrow;",
+      "output": "↗"
+    },
+    {
+      "input": "&nedot;",
+      "output": "≐̸"
+    },
+    {
+      "input": "&nequiv;",
+      "output": "≢"
+    },
+    {
+      "input": "&nesear;",
+      "output": "⤨"
+    },
+    {
+      "input": "&nesim;",
+      "output": "≂̸"
+    },
+    {
+      "input": "&nexist;",
+      "output": "∄"
+    },
+    {
+      "input": "&nexists;",
+      "output": "∄"
+    },
+    {
+      "input": "&nfr;",
+      "output": "𝔫"
+    },
+    {
+      "input": "&ngE;",
+      "output": "≧̸"
+    },
+    {
+      "input": "&nge;",
+      "output": "≱"
+    },
+    {
+      "input": "&ngeq;",
+      "output": "≱"
+    },
+    {
+      "input": "&ngeqq;",
+      "output": "≧̸"
+    },
+    {
+      "input": "&ngeqslant;",
+      "output": "⩾̸"
+    },
+    {
+      "input": "&nges;",
+      "output": "⩾̸"
+    },
+    {
+      "input": "&ngsim;",
+      "output": "≵"
+    },
+    {
+      "input": "&ngt;",
+      "output": "≯"
+    },
+    {
+      "input": "&ngtr;",
+      "output": "≯"
+    },
+    {
+      "input": "&nhArr;",
+      "output": "⇎"
+    },
+    {
+      "input": "&nharr;",
+      "output": "↮"
+    },
+    {
+      "input": "&nhpar;",
+      "output": "⫲"
+    },
+    {
+      "input": "&ni;",
+      "output": "∋"
+    },
+    {
+      "input": "&nis;",
+      "output": "⋼"
+    },
+    {
+      "input": "&nisd;",
+      "output": "⋺"
+    },
+    {
+      "input": "&niv;",
+      "output": "∋"
+    },
+    {
+      "input": "&njcy;",
+      "output": "њ"
+    },
+    {
+      "input": "&nlArr;",
+      "output": "⇍"
+    },
+    {
+      "input": "&nlE;",
+      "output": "≦̸"
+    },
+    {
+      "input": "&nlarr;",
+      "output": "↚"
+    },
+    {
+      "input": "&nldr;",
+      "output": "‥"
+    },
+    {
+      "input": "&nle;",
+      "output": "≰"
+    },
+    {
+      "input": "&nleftarrow;",
+      "output": "↚"
+    },
+    {
+      "input": "&nleftrightarrow;",
+      "output": "↮"
+    },
+    {
+      "input": "&nleq;",
+      "output": "≰"
+    },
+    {
+      "input": "&nleqq;",
+      "output": "≦̸"
+    },
+    {
+      "input": "&nleqslant;",
+      "output": "⩽̸"
+    },
+    {
+      "input": "&nles;",
+      "output": "⩽̸"
+    },
+    {
+      "input": "&nless;",
+      "output": "≮"
+    },
+    {
+      "input": "&nlsim;",
+      "output": "≴"
+    },
+    {
+      "input": "&nlt;",
+      "output": "≮"
+    },
+    {
+      "input": "&nltri;",
+      "output": "⋪"
+    },
+    {
+      "input": "&nltrie;",
+      "output": "⋬"
+    },
+    {
+      "input": "&nmid;",
+      "output": "∤"
+    },
+    {
+      "input": "&nopf;",
+      "output": "𝕟"
+    },
+    {
+      "input": "&not",
+      "output": "¬"
+    },
+    {
+      "input": "&not;",
+      "output": "¬"
+    },
+    {
+      "input": "&notin;",
+      "output": "∉"
+    },
+    {
+      "input": "&notinE;",
+      "output": "⋹̸"
+    },
+    {
+      "input": "&notindot;",
+      "output": "⋵̸"
+    },
+    {
+      "input": "&notinva;",
+      "output": "∉"
+    },
+    {
+      "input": "&notinvb;",
+      "output": "⋷"
+    },
+    {
+      "input": "&notinvc;",
+      "output": "⋶"
+    },
+    {
+      "input": "&notni;",
+      "output": "∌"
+    },
+    {
+      "input": "&notniva;",
+      "output": "∌"
+    },
+    {
+      "input": "&notnivb;",
+      "output": "⋾"
+    },
+    {
+      "input": "&notnivc;",
+      "output": "⋽"
+    },
+    {
+      "input": "&npar;",
+      "output": "∦"
+    },
+    {
+      "input": "&nparallel;",
+      "output": "∦"
+    },
+    {
+      "input": "&nparsl;",
+      "output": "⫽⃥"
+    },
+    {
+      "input": "&npart;",
+      "output": "∂̸"
+    },
+    {
+      "input": "&npolint;",
+      "output": "⨔"
+    },
+    {
+      "input": "&npr;",
+      "output": "⊀"
+    },
+    {
+      "input": "&nprcue;",
+      "output": "⋠"
+    },
+    {
+      "input": "&npre;",
+      "output": "⪯̸"
+    },
+    {
+      "input": "&nprec;",
+      "output": "⊀"
+    },
+    {
+      "input": "&npreceq;",
+      "output": "⪯̸"
+    },
+    {
+      "input": "&nrArr;",
+      "output": "⇏"
+    },
+    {
+      "input": "&nrarr;",
+      "output": "↛"
+    },
+    {
+      "input": "&nrarrc;",
+      "output": "⤳̸"
+    },
+    {
+      "input": "&nrarrw;",
+      "output": "↝̸"
+    },
+    {
+      "input": "&nrightarrow;",
+      "output": "↛"
+    },
+    {
+      "input": "&nrtri;",
+      "output": "⋫"
+    },
+    {
+      "input": "&nrtrie;",
+      "output": "⋭"
+    },
+    {
+      "input": "&nsc;",
+      "output": "⊁"
+    },
+    {
+      "input": "&nsccue;",
+      "output": "⋡"
+    },
+    {
+      "input": "&nsce;",
+      "output": "⪰̸"
+    },
+    {
+      "input": "&nscr;",
+      "output": "𝓃"
+    },
+    {
+      "input": "&nshortmid;",
+      "output": "∤"
+    },
+    {
+      "input": "&nshortparallel;",
+      "output": "∦"
+    },
+    {
+      "input": "&nsim;",
+      "output": "≁"
+    },
+    {
+      "input": "&nsime;",
+      "output": "≄"
+    },
+    {
+      "input": "&nsimeq;",
+      "output": "≄"
+    },
+    {
+      "input": "&nsmid;",
+      "output": "∤"
+    },
+    {
+      "input": "&nspar;",
+      "output": "∦"
+    },
+    {
+      "input": "&nsqsube;",
+      "output": "⋢"
+    },
+    {
+      "input": "&nsqsupe;",
+      "output": "⋣"
+    },
+    {
+      "input": "&nsub;",
+      "output": "⊄"
+    },
+    {
+      "input": "&nsubE;",
+      "output": "⫅̸"
+    },
+    {
+      "input": "&nsube;",
+      "output": "⊈"
+    },
+    {
+      "input": "&nsubset;",
+      "output": "⊂⃒"
+    },
+    {
+      "input": "&nsubseteq;",
+      "output": "⊈"
+    },
+    {
+      "input": "&nsubseteqq;",
+      "output": "⫅̸"
+    },
+    {
+      "input": "&nsucc;",
+      "output": "⊁"
+    },
+    {
+      "input": "&nsucceq;",
+      "output": "⪰̸"
+    },
+    {
+      "input": "&nsup;",
+      "output": "⊅"
+    },
+    {
+      "input": "&nsupE;",
+      "output": "⫆̸"
+    },
+    {
+      "input": "&nsupe;",
+      "output": "⊉"
+    },
+    {
+      "input": "&nsupset;",
+      "output": "⊃⃒"
+    },
+    {
+      "input": "&nsupseteq;",
+      "output": "⊉"
+    },
+    {
+      "input": "&nsupseteqq;",
+      "output": "⫆̸"
+    },
+    {
+      "input": "&ntgl;",
+      "output": "≹"
+    },
+    {
+      "input": "&ntilde",
+      "output": "ñ"
+    },
+    {
+      "input": "&ntilde;",
+      "output": "ñ"
+    },
+    {
+      "input": "&ntlg;",
+      "output": "≸"
+    },
+    {
+      "input": "&ntriangleleft;",
+      "output": "⋪"
+    },
+    {
+      "input": "&ntrianglelefteq;",
+      "output": "⋬"
+    },
+    {
+      "input": "&ntriangleright;",
+      "output": "⋫"
+    },
+    {
+      "input": "&ntrianglerighteq;",
+      "output": "⋭"
+    },
+    {
+      "input": "&nu;",
+      "output": "ν"
+    },
+    {
+      "input": "&num;",
+      "output": "#"
+    },
+    {
+      "input": "&numero;",
+      "output": "№"
+    },
+    {
+      "input": "&numsp;",
+      "output": " "
+    },
+    {
+      "input": "&nvDash;",
+      "output": "⊭"
+    },
+    {
+      "input": "&nvHarr;",
+      "output": "⤄"
+    },
+    {
+      "input": "&nvap;",
+      "output": "≍⃒"
+    },
+    {
+      "input": "&nvdash;",
+      "output": "⊬"
+    },
+    {
+      "input": "&nvge;",
+      "output": "≥⃒"
+    },
+    {
+      "input": "&nvgt;",
+      "output": ">⃒"
+    },
+    {
+      "input": "&nvinfin;",
+      "output": "⧞"
+    },
+    {
+      "input": "&nvlArr;",
+      "output": "⤂"
+    },
+    {
+      "input": "&nvle;",
+      "output": "≤⃒"
+    },
+    {
+      "input": "&nvlt;",
+      "output": "<⃒"
+    },
+    {
+      "input": "&nvltrie;",
+      "output": "⊴⃒"
+    },
+    {
+      "input": "&nvrArr;",
+      "output": "⤃"
+    },
+    {
+      "input": "&nvrtrie;",
+      "output": "⊵⃒"
+    },
+    {
+      "input": "&nvsim;",
+      "output": "∼⃒"
+    },
+    {
+      "input": "&nwArr;",
+      "output": "⇖"
+    },
+    {
+      "input": "&nwarhk;",
+      "output": "⤣"
+    },
+    {
+      "input": "&nwarr;",
+      "output": "↖"
+    },
+    {
+      "input": "&nwarrow;",
+      "output": "↖"
+    },
+    {
+      "input": "&nwnear;",
+      "output": "⤧"
+    },
+    {
+      "input": "&oS;",
+      "output": "Ⓢ"
+    },
+    {
+      "input": "&oacute",
+      "output": "ó"
+    },
+    {
+      "input": "&oacute;",
+      "output": "ó"
+    },
+    {
+      "input": "&oast;",
+      "output": "⊛"
+    },
+    {
+      "input": "&ocir;",
+      "output": "⊚"
+    },
+    {
+      "input": "&ocirc",
+      "output": "ô"
+    },
+    {
+      "input": "&ocirc;",
+      "output": "ô"
+    },
+    {
+      "input": "&ocy;",
+      "output": "о"
+    },
+    {
+      "input": "&odash;",
+      "output": "⊝"
+    },
+    {
+      "input": "&odblac;",
+      "output": "ő"
+    },
+    {
+      "input": "&odiv;",
+      "output": "⨸"
+    },
+    {
+      "input": "&odot;",
+      "output": "⊙"
+    },
+    {
+      "input": "&odsold;",
+      "output": "⦼"
+    },
+    {
+      "input": "&oelig;",
+      "output": "œ"
+    },
+    {
+      "input": "&ofcir;",
+      "output": "⦿"
+    },
+    {
+      "input": "&ofr;",
+      "output": "𝔬"
+    },
+    {
+      "input": "&ogon;",
+      "output": "˛"
+    },
+    {
+      "input": "&ograve",
+      "output": "ò"
+    },
+    {
+      "input": "&ograve;",
+      "output": "ò"
+    },
+    {
+      "input": "&ogt;",
+      "output": "⧁"
+    },
+    {
+      "input": "&ohbar;",
+      "output": "⦵"
+    },
+    {
+      "input": "&ohm;",
+      "output": "Ω"
+    },
+    {
+      "input": "&oint;",
+      "output": "∮"
+    },
+    {
+      "input": "&olarr;",
+      "output": "↺"
+    },
+    {
+      "input": "&olcir;",
+      "output": "⦾"
+    },
+    {
+      "input": "&olcross;",
+      "output": "⦻"
+    },
+    {
+      "input": "&oline;",
+      "output": "‾"
+    },
+    {
+      "input": "&olt;",
+      "output": "⧀"
+    },
+    {
+      "input": "&omacr;",
+      "output": "ō"
+    },
+    {
+      "input": "&omega;",
+      "output": "ω"
+    },
+    {
+      "input": "&omicron;",
+      "output": "ο"
+    },
+    {
+      "input": "&omid;",
+      "output": "⦶"
+    },
+    {
+      "input": "&ominus;",
+      "output": "⊖"
+    },
+    {
+      "input": "&oopf;",
+      "output": "𝕠"
+    },
+    {
+      "input": "&opar;",
+      "output": "⦷"
+    },
+    {
+      "input": "&operp;",
+      "output": "⦹"
+    },
+    {
+      "input": "&oplus;",
+      "output": "⊕"
+    },
+    {
+      "input": "&or;",
+      "output": "∨"
+    },
+    {
+      "input": "&orarr;",
+      "output": "↻"
+    },
+    {
+      "input": "&ord;",
+      "output": "⩝"
+    },
+    {
+      "input": "&order;",
+      "output": "ℴ"
+    },
+    {
+      "input": "&orderof;",
+      "output": "ℴ"
+    },
+    {
+      "input": "&ordf",
+      "output": "ª"
+    },
+    {
+      "input": "&ordf;",
+      "output": "ª"
+    },
+    {
+      "input": "&ordm",
+      "output": "º"
+    },
+    {
+      "input": "&ordm;",
+      "output": "º"
+    },
+    {
+      "input": "&origof;",
+      "output": "⊶"
+    },
+    {
+      "input": "&oror;",
+      "output": "⩖"
+    },
+    {
+      "input": "&orslope;",
+      "output": "⩗"
+    },
+    {
+      "input": "&orv;",
+      "output": "⩛"
+    },
+    {
+      "input": "&oscr;",
+      "output": "ℴ"
+    },
+    {
+      "input": "&oslash",
+      "output": "ø"
+    },
+    {
+      "input": "&oslash;",
+      "output": "ø"
+    },
+    {
+      "input": "&osol;",
+      "output": "⊘"
+    },
+    {
+      "input": "&otilde",
+      "output": "õ"
+    },
+    {
+      "input": "&otilde;",
+      "output": "õ"
+    },
+    {
+      "input": "&otimes;",
+      "output": "⊗"
+    },
+    {
+      "input": "&otimesas;",
+      "output": "⨶"
+    },
+    {
+      "input": "&ouml",
+      "output": "ö"
+    },
+    {
+      "input": "&ouml;",
+      "output": "ö"
+    },
+    {
+      "input": "&ovbar;",
+      "output": "⌽"
+    },
+    {
+      "input": "&par;",
+      "output": "∥"
+    },
+    {
+      "input": "&para",
+      "output": "¶"
+    },
+    {
+      "input": "&para;",
+      "output": "¶"
+    },
+    {
+      "input": "&parallel;",
+      "output": "∥"
+    },
+    {
+      "input": "&parsim;",
+      "output": "⫳"
+    },
+    {
+      "input": "&parsl;",
+      "output": "⫽"
+    },
+    {
+      "input": "&part;",
+      "output": "∂"
+    },
+    {
+      "input": "&pcy;",
+      "output": "п"
+    },
+    {
+      "input": "&percnt;",
+      "output": "%"
+    },
+    {
+      "input": "&period;",
+      "output": "."
+    },
+    {
+      "input": "&permil;",
+      "output": "‰"
+    },
+    {
+      "input": "&perp;",
+      "output": "⊥"
+    },
+    {
+      "input": "&pertenk;",
+      "output": "‱"
+    },
+    {
+      "input": "&pfr;",
+      "output": "𝔭"
+    },
+    {
+      "input": "&phi;",
+      "output": "φ"
+    },
+    {
+      "input": "&phiv;",
+      "output": "ϕ"
+    },
+    {
+      "input": "&phmmat;",
+      "output": "ℳ"
+    },
+    {
+      "input": "&phone;",
+      "output": "☎"
+    },
+    {
+      "input": "&pi;",
+      "output": "π"
+    },
+    {
+      "input": "&pitchfork;",
+      "output": "⋔"
+    },
+    {
+      "input": "&piv;",
+      "output": "ϖ"
+    },
+    {
+      "input": "&planck;",
+      "output": "ℏ"
+    },
+    {
+      "input": "&planckh;",
+      "output": "ℎ"
+    },
+    {
+      "input": "&plankv;",
+      "output": "ℏ"
+    },
+    {
+      "input": "&plus;",
+      "output": "+"
+    },
+    {
+      "input": "&plusacir;",
+      "output": "⨣"
+    },
+    {
+      "input": "&plusb;",
+      "output": "⊞"
+    },
+    {
+      "input": "&pluscir;",
+      "output": "⨢"
+    },
+    {
+      "input": "&plusdo;",
+      "output": "∔"
+    },
+    {
+      "input": "&plusdu;",
+      "output": "⨥"
+    },
+    {
+      "input": "&pluse;",
+      "output": "⩲"
+    },
+    {
+      "input": "&plusmn",
+      "output": "±"
+    },
+    {
+      "input": "&plusmn;",
+      "output": "±"
+    },
+    {
+      "input": "&plussim;",
+      "output": "⨦"
+    },
+    {
+      "input": "&plustwo;",
+      "output": "⨧"
+    },
+    {
+      "input": "&pm;",
+      "output": "±"
+    },
+    {
+      "input": "&pointint;",
+      "output": "⨕"
+    },
+    {
+      "input": "&popf;",
+      "output": "𝕡"
+    },
+    {
+      "input": "&pound",
+      "output": "£"
+    },
+    {
+      "input": "&pound;",
+      "output": "£"
+    },
+    {
+      "input": "&pr;",
+      "output": "≺"
+    },
+    {
+      "input": "&prE;",
+      "output": "⪳"
+    },
+    {
+      "input": "&prap;",
+      "output": "⪷"
+    },
+    {
+      "input": "&prcue;",
+      "output": "≼"
+    },
+    {
+      "input": "&pre;",
+      "output": "⪯"
+    },
+    {
+      "input": "&prec;",
+      "output": "≺"
+    },
+    {
+      "input": "&precapprox;",
+      "output": "⪷"
+    },
+    {
+      "input": "&preccurlyeq;",
+      "output": "≼"
+    },
+    {
+      "input": "&preceq;",
+      "output": "⪯"
+    },
+    {
+      "input": "&precnapprox;",
+      "output": "⪹"
+    },
+    {
+      "input": "&precneqq;",
+      "output": "⪵"
+    },
+    {
+      "input": "&precnsim;",
+      "output": "⋨"
+    },
+    {
+      "input": "&precsim;",
+      "output": "≾"
+    },
+    {
+      "input": "&prime;",
+      "output": "′"
+    },
+    {
+      "input": "&primes;",
+      "output": "ℙ"
+    },
+    {
+      "input": "&prnE;",
+      "output": "⪵"
+    },
+    {
+      "input": "&prnap;",
+      "output": "⪹"
+    },
+    {
+      "input": "&prnsim;",
+      "output": "⋨"
+    },
+    {
+      "input": "&prod;",
+      "output": "∏"
+    },
+    {
+      "input": "&profalar;",
+      "output": "⌮"
+    },
+    {
+      "input": "&profline;",
+      "output": "⌒"
+    },
+    {
+      "input": "&profsurf;",
+      "output": "⌓"
+    },
+    {
+      "input": "&prop;",
+      "output": "∝"
+    },
+    {
+      "input": "&propto;",
+      "output": "∝"
+    },
+    {
+      "input": "&prsim;",
+      "output": "≾"
+    },
+    {
+      "input": "&prurel;",
+      "output": "⊰"
+    },
+    {
+      "input": "&pscr;",
+      "output": "𝓅"
+    },
+    {
+      "input": "&psi;",
+      "output": "ψ"
+    },
+    {
+      "input": "&puncsp;",
+      "output": " "
+    },
+    {
+      "input": "&qfr;",
+      "output": "𝔮"
+    },
+    {
+      "input": "&qint;",
+      "output": "⨌"
+    },
+    {
+      "input": "&qopf;",
+      "output": "𝕢"
+    },
+    {
+      "input": "&qprime;",
+      "output": "⁗"
+    },
+    {
+      "input": "&qscr;",
+      "output": "𝓆"
+    },
+    {
+      "input": "&quaternions;",
+      "output": "ℍ"
+    },
+    {
+      "input": "&quatint;",
+      "output": "⨖"
+    },
+    {
+      "input": "&quest;",
+      "output": "?"
+    },
+    {
+      "input": "&questeq;",
+      "output": "≟"
+    },
+    {
+      "input": "&quot",
+      "output": "\""
+    },
+    {
+      "input": "&quot;",
+      "output": "\""
+    },
+    {
+      "input": "&rAarr;",
+      "output": "⇛"
+    },
+    {
+      "input": "&rArr;",
+      "output": "⇒"
+    },
+    {
+      "input": "&rAtail;",
+      "output": "⤜"
+    },
+    {
+      "input": "&rBarr;",
+      "output": "⤏"
+    },
+    {
+      "input": "&rHar;",
+      "output": "⥤"
+    },
+    {
+      "input": "&race;",
+      "output": "∽̱"
+    },
+    {
+      "input": "&racute;",
+      "output": "ŕ"
+    },
+    {
+      "input": "&radic;",
+      "output": "√"
+    },
+    {
+      "input": "&raemptyv;",
+      "output": "⦳"
+    },
+    {
+      "input": "&rang;",
+      "output": "⟩"
+    },
+    {
+      "input": "&rangd;",
+      "output": "⦒"
+    },
+    {
+      "input": "&range;",
+      "output": "⦥"
+    },
+    {
+      "input": "&rangle;",
+      "output": "⟩"
+    },
+    {
+      "input": "&raquo",
+      "output": "»"
+    },
+    {
+      "input": "&raquo;",
+      "output": "»"
+    },
+    {
+      "input": "&rarr;",
+      "output": "→"
+    },
+    {
+      "input": "&rarrap;",
+      "output": "⥵"
+    },
+    {
+      "input": "&rarrb;",
+      "output": "⇥"
+    },
+    {
+      "input": "&rarrbfs;",
+      "output": "⤠"
+    },
+    {
+      "input": "&rarrc;",
+      "output": "⤳"
+    },
+    {
+      "input": "&rarrfs;",
+      "output": "⤞"
+    },
+    {
+      "input": "&rarrhk;",
+      "output": "↪"
+    },
+    {
+      "input": "&rarrlp;",
+      "output": "↬"
+    },
+    {
+      "input": "&rarrpl;",
+      "output": "⥅"
+    },
+    {
+      "input": "&rarrsim;",
+      "output": "⥴"
+    },
+    {
+      "input": "&rarrtl;",
+      "output": "↣"
+    },
+    {
+      "input": "&rarrw;",
+      "output": "↝"
+    },
+    {
+      "input": "&ratail;",
+      "output": "⤚"
+    },
+    {
+      "input": "&ratio;",
+      "output": "∶"
+    },
+    {
+      "input": "&rationals;",
+      "output": "ℚ"
+    },
+    {
+      "input": "&rbarr;",
+      "output": "⤍"
+    },
+    {
+      "input": "&rbbrk;",
+      "output": "❳"
+    },
+    {
+      "input": "&rbrace;",
+      "output": "}"
+    },
+    {
+      "input": "&rbrack;",
+      "output": "]"
+    },
+    {
+      "input": "&rbrke;",
+      "output": "⦌"
+    },
+    {
+      "input": "&rbrksld;",
+      "output": "⦎"
+    },
+    {
+      "input": "&rbrkslu;",
+      "output": "⦐"
+    },
+    {
+      "input": "&rcaron;",
+      "output": "ř"
+    },
+    {
+      "input": "&rcedil;",
+      "output": "ŗ"
+    },
+    {
+      "input": "&rceil;",
+      "output": "⌉"
+    },
+    {
+      "input": "&rcub;",
+      "output": "}"
+    },
+    {
+      "input": "&rcy;",
+      "output": "р"
+    },
+    {
+      "input": "&rdca;",
+      "output": "⤷"
+    },
+    {
+      "input": "&rdldhar;",
+      "output": "⥩"
+    },
+    {
+      "input": "&rdquo;",
+      "output": "”"
+    },
+    {
+      "input": "&rdquor;",
+      "output": "”"
+    },
+    {
+      "input": "&rdsh;",
+      "output": "↳"
+    },
+    {
+      "input": "&real;",
+      "output": "ℜ"
+    },
+    {
+      "input": "&realine;",
+      "output": "ℛ"
+    },
+    {
+      "input": "&realpart;",
+      "output": "ℜ"
+    },
+    {
+      "input": "&reals;",
+      "output": "ℝ"
+    },
+    {
+      "input": "&rect;",
+      "output": "▭"
+    },
+    {
+      "input": "&reg",
+      "output": "®"
+    },
+    {
+      "input": "&reg;",
+      "output": "®"
+    },
+    {
+      "input": "&rfisht;",
+      "output": "⥽"
+    },
+    {
+      "input": "&rfloor;",
+      "output": "⌋"
+    },
+    {
+      "input": "&rfr;",
+      "output": "𝔯"
+    },
+    {
+      "input": "&rhard;",
+      "output": "⇁"
+    },
+    {
+      "input": "&rharu;",
+      "output": "⇀"
+    },
+    {
+      "input": "&rharul;",
+      "output": "⥬"
+    },
+    {
+      "input": "&rho;",
+      "output": "ρ"
+    },
+    {
+      "input": "&rhov;",
+      "output": "ϱ"
+    },
+    {
+      "input": "&rightarrow;",
+      "output": "→"
+    },
+    {
+      "input": "&rightarrowtail;",
+      "output": "↣"
+    },
+    {
+      "input": "&rightharpoondown;",
+      "output": "⇁"
+    },
+    {
+      "input": "&rightharpoonup;",
+      "output": "⇀"
+    },
+    {
+      "input": "&rightleftarrows;",
+      "output": "⇄"
+    },
+    {
+      "input": "&rightleftharpoons;",
+      "output": "⇌"
+    },
+    {
+      "input": "&rightrightarrows;",
+      "output": "⇉"
+    },
+    {
+      "input": "&rightsquigarrow;",
+      "output": "↝"
+    },
+    {
+      "input": "&rightthreetimes;",
+      "output": "⋌"
+    },
+    {
+      "input": "&ring;",
+      "output": "˚"
+    },
+    {
+      "input": "&risingdotseq;",
+      "output": "≓"
+    },
+    {
+      "input": "&rlarr;",
+      "output": "⇄"
+    },
+    {
+      "input": "&rlhar;",
+      "output": "⇌"
+    },
+    {
+      "input": "&rlm;",
+      "output": "‏"
+    },
+    {
+      "input": "&rmoust;",
+      "output": "⎱"
+    },
+    {
+      "input": "&rmoustache;",
+      "output": "⎱"
+    },
+    {
+      "input": "&rnmid;",
+      "output": "⫮"
+    },
+    {
+      "input": "&roang;",
+      "output": "⟭"
+    },
+    {
+      "input": "&roarr;",
+      "output": "⇾"
+    },
+    {
+      "input": "&robrk;",
+      "output": "⟧"
+    },
+    {
+      "input": "&ropar;",
+      "output": "⦆"
+    },
+    {
+      "input": "&ropf;",
+      "output": "𝕣"
+    },
+    {
+      "input": "&roplus;",
+      "output": "⨮"
+    },
+    {
+      "input": "&rotimes;",
+      "output": "⨵"
+    },
+    {
+      "input": "&rpar;",
+      "output": ")"
+    },
+    {
+      "input": "&rpargt;",
+      "output": "⦔"
+    },
+    {
+      "input": "&rppolint;",
+      "output": "⨒"
+    },
+    {
+      "input": "&rrarr;",
+      "output": "⇉"
+    },
+    {
+      "input": "&rsaquo;",
+      "output": "›"
+    },
+    {
+      "input": "&rscr;",
+      "output": "𝓇"
+    },
+    {
+      "input": "&rsh;",
+      "output": "↱"
+    },
+    {
+      "input": "&rsqb;",
+      "output": "]"
+    },
+    {
+      "input": "&rsquo;",
+      "output": "’"
+    },
+    {
+      "input": "&rsquor;",
+      "output": "’"
+    },
+    {
+      "input": "&rthree;",
+      "output": "⋌"
+    },
+    {
+      "input": "&rtimes;",
+      "output": "⋊"
+    },
+    {
+      "input": "&rtri;",
+      "output": "▹"
+    },
+    {
+      "input": "&rtrie;",
+      "output": "⊵"
+    },
+    {
+      "input": "&rtrif;",
+      "output": "▸"
+    },
+    {
+      "input": "&rtriltri;",
+      "output": "⧎"
+    },
+    {
+      "input": "&ruluhar;",
+      "output": "⥨"
+    },
+    {
+      "input": "&rx;",
+      "output": "℞"
+    },
+    {
+      "input": "&sacute;",
+      "output": "ś"
+    },
+    {
+      "input": "&sbquo;",
+      "output": "‚"
+    },
+    {
+      "input": "&sc;",
+      "output": "≻"
+    },
+    {
+      "input": "&scE;",
+      "output": "⪴"
+    },
+    {
+      "input": "&scap;",
+      "output": "⪸"
+    },
+    {
+      "input": "&scaron;",
+      "output": "š"
+    },
+    {
+      "input": "&sccue;",
+      "output": "≽"
+    },
+    {
+      "input": "&sce;",
+      "output": "⪰"
+    },
+    {
+      "input": "&scedil;",
+      "output": "ş"
+    },
+    {
+      "input": "&scirc;",
+      "output": "ŝ"
+    },
+    {
+      "input": "&scnE;",
+      "output": "⪶"
+    },
+    {
+      "input": "&scnap;",
+      "output": "⪺"
+    },
+    {
+      "input": "&scnsim;",
+      "output": "⋩"
+    },
+    {
+      "input": "&scpolint;",
+      "output": "⨓"
+    },
+    {
+      "input": "&scsim;",
+      "output": "≿"
+    },
+    {
+      "input": "&scy;",
+      "output": "с"
+    },
+    {
+      "input": "&sdot;",
+      "output": "⋅"
+    },
+    {
+      "input": "&sdotb;",
+      "output": "⊡"
+    },
+    {
+      "input": "&sdote;",
+      "output": "⩦"
+    },
+    {
+      "input": "&seArr;",
+      "output": "⇘"
+    },
+    {
+      "input": "&searhk;",
+      "output": "⤥"
+    },
+    {
+      "input": "&searr;",
+      "output": "↘"
+    },
+    {
+      "input": "&searrow;",
+      "output": "↘"
+    },
+    {
+      "input": "&sect",
+      "output": "§"
+    },
+    {
+      "input": "&sect;",
+      "output": "§"
+    },
+    {
+      "input": "&semi;",
+      "output": ";"
+    },
+    {
+      "input": "&seswar;",
+      "output": "⤩"
+    },
+    {
+      "input": "&setminus;",
+      "output": "∖"
+    },
+    {
+      "input": "&setmn;",
+      "output": "∖"
+    },
+    {
+      "input": "&sext;",
+      "output": "✶"
+    },
+    {
+      "input": "&sfr;",
+      "output": "𝔰"
+    },
+    {
+      "input": "&sfrown;",
+      "output": "⌢"
+    },
+    {
+      "input": "&sharp;",
+      "output": "♯"
+    },
+    {
+      "input": "&shchcy;",
+      "output": "щ"
+    },
+    {
+      "input": "&shcy;",
+      "output": "ш"
+    },
+    {
+      "input": "&shortmid;",
+      "output": "∣"
+    },
+    {
+      "input": "&shortparallel;",
+      "output": "∥"
+    },
+    {
+      "input": "&shy",
+      "output": "­"
+    },
+    {
+      "input": "&shy;",
+      "output": "­"
+    },
+    {
+      "input": "&sigma;",
+      "output": "σ"
+    },
+    {
+      "input": "&sigmaf;",
+      "output": "ς"
+    },
+    {
+      "input": "&sigmav;",
+      "output": "ς"
+    },
+    {
+      "input": "&sim;",
+      "output": "∼"
+    },
+    {
+      "input": "&simdot;",
+      "output": "⩪"
+    },
+    {
+      "input": "&sime;",
+      "output": "≃"
+    },
+    {
+      "input": "&simeq;",
+      "output": "≃"
+    },
+    {
+      "input": "&simg;",
+      "output": "⪞"
+    },
+    {
+      "input": "&simgE;",
+      "output": "⪠"
+    },
+    {
+      "input": "&siml;",
+      "output": "⪝"
+    },
+    {
+      "input": "&simlE;",
+      "output": "⪟"
+    },
+    {
+      "input": "&simne;",
+      "output": "≆"
+    },
+    {
+      "input": "&simplus;",
+      "output": "⨤"
+    },
+    {
+      "input": "&simrarr;",
+      "output": "⥲"
+    },
+    {
+      "input": "&slarr;",
+      "output": "←"
+    },
+    {
+      "input": "&smallsetminus;",
+      "output": "∖"
+    },
+    {
+      "input": "&smashp;",
+      "output": "⨳"
+    },
+    {
+      "input": "&smeparsl;",
+      "output": "⧤"
+    },
+    {
+      "input": "&smid;",
+      "output": "∣"
+    },
+    {
+      "input": "&smile;",
+      "output": "⌣"
+    },
+    {
+      "input": "&smt;",
+      "output": "⪪"
+    },
+    {
+      "input": "&smte;",
+      "output": "⪬"
+    },
+    {
+      "input": "&smtes;",
+      "output": "⪬︀"
+    },
+    {
+      "input": "&softcy;",
+      "output": "ь"
+    },
+    {
+      "input": "&sol;",
+      "output": "/"
+    },
+    {
+      "input": "&solb;",
+      "output": "⧄"
+    },
+    {
+      "input": "&solbar;",
+      "output": "⌿"
+    },
+    {
+      "input": "&sopf;",
+      "output": "𝕤"
+    },
+    {
+      "input": "&spades;",
+      "output": "♠"
+    },
+    {
+      "input": "&spadesuit;",
+      "output": "♠"
+    },
+    {
+      "input": "&spar;",
+      "output": "∥"
+    },
+    {
+      "input": "&sqcap;",
+      "output": "⊓"
+    },
+    {
+      "input": "&sqcaps;",
+      "output": "⊓︀"
+    },
+    {
+      "input": "&sqcup;",
+      "output": "⊔"
+    },
+    {
+      "input": "&sqcups;",
+      "output": "⊔︀"
+    },
+    {
+      "input": "&sqsub;",
+      "output": "⊏"
+    },
+    {
+      "input": "&sqsube;",
+      "output": "⊑"
+    },
+    {
+      "input": "&sqsubset;",
+      "output": "⊏"
+    },
+    {
+      "input": "&sqsubseteq;",
+      "output": "⊑"
+    },
+    {
+      "input": "&sqsup;",
+      "output": "⊐"
+    },
+    {
+      "input": "&sqsupe;",
+      "output": "⊒"
+    },
+    {
+      "input": "&sqsupset;",
+      "output": "⊐"
+    },
+    {
+      "input": "&sqsupseteq;",
+      "output": "⊒"
+    },
+    {
+      "input": "&squ;",
+      "output": "□"
+    },
+    {
+      "input": "&square;",
+      "output": "□"
+    },
+    {
+      "input": "&squarf;",
+      "output": "▪"
+    },
+    {
+      "input": "&squf;",
+      "output": "▪"
+    },
+    {
+      "input": "&srarr;",
+      "output": "→"
+    },
+    {
+      "input": "&sscr;",
+      "output": "𝓈"
+    },
+    {
+      "input": "&ssetmn;",
+      "output": "∖"
+    },
+    {
+      "input": "&ssmile;",
+      "output": "⌣"
+    },
+    {
+      "input": "&sstarf;",
+      "output": "⋆"
+    },
+    {
+      "input": "&star;",
+      "output": "☆"
+    },
+    {
+      "input": "&starf;",
+      "output": "★"
+    },
+    {
+      "input": "&straightepsilon;",
+      "output": "ϵ"
+    },
+    {
+      "input": "&straightphi;",
+      "output": "ϕ"
+    },
+    {
+      "input": "&strns;",
+      "output": "¯"
+    },
+    {
+      "input": "&sub;",
+      "output": "⊂"
+    },
+    {
+      "input": "&subE;",
+      "output": "⫅"
+    },
+    {
+      "input": "&subdot;",
+      "output": "⪽"
+    },
+    {
+      "input": "&sube;",
+      "output": "⊆"
+    },
+    {
+      "input": "&subedot;",
+      "output": "⫃"
+    },
+    {
+      "input": "&submult;",
+      "output": "⫁"
+    },
+    {
+      "input": "&subnE;",
+      "output": "⫋"
+    },
+    {
+      "input": "&subne;",
+      "output": "⊊"
+    },
+    {
+      "input": "&subplus;",
+      "output": "⪿"
+    },
+    {
+      "input": "&subrarr;",
+      "output": "⥹"
+    },
+    {
+      "input": "&subset;",
+      "output": "⊂"
+    },
+    {
+      "input": "&subseteq;",
+      "output": "⊆"
+    },
+    {
+      "input": "&subseteqq;",
+      "output": "⫅"
+    },
+    {
+      "input": "&subsetneq;",
+      "output": "⊊"
+    },
+    {
+      "input": "&subsetneqq;",
+      "output": "⫋"
+    },
+    {
+      "input": "&subsim;",
+      "output": "⫇"
+    },
+    {
+      "input": "&subsub;",
+      "output": "⫕"
+    },
+    {
+      "input": "&subsup;",
+      "output": "⫓"
+    },
+    {
+      "input": "&succ;",
+      "output": "≻"
+    },
+    {
+      "input": "&succapprox;",
+      "output": "⪸"
+    },
+    {
+      "input": "&succcurlyeq;",
+      "output": "≽"
+    },
+    {
+      "input": "&succeq;",
+      "output": "⪰"
+    },
+    {
+      "input": "&succnapprox;",
+      "output": "⪺"
+    },
+    {
+      "input": "&succneqq;",
+      "output": "⪶"
+    },
+    {
+      "input": "&succnsim;",
+      "output": "⋩"
+    },
+    {
+      "input": "&succsim;",
+      "output": "≿"
+    },
+    {
+      "input": "&sum;",
+      "output": "∑"
+    },
+    {
+      "input": "&sung;",
+      "output": "♪"
+    },
+    {
+      "input": "&sup1",
+      "output": "¹"
+    },
+    {
+      "input": "&sup1;",
+      "output": "¹"
+    },
+    {
+      "input": "&sup2",
+      "output": "²"
+    },
+    {
+      "input": "&sup2;",
+      "output": "²"
+    },
+    {
+      "input": "&sup3",
+      "output": "³"
+    },
+    {
+      "input": "&sup3;",
+      "output": "³"
+    },
+    {
+      "input": "&sup;",
+      "output": "⊃"
+    },
+    {
+      "input": "&supE;",
+      "output": "⫆"
+    },
+    {
+      "input": "&supdot;",
+      "output": "⪾"
+    },
+    {
+      "input": "&supdsub;",
+      "output": "⫘"
+    },
+    {
+      "input": "&supe;",
+      "output": "⊇"
+    },
+    {
+      "input": "&supedot;",
+      "output": "⫄"
+    },
+    {
+      "input": "&suphsol;",
+      "output": "⟉"
+    },
+    {
+      "input": "&suphsub;",
+      "output": "⫗"
+    },
+    {
+      "input": "&suplarr;",
+      "output": "⥻"
+    },
+    {
+      "input": "&supmult;",
+      "output": "⫂"
+    },
+    {
+      "input": "&supnE;",
+      "output": "⫌"
+    },
+    {
+      "input": "&supne;",
+      "output": "⊋"
+    },
+    {
+      "input": "&supplus;",
+      "output": "⫀"
+    },
+    {
+      "input": "&supset;",
+      "output": "⊃"
+    },
+    {
+      "input": "&supseteq;",
+      "output": "⊇"
+    },
+    {
+      "input": "&supseteqq;",
+      "output": "⫆"
+    },
+    {
+      "input": "&supsetneq;",
+      "output": "⊋"
+    },
+    {
+      "input": "&supsetneqq;",
+      "output": "⫌"
+    },
+    {
+      "input": "&supsim;",
+      "output": "⫈"
+    },
+    {
+      "input": "&supsub;",
+      "output": "⫔"
+    },
+    {
+      "input": "&supsup;",
+      "output": "⫖"
+    },
+    {
+      "input": "&swArr;",
+      "output": "⇙"
+    },
+    {
+      "input": "&swarhk;",
+      "output": "⤦"
+    },
+    {
+      "input": "&swarr;",
+      "output": "↙"
+    },
+    {
+      "input": "&swarrow;",
+      "output": "↙"
+    },
+    {
+      "input": "&swnwar;",
+      "output": "⤪"
+    },
+    {
+      "input": "&szlig",
+      "output": "ß"
+    },
+    {
+      "input": "&szlig;",
+      "output": "ß"
+    },
+    {
+      "input": "&target;",
+      "output": "⌖"
+    },
+    {
+      "input": "&tau;",
+      "output": "τ"
+    },
+    {
+      "input": "&tbrk;",
+      "output": "⎴"
+    },
+    {
+      "input": "&tcaron;",
+      "output": "ť"
+    },
+    {
+      "input": "&tcedil;",
+      "output": "ţ"
+    },
+    {
+      "input": "&tcy;",
+      "output": "т"
+    },
+    {
+      "input": "&tdot;",
+      "output": "⃛"
+    },
+    {
+      "input": "&telrec;",
+      "output": "⌕"
+    },
+    {
+      "input": "&tfr;",
+      "output": "𝔱"
+    },
+    {
+      "input": "&there4;",
+      "output": "∴"
+    },
+    {
+      "input": "&therefore;",
+      "output": "∴"
+    },
+    {
+      "input": "&theta;",
+      "output": "θ"
+    },
+    {
+      "input": "&thetasym;",
+      "output": "ϑ"
+    },
+    {
+      "input": "&thetav;",
+      "output": "ϑ"
+    },
+    {
+      "input": "&thickapprox;",
+      "output": "≈"
+    },
+    {
+      "input": "&thicksim;",
+      "output": "∼"
+    },
+    {
+      "input": "&thinsp;",
+      "output": " "
+    },
+    {
+      "input": "&thkap;",
+      "output": "≈"
+    },
+    {
+      "input": "&thksim;",
+      "output": "∼"
+    },
+    {
+      "input": "&thorn",
+      "output": "þ"
+    },
+    {
+      "input": "&thorn;",
+      "output": "þ"
+    },
+    {
+      "input": "&tilde;",
+      "output": "˜"
+    },
+    {
+      "input": "&times",
+      "output": "×"
+    },
+    {
+      "input": "&times;",
+      "output": "×"
+    },
+    {
+      "input": "&timesb;",
+      "output": "⊠"
+    },
+    {
+      "input": "&timesbar;",
+      "output": "⨱"
+    },
+    {
+      "input": "&timesd;",
+      "output": "⨰"
+    },
+    {
+      "input": "&tint;",
+      "output": "∭"
+    },
+    {
+      "input": "&toea;",
+      "output": "⤨"
+    },
+    {
+      "input": "&top;",
+      "output": "⊤"
+    },
+    {
+      "input": "&topbot;",
+      "output": "⌶"
+    },
+    {
+      "input": "&topcir;",
+      "output": "⫱"
+    },
+    {
+      "input": "&topf;",
+      "output": "𝕥"
+    },
+    {
+      "input": "&topfork;",
+      "output": "⫚"
+    },
+    {
+      "input": "&tosa;",
+      "output": "⤩"
+    },
+    {
+      "input": "&tprime;",
+      "output": "‴"
+    },
+    {
+      "input": "&trade;",
+      "output": "™"
+    },
+    {
+      "input": "&triangle;",
+      "output": "▵"
+    },
+    {
+      "input": "&triangledown;",
+      "output": "▿"
+    },
+    {
+      "input": "&triangleleft;",
+      "output": "◃"
+    },
+    {
+      "input": "&trianglelefteq;",
+      "output": "⊴"
+    },
+    {
+      "input": "&triangleq;",
+      "output": "≜"
+    },
+    {
+      "input": "&triangleright;",
+      "output": "▹"
+    },
+    {
+      "input": "&trianglerighteq;",
+      "output": "⊵"
+    },
+    {
+      "input": "&tridot;",
+      "output": "◬"
+    },
+    {
+      "input": "&trie;",
+      "output": "≜"
+    },
+    {
+      "input": "&triminus;",
+      "output": "⨺"
+    },
+    {
+      "input": "&triplus;",
+      "output": "⨹"
+    },
+    {
+      "input": "&trisb;",
+      "output": "⧍"
+    },
+    {
+      "input": "&tritime;",
+      "output": "⨻"
+    },
+    {
+      "input": "&trpezium;",
+      "output": "⏢"
+    },
+    {
+      "input": "&tscr;",
+      "output": "𝓉"
+    },
+    {
+      "input": "&tscy;",
+      "output": "ц"
+    },
+    {
+      "input": "&tshcy;",
+      "output": "ћ"
+    },
+    {
+      "input": "&tstrok;",
+      "output": "ŧ"
+    },
+    {
+      "input": "&twixt;",
+      "output": "≬"
+    },
+    {
+      "input": "&twoheadleftarrow;",
+      "output": "↞"
+    },
+    {
+      "input": "&twoheadrightarrow;",
+      "output": "↠"
+    },
+    {
+      "input": "&uArr;",
+      "output": "⇑"
+    },
+    {
+      "input": "&uHar;",
+      "output": "⥣"
+    },
+    {
+      "input": "&uacute",
+      "output": "ú"
+    },
+    {
+      "input": "&uacute;",
+      "output": "ú"
+    },
+    {
+      "input": "&uarr;",
+      "output": "↑"
+    },
+    {
+      "input": "&ubrcy;",
+      "output": "ў"
+    },
+    {
+      "input": "&ubreve;",
+      "output": "ŭ"
+    },
+    {
+      "input": "&ucirc",
+      "output": "û"
+    },
+    {
+      "input": "&ucirc;",
+      "output": "û"
+    },
+    {
+      "input": "&ucy;",
+      "output": "у"
+    },
+    {
+      "input": "&udarr;",
+      "output": "⇅"
+    },
+    {
+      "input": "&udblac;",
+      "output": "ű"
+    },
+    {
+      "input": "&udhar;",
+      "output": "⥮"
+    },
+    {
+      "input": "&ufisht;",
+      "output": "⥾"
+    },
+    {
+      "input": "&ufr;",
+      "output": "𝔲"
+    },
+    {
+      "input": "&ugrave",
+      "output": "ù"
+    },
+    {
+      "input": "&ugrave;",
+      "output": "ù"
+    },
+    {
+      "input": "&uharl;",
+      "output": "↿"
+    },
+    {
+      "input": "&uharr;",
+      "output": "↾"
+    },
+    {
+      "input": "&uhblk;",
+      "output": "▀"
+    },
+    {
+      "input": "&ulcorn;",
+      "output": "⌜"
+    },
+    {
+      "input": "&ulcorner;",
+      "output": "⌜"
+    },
+    {
+      "input": "&ulcrop;",
+      "output": "⌏"
+    },
+    {
+      "input": "&ultri;",
+      "output": "◸"
+    },
+    {
+      "input": "&umacr;",
+      "output": "ū"
+    },
+    {
+      "input": "&uml",
+      "output": "¨"
+    },
+    {
+      "input": "&uml;",
+      "output": "¨"
+    },
+    {
+      "input": "&uogon;",
+      "output": "ų"
+    },
+    {
+      "input": "&uopf;",
+      "output": "𝕦"
+    },
+    {
+      "input": "&uparrow;",
+      "output": "↑"
+    },
+    {
+      "input": "&updownarrow;",
+      "output": "↕"
+    },
+    {
+      "input": "&upharpoonleft;",
+      "output": "↿"
+    },
+    {
+      "input": "&upharpoonright;",
+      "output": "↾"
+    },
+    {
+      "input": "&uplus;",
+      "output": "⊎"
+    },
+    {
+      "input": "&upsi;",
+      "output": "υ"
+    },
+    {
+      "input": "&upsih;",
+      "output": "ϒ"
+    },
+    {
+      "input": "&upsilon;",
+      "output": "υ"
+    },
+    {
+      "input": "&upuparrows;",
+      "output": "⇈"
+    },
+    {
+      "input": "&urcorn;",
+      "output": "⌝"
+    },
+    {
+      "input": "&urcorner;",
+      "output": "⌝"
+    },
+    {
+      "input": "&urcrop;",
+      "output": "⌎"
+    },
+    {
+      "input": "&uring;",
+      "output": "ů"
+    },
+    {
+      "input": "&urtri;",
+      "output": "◹"
+    },
+    {
+      "input": "&uscr;",
+      "output": "𝓊"
+    },
+    {
+      "input": "&utdot;",
+      "output": "⋰"
+    },
+    {
+      "input": "&utilde;",
+      "output": "ũ"
+    },
+    {
+      "input": "&utri;",
+      "output": "▵"
+    },
+    {
+      "input": "&utrif;",
+      "output": "▴"
+    },
+    {
+      "input": "&uuarr;",
+      "output": "⇈"
+    },
+    {
+      "input": "&uuml",
+      "output": "ü"
+    },
+    {
+      "input": "&uuml;",
+      "output": "ü"
+    },
+    {
+      "input": "&uwangle;",
+      "output": "⦧"
+    },
+    {
+      "input": "&vArr;",
+      "output": "⇕"
+    },
+    {
+      "input": "&vBar;",
+      "output": "⫨"
+    },
+    {
+      "input": "&vBarv;",
+      "output": "⫩"
+    },
+    {
+      "input": "&vDash;",
+      "output": "⊨"
+    },
+    {
+      "input": "&vangrt;",
+      "output": "⦜"
+    },
+    {
+      "input": "&varepsilon;",
+      "output": "ϵ"
+    },
+    {
+      "input": "&varkappa;",
+      "output": "ϰ"
+    },
+    {
+      "input": "&varnothing;",
+      "output": "∅"
+    },
+    {
+      "input": "&varphi;",
+      "output": "ϕ"
+    },
+    {
+      "input": "&varpi;",
+      "output": "ϖ"
+    },
+    {
+      "input": "&varpropto;",
+      "output": "∝"
+    },
+    {
+      "input": "&varr;",
+      "output": "↕"
+    },
+    {
+      "input": "&varrho;",
+      "output": "ϱ"
+    },
+    {
+      "input": "&varsigma;",
+      "output": "ς"
+    },
+    {
+      "input": "&varsubsetneq;",
+      "output": "⊊︀"
+    },
+    {
+      "input": "&varsubsetneqq;",
+      "output": "⫋︀"
+    },
+    {
+      "input": "&varsupsetneq;",
+      "output": "⊋︀"
+    },
+    {
+      "input": "&varsupsetneqq;",
+      "output": "⫌︀"
+    },
+    {
+      "input": "&vartheta;",
+      "output": "ϑ"
+    },
+    {
+      "input": "&vartriangleleft;",
+      "output": "⊲"
+    },
+    {
+      "input": "&vartriangleright;",
+      "output": "⊳"
+    },
+    {
+      "input": "&vcy;",
+      "output": "в"
+    },
+    {
+      "input": "&vdash;",
+      "output": "⊢"
+    },
+    {
+      "input": "&vee;",
+      "output": "∨"
+    },
+    {
+      "input": "&veebar;",
+      "output": "⊻"
+    },
+    {
+      "input": "&veeeq;",
+      "output": "≚"
+    },
+    {
+      "input": "&vellip;",
+      "output": "⋮"
+    },
+    {
+      "input": "&verbar;",
+      "output": "|"
+    },
+    {
+      "input": "&vert;",
+      "output": "|"
+    },
+    {
+      "input": "&vfr;",
+      "output": "𝔳"
+    },
+    {
+      "input": "&vltri;",
+      "output": "⊲"
+    },
+    {
+      "input": "&vnsub;",
+      "output": "⊂⃒"
+    },
+    {
+      "input": "&vnsup;",
+      "output": "⊃⃒"
+    },
+    {
+      "input": "&vopf;",
+      "output": "𝕧"
+    },
+    {
+      "input": "&vprop;",
+      "output": "∝"
+    },
+    {
+      "input": "&vrtri;",
+      "output": "⊳"
+    },
+    {
+      "input": "&vscr;",
+      "output": "𝓋"
+    },
+    {
+      "input": "&vsubnE;",
+      "output": "⫋︀"
+    },
+    {
+      "input": "&vsubne;",
+      "output": "⊊︀"
+    },
+    {
+      "input": "&vsupnE;",
+      "output": "⫌︀"
+    },
+    {
+      "input": "&vsupne;",
+      "output": "⊋︀"
+    },
+    {
+      "input": "&vzigzag;",
+      "output": "⦚"
+    },
+    {
+      "input": "&wcirc;",
+      "output": "ŵ"
+    },
+    {
+      "input": "&wedbar;",
+      "output": "⩟"
+    },
+    {
+      "input": "&wedge;",
+      "output": "∧"
+    },
+    {
+      "input": "&wedgeq;",
+      "output": "≙"
+    },
+    {
+      "input": "&weierp;",
+      "output": "℘"
+    },
+    {
+      "input": "&wfr;",
+      "output": "𝔴"
+    },
+    {
+      "input": "&wopf;",
+      "output": "𝕨"
+    },
+    {
+      "input": "&wp;",
+      "output": "℘"
+    },
+    {
+      "input": "&wr;",
+      "output": "≀"
+    },
+    {
+      "input": "&wreath;",
+      "output": "≀"
+    },
+    {
+      "input": "&wscr;",
+      "output": "𝓌"
+    },
+    {
+      "input": "&xcap;",
+      "output": "⋂"
+    },
+    {
+      "input": "&xcirc;",
+      "output": "◯"
+    },
+    {
+      "input": "&xcup;",
+      "output": "⋃"
+    },
+    {
+      "input": "&xdtri;",
+      "output": "▽"
+    },
+    {
+      "input": "&xfr;",
+      "output": "𝔵"
+    },
+    {
+      "input": "&xhArr;",
+      "output": "⟺"
+    },
+    {
+      "input": "&xharr;",
+      "output": "⟷"
+    },
+    {
+      "input": "&xi;",
+      "output": "ξ"
+    },
+    {
+      "input": "&xlArr;",
+      "output": "⟸"
+    },
+    {
+      "input": "&xlarr;",
+      "output": "⟵"
+    },
+    {
+      "input": "&xmap;",
+      "output": "⟼"
+    },
+    {
+      "input": "&xnis;",
+      "output": "⋻"
+    },
+    {
+      "input": "&xodot;",
+      "output": "⨀"
+    },
+    {
+      "input": "&xopf;",
+      "output": "𝕩"
+    },
+    {
+      "input": "&xoplus;",
+      "output": "⨁"
+    },
+    {
+      "input": "&xotime;",
+      "output": "⨂"
+    },
+    {
+      "input": "&xrArr;",
+      "output": "⟹"
+    },
+    {
+      "input": "&xrarr;",
+      "output": "⟶"
+    },
+    {
+      "input": "&xscr;",
+      "output": "𝓍"
+    },
+    {
+      "input": "&xsqcup;",
+      "output": "⨆"
+    },
+    {
+      "input": "&xuplus;",
+      "output": "⨄"
+    },
+    {
+      "input": "&xutri;",
+      "output": "△"
+    },
+    {
+      "input": "&xvee;",
+      "output": "⋁"
+    },
+    {
+      "input": "&xwedge;",
+      "output": "⋀"
+    },
+    {
+      "input": "&yacute",
+      "output": "ý"
+    },
+    {
+      "input": "&yacute;",
+      "output": "ý"
+    },
+    {
+      "input": "&yacy;",
+      "output": "я"
+    },
+    {
+      "input": "&ycirc;",
+      "output": "ŷ"
+    },
+    {
+      "input": "&ycy;",
+      "output": "ы"
+    },
+    {
+      "input": "&yen",
+      "output": "¥"
+    },
+    {
+      "input": "&yen;",
+      "output": "¥"
+    },
+    {
+      "input": "&yfr;",
+      "output": "𝔶"
+    },
+    {
+      "input": "&yicy;",
+      "output": "ї"
+    },
+    {
+      "input": "&yopf;",
+      "output": "𝕪"
+    },
+    {
+      "input": "&yscr;",
+      "output": "𝓎"
+    },
+    {
+      "input": "&yucy;",
+      "output": "ю"
+    },
+    {
+      "input": "&yuml",
+      "output": "ÿ"
+    },
+    {
+      "input": "&yuml;",
+      "output": "ÿ"
+    },
+    {
+      "input": "&zacute;",
+      "output": "ź"
+    },
+    {
+      "input": "&zcaron;",
+      "output": "ž"
+    },
+    {
+      "input": "&zcy;",
+      "output": "з"
+    },
+    {
+      "input": "&zdot;",
+      "output": "ż"
+    },
+    {
+      "input": "&zeetrf;",
+      "output": "ℨ"
+    },
+    {
+      "input": "&zeta;",
+      "output": "ζ"
+    },
+    {
+      "input": "&zfr;",
+      "output": "𝔷"
+    },
+    {
+      "input": "&zhcy;",
+      "output": "ж"
+    },
+    {
+      "input": "&zigrarr;",
+      "output": "⇝"
+    },
+    {
+      "input": "&zopf;",
+      "output": "𝕫"
+    },
+    {
+      "input": "&zscr;",
+      "output": "𝓏"
+    },
+    {
+      "input": "&zwj;",
+      "output": "‍"
+    },
+    {
+      "input": "&zwnj;",
+      "output": "‌"
+    }
+  ]
+}

@@ -3,6 +3,12 @@ use crate::{Result, error, extract::Media};
 use futures_util::{StreamExt, stream::BoxStream};
 use time::{Date, Month, PrimitiveDateTime, Time, UtcOffset};
 
+/// Convert a source configuration bound, trying ISO before Python integer coercion.
+/// Falsy values and failed conversions disable that bound.
+pub fn source_date_bound(value: &serde_json::Value) -> Option<i64> {
+    crate::source_date::convert(value)
+}
+
 /// Parse Unix seconds or an ISO calendar date/time. Naive values use UTC.
 /// Fractions are rounded down to whole seconds, including before the epoch.
 pub fn parse_date(input: &str) -> Result<i64> {
@@ -236,7 +242,51 @@ mod tests {
             category: "direct".into(),
             filename: "image.jpg".into(),
             metadata: Some(PostMetadata {
+                source_num: None,
+                booru_keywords: None,
+                source_defaults: None,
+                booru_user_id: None,
+                booru_pool_name: None,
+                booru_favorite_id: None,
+                booru_artist_parent: None,
+                booru_popular: None,
+                source_suffix: None,
+                pool: None,
+                favgroup: None,
+                search_tags: None,
+                keyword_updates: None,
+                tags: None,
+                sketch: None,
+                sketch_archive: false,
+                user_bookmark: None,
+                bookmark_archive: false,
+                ajax: None,
+                mypixiv: None,
+                pixiv_novel_metadata: None,
+                caption_html: None,
+                pixiv_user_detail: None,
+                comments: None,
+                tags_bookmark: None,
+                ugoira_original: None,
+                ugoira_frame_index: None,
+                pixivision: None,
+                pixivision_archive: false,
+                user_follow: None,
+                followed_archive: false,
+                series: None,
+                num_series: None,
+                search: None,
+                search_archive: false,
+                ranking: None,
+                ranking_archive: false,
+                profile_asset: None,
                 file: None,
+                frames: None,
+                rating: None,
+                score: None,
+                revision: None,
+                discord: None,
+                creator: None,
                 community: None,
                 community_archive: false,
                 retweet_id: None,
@@ -462,3 +512,7 @@ mod tests {
         assert!(dropped.load(Ordering::SeqCst));
     }
 }
+
+#[cfg(test)]
+#[path = "source_date_bound_tests.rs"]
+mod source_date_bound_tests;

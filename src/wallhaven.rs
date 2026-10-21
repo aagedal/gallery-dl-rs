@@ -8,7 +8,7 @@
 //! required for NSFW content. Media must be HTTPS on `w.wallhaven.cc`.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, group},
+    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -314,7 +314,11 @@ impl Wallhaven {
         for item in &mut items {
             self.network.apply_media(item);
         }
-        group(items, "wallhaven")
+        group_with_keywords(
+            items,
+            "wallhaven",
+            KeywordPolicy::shared(&["num", "index", "media_id", "filename", "name", "extension"]),
+        )
     }
 
     async fn single(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
@@ -542,6 +546,18 @@ mod tests {
         assert_eq!((file.width, file.height), (Some(2560), Some(1440)));
         let key = media.archive_key().unwrap();
         assert!(key.starts_with("wallhaven:"), "{key}");
+        let source =
+            wallhaven(Url::parse("http://127.0.0.1:1/").unwrap()).finish(vec![media.clone()]);
+        let ExtractionEvent::Post(post) = &source[0] else {
+            panic!("missing source post")
+        };
+        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
+            panic!("wallhaven must reuse Directory keywords")
+        };
+        assert_eq!(
+            file_fields.as_ref(),
+            &["num", "index", "media_id", "filename", "name", "extension"]
+        );
         assert!(parse_wallpaper(body.as_bytes(), "other").is_err());
         let bad = json!({"data": {"id": "1", "path": "http://w.wallhaven.cc/full/1.jpg"}});
         assert!(parse_wallpaper(bad.to_string().as_bytes(), "1").is_err());
