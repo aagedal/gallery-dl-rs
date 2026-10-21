@@ -118,17 +118,31 @@ impl Process {
         })?;
         let source_defaults = crate::booru::defaults_for_url(&url);
         crate::network::NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
-        let mut child = backend
-            .command(&url, &options)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                error(format!(
-                    "could not run {}: {e}. Install gallery-dl or set --extractor-command",
-                    backend.executable.display()
-                ))
-            })?;
+        let spawn = || {
+            backend
+                .command(&url, &options)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+        };
+        let mut spawned = spawn();
+        // A just-written executable can briefly report ETXTBSY while another
+        // thread's fork still holds the writer's descriptor before its exec.
+        for attempt in 1..=5 {
+            match &spawned {
+                Err(e) if cfg!(target_os = "linux") && e.raw_os_error() == Some(26) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10 * attempt));
+                    spawned = spawn();
+                }
+                _ => break,
+            }
+        }
+        let mut child = spawned.map_err(|e| {
+            error(format!(
+                "could not run {}: {e}. Install gallery-dl or set --extractor-command",
+                backend.executable.display()
+            ))
+        })?;
         let stdout = BufReader::new(
             child
                 .stdout

@@ -4,10 +4,16 @@ use gallery_dl_rs::{
 };
 use serde_json::{Value, json};
 use std::path::Path;
+// Configuration directories must be absolute on the host platform.
+const CONFIG_DIRECTORY: &str = if cfg!(windows) {
+    r"C:\synthetic\config"
+} else {
+    "/synthetic/config"
+};
 fn config(value: Value) -> Config {
     Config::parse(
         &serde_json::to_vec(&value).unwrap(),
-        Path::new("/synthetic/config"),
+        Path::new(CONFIG_DIRECTORY),
     )
     .unwrap()
 }
@@ -124,7 +130,7 @@ fn invalid_postprocessor_options_errors_and_debug_never_quote_private_values() {
     for value in invalid {
         let error = match Config::parse(
             &serde_json::to_vec(&value).unwrap(),
-            Path::new("/synthetic/config"),
+            Path::new(CONFIG_DIRECTORY),
         ) {
             Err(error) => error.to_string(),
             Ok(config) => {

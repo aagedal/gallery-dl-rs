@@ -3,7 +3,15 @@ use gallery_dl_rs::config::{Config, Options};
 use serde_json::{Value, json};
 use std::path::Path;
 fn config(value: Value) -> Config {
-    Config::parse(&serde_json::to_vec(&value).unwrap(), Path::new("/fixture")).unwrap()
+    Config::parse(
+        &serde_json::to_vec(&value).unwrap(),
+        Path::new(if cfg!(windows) {
+            r"C:\fixture"
+        } else {
+            "/fixture"
+        }),
+    )
+    .unwrap()
 }
 #[test]
 fn source_truthiness_and_exact_lazy_alias_apply_to_every_scope() {
