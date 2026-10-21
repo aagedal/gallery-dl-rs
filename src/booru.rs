@@ -40,7 +40,7 @@ const MAX_PAGES: usize = 100;
 const MAX_TAGS: usize = 1024;
 
 #[path = "booru_dapi_pool.rs"]
-mod dapi_pool;
+mod dapi_listing;
 #[derive(Clone, Copy, PartialEq)]
 enum RequestKind {
     Api,
@@ -119,6 +119,10 @@ pub enum Target {
     },
     Favorites {
         params: Vec<(String, String)>,
+    },
+    /// Safebooru favorites with the exact requested owner ID.
+    DapiFavorites {
+        id: String,
     },
     /// Exact decimal source capture, retaining leading zeroes.
     Pool {
@@ -267,7 +271,9 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     // A matched invalid capture must fail; falling back could select a
     // different duplicate query and silently change the requested namespace.
     let source_tags = checked_source_search_tags(site, url)?;
-    let target = if let Some(id) = dapi_pool::capture(site, url) {
+    let target = if let Some(id) = dapi_listing::capture_favorites(site, url) {
+        Some(Target::DapiFavorites { id })
+    } else if let Some(id) = dapi_listing::capture(site, url) {
         Some(Target::Pool { id })
     } else if site == Site::E621 && url.path().starts_with("/favorites") {
         let mut params = Vec::new();
@@ -550,6 +556,7 @@ fn defaults(
         Target::Post { .. } => &["{category}"],
         Target::Tags { .. } => &["{category}", "{search_tags}"],
         Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
+        Target::DapiFavorites { .. } => &["{category}", "favorites", "{favorite_id}"],
         Target::Pool { .. } if !site.danbooru_dialect() => &["{category}", "pool", "{pool}"],
         Target::Pool { .. } => &["{category}", "pool", "{pool[id]} {pool[name]}"],
         Target::Favgroup { .. } => &[
@@ -565,6 +572,7 @@ fn defaults(
         Target::Pool { .. } => "p_{pool[id]}_{id}",
         Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
         Target::Favorites { .. } => "f_{user_id}_{id}",
+        Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
     };
     Arc::new(crate::naming::SourceDefaults::new(
         category, archive, filename, directory,
@@ -684,6 +692,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             source_defaults: Some(defaults(site, site.category(), &Target::Post { id: 0 })),
             booru_user_id: None,
             booru_pool_name: None,
+            booru_favorite_id: None,
             file: Some(FileMetadata {
                 width,
                 height,
@@ -904,7 +913,7 @@ struct Collection {
 }
 
 struct State {
-    dapi_pool: Option<Box<dapi_pool::DapiPool>>,
+    dapi_listing: Option<Box<dapi_listing::DapiListing>>,
     favorite_user_id: Option<Arc<str>>,
     collection: Option<Collection>,
     root: Url,
@@ -1085,8 +1094,8 @@ impl Booru {
                 state.pending_error = Some(error("invalid booru collection member"));
                 break;
             }
-            let prepared = if state.dapi_pool.is_some() {
-                match dapi_pool::prepare(self.site, post) {
+            let prepared = if state.dapi_listing.is_some() {
+                match dapi_listing::prepare(self.site, post) {
                     Ok(Some(prepared)) => Some(prepared),
                     Ok(None) => continue,
                     Err(failure) => {
@@ -1106,9 +1115,13 @@ impl Booru {
                     media.handoff.insert("_fallback".into(), fallback);
                 }
                 if let Some(metadata) = &mut media.metadata {
-                    if let Some(pool) = &state.dapi_pool {
-                        metadata.pool = Some(pool.value.clone());
-                        metadata.booru_pool_name = Some(pool.name.clone());
+                    if let Some(listing) = &state.dapi_listing {
+                        if listing.favorite {
+                            metadata.booru_favorite_id = Some((*listing.value).clone());
+                        } else {
+                            metadata.pool = Some(listing.value.clone());
+                            metadata.booru_pool_name = Some(listing.name.clone());
+                        }
                         if let Some(fields) = &mut metadata.booru_keywords {
                             let fields = Arc::make_mut(fields);
                             for key in ["id", "tags"] {
@@ -1146,8 +1159,16 @@ impl Booru {
                     } else {
                         &["num", "index", "media_id"]
                     };
-                let post_fields: &[&str] = if state.dapi_pool.is_some() {
-                    &["filename", "name", "extension", "pool", "pool_name"]
+                let post_fields: &[&str] = if state.dapi_listing.is_some() {
+                    if state
+                        .dapi_listing
+                        .as_ref()
+                        .is_some_and(|listing| listing.favorite)
+                    {
+                        &["filename", "name", "extension", "favorite_id"]
+                    } else {
+                        &["filename", "name", "extension", "pool", "pool_name"]
+                    }
                 } else if state.collection.is_some() {
                     &["filename", "name", "extension", "num"]
                 } else if state.favorite_user_id.is_some() {
@@ -1186,8 +1207,8 @@ impl Booru {
     }
 
     async fn next_page(&self, state: &mut State) -> Result<()> {
-        if state.dapi_pool.is_some() {
-            return dapi_pool::next(self, state).await;
+        if state.dapi_listing.is_some() {
+            return dapi_listing::next(self, state).await;
         }
         let limit = self.site.page_limit();
         let limit_text = limit.to_string();
@@ -1322,11 +1343,30 @@ impl Booru {
         };
         let root = self.api_root.clone().unwrap_or(root);
         let (tags, cursor) = match target {
+            Target::DapiFavorites { id } => {
+                return match dapi_listing::favorites(id) {
+                    Ok(listing) => self.listing(State {
+                        dapi_listing: Some(listing),
+                        favorite_user_id: None,
+                        collection: None,
+                        root,
+                        tags: String::new(),
+                        search_tags: None,
+                        cursor: Cursor::Page(0),
+                        pages: 0,
+                        done: false,
+                        pending: VecDeque::new(),
+                        pending_cursor: None,
+                        pending_error: None,
+                    }),
+                    Err(failure) => stream::once(async move { Err(failure) }).boxed(),
+                };
+            }
             Target::Pool { id } if !self.site.danbooru_dialect() => {
                 return stream::once(async move {
-                    let pool = dapi_pool::start(self, &root, id).await?;
+                    let pool = dapi_listing::start(self, &root, id).await?;
                     Ok::<_, crate::Error>(self.listing(State {
-                        dapi_pool: Some(pool),
+                        dapi_listing: Some(pool),
                         favorite_user_id: None,
                         collection: None,
                         root,
@@ -1354,7 +1394,7 @@ impl Booru {
                     .map(|(_, value)| value.as_str())
                     .unwrap_or_default();
                 return self.listing(State {
-                    dapi_pool: None,
+                    dapi_listing: None,
                     favorite_user_id: Some(Arc::from(user_id)),
                     collection: None,
                     root,
@@ -1372,7 +1412,7 @@ impl Booru {
                 return stream::once(async move {
                     let raw = self.post(&root, id).await?;
                     let mut state = State {
-                        dapi_pool: None,
+                        dapi_listing: None,
                         favorite_user_id: None,
                         collection: None,
                         root,
@@ -1423,7 +1463,7 @@ impl Booru {
                         .map(|(num, id)| (*id, num + 1))
                         .collect();
                     let mut state = State {
-                        dapi_pool: None,
+                        dapi_listing: None,
                         favorite_user_id: None,
                         collection: Some(Collection {
                             kind,
@@ -1560,7 +1600,7 @@ impl Booru {
             tags
         };
         self.listing(State {
-            dapi_pool: None,
+            dapi_listing: None,
             favorite_user_id: None,
             collection: None,
             root,
@@ -1805,7 +1845,7 @@ mod tests {
             // ascending/non-ID source pagination remains a separate parity gap.
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
-                dapi_pool: None,
+                dapi_listing: None,
                 favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
@@ -1977,7 +2017,7 @@ mod tests {
             )]));
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
-                dapi_pool: None,
+                dapi_listing: None,
                 favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
@@ -2719,3 +2759,7 @@ mod favorites_tests;
 #[cfg(test)]
 #[path = "booru_dapi_pool_tests.rs"]
 mod dapi_pool_tests;
+
+#[cfg(test)]
+#[path = "booru_dapi_favorite_tests.rs"]
+mod dapi_favorite_tests;

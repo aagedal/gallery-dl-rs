@@ -721,6 +721,9 @@ pub struct PostMetadata {
     /// Exact scalar DAPI pool display name, separate from nested pool objects.
     #[serde(skip_serializing)]
     pub booru_pool_name: Option<Value>,
+    /// Exact scalar DAPI favorites owner keyword.
+    #[serde(skip_serializing)]
+    pub booru_favorite_id: Option<Value>,
     /// Immutable source class path defaults, separate from live keywords.
     #[serde(skip_serializing)]
     pub source_defaults: Option<std::sync::Arc<crate::naming::SourceDefaults>>,
@@ -2007,6 +2010,9 @@ fn compatibility_metadata(
             .filter(|tags| tags.len() <= 1024)
             .map(std::sync::Arc::from),
         source_defaults: None,
+        booru_favorite_id: matches!(category, "gelbooru" | "safebooru")
+            .then(|| data.get("favorite_id").cloned())
+            .flatten(),
         booru_pool_name: matches!(category, "gelbooru" | "safebooru")
             .then(|| data.get("pool_name").cloned())
             .flatten(),
@@ -2025,7 +2031,7 @@ fn compatibility_metadata(
                     .into_iter()
                     .chain(["id", "tags"].into_iter().filter(|key| {
                         matches!(category, "gelbooru" | "safebooru")
-                            && data.contains_key("pool_name")
+                            && (data.contains_key("pool_name") || data.contains_key("favorite_id"))
                             && (*key == "tags" || category == "safebooru")
                     }))
                     .filter_map(|key| data.get(key).map(|value| (key.to_owned(), value.clone())))

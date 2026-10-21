@@ -509,6 +509,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 source_defaults: None,
                 booru_user_id: None,
                 booru_pool_name: None,
+                booru_favorite_id: None,
                 source_suffix: None,
                 pool: None,
                 favgroup: None,

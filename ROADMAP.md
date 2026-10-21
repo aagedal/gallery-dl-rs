@@ -622,7 +622,7 @@ Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite
-groups and e621/e926 favorites. Danbooru/e621 support
+groups, e621/e926 favorites and Safebooru favorites. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
@@ -1293,16 +1293,32 @@ rejects DTDs; API error bodies are excluded from diagnostics. XML attribute IDs
 and stripped tags preserve source string types in filters, templates and hooks.
 Both sites validate required tags/date after skipping records without file URLs.
 
-**Next booru route (source audit):** Safebooru favorites match the ordered
-`page=favorites&s=view&id=ID` query on `/index.php`. They expose scalar
-`favorite_id`, begin HTML traversal without a title request, and match numeric
-`id="pID` markers with preceding whitespace. HTML offsets advance by 50; each
-member uses the existing XML DAPI preparation. Defaults are
-`{category}/favorites/{favorite_id}`, the ordinary DAPI filename, and
-`f_{favorite_id}_{id}`. Gelbooru favorites require a separate JSON pipeline:
-first fetch count/order metadata, then favorite entry pages and individual post
-records, retaining `date_favorited`. Popular views and artist child dispatch
-also need their own source contracts; they are not aliases for tag searches.
+**Implemented Safebooru favorites (source oracle, 1.32.17):** match the ordered
+`page=favorites&s=view&id=ID` query on `/index.php`. Expose scalar integer
+`favorite_id` while retaining the lexical requested ID in HTML queries. Begin
+HTML traversal at `pid=0` without a title request; the source regex matches
+Python whitespace followed by `id="p` and a Unicode decimal digit prefix, without
+requiring a closing quote. Count every match, including duplicates, and advance
+by 50 when at least 50 matches occur, independently of XML response row counts.
+Each member uses lazy XML DAPI preparation, preserving string IDs and stripped
+tags and skipping missing file URLs before required-field validation. Reapply
+`favorite_id` per Post without sharing later mutations across posts or requests.
+Default paths are `{category}/favorites/{favorite_id}` with the ordinary DAPI
+filename; metadata archives use live `f_{favorite_id}_{id}` keys. Native history
+retains the original canonical post identity. Compatibility keywords preserve
+raw owner types for Gelbooru/Safebooru without inferring a source class; only
+proven Safebooru favorite routes select these defaults. Existing Pixiv Unicode
+17 decimal rules now serve the HTML scanner too. Genuine source replay covers
+41 cases and nine route probes, six hook checkpoints, full media/sidecar bytes,
+actual source metadata archive SQL, and canonical native history identity.
+DAPI source contexts no longer synthesize `num`; user-added values remain live
+within the current post. The existing 73 pool cases also verify that absence.
+
+**Next booru route (source audit):** Gelbooru favorites require a separate JSON
+pipeline: first fetch count/order metadata, then favorite entry pages and
+individual post records, retaining `date_favorited`. Popular views and artist
+child dispatch also need their own source contracts; they are not aliases for
+tag searches.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

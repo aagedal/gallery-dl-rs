@@ -1,13 +1,69 @@
-//! Literal HTML pool discovery and lazy DAPI member requests.
+//! HTML collection discovery and lazy DAPI member requests.
 use super::*;
 
-pub(super) struct DapiPool {
+pub(super) struct DapiListing {
     pub value: Arc<Value>,
     pub name: Value,
+    pub favorite: bool,
     id: String,
     ids: VecDeque<String>,
     offset: usize,
     done: bool,
+}
+pub(super) fn capture_favorites(site: Site, url: &Url) -> Option<String> {
+    if site != Site::Safebooru || url.path() != "/index.php" {
+        return None;
+    }
+    let rest = url.query()?.strip_prefix("page=favorites&s=view&id=")?;
+    let id: String = rest
+        .chars()
+        .take_while(|&c| crate::python_unicode::decimal_digit(c).is_some())
+        .collect();
+    (!id.is_empty()).then_some(id)
+}
+fn scalar_id(id: &str) -> Result<Arc<Value>> {
+    let digits = id
+        .chars()
+        .map(|c| crate::python_unicode::decimal_digit(c).map(|n| char::from(b'0' + n)))
+        .collect::<Option<String>>()
+        .ok_or_else(|| error("invalid booru collection identifier"))?;
+    let digits = digits.trim_start_matches('0');
+    serde_json::from_str(if digits.is_empty() { "0" } else { digits })
+        .map(Arc::new)
+        .map_err(|_| error("invalid booru collection identifier"))
+}
+pub(super) fn favorites(id: String) -> Result<Box<DapiListing>> {
+    Ok(Box::new(DapiListing {
+        value: scalar_id(&id)?,
+        name: Value::Null,
+        favorite: true,
+        id,
+        ids: VecDeque::new(),
+        offset: 0,
+        done: false,
+    }))
+}
+fn favorite_ids(text: &str) -> VecDeque<String> {
+    let mut ids = VecDeque::new();
+    let mut text = text;
+    while let Some((before, after)) = text.split_once("id=\"p") {
+        if before
+            .chars()
+            .next_back()
+            .is_some_and(crate::python_unicode::whitespace)
+        {
+            let count = after
+                .chars()
+                .take_while(|&c| crate::python_unicode::decimal_digit(c).is_some())
+                .map(char::len_utf8)
+                .sum::<usize>();
+            if count != 0 {
+                ids.push_back(after[..count].to_owned());
+            }
+        }
+        text = after;
+    }
+    ids
 }
 pub(super) fn capture(site: Site, url: &Url) -> Option<String> {
     if site.danbooru_dialect()
@@ -32,7 +88,7 @@ fn ids(mut text: &str, marker: &str) -> VecDeque<String> {
     }
     ids
 }
-pub(super) async fn start(client: &Booru, root: &Url, id: String) -> Result<Box<DapiPool>> {
+pub(super) async fn start(client: &Booru, root: &Url, id: String) -> Result<Box<DapiListing>> {
     let body = client
         .call_kind(
             root,
@@ -50,12 +106,10 @@ pub(super) async fn start(client: &Booru, root: &Url, id: String) -> Result<Box<
     let (name, tail) = extract(&html, begin, end)
         .filter(|(name, _)| !name.is_empty())
         .ok_or_else(|| error("booru pool not found"))?;
-    let digits = id.trim_start_matches('0');
-    let value: Value = serde_json::from_str(if digits.is_empty() { "0" } else { digits })
-        .map_err(|_| error("invalid booru pool identifier"))?;
-    Ok(Box::new(DapiPool {
-        value: Arc::new(value),
+    Ok(Box::new(DapiListing {
+        value: scalar_id(&id)?,
         name: crate::pixiv::pixivision::unescape(name).into(),
+        favorite: false,
         id,
         ids: if client.site == Site::Safebooru {
             ids(tail, "class=\"thumb\" id=\"p")
@@ -67,10 +121,10 @@ pub(super) async fn start(client: &Booru, root: &Url, id: String) -> Result<Box<
     }))
 }
 pub(super) async fn next(client: &Booru, state: &mut State) -> Result<()> {
-    let mut pool = state.dapi_pool.take().expect("DAPI pool cursor");
+    let mut listing = state.dapi_listing.take().expect("DAPI collection cursor");
     let result = async {
         loop {
-            if let Some(id) = pool.ids.pop_front() {
+            if let Some(id) = listing.ids.pop_front() {
                 let (query, kind) = if client.site == Site::Gelbooru {
                     (
                         vec![
@@ -102,33 +156,46 @@ pub(super) async fn next(client: &Booru, state: &mut State) -> Result<()> {
                     posts(client.site, &body).map(Some)
                 };
             }
-            if pool.done {
+            if listing.done {
                 return Ok(None);
             }
-            let offset = pool.offset.to_string();
+            let offset = listing.offset.to_string();
             let body = client
                 .call_kind(
                     &state.root,
                     "index.php",
                     &[
-                        ("page", "pool"),
-                        ("s", "show"),
-                        ("id", &pool.id),
+                        (
+                            "page",
+                            if listing.favorite {
+                                "favorites"
+                            } else {
+                                "pool"
+                            },
+                        ),
+                        ("s", if listing.favorite { "view" } else { "show" }),
+                        ("id", &listing.id),
                         ("pid", &offset),
                     ],
                     RequestKind::Html,
                 )
                 .await?;
-            pool.ids = ids(&String::from_utf8_lossy(&body), "\" id=\"p");
-            pool.done = pool.ids.len() < 45;
-            pool.offset = pool
+            let html = String::from_utf8_lossy(&body);
+            listing.ids = if listing.favorite {
+                favorite_ids(&html)
+            } else {
+                ids(&html, "\" id=\"p")
+            };
+            let per_page = if listing.favorite { 50 } else { 45 };
+            listing.done = listing.ids.len() < per_page;
+            listing.offset = listing
                 .offset
-                .checked_add(45)
-                .ok_or_else(|| error("booru pool offset overflow"))?;
+                .checked_add(per_page)
+                .ok_or_else(|| error("booru collection offset overflow"))?;
         }
     }
     .await;
-    state.dapi_pool = Some(pool);
+    state.dapi_listing = Some(listing);
     match result? {
         Some(raw) => client.emit(state, &raw),
         None => state.done = true,
@@ -136,7 +203,7 @@ pub(super) async fn next(client: &Booru, state: &mut State) -> Result<()> {
     Ok(())
 }
 fn xml_posts(bytes: &[u8]) -> Result<Vec<Value>> {
-    let xml = std::str::from_utf8(bytes).map_err(|_| error("invalid booru pool XML encoding"))?;
+    let xml = std::str::from_utf8(bytes).map_err(|_| error("invalid booru DAPI XML encoding"))?;
     let document = roxmltree::Document::parse_with_options(
         xml,
         roxmltree::ParsingOptions {
@@ -145,10 +212,10 @@ fn xml_posts(bytes: &[u8]) -> Result<Vec<Value>> {
             ..Default::default()
         },
     )
-    .map_err(|_| error("invalid or excessive booru pool XML"))?;
+    .map_err(|_| error("invalid or excessive booru DAPI XML"))?;
     let root = document.root_element();
     if root.tag_name().name() == "error" {
-        return Err(error("booru pool API refused extraction"));
+        return Err(error("booru DAPI refused extraction"));
     }
     Ok(root
         .children()
@@ -168,7 +235,7 @@ pub(super) struct PreparedPost {
 }
 pub(super) fn prepare(site: Site, post: &Value) -> Result<Option<PreparedPost>> {
     if !post.is_object() {
-        return Err(error("invalid booru pool post"));
+        return Err(error("invalid booru DAPI post"));
     }
     let Some(raw) = post
         .get("file_url")
@@ -216,12 +283,12 @@ pub(super) fn prepare(site: Site, post: &Value) -> Result<Option<PreparedPost>> 
         let tags = post
             .get("tags")
             .and_then(Value::as_str)
-            .ok_or_else(|| error("invalid booru pool tags"))?;
+            .ok_or_else(|| error("invalid booru DAPI tags"))?;
         let tags = tags
-            .trim_matches(|c: char| c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}'))
+            .trim_matches(crate::python_unicode::whitespace)
             .to_owned();
         if post.get("created_at").is_none() {
-            return Err(error("booru pool post date is missing"));
+            return Err(error("booru DAPI post date is missing"));
         }
         post["tags"] = tags.into();
     }

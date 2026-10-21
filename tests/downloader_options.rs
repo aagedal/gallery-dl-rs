@@ -21,6 +21,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         source_defaults: None,
         booru_user_id: None,
         booru_pool_name: None,
+        booru_favorite_id: None,
         source_suffix: None,
         search_tags: None,
         pool: None,

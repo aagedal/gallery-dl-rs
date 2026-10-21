@@ -37,6 +37,7 @@ pub mod pixiv;
 pub mod post_selection;
 pub mod postprocess;
 pub mod profile_asset;
+mod python_unicode;
 mod range;
 pub mod reddit;
 mod resume;

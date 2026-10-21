@@ -752,7 +752,13 @@ fn context_parts(
         values.extend(metadata.clone());
         if let Some(num) = &post.source_num {
             values.insert("num".into(), json_value(num));
-        } else if media.is_some() && !metadata.contains_key("num") {
+        } else if media.is_some()
+            && !metadata.contains_key("num")
+            && !post
+                .source_defaults
+                .as_ref()
+                .is_some_and(|defaults| matches!(defaults.category, "gelbooru" | "safebooru"))
+        {
             values.insert("num".into(), Value::Int(post.index as i128));
         }
         if category == "twitter" {
@@ -1058,6 +1064,11 @@ fn context_parts(
             let name = json_value(name);
             values.insert("pool_name".into(), name.clone());
             metadata.insert("pool_name".into(), name);
+        }
+        if let Some(owner) = &post.booru_favorite_id {
+            let owner = json_value(owner);
+            values.insert("favorite_id".into(), owner.clone());
+            metadata.insert("favorite_id".into(), owner);
         }
         values.insert("metadata".into(), map(metadata));
     }

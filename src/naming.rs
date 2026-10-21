@@ -110,6 +110,7 @@ const FIELDS: &[&str] = &[
     "search_tags",
     "pool",
     "pool_name",
+    "favorite_id",
     "favgroup",
     "filesize",
     "revision",

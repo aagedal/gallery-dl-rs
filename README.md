@@ -321,7 +321,8 @@ Experimental native booru extraction (`--extractor native`) covers categories
 `index.php?page=pool&s=show&id=ID`. Danbooru favorite groups use
 `/favorite_groups/ID` or
 `/favorite_group/show/ID`. E621/e926 favorites use `/favorites?user_id=OWNER`;
-the owner is an arbitrary query string, with an empty default.
+the owner is an arbitrary query string, with an empty default. Safebooru favorites
+use `index.php?page=favorites&s=view&id=ID`.
 Danbooru/e621 use before/after ID cursors or numbered pages according to search
 tags, requesting 200/320 posts per page respectively. Ascending searches retain
 the first API page and reverse subsequent pages before selecting the next cursor.
@@ -370,6 +371,18 @@ Default directories are `{category}/Favorites/{user_id}` (empty owner segments
 are omitted); filenames use the ordinary e621 format. Metadata postprocessor
 archives use live `f_{user_id}_{id}` keys. Retained class descriptors also select
 the correct default metadata archive for media-only library downloads.
+
+Safebooru favorites begin with HTML at `pid=0`, collect numeric ID prefixes
+following whitespace and `id="p`, and fetch each member through XML DAPI. A full
+50-ID HTML page advances the offset by 50; empty or multi-record API responses
+do not change that threshold. Traversal preserves duplicates and stops on
+cancellation or error, with no fixed page cutoff. `favorite_id` is the scalar
+integer owner, while HTML requests retain the lexical URL ID. The owner keyword
+resets for each post; current Post/File edits reach its file and metadata archive.
+Defaults are `{category}/favorites/{favorite_id}`, the ordinary DAPI filename,
+and archive key `f_{favorite_id}_{id}`. DAPI source classes do not synthesize
+`num`; hook-created values remain live within their post. Gelbooru favorites
+remain unimplemented.
 
 Booru template keywords retain producer spelling independently of the native
 logical basename. Danbooru derives `filename` and `extension` from the raw URL;

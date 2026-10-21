@@ -22,6 +22,7 @@ const EVENTS: &[&str] = &["post", "prepare", "file", "after", "post-after", "ski
 const KEYS: &[&str] = &[
     "pool",
     "pool_name",
+    "num",
     "id",
     "category",
     "filename",

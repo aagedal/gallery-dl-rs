@@ -78,6 +78,7 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
                 "{id}" | "t_{search_tags}_{id}" | "p_{pool[id]}_{id}"
             )
         }
+        "safebooru" if format == "f_{favorite_id}_{id}" => true,
         "gelbooru" | "safebooru" => {
             matches!(format, "{id}" | "t_{search_tags}_{id}" | "p_{pool}_{id}")
         }
@@ -284,6 +285,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 crate::booru::Target::Pool { .. } => "p_{pool[id]}_{id}",
                 crate::booru::Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
                 crate::booru::Target::Favorites { .. } => "f_{user_id}_{id}",
+                crate::booru::Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
             };
             return Some(descriptor(category, format));
         }
