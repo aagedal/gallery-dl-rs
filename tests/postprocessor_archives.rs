@@ -43,7 +43,13 @@ fn descriptor() -> ArchiveDescriptor {
 }
 fn normalize(value: &mut Value, root: &Path) {
     match value {
-        Value::String(s) => *s = s.replace(root.to_str().unwrap(), "$WORK"),
+        Value::String(s) => {
+            *s = s.replace(root.to_str().unwrap(), "$WORK");
+            // Oracles were recorded on POSIX; joined paths are native here.
+            if cfg!(windows) && s.starts_with("$WORK") {
+                *s = s.replace('\\', "/");
+            }
+        }
         Value::Array(items) => items.iter_mut().for_each(|v| normalize(v, root)),
         Value::Object(items) => items.values_mut().for_each(|v| normalize(v, root)),
         _ => (),

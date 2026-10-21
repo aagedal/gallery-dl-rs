@@ -987,7 +987,10 @@ async fn skip_mtime_updates_sidecar_metadata_and_preserves_existing_file_time() 
     let file = path(root.path(), &media);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     fs::write(&file, b"existing").unwrap();
-    fs::File::open(&file)
+    // Windows needs write access to change file times.
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&file)
         .unwrap()
         .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(946_684_800))
         .unwrap();

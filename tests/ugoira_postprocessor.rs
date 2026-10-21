@@ -52,7 +52,10 @@ fn input_files(root: &Path, source: &[UgoiraFrame]) -> FrameInput {
             .map(|frame| {
                 let path = root.join(&frame.file);
                 fs::write(&path, format!("fixture {}", frame.file)).unwrap();
-                fs::File::open(&path)
+                // Windows needs write access to change file times.
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
                     .unwrap()
                     .set_times(
                         fs::FileTimes::new()
@@ -154,7 +157,20 @@ fn source_command_concat_timecodes_and_image2_mutation_match_native_plan() {
             .map(|command| {
                 command
                     .iter()
-                    .map(|arg| arg.to_str().unwrap().to_owned())
+                    .map(|arg| {
+                        // Joined paths and the null device are native, as in
+                        // gallery-dl; the oracle was recorded on POSIX.
+                        let arg = arg.to_str().unwrap();
+                        if !cfg!(windows) {
+                            arg.to_owned()
+                        } else if arg == "NUL" {
+                            "/dev/null".to_owned()
+                        } else if arg.contains("$WORK") {
+                            arg.replace('\\', "/")
+                        } else {
+                            arg.to_owned()
+                        }
+                    })
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();

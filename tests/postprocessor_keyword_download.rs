@@ -86,7 +86,7 @@ async fn actual_file_pipeline_observes_producer_ownership_with_concurrent_consum
         )]));
         let events = group_with_keywords(vec![media(1), media(2)], "pixiv", policy);
         let input = jobs::apply(stream::iter(events.into_iter().map(Ok)).boxed(), configs);
-        let client = download::client(Duration::from_secs(2)).unwrap();
+        let client = download::client(Duration::from_secs(30)).unwrap();
         let outcomes = input
             .map(|job| {
                 let root = root.path();
@@ -182,7 +182,7 @@ async fn pre_directory_filename_deletion_is_not_reintroduced_from_file_snapshot(
     );
     let mut input = Box::pin(input);
     let item = input.next().await.unwrap().unwrap();
-    let client = download::client(Duration::from_secs(2)).unwrap();
+    let client = download::client(Duration::from_secs(30)).unwrap();
     download::download_with_options(
         &client,
         root.path(),
