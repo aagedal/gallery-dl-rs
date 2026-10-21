@@ -1023,7 +1023,7 @@ mod tests {
                 "{}",
                 case["name"]
             );
-            let actual:Vec<_>=plan.mtimes.iter().map(|(name,milliseconds)|json!({"path":directory.join(name).to_str().unwrap(),"ns":[milliseconds*1_000_000,milliseconds*1_000_000]})).collect();
+            let actual:Vec<_>=plan.mtimes.iter().map(|(name,milliseconds)|json!({"path":directory.join(name).to_str().unwrap().replace(std::path::MAIN_SEPARATOR, "/"),"ns":[milliseconds*1_000_000,milliseconds*1_000_000]})).collect();
             assert_eq!(json!(actual), case["utimes"], "{}", case["name"]);
         }
     }

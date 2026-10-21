@@ -226,7 +226,7 @@ pub(super) fn artifacts(root: &Path) -> Value {
                     .unwrap()
                     .to_str()
                     .unwrap()
-                    .to_owned();
+                    .replace(std::path::MAIN_SEPARATOR, "/");
                 if EVENTS
                     .iter()
                     .any(|event| relative == format!("oracle-{event}.jsonl"))

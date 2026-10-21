@@ -558,12 +558,17 @@ pub(super) async fn replay_date_jobs(cases: &[Value], extra_keys: &[&str]) {
                     visit(root, &path, files);
                     continue;
                 }
-                let relative = path.strip_prefix(root).unwrap().to_str().unwrap();
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
                 if ["post", "prepare", "file", "after", "post-after"]
                     .iter()
                     .any(|event| relative == format!("oracle-{event}.jsonl"))
                     || matches!(
-                        relative,
+                        relative.as_str(),
                         "history.sqlite3"
                             | "history.sqlite3-wal"
                             | "history.sqlite3-shm"

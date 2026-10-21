@@ -157,12 +157,17 @@ fn artifacts(root: &Path) -> Value {
                 visit(root, &path, files);
                 continue;
             }
-            let relative = path.strip_prefix(root).unwrap().to_str().unwrap();
+            let relative = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .replace(std::path::MAIN_SEPARATOR, "/");
             if EVENTS
                 .iter()
                 .any(|event| relative == format!("oracle-{event}.jsonl"))
                 || matches!(
-                    relative,
+                    relative.as_str(),
                     "history.sqlite3"
                         | "history.sqlite3-wal"
                         | "history.sqlite3-shm"

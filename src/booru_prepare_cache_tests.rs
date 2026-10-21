@@ -55,7 +55,12 @@ fn artifacts(root: &Path) -> Value {
                 visit(root, &path, files);
                 continue;
             }
-            let relative = path.strip_prefix(root).unwrap().to_str().unwrap();
+            let relative = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .replace(std::path::MAIN_SEPARATOR, "/");
             if relative.starts_with("oracle-") || relative.starts_with("history.sqlite3") {
                 continue;
             }
