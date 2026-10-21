@@ -100,7 +100,9 @@ impl Template {
         };
         let context = convert_context(context).ok()?;
         match field.render_value(|name| context.get(name).cloned()).ok()? {
-            FormatValue::Date(value) => Some(value.unix_timestamp()),
+            FormatValue::Date(value) | FormatValue::SourceDate(value) => {
+                Some(value.unix_timestamp())
+            }
             _ => None,
         }
     }
@@ -165,6 +167,12 @@ fn convert(
     *budget = budget
         .checked_sub(bytes)
         .ok_or_else(|| error("postprocessor context exceeds the size limit"))?;
+    if let Some(value) = crate::filter::source_date_from_json(value) {
+        return Ok(value.map_or(
+            FormatValue::InvalidDate,
+            crate::naming::format::source_timestamp,
+        ));
+    }
     let date = dates && matches!(key, "date" | "date_updated" | "date_url");
     Ok(match value {
         Value::Null => FormatValue::None,
@@ -219,6 +227,10 @@ pub(crate) fn parse_date(value: &str) -> std::result::Result<time::OffsetDateTim
 fn json_value(value: FormatValue) -> Result<Value> {
     Ok(match value {
         FormatValue::None => Value::Null,
+        FormatValue::InvalidDate => crate::filter::source_date_json(None),
+        FormatValue::SourceDate(value) => {
+            crate::filter::source_date_json(Some(value.unix_timestamp()))
+        }
         FormatValue::Bool(v) => v.into(),
         FormatValue::Int(v) => Value::Number(
             serde_json::Number::from_i128(v)

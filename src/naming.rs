@@ -41,6 +41,7 @@ const FIELDS: &[&str] = &[
     "num",
     "timestamp",
     "date",
+    "date_favorited",
     "caption",
     "caption_html",
     "title",
@@ -264,7 +265,7 @@ impl FilenameTemplate {
         let mut context = Some(
             keywords
                 .iter()
-                .map(|(key, value)| (key.clone(), crate::filter::json_value(value)))
+                .map(|(key, value)| (key.clone(), crate::filter::keyword_value(key, value)))
                 .collect(),
         );
         let mut selected = self.parts.as_deref();
@@ -644,6 +645,7 @@ fn convert_value(value: &crate::filter::Value, key: &str, dates: bool) -> Value 
     use crate::filter::Value as Source;
     match value {
         Source::None => Value::None,
+        Source::SourceDate(value) => value.map_or(Value::InvalidDate, format::source_timestamp),
         Source::Bool(value) => Value::Bool(*value),
         // Upstream exposes these as datetimes; native metadata stores seconds.
         Source::Int(value) if dates && matches!(key, "date" | "date_updated") => {
@@ -683,12 +685,19 @@ fn lookup(
         .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
         .unwrap_or((&media.filename, ""));
     let metadata = media.metadata.as_ref();
-    if matches!(name, "id" | "tags")
+    if matches!(name, "id" | "tags" | "date_favorited")
         && let Some(value) = metadata
             .and_then(|metadata| metadata.booru_keywords.as_ref())
             .and_then(|fields| fields.get(name))
     {
-        return Some(convert(&crate::filter::json_value(value), name));
+        return Some(convert(
+            &if name == "date_favorited" {
+                crate::filter::source_date_value(value)
+            } else {
+                crate::filter::json_value(value)
+            },
+            name,
+        ));
     }
     if matches!(name, "filename" | "extension" | "md5")
         && let Some(fields) = metadata.and_then(|metadata| metadata.booru_keywords.as_deref())

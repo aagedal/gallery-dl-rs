@@ -22,19 +22,21 @@ pub(crate) enum Value {
     List(Vec<Value>),
     Map(Vec<(String, Value)>),
     Date(OffsetDateTime),
+    InvalidDate,
+    SourceDate(OffsetDateTime),
 }
 
 impl Value {
     fn truthy(&self) -> bool {
         match self {
-            Value::None => false,
+            Value::None | Value::InvalidDate => false,
             Value::Bool(value) => *value,
             Value::Int(value) => *value != 0,
             Value::Float(value) => *value != 0.0,
             Value::Str(value) => !value.is_empty(),
             Value::List(value) => !value.is_empty(),
             Value::Map(value) => !value.is_empty(),
-            Value::Date(_) => true,
+            Value::Date(_) | Value::SourceDate(_) => true,
         }
     }
 
@@ -42,7 +44,10 @@ impl Value {
     fn text(&self) -> String {
         match self {
             Value::Str(value) => value.clone(),
-            Value::Date(value) => strftime(value, "%Y-%m-%d %H:%M:%S").unwrap_or_default(),
+            Value::InvalidDate => "[Invalid DateTime]".into(),
+            Value::Date(value) | Value::SourceDate(value) => {
+                strftime(value, "%Y-%m-%d %H:%M:%S").unwrap_or_default()
+            }
             value => repr(value),
         }
     }
@@ -55,9 +60,14 @@ pub(crate) fn timestamp(seconds: i128) -> Value {
         .map_or(Value::None, Value::Date)
 }
 
+pub(crate) fn source_timestamp(seconds: i64) -> Value {
+    OffsetDateTime::from_unix_timestamp(seconds).map_or(Value::InvalidDate, Value::SourceDate)
+}
+
 fn repr(value: &Value) -> String {
     match value {
         Value::None => "None".into(),
+        Value::InvalidDate => "NullDatetime(1, 1, 1, 0, 0)".into(),
         Value::Bool(true) => "True".into(),
         Value::Bool(false) => "False".into(),
         Value::Int(value) => value.to_string(),
@@ -97,7 +107,7 @@ fn repr(value: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Value::Date(value) => value.unix_timestamp().to_string(),
+        Value::Date(value) | Value::SourceDate(value) => value.unix_timestamp().to_string(),
     }
 }
 
@@ -160,8 +170,13 @@ impl Field {
             return Err(error(format!("unknown template conversion: !{c}")));
         }
         let (ops, spec) = parse_ops(spec)?;
-        if !spec.contains('%') {
-            // Validate eagerly; date patterns are checked against each value.
+        if !spec.contains('%')
+            && !alternatives.iter().any(
+                |source| matches!(source, Source::Path { name, .. } if name == "date_favorited"),
+            )
+        {
+            // Source datetimes permit literal strftime text; primitive values
+            // still validate their final specification at rendering time.
             PythonSpec::parse(&spec)?;
         }
         Ok(Self {
@@ -565,7 +580,7 @@ fn identity_int_float_cmp(integer: i128, float: f64) -> Option<std::cmp::Orderin
 
 fn identity_repr(value: &Value) -> String {
     match value {
-        Value::Date(value) => format!(
+        Value::Date(value) | Value::SourceDate(value) => format!(
             "datetime.datetime({}, {}, {}, {}, {}, {})",
             value.year(),
             u8::from(value.month()),
@@ -605,7 +620,9 @@ fn identity_text(value: &Value) -> String {
 }
 fn identity_json(value: &Value) -> serde_json::Value {
     match value {
-        Value::Date(_) => serde_json::Value::String(identity_text(value)),
+        Value::Date(_) | Value::SourceDate(_) | Value::InvalidDate => {
+            serde_json::Value::String(identity_text(value))
+        }
         Value::List(values) => values.iter().map(identity_json).collect(),
         Value::Map(values) => values
             .iter()
@@ -699,6 +716,7 @@ fn convert_identity(value: Value, conversion: char) -> Result<Value> {
             } else {
                 match value {
                     Value::Date(value) => Value::Date(value),
+                    Value::SourceDate(value) => Value::SourceDate(value),
                     Value::Str(value) => crate::date::parse_date(&value)
                         .map_or(Value::None, |seconds| timestamp(seconds.into())),
                     value => identity_int(&value).map_or(Value::None, timestamp),
@@ -706,7 +724,7 @@ fn convert_identity(value: Value, conversion: char) -> Result<Value> {
             }
         }
         'T' => Value::Str(match value {
-            Value::Date(value) => value.unix_timestamp().to_string(),
+            Value::Date(value) | Value::SourceDate(value) => value.unix_timestamp().to_string(),
             _ => String::new(),
         }),
         'l' | 'u' | 'c' | 'C' | 't' | 'g' | 'U' | 'H' | 'W' => {
@@ -727,7 +745,9 @@ impl Value {
             (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
             (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)),
             (Value::Str(a), Value::Str(b)) => Some(a.cmp(b)),
-            (Value::Date(a), Value::Date(b)) => Some(a.cmp(b)),
+            (Value::Date(a) | Value::SourceDate(a), Value::Date(b) | Value::SourceDate(b)) => {
+                Some(a.cmp(b))
+            }
             _ => None,
         }
     }
@@ -869,6 +889,7 @@ fn convert(value: Value, conversion: char) -> Result<Value> {
         'j' => Value::Str(serde_json::to_string(&json(&value))?),
         'd' | 'D' => match value {
             Value::Date(date) => Value::Date(date),
+            Value::SourceDate(date) => Value::SourceDate(date),
             Value::Int(seconds) => timestamp(seconds),
             Value::Float(seconds) if seconds.is_finite() => timestamp(seconds.floor() as i128),
             Value::Str(text) => crate::date::parse_date(&text)
@@ -876,7 +897,9 @@ fn convert(value: Value, conversion: char) -> Result<Value> {
             _ => Value::None,
         },
         'T' => match value {
-            Value::Date(date) => Value::Str(date.unix_timestamp().to_string()),
+            Value::Date(date) | Value::SourceDate(date) => {
+                Value::Str(date.unix_timestamp().to_string())
+            }
             _ => Value::None,
         },
         'i' => match value {
@@ -950,7 +973,7 @@ fn json(value: &Value) -> serde_json::Value {
                 .map(|(key, value)| (key.clone(), json(value)))
                 .collect(),
         ),
-        Value::Date(_) => Json::String(value.text()),
+        Value::Date(_) | Value::SourceDate(_) | Value::InvalidDate => Json::String(value.text()),
     }
 }
 
@@ -1301,7 +1324,10 @@ fn format_float(value: f64, kind: char, precision: usize) -> String {
 }
 
 fn format_value(value: &Value, spec: &str) -> Result<String> {
-    if let Value::Date(date) = value {
+    if matches!(value, Value::InvalidDate) {
+        return Ok("[Invalid DateTime]".into());
+    }
+    if let Value::Date(date) | Value::SourceDate(date) = value {
         return if spec.is_empty() {
             Ok(value.text())
         } else {

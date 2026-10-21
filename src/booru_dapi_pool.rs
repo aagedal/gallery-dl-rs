@@ -5,13 +5,17 @@ pub(super) struct DapiListing {
     pub value: Arc<Value>,
     pub name: Value,
     pub favorite: bool,
+    gel: Option<gel_favorite::Favorites>,
     id: String,
     ids: VecDeque<String>,
     offset: usize,
     done: bool,
 }
 pub(super) fn capture_favorites(site: Site, url: &Url) -> Option<String> {
-    if site != Site::Safebooru || url.path() != "/index.php" {
+    if site.danbooru_dialect()
+        || !matches!(url.path(), "/index.php" | "/")
+        || site == Site::Safebooru && url.path() != "/index.php"
+    {
         return None;
     }
     let rest = url.query()?.strip_prefix("page=favorites&s=view&id=")?;
@@ -32,11 +36,12 @@ fn scalar_id(id: &str) -> Result<Arc<Value>> {
         .map(Arc::new)
         .map_err(|_| error("invalid booru collection identifier"))
 }
-pub(super) fn favorites(id: String) -> Result<Box<DapiListing>> {
+pub(super) fn favorites(site: Site, id: String) -> Result<Box<DapiListing>> {
     Ok(Box::new(DapiListing {
         value: scalar_id(&id)?,
         name: Value::Null,
         favorite: true,
+        gel: (site == Site::Gelbooru).then(|| gel_favorite::Favorites::new(id.clone())),
         id,
         ids: VecDeque::new(),
         offset: 0,
@@ -110,6 +115,7 @@ pub(super) async fn start(client: &Booru, root: &Url, id: String) -> Result<Box<
         value: scalar_id(&id)?,
         name: crate::pixiv::pixivision::unescape(name).into(),
         favorite: false,
+        gel: None,
         id,
         ids: if client.site == Site::Safebooru {
             ids(tail, "class=\"thumb\" id=\"p")
@@ -123,6 +129,9 @@ pub(super) async fn start(client: &Booru, root: &Url, id: String) -> Result<Box<
 pub(super) async fn next(client: &Booru, state: &mut State) -> Result<()> {
     let mut listing = state.dapi_listing.take().expect("DAPI collection cursor");
     let result = async {
+        if let Some(gel) = &mut listing.gel {
+            return gel.next(client, &state.root).await;
+        }
         loop {
             if let Some(id) = listing.ids.pop_front() {
                 let (query, kind) = if client.site == Site::Gelbooru {

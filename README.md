@@ -321,7 +321,7 @@ Experimental native booru extraction (`--extractor native`) covers categories
 `index.php?page=pool&s=show&id=ID`. Danbooru favorite groups use
 `/favorite_groups/ID` or
 `/favorite_group/show/ID`. E621/e926 favorites use `/favorites?user_id=OWNER`;
-the owner is an arbitrary query string, with an empty default. Safebooru favorites
+the owner is an arbitrary query string, with an empty default. Gelbooru/Safebooru favorites
 use `index.php?page=favorites&s=view&id=ID`.
 Danbooru/e621 use before/after ID cursors or numbered pages according to search
 tags, requesting 200/320 posts per page respectively. Ascending searches retain
@@ -381,8 +381,20 @@ integer owner, while HTML requests retain the lexical URL ID. The owner keyword
 resets for each post; current Post/File edits reach its file and metadata archive.
 Defaults are `{category}/favorites/{favorite_id}`, the ordinary DAPI filename,
 and archive key `f_{favorite_id}_{id}`. DAPI source classes do not synthesize
-`num`; hook-created values remain live within their post. Gelbooru favorites
-remain unimplemented.
+`num`; hook-created values remain live within their post.
+
+Gelbooru favorites use JSON throughout. A two-entry request determines API order
+and count, then numbered 100-entry pages hydrate individual posts lazily.
+Forward traversal continues until an empty entry page, even after a short page;
+reverse traversal starts at the final count-derived page and reverses each page.
+Category `order-posts` strings beginning with lowercase `r` or `a` flip the
+detected direction. The setting retains raw JSON types and source truthiness;
+compatibility forwarding preserves the configured value. Gelbooru uses the same
+scalar `favorite_id`, paths, and archive format as Safebooru. Each post also gets
+`date_favorited`, distinct from its creation date. It supports datetime templates
+such as `{date_favorited:%Y-%m-%d}`; invalid timestamps retain the source's falsy
+`[Invalid DateTime]` value. Hook-written strings remain strings, and metadata
+JSON emits date strings without internal type markers.
 
 Booru template keywords retain producer spelling independently of the native
 logical basename. Danbooru derives `filename` and `extension` from the raw URL;

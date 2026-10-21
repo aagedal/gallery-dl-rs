@@ -957,6 +957,7 @@ pub struct BackendOptions {
     pub api_server: Option<String>,
     pub order_posts: Option<crate::kemono::PostOrder>,
     pub booru_order_posts: Option<crate::booru::PoolOrder>,
+    pub booru_favorite_order: Option<Value>,
     pub favorites: Option<crate::kemono::Favorites>,
 }
 impl std::fmt::Debug for BackendOptions {
@@ -1230,7 +1231,9 @@ impl Backend {
                 .arg("--option")
                 .arg(format!("favorites={}", serde_json::json!(value)));
         }
-        if let Some(order) = options.booru_order_posts {
+        if let Some(order) = &options.booru_favorite_order {
+            command.arg("--option").arg(format!("order-posts={order}"));
+        } else if let Some(order) = options.booru_order_posts {
             let order = match order {
                 crate::booru::PoolOrder::Pool => "pool",
                 crate::booru::PoolOrder::PoolReverse => "pool_desc",
@@ -2029,10 +2032,10 @@ fn compatibility_metadata(
             std::sync::Arc::new(
                 ["filename", "extension", "md5"]
                     .into_iter()
-                    .chain(["id", "tags"].into_iter().filter(|key| {
+                    .chain(["id", "tags", "date_favorited"].into_iter().filter(|key| {
                         matches!(category, "gelbooru" | "safebooru")
                             && (data.contains_key("pool_name") || data.contains_key("favorite_id"))
-                            && (*key == "tags" || category == "safebooru")
+                            && (*key != "id" || category == "safebooru")
                     }))
                     .filter_map(|key| data.get(key).map(|value| (key.to_owned(), value.clone())))
                     .collect(),

@@ -83,6 +83,8 @@ pub struct Options {
     pub order_posts: Option<crate::kemono::PostOrder>,
     /// Danbooru pool member ordering, independent of Kemono post ordering.
     pub booru_order_posts: Option<crate::booru::PoolOrder>,
+    /// Gelbooru favorites retain source JSON types and first-element rules.
+    pub booru_favorite_order: Option<Value>,
     pub favorites: Option<crate::kemono::Favorites>,
     pub username: Option<String>,
     pub password: Option<String>,
@@ -302,6 +304,16 @@ impl Options {
                     })
                 })
                 .or(self.booru_order_posts),
+            booru_favorite_order: overrides
+                .booru_favorite_order
+                .clone()
+                .or_else(|| {
+                    overrides.order_posts.map(|order| match order {
+                        crate::kemono::PostOrder::Forward => Value::String("asc".into()),
+                        crate::kemono::PostOrder::Reverse => Value::String("desc".into()),
+                    })
+                })
+                .or_else(|| self.booru_favorite_order.clone()),
             favorites: overrides.favorites.or(self.favorites),
             username: overrides.username.clone().or_else(|| self.username.clone()),
             password: overrides.password.clone().or_else(|| self.password.clone()),
@@ -1118,6 +1130,11 @@ impl Config {
             } else {
                 None
             };
+            let booru_favorite_order = if name == "gelbooru" {
+                settings.order_posts.0.take()
+            } else {
+                None
+            };
             let booru_order_posts = if name == "danbooru" {
                 settings
                     .order_posts
@@ -1135,6 +1152,7 @@ impl Config {
             let mut resolved = (*settings).resolve(directory)?;
             resolved.bluesky_endpoint = bluesky_endpoint;
             resolved.booru_order_posts = booru_order_posts;
+            resolved.booru_favorite_order = booru_favorite_order;
             if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
                 resolved.api_key = opaque_key;
             }
@@ -1333,6 +1351,7 @@ impl RawOptions {
             }),
             Some(_) => return Err(error("native configuration favorites must be a string")),
         };
+        let booru_favorite_order = self.order_posts.0.clone();
         let order_posts = match self.order_posts.0 {
             None => None,
             Some(Value::String(value)) => Some(match value.as_str() {
@@ -1858,6 +1877,7 @@ impl RawOptions {
             revisions,
             order_revisions,
             endpoint,
+            booru_favorite_order,
             booru_order_posts: order_posts.map(|order| match order {
                 crate::kemono::PostOrder::Forward => crate::booru::PoolOrder::Pool,
                 crate::kemono::PostOrder::Reverse => crate::booru::PoolOrder::PoolReverse,

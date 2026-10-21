@@ -78,7 +78,7 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
                 "{id}" | "t_{search_tags}_{id}" | "p_{pool[id]}_{id}"
             )
         }
-        "safebooru" if format == "f_{favorite_id}_{id}" => true,
+        "gelbooru" | "safebooru" if format == "f_{favorite_id}_{id}" => true,
         "gelbooru" | "safebooru" => {
             matches!(format, "{id}" | "t_{search_tags}_{id}" | "p_{pool}_{id}")
         }

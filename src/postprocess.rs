@@ -560,6 +560,28 @@ pub(crate) async fn convert(
     Ok(())
 }
 
+/// Normalize internal source datetime objects when exporting public JSON.
+pub fn public_keywords(context: &Map<String, Value>) -> Map<String, Value> {
+    fn public(value: &Value) -> Value {
+        if let Some(value) = crate::filter::source_date_from_json(value) {
+            return crate::filter::source_date_text(value).into();
+        }
+        match value {
+            Value::Array(values) => Value::Array(values.iter().map(public).collect()),
+            Value::Object(values) => Value::Object(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), public(value)))
+                    .collect(),
+            ),
+            value => value.clone(),
+        }
+    }
+    context
+        .iter()
+        .map(|(key, value)| (key.clone(), public(value)))
+        .collect()
+}
 /// Keyword values exposed by native extractors. Transport headers, handoffs and
 /// cookie stores are deliberately absent, just as they are in expression contexts.
 pub fn context(media: &Media) -> Map<String, Value> {
@@ -567,6 +589,7 @@ pub fn context(media: &Media) -> Map<String, Value> {
         use crate::filter::Value as V;
         match value {
             V::None => Value::Null,
+            V::SourceDate(v) => crate::filter::source_date_json(*v),
             V::Bool(v) => (*v).into(),
             V::Int(v) => serde_json::Number::from_i128(*v).map_or(Value::Null, Value::Number),
             V::Float(v) => serde_json::Number::from_f64(*v).map_or(Value::Null, Value::Number),

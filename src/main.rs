@@ -1365,6 +1365,7 @@ fn extract_input<'a>(
                                             options.api_key.as_deref(),
                                         )?
                                         .with_threshold(options.booru_threshold.flatten())
+                                        .with_favorite_order(options.booru_favorite_order.clone())
                                         .with_pool_order(
                                             options.booru_order_posts.unwrap_or_default(),
                                         )
@@ -1425,6 +1426,9 @@ fn extract_input<'a>(
                                 .flatten(),
                             favorites: matches!(category, "kemono" | "coomer")
                                 .then_some(options.favorites)
+                                .flatten(),
+                            booru_favorite_order: (category == "gelbooru")
+                                .then(|| options.booru_favorite_order.clone())
                                 .flatten(),
                             booru_order_posts: (category == "danbooru")
                                 .then_some(options.booru_order_posts)
@@ -1668,6 +1672,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         api_server: None,
         order_posts: None,
         booru_order_posts: None,
+        booru_favorite_order: None,
         favorites: None,
         username: None,
         password: None,

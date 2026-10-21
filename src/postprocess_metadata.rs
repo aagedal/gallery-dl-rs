@@ -688,7 +688,11 @@ impl MetadataOptions {
                     String::new()
                 } else {
                     let mut out = String::new();
-                    self.json(&Value::Object(m), 0, &mut out)?;
+                    self.json(
+                        &Value::Object(crate::postprocess::public_keywords(&m)),
+                        0,
+                        &mut out,
+                    )?;
                     out.push('\n');
                     out
                 }
@@ -1437,6 +1441,63 @@ mod job_path_oracle {
                 case["name"]
             );
             assert!(!temp.path().join("artist1/post.json").exists());
+        }
+    }
+}
+
+#[cfg(test)]
+mod source_date_exports {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn typed_dates_export_public_strings_and_hook_literal_strings_keep_their_type() {
+        for (date, text, truthy) in [
+            (Some(0), "1970-01-01 00:00:00", true),
+            (None, "[Invalid DateTime]", false),
+        ] {
+            let source = crate::filter::source_date_json(date);
+            let mut context = Map::from_iter([
+                ("date_favorited".into(), source.clone()),
+                ("nested".into(), json!([{"date":source}])),
+            ]);
+            let json_options =
+                MetadataOptions::parse(json!({"mode":"json"}).as_object().unwrap(), Path::new("."))
+                    .unwrap();
+            let encoded = json_options.content(&context).unwrap();
+            let exported: Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(exported["date_favorited"], text);
+            assert_eq!(exported["nested"][0]["date"], text);
+            assert!(!encoded.contains("$gallery_dl_source_date"));
+            let modify=MetadataOptions::parse(json!({"mode":"modify","fields":{"copied":"{date_favorited}","date_favorited":"{'[Invalid DateTime]'}"}}).as_object().unwrap(),Path::new(".")).unwrap();
+            let media = crate::extract::direct(
+                &url::Url::parse("https://example.invalid/file.jpg").unwrap(),
+            )
+            .unwrap();
+            modify
+                .run(&mut context, &media, Path::new("file.jpg"), Path::new("."))
+                .await
+                .unwrap();
+            let copied = crate::filter::FilterExpression::parse("bool(copied)").unwrap();
+            assert_eq!(copied.matches_keywords(&context).unwrap(), truthy);
+            assert!(
+                crate::filter::FilterExpression::parse("bool(date_favorited)")
+                    .unwrap()
+                    .matches_keywords(&context)
+                    .unwrap()
+            );
+            assert_eq!(context["date_favorited"], "[Invalid DateTime]");
+            assert_eq!(
+                crate::postprocess::public_keywords(&context)["copied"],
+                text
+            );
+            assert_eq!(
+                crate::postprocess::template::Template::parse("{copied:%Y}")
+                    .unwrap()
+                    .render(&context)
+                    .unwrap(),
+                if truthy { "1970" } else { "[Invalid DateTime]" }
+            );
         }
     }
 }

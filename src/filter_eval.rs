@@ -14,6 +14,7 @@ fn invalid() -> crate::Error {
 pub(super) fn truthy(value: &Value) -> bool {
     match value {
         Value::None => false,
+        Value::SourceDate(value) => value.is_some(),
         Value::Bool(v) => *v,
         Value::Int(v) => *v != 0,
         Value::Float(v) => *v != 0.0,
@@ -216,6 +217,9 @@ impl Evaluator<'_> {
         }
         Ok(match (left, right) {
             (Value::None, Value::None) => true,
+            (Value::SourceDate(a), Value::SourceDate(b)) => {
+                a.unwrap_or(-62_135_596_800) == b.unwrap_or(-62_135_596_800)
+            }
             (Value::String(a), Value::String(b)) => a == b,
             (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
                 if a.len() != b.len() {
@@ -259,6 +263,9 @@ impl Evaluator<'_> {
             return numeric_cmp(left, right);
         }
         match (left, right) {
+            (Value::SourceDate(a), Value::SourceDate(b)) => Ok(a
+                .unwrap_or(-62_135_596_800)
+                .cmp(&b.unwrap_or(-62_135_596_800))),
             (Value::String(a), Value::String(b)) => Ok(a.cmp(b)),
             (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
                 for (a, b) in a.iter().zip(b.iter()) {
@@ -641,6 +648,7 @@ impl Evaluator<'_> {
         }
         let result = match value {
             Value::None => "None".into(),
+            Value::SourceDate(value) => super::source_date_text(*value),
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(value) => value.to_string(),

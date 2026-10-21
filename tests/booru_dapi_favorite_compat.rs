@@ -65,11 +65,13 @@ fn compatibility_favorite_owner_is_exact_scoped_private_and_not_class_provenance
             }
         }
     }
-    assert!(
+    assert_eq!(
         source_archive::for_url(
             &Url::parse("https://gelbooru.com/index.php?page=favorites&s=view&id=7").unwrap()
         )
-        .is_none()
+        .unwrap()
+        .format,
+        "f_{favorite_id}_{id}"
     );
 }
 

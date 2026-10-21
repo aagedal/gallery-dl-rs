@@ -11,6 +11,7 @@ pub(crate) use eval::float_repr;
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Value {
     None,
+    SourceDate(Option<i64>),
     Bool(bool),
     Int(i128),
     Float(f64),
@@ -152,7 +153,7 @@ impl FilterExpression {
     ) -> Result<bool> {
         let context = keywords
             .iter()
-            .map(|(key, value)| (key.clone(), json_value(value)))
+            .map(|(key, value)| (key.clone(), keyword_value(key, value)))
             .collect();
         for expression in self.expressions.iter() {
             if !eval::truthy(&eval::evaluate(expression, &context)?) {
@@ -315,6 +316,9 @@ fn map(values: BTreeMap<String, Value>) -> Value {
 }
 // Structured public metadata is validated before reaching this context.
 pub(crate) fn json_value(value: &serde_json::Value) -> Value {
+    if let Some(value) = source_date_from_json(value) {
+        return Value::SourceDate(value);
+    }
     match value {
         serde_json::Value::Null => Value::None,
         serde_json::Value::Bool(value) => Value::Bool(*value),
@@ -333,6 +337,63 @@ pub(crate) fn json_value(value: &serde_json::Value) -> Value {
             Value::Map(Arc::new(result))
         }
     }
+}
+const SOURCE_DATE_KEY: &str = "$gallery_dl_source_date";
+pub(crate) fn source_date_json(value: Option<i64>) -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::from_iter([(
+        SOURCE_DATE_KEY.into(),
+        value.map_or(serde_json::Value::Null, serde_json::Value::from),
+    )]))
+}
+pub(crate) fn source_date_from_json(value: &serde_json::Value) -> Option<Option<i64>> {
+    let map = value.as_object()?;
+    if map.len() != 1 {
+        return None;
+    }
+    match map.get(SOURCE_DATE_KEY)? {
+        serde_json::Value::Null => Some(None),
+        value => value
+            .as_i64()
+            .filter(|seconds| {
+                time::OffsetDateTime::from_unix_timestamp(*seconds)
+                    .is_ok_and(|date| (1..=9999).contains(&date.year()))
+            })
+            .map(Some),
+    }
+}
+/// Producer snapshots are authoritative datetime strings. Runtime hook strings
+/// remain strings; typed datetime provenance travels in an internal wrapper.
+pub(crate) fn source_date_value(value: &serde_json::Value) -> Value {
+    if let serde_json::Value::String(value) = value {
+        if value == "[Invalid DateTime]" {
+            return Value::SourceDate(None);
+        }
+        if let Ok(date) = crate::postprocess::template::parse_date(value)
+            && (1..=9999).contains(&date.year())
+        {
+            return Value::SourceDate(Some(date.unix_timestamp()));
+        }
+    }
+    json_value(value)
+}
+pub(crate) fn keyword_value(_key: &str, value: &serde_json::Value) -> Value {
+    json_value(value)
+}
+pub(crate) fn source_date_text(value: Option<i64>) -> String {
+    value
+        .and_then(|seconds| time::OffsetDateTime::from_unix_timestamp(seconds).ok())
+        .map(|date| {
+            format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                date.year(),
+                u8::from(date.month()),
+                date.day(),
+                date.hour(),
+                date.minute(),
+                date.second()
+            )
+        })
+        .unwrap_or_else(|| "[Invalid DateTime]".into())
 }
 fn identifier(value: &str) -> Value {
     value
@@ -1044,9 +1105,13 @@ fn context_parts(
                     metadata.insert(key.into(), value);
                 }
             }
-            for key in ["id", "tags"] {
+            for key in ["id", "tags", "date_favorited"] {
                 if let Some(value) = fields.get(key) {
-                    let value = json_value(value);
+                    let value = if key == "date_favorited" {
+                        source_date_value(value)
+                    } else {
+                        json_value(value)
+                    };
                     values.insert(key.into(), value.clone());
                     metadata.insert(key.into(), value);
                 }
@@ -1073,4 +1138,143 @@ fn context_parts(
         values.insert("metadata".into(), map(metadata));
     }
     values
+}
+
+#[cfg(test)]
+mod source_date_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn media(value: serde_json::Value) -> Media {
+        let mut media = crate::booru::parse_post(
+            crate::booru::Site::Gelbooru,
+            &json!({"id":42,"file_url":"https://img3.gelbooru.com/images/raw.jpg","md5":"0123456789abcdef0123456789abcdef"}),
+        ).unwrap();
+        Arc::make_mut(
+            media
+                .metadata
+                .as_mut()
+                .unwrap()
+                .booru_keywords
+                .as_mut()
+                .unwrap(),
+        )
+        .insert("date_favorited".into(), value);
+        media
+    }
+    #[test]
+    fn source_dates_preserve_epoch_truthiness_invalid_sentinel_and_live_primitives() {
+        for (value, truthy, year, text) in [
+            (
+                json!("1970-01-01 00:00:00"),
+                true,
+                "1970",
+                "1970-01-01 00:00:00",
+            ),
+            (
+                json!("1969-12-31 23:59:59"),
+                true,
+                "1969",
+                "1969-12-31 23:59:59",
+            ),
+            (
+                json!("[Invalid DateTime]"),
+                false,
+                "[Invalid DateTime]",
+                "[Invalid DateTime]",
+            ),
+        ] {
+            let media = media(value);
+            let predicate = FilterExpression::parse("bool(date_favorited)").unwrap();
+            assert_eq!(predicate.matches(&media).unwrap(), truthy);
+            let keywords = crate::postprocess::context(&media);
+            assert_eq!(
+                crate::postprocess::public_keywords(&keywords)["date_favorited"],
+                text
+            );
+            assert_eq!(predicate.matches_keywords(&keywords).unwrap(), truthy);
+            assert_eq!(
+                crate::naming::FilenameTemplate::parse("{date_favorited:%Y}")
+                    .unwrap()
+                    .render(&media)
+                    .unwrap(),
+                year
+            );
+            for template in [
+                "{date_favorited:%Y}",
+                "{date_favorited:>30}",
+                "{date_favorited:NOT_A_DATE_SPEC}",
+            ] {
+                if !truthy {
+                    assert_eq!(
+                        crate::postprocess::template::Template::parse(template)
+                            .unwrap()
+                            .render(&keywords)
+                            .unwrap(),
+                        "[Invalid DateTime]"
+                    );
+                }
+            }
+            assert_eq!(
+                crate::postprocess::template::Template::parse("{date_favorited:%Y}")
+                    .unwrap()
+                    .render(&keywords)
+                    .unwrap(),
+                year
+            );
+            assert_eq!(
+                crate::postprocess::template::Template::parse("{date_favorited}")
+                    .unwrap()
+                    .render_value(&keywords)
+                    .unwrap(),
+                keywords["date_favorited"]
+            );
+        }
+        for value in [
+            json!(false),
+            json!(0),
+            serde_json::Value::Null,
+            json!("changed"),
+            json!("1970-01-01 00:00:00"),
+            json!("[Invalid DateTime]"),
+        ] {
+            assert_eq!(keyword_value("date_favorited", &value), json_value(&value));
+        }
+        for value in [json!("1970-01-01 00:00:00"), json!("[Invalid DateTime]")] {
+            let keywords = serde_json::Map::from_iter([("date_favorited".into(), value.clone())]);
+            assert!(
+                FilterExpression::parse("bool(date_favorited)")
+                    .unwrap()
+                    .matches_keywords(&keywords)
+                    .unwrap()
+            );
+            assert_eq!(
+                crate::postprocess::template::Template::parse("{date_favorited}")
+                    .unwrap()
+                    .render_value(&keywords)
+                    .unwrap(),
+                value
+            );
+            assert!(
+                crate::postprocess::template::Template::parse("{date_favorited:%Y}")
+                    .unwrap()
+                    .render(&keywords)
+                    .is_err()
+            );
+        }
+        assert!(source_date_from_json(&source_date_json(Some(-62_135_596_801))).is_none());
+        assert_eq!(
+            source_date_from_json(&source_date_json(Some(-62_135_596_800))),
+            Some(Some(-62_135_596_800))
+        );
+        // Source typing must not spread to unrelated metadata or strings.
+        assert!(matches!(
+            keyword_value("ordinary", &json!("[Invalid DateTime]")),
+            Value::String(_)
+        ));
+        assert_eq!(
+            keyword_value("date_favorited", &serde_json::Value::Null),
+            Value::None
+        );
+    }
 }

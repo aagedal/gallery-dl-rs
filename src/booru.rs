@@ -41,6 +41,8 @@ const MAX_TAGS: usize = 1024;
 
 #[path = "booru_dapi_pool.rs"]
 mod dapi_listing;
+#[path = "booru_gel_favorite.rs"]
+mod gel_favorite;
 #[derive(Clone, Copy, PartialEq)]
 enum RequestKind {
     Api,
@@ -120,7 +122,7 @@ pub enum Target {
     Favorites {
         params: Vec<(String, String)>,
     },
-    /// Safebooru favorites with the exact requested owner ID.
+    /// Gelbooru/Safebooru favorites with the exact requested owner ID.
     DapiFavorites {
         id: String,
     },
@@ -801,6 +803,7 @@ pub enum PoolOrder {
 
 pub struct Booru {
     pool_order: PoolOrder,
+    favorite_order: Option<Value>,
     site: Site,
     client: Client,
     network: NetworkOptions,
@@ -931,6 +934,7 @@ impl Booru {
     pub fn new(site: Site, timeout: Duration) -> Result<Self> {
         Ok(Self {
             pool_order: PoolOrder::Pool,
+            favorite_order: None,
             site,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
@@ -1012,6 +1016,11 @@ impl Booru {
     /// Select Danbooru pool traversal order; e621 retains member order.
     pub fn with_pool_order(mut self, order: PoolOrder) -> Self {
         self.pool_order = order;
+        self
+    }
+    /// Preserve Gelbooru's raw favorite ordering setting and source truthiness.
+    pub fn with_favorite_order(mut self, order: Option<Value>) -> Self {
+        self.favorite_order = order;
         self
     }
 
@@ -1131,6 +1140,9 @@ impl Booru {
                                 if let Some(value) = post.get(key) {
                                     fields.insert(key.into(), value.clone());
                                 }
+                            }
+                            if let Some(value) = post.get("date_favorited") {
+                                fields.insert("date_favorited".into(), value.clone());
                             }
                         }
                     }
@@ -1344,7 +1356,7 @@ impl Booru {
         let root = self.api_root.clone().unwrap_or(root);
         let (tags, cursor) = match target {
             Target::DapiFavorites { id } => {
-                return match dapi_listing::favorites(id) {
+                return match dapi_listing::favorites(self.site, id) {
                     Ok(listing) => self.listing(State {
                         dapi_listing: Some(listing),
                         favorite_user_id: None,
@@ -2763,3 +2775,7 @@ mod dapi_pool_tests;
 #[cfg(test)]
 #[path = "booru_dapi_favorite_tests.rs"]
 mod dapi_favorite_tests;
+
+#[cfg(test)]
+#[path = "booru_gel_favorite_tests.rs"]
+mod gel_favorite_tests;

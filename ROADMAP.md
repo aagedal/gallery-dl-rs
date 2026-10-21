@@ -622,7 +622,7 @@ Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite
-groups, e621/e926 favorites and Safebooru favorites. Danbooru/e621 support
+groups and e621/e926/Gelbooru/Safebooru favorites. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
@@ -1306,19 +1306,44 @@ tags and skipping missing file URLs before required-field validation. Reapply
 Default paths are `{category}/favorites/{favorite_id}` with the ordinary DAPI
 filename; metadata archives use live `f_{favorite_id}_{id}` keys. Native history
 retains the original canonical post identity. Compatibility keywords preserve
-raw owner types for Gelbooru/Safebooru without inferring a source class; only
-proven Safebooru favorite routes select these defaults. Existing Pixiv Unicode
+raw owner types for Gelbooru/Safebooru without inferring a source class; proven
+Gelbooru/Safebooru favorite routes select these defaults. Existing Pixiv Unicode
 17 decimal rules now serve the HTML scanner too. Genuine source replay covers
 41 cases and nine route probes, six hook checkpoints, full media/sidecar bytes,
 actual source metadata archive SQL, and canonical native history identity.
 DAPI source contexts no longer synthesize `num`; user-added values remain live
 within the current post. The existing 73 pool cases also verify that absence.
 
-**Next booru route (source audit):** Gelbooru favorites require a separate JSON
-pipeline: first fetch count/order metadata, then favorite entry pages and
-individual post records, retaining `date_favorited`. Popular views and artist
-child dispatch also need their own source contracts; they are not aliases for
-tag searches.
+**Implemented Gelbooru favorites (source oracle, 1.32.17):** the ordered
+`page=favorites&s=view&id=ID` query matches `/` or `/index.php`, retaining lexical
+IDs for API requests and scalar `favorite_id` for source keywords. A JSON probe
+uses string limit `2`, compares the first two raw entry IDs with Python ordering,
+and chooses forward or reverse traversal. Forward pages use numeric limit 100
+and stop only on an empty favorite result; reverse traversal starts at
+`divmod(count-1,100)[0]`, reverses each page and decrements through zero, including
+the source's initial negative page for zero counts and float page spellings.
+Regular single-object responses are supported forward but fail in reverse, where
+the source requires a mutable list. Count types are validated only on paths that
+use them. Category `order-posts` retains raw JSON and first-element truthiness
+rules, including delayed errors after the probe. Global supported order strings
+retain their original spelling rather than conflating `reverse` with `desc`.
+Each favorite entry hydrates posts lazily, then assigns `date_favorited`; missing
+`added` fails only when hydration returns a post. Timestamp conversion follows
+source integer coercion, with a typed falsy NullDatetime sentinel for invalid
+values. Typed dates survive hook copies and template/filter evaluation; primitive
+hook replacements retain their types, and public metadata JSON removes internal
+type markers. Default paths and archives match Safebooru favorites. Source replay
+covers 76 cases, ten typed timestamp vectors and six route probes, including
+pagination, cancellation, six hook events, full publication bytes, metadata
+archive SQL and stable native history IDs. Compatibility/configuration tests
+cover date types, retained source class provenance, sparse raw order settings,
+precedence and exact backend argument forwarding. Arbitrary literal strftime
+specifications on unknown copied-date aliases remain a generic formatter gap;
+standard `%Y` date aliases are supported.
+
+**Remaining booru routes (source audit):** popular views require separate
+normalized date/scale metadata and original API parameters. Artist routes queue
+tag-search child jobs; they are not direct tag-search aliases.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the
