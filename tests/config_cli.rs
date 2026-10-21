@@ -1609,6 +1609,7 @@ async fn original_ugoira_and_truthy_fallback_modes_forward_only_to_pixiv() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn pixiv_optional_enrichment_forwards_truthiness_only_to_illustrations() {
     for (setting, expected) in [
@@ -1650,6 +1651,7 @@ async fn pixiv_optional_enrichment_forwards_truthiness_only_to_illustrations() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn novel_and_illustration_enrichment_forward_independent_category_overrides() {
     let root = tempfile::tempdir().unwrap();
@@ -1695,6 +1697,7 @@ async fn novel_and_illustration_enrichment_forward_independent_category_override
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn pixiv_metadata_truthiness_forwards_independent_scopes_and_keeps_other_categories_sparse() {
     let root = tempfile::tempdir().unwrap();
@@ -1729,6 +1732,7 @@ async fn pixiv_metadata_truthiness_forwards_independent_scopes_and_keeps_other_c
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn pixiv_captions_truthiness_forwards_only_to_supported_illustration_jobs() {
     for (value, expected) in [
@@ -1768,6 +1772,7 @@ async fn pixiv_captions_truthiness_forwards_only_to_supported_illustration_jobs(
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn pixiv_sanity_truthiness_forwards_only_to_supported_illustration_jobs() {
     for (value, expected) in [
@@ -1807,6 +1812,7 @@ async fn pixiv_sanity_truthiness_forwards_only_to_supported_illustration_jobs() 
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn pixiv_novel_switches_truthiness_forward_only_to_novel_jobs() {
     for (value, expected) in [

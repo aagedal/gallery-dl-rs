@@ -797,12 +797,12 @@ pub(crate) fn archive(
                         date(time::OffsetDateTime::from(metadata.modified()?).unix_timestamp())?
                     }
                 };
-                let mut options = options(time);
+                let options = options(time);
                 #[cfg(unix)]
-                {
+                let options = {
                     use std::os::unix::fs::PermissionsExt;
-                    options = options.unix_permissions(metadata.permissions().mode() & 0o7777);
-                }
+                    options.unix_permissions(metadata.permissions().mode() & 0o7777)
+                };
                 writer
                     .start_file(&frame.file, options)
                     .map_err(|_| invalid())?;
