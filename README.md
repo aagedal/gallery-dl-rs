@@ -317,7 +317,9 @@ Experimental native booru extraction (`--extractor native`) covers categories
 `safebooru` (safebooru.org): single posts (`/posts/ID`,
 `index.php?page=post&s=view&id=ID`), tag searches (`/posts?tags=...`,
 `index.php?page=post&s=list&tags=...`) and Danbooru/e621 pools (`/pools/ID` or
-`/pool/show/ID`). Danbooru favorite groups use `/favorite_groups/ID` or
+`/pool/show/ID`). Gelbooru/Safebooru pools use
+`index.php?page=pool&s=show&id=ID`. Danbooru favorite groups use
+`/favorite_groups/ID` or
 `/favorite_group/show/ID`. E621/e926 favorites use `/favorites?user_id=OWNER`;
 the owner is an arbitrary query string, with an empty default.
 Danbooru/e621 use before/after ID cursors or numbered pages according to search
@@ -327,7 +329,7 @@ Searches stop below the source page-length threshold (180/300 by default), on
 cancellation, or on an API error. They have no fixed 100-page cutoff. The
 `threshold` configuration option accepts an integer, clamps values below one to
 one, and restores the default for other JSON types, including null and booleans.
-Gelbooru-style sites use `pid` (100 per page) and remain capped at 100 pages.
+Gelbooru-style tag searches use `pid` (100 per page) and remain capped at 100 pages.
 Danbooru pools and favorite groups paginate `ordpool:`/`ordfavgroup:` in API
 order; e621 pools buffer numbered `pool:` pages and restore member order. Both
 retain original member positions as `num`, including unavailable-member gaps.
@@ -346,7 +348,15 @@ one (Gelbooru `owner`). Archive identity is (category, post ID). API-reported fi
 `filesize`; `rating` and signed `score` are available to post filters and filename
 templates (e621 uses `score.total`). Per-category tags are not yet exposed.
 
-Favorites stream `/favorites.json` using numbered pages (initial page absent,
+Gelbooru pools read the title HTML, then list member IDs in 45-item HTML pages
+and fetch each member through JSON DAPI. Safebooru reads IDs after the pool title
+and fetches XML DAPI records without HTML pagination. Both preserve member order
+and duplicate IDs, fetch lazily, and expose scalar `pool` and HTML-decoded
+`pool_name` keywords. These keywords reset for each post; hook edits cannot alter
+later requests. They have no synthetic `num`. Their metadata archive key is
+`p_{pool}_{id}`. Safebooru XML IDs and tags retain their source string types.
+
+E621/e926 favorites stream `/favorites.json` using numbered pages (initial page absent,
 then 2, 3, ...), 320 posts per request, and the source page-length threshold.
 They do not buffer a pool or interpret tag-order parameters. Query keys and
 values are decoded once; the first decoded key wins, blank values are retained,
@@ -376,7 +386,8 @@ URLs without a recognized logical extension use `.bin` for the native basename.
 Default paths now follow the source extractor class. Post downloads use the
 category directory; tag searches add `search_tags`. Danbooru/e621 filenames are
 `{category}_{id}_{filename}.{extension}`; Gelbooru/Safebooru use
-`{category}_{id}_{md5}.{extension}`. Pools use
+`{category}_{id}_{md5}.{extension}`. Gelbooru/Safebooru pools use
+`{category}/pool/{pool}` with the ordinary DAPI filename. Danbooru/e621 pools use
 `{category}/pool/{pool[id]} {pool[name]}` and
 `{num:>04}_{id}_{filename}.{extension}`. Danbooru favorite groups use
 `{category}/Favorite Groups/{favgroup[id]} {favgroup[name]}` with the pool filename.
@@ -400,10 +411,10 @@ Source-matched search URLs support default metadata archive keys
 use an explicit `archive-format` when Python has no matching extractor.
 
 Danbooru/e621 accept category-scoped `username` and `password` (the account's API
-key) for HTTP Basic authentication. Gelbooru accepts category-scoped `user-id` and
-`api-key`; both must be nonempty to authenticate. Credentials are sent only to the
-API origin, never attached to media requests or public JSON, and redirects to
-another origin are refused. Authentication can expose posts hidden from public
+key) for HTTP Basic authentication. Gelbooru/Safebooru accept category-scoped
+`user-id` and `api-key`; both must be nonempty to authenticate. Credentials are sent only to the
+API origin, never attached to pool HTML, media requests or public JSON. Redirects
+to another origin are refused. Authentication can expose posts hidden from public
 API requests; posts without usable file URLs are still skipped. Plain CDN file
 links stay direct downloads.
 
@@ -1005,7 +1016,7 @@ the title, with `published_time` and width/height. Default filenames are
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
 uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`, never
+`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
 echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
 `photos.getSizes`: "Original" or the largest photo; videos pick the best
 stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
@@ -1948,7 +1959,7 @@ Supported settings are `base-directory`, `directory`, `filename`, `file-range`, 
 They can appear at the root, under `extractor`, or under a supported category
 such as `extractor.instagram`, `extractor.imgur`, or `extractor.mastodon`.
 Site-specific media options affect their respective extractors. Booru
-`username`/`password` and Gelbooru `user-id` are category-scoped credentials;
+`username`/`password` and Gelbooru/Safebooru `user-id` are category-scoped credentials;
 API keys also forward to the selected compatibility extractor. API credentials
 are accepted only in the documented category scopes. Mastodon instance scopes
 inherit `extractor.mastodon` before applying their own overrides. Precedence is

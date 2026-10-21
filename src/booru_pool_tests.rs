@@ -916,6 +916,7 @@ fn source_filename_preparation_matches_real_pathformat_types_and_aliases() {
         booru_keywords: Some(Arc::new(serde_json::Map::new())),
         source_defaults: None,
         booru_user_id: None,
+        booru_pool_name: None,
         ..Default::default()
     });
     for case in cases {

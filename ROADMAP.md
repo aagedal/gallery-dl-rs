@@ -621,12 +621,12 @@ to true; false preserves animated GIFs while leaving native video unchanged.
 Not yet: user profiles, favorites, subreddits, searches and tag listings.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
-Safebooru posts and tag searches, plus Danbooru/e621 pools and Danbooru favorite
-groups. Danbooru/e621 support
-API-only username/password Basic authentication and Gelbooru supports API-only
+Safebooru posts, tag searches and pools, plus Danbooru favorite
+groups and e621/e926 favorites. Danbooru/e621 support
+API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: favorites/popular/artist views, Gelbooru pools, notes,
+Remaining: other favorites/popular/artist views, notes,
 `tags`/`metadata` options, per-category tags and authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
@@ -1244,8 +1244,8 @@ and multi-post directory checkpoints across all fourteen supported route classes
 
 **Remaining booru paths/options:** custom path restriction/replacement/conversion,
 strip/substitution settings, extension-map overrides, unsupported routes and
-alternate source hosts still need their source contracts. Gelbooru/Safebooru
-pools remain unimplemented.
+alternate source hosts still need their source contracts. Gelbooru video URL
+rewriting outside pools and broader DAPI response normalization remain unfinished.
 
 **Implemented E621/e926 favorites:** E621 favorites stream
 `/favorites.json` with numbered pages (no pool buffering). The constructor
@@ -1271,7 +1271,7 @@ complete published paths/bytes, live metadata archive keys, and unchanged native
 SQLite identity. Compatibility tests cover typed owner presence, category scope,
 E926 keyword category, unknown-route rejection, and media-only default archives.
 
-**Next DAPI pool step (source audit):** Gelbooru matches the ordered
+**Implemented DAPI pools (source oracle, 1.32.17):** Gelbooru matches the ordered
 `page=pool&s=show&id=ID` query on `/` or `/index.php`; Safebooru requires
 `/index.php`. Preserve lexical digit captures, then expose scalar integer `pool`
 and HTML-decoded `pool_name`. Missing/empty titles fail before post requests.
@@ -1284,7 +1284,25 @@ keywords per post, without Danbooru shared-object semantics or synthetic `num`.
 Defaults are `{category}/pool/{pool}`, the ordinary DAPI filename, and metadata
 archive key `p_{pool}_{id}`. Replay title failures/decoding, repeated HTML reads,
 45-ID boundaries, duplicate/zero/multiple API results, cancellation before later
-ID requests, and per-post keyword restoration.
+ID requests, and per-post keyword restoration. Native source replay compares
+actual publication paths/bytes, all six hook events including duplicate skips,
+metadata archive keys, and unchanged native SQLite post identity. Pool HTML
+never receives API credentials, including across redirects; both DAPI sites
+accept API-only credentials. XML decoding uses the bounded existing parser and
+rejects DTDs; API error bodies are excluded from diagnostics. XML attribute IDs
+and stripped tags preserve source string types in filters, templates and hooks.
+Both sites validate required tags/date after skipping records without file URLs.
+
+**Next booru route (source audit):** Safebooru favorites match the ordered
+`page=favorites&s=view&id=ID` query on `/index.php`. They expose scalar
+`favorite_id`, begin HTML traversal without a title request, and match numeric
+`id="pID` markers with preceding whitespace. HTML offsets advance by 50; each
+member uses the existing XML DAPI preparation. Defaults are
+`{category}/favorites/{favorite_id}`, the ordinary DAPI filename, and
+`f_{favorite_id}_{id}`. Gelbooru favorites require a separate JSON pipeline:
+first fetch count/order metadata, then favorite entry pages and individual post
+records, retaining `date_favorited`. Popular views and artist child dispatch
+also need their own source contracts; they are not aliases for tag searches.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

@@ -1038,6 +1038,13 @@ fn context_parts(
                     metadata.insert(key.into(), value);
                 }
             }
+            for key in ["id", "tags"] {
+                if let Some(value) = fields.get(key) {
+                    let value = json_value(value);
+                    values.insert(key.into(), value.clone());
+                    metadata.insert(key.into(), value);
+                }
+            }
         }
         if let Some(defaults) = &post.source_defaults {
             values.insert("category".into(), Value::String(defaults.category.into()));
@@ -1046,6 +1053,11 @@ fn context_parts(
             let user_id = json_value(user_id);
             values.insert("user_id".into(), user_id.clone());
             metadata.insert("user_id".into(), user_id);
+        }
+        if let Some(name) = &post.booru_pool_name {
+            let name = json_value(name);
+            values.insert("pool_name".into(), name.clone());
+            metadata.insert("pool_name".into(), name);
         }
         values.insert("metadata".into(), map(metadata));
     }

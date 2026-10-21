@@ -1008,11 +1008,17 @@ impl Config {
         ] {
             if !matches!(
                 name,
-                "tumblr" | "flickr" | "wallhaven" | "weasyl" | "pixeldrain" | "gelbooru"
+                "tumblr"
+                    | "flickr"
+                    | "wallhaven"
+                    | "weasyl"
+                    | "pixeldrain"
+                    | "gelbooru"
+                    | "safebooru"
             ) && settings.api_key.0.is_some()
             {
                 return Err(error(
-                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain and gelbooru",
+                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain, gelbooru and safebooru",
                 ));
             }
             if !matches!(name, "danbooru" | "e621") && settings.threshold.0.is_some() {
@@ -1027,9 +1033,9 @@ impl Config {
                     "native configuration username/password are only supported for danbooru and e621",
                 ));
             }
-            if name != "gelbooru" && settings.user_id.0.is_some() {
+            if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
                 return Err(error(
-                    "native configuration user-id is only supported for gelbooru",
+                    "native configuration user-id is only supported for gelbooru and safebooru",
                 ));
             }
             if name != "bluesky" && settings.api_server.0.is_some() {
@@ -1095,7 +1101,7 @@ impl Config {
                     "native configuration client-id and client-secret are only supported for deviantart",
                 ));
             }
-            let opaque_key = if matches!(name, "pixeldrain" | "gelbooru") {
+            let opaque_key = if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
                 match settings.api_key.0.take() {
                     None => None,
                     Some(Value::String(key))
@@ -1129,7 +1135,7 @@ impl Config {
             let mut resolved = (*settings).resolve(directory)?;
             resolved.bluesky_endpoint = bluesky_endpoint;
             resolved.booru_order_posts = booru_order_posts;
-            if matches!(name, "pixeldrain" | "gelbooru") {
+            if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
                 resolved.api_key = opaque_key;
             }
             resolved.tumblr_reblogs = tumblr_reblogs;

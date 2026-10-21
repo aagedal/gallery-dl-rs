@@ -2200,7 +2200,7 @@ fn tumblr_invalid_modes_and_types_fail_without_echoing_values() {
 
 #[test]
 fn booru_credentials_stay_in_their_category_and_are_private() {
-    let cfg = parse(r#"{"extractor":{"danbooru":{"username":"alice","password":"key:one"},"e621":{"username":"bob","password":"key-two"},"gelbooru":{"user-id":42,"api-key":"key:&=!?"}}}"#).unwrap();
+    let cfg = parse(r#"{"extractor":{"danbooru":{"username":"alice","password":"key:one"},"e621":{"username":"bob","password":"key-two"},"gelbooru":{"user-id":42,"api-key":"key:&=!?"},"safebooru":{"user-id":"00043","api-key":"safe-key"}}}"#).unwrap();
     let danbooru = cfg.resolve("danbooru").unwrap();
     assert_eq!(danbooru.username.as_deref(), Some("alice"));
     assert_eq!(danbooru.password.as_deref(), Some("key:one"));
@@ -2216,7 +2216,12 @@ fn booru_credentials_stay_in_their_category_and_are_private() {
         cfg.resolve("gelbooru").unwrap().api_key.as_deref(),
         Some("key:&=!?")
     );
-    for category in ["safebooru", "twitter", "direct", "tumblr"] {
+    let safebooru = cfg.resolve("safebooru").unwrap();
+    assert_eq!(safebooru.user_id.as_deref(), Some("00043"));
+    assert_eq!(safebooru.api_key.as_deref(), Some("safe-key"));
+    assert!(safebooru.username.is_none() && safebooru.password.is_none());
+    assert!(!format!("{safebooru:?}").contains("safe-key"));
+    for category in ["twitter", "direct", "tumblr"] {
         let options = cfg.resolve(category).unwrap();
         assert!(
             options.username.is_none() && options.password.is_none() && options.user_id.is_none()

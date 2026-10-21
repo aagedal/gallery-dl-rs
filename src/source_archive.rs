@@ -78,7 +78,9 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
                 "{id}" | "t_{search_tags}_{id}" | "p_{pool[id]}_{id}"
             )
         }
-        "gelbooru" | "safebooru" => matches!(format, "{id}" | "t_{search_tags}_{id}"),
+        "gelbooru" | "safebooru" => {
+            matches!(format, "{id}" | "t_{search_tags}_{id}" | "p_{pool}_{id}")
+        }
         "flickr" | "wallhaven" | "imgur" | "furaffinity" | "vsco" | "pixeldrain" => {
             format == "{id}"
         }
@@ -270,6 +272,14 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 crate::booru::Target::Tags { .. } => {
                     crate::booru::source_search_tags(site, url)?;
                     "t_{search_tags}_{id}"
+                }
+                crate::booru::Target::Pool { .. }
+                    if !matches!(
+                        site,
+                        crate::booru::Site::Danbooru | crate::booru::Site::E621
+                    ) =>
+                {
+                    "p_{pool}_{id}"
                 }
                 crate::booru::Target::Pool { .. } => "p_{pool[id]}_{id}",
                 crate::booru::Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",

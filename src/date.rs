@@ -240,6 +240,7 @@ mod tests {
                 booru_keywords: None,
                 source_defaults: None,
                 booru_user_id: None,
+                booru_pool_name: None,
                 source_suffix: None,
                 pool: None,
                 favgroup: None,

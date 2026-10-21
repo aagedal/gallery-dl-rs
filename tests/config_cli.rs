@@ -892,6 +892,7 @@ async fn tumblr_selections_and_booru_credentials_forward_with_exact_types_and_sc
             "danbooru":{"username":"alice","password":"key:one?&="},
             "e621":{"username":"bob","password":""},
             "gelbooru":{"user-id":42,"api-key":"key:&=!?"},
+            "safebooru":{"user-id":"00043","api-key":"safe-key"},
             "pixeldrain":{"api-key":"pixel:key"}
         }}),
     );
@@ -927,6 +928,11 @@ async fn tumblr_selections_and_booru_credentials_forward_with_exact_types_and_sc
         (
             "https://gelbooru.com/index.php?page=post&s=view&id=42",
             vec!["user-id=\"42\"", "api-key=\"key:&=!?\""],
+            vec!["username=", "password=", "posts=", "reblogs="],
+        ),
+        (
+            "https://safebooru.org/index.php?page=pool&s=show&id=7",
+            vec!["user-id=\"00043\"", "api-key=\"safe-key\""],
             vec!["username=", "password=", "posts=", "reblogs="],
         ),
         (

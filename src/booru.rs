@@ -39,6 +39,15 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const MAX_PAGES: usize = 100;
 const MAX_TAGS: usize = 1024;
 
+#[path = "booru_dapi_pool.rs"]
+mod dapi_pool;
+#[derive(Clone, Copy, PartialEq)]
+enum RequestKind {
+    Api,
+    Xml,
+    Html,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Site {
     Danbooru,
@@ -258,7 +267,9 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     // A matched invalid capture must fail; falling back could select a
     // different duplicate query and silently change the requested namespace.
     let source_tags = checked_source_search_tags(site, url)?;
-    let target = if site == Site::E621 && url.path().starts_with("/favorites") {
+    let target = if let Some(id) = dapi_pool::capture(site, url) {
+        Some(Target::Pool { id })
+    } else if site == Site::E621 && url.path().starts_with("/favorites") {
         let mut params = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         if url.path() == "/favorites" {
@@ -526,7 +537,8 @@ fn defaults(
     category: &'static str,
     target: &Target,
 ) -> Arc<crate::naming::SourceDefaults> {
-    let collection = matches!(target, Target::Pool { .. } | Target::Favgroup { .. });
+    let collection =
+        site.danbooru_dialect() && matches!(target, Target::Pool { .. } | Target::Favgroup { .. });
     let filename = if collection {
         "{num:>04}_{id}_{filename}.{extension}"
     } else if site.danbooru_dialect() {
@@ -538,6 +550,7 @@ fn defaults(
         Target::Post { .. } => &["{category}"],
         Target::Tags { .. } => &["{category}", "{search_tags}"],
         Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
+        Target::Pool { .. } if !site.danbooru_dialect() => &["{category}", "pool", "{pool}"],
         Target::Pool { .. } => &["{category}", "pool", "{pool[id]} {pool[name]}"],
         Target::Favgroup { .. } => &[
             "{category}",
@@ -548,6 +561,7 @@ fn defaults(
     let archive = match target {
         Target::Post { .. } => "{id}",
         Target::Tags { .. } => "t_{search_tags}_{id}",
+        Target::Pool { .. } if !site.danbooru_dialect() => "p_{pool}_{id}",
         Target::Pool { .. } => "p_{pool[id]}_{id}",
         Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
         Target::Favorites { .. } => "f_{user_id}_{id}",
@@ -669,6 +683,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             booru_keywords,
             source_defaults: Some(defaults(site, site.category(), &Target::Post { id: 0 })),
             booru_user_id: None,
+            booru_pool_name: None,
             file: Some(FileMetadata {
                 width,
                 height,
@@ -889,6 +904,7 @@ struct Collection {
 }
 
 struct State {
+    dapi_pool: Option<Box<dapi_pool::DapiPool>>,
     favorite_user_id: Option<Arc<str>>,
     collection: Option<Collection>,
     root: Url,
@@ -899,7 +915,7 @@ struct State {
     done: bool,
     pending: VecDeque<ExtractionEvent>,
     pending_cursor: Option<PendingTagCursor>,
-    pending_error: Option<&'static str>,
+    pending_error: Option<crate::Error>,
 }
 
 impl Booru {
@@ -967,7 +983,7 @@ impl Booru {
         }) {
             return Err(error("invalid booru user-id or api-key"));
         }
-        self.api_credentials = if self.site == Site::Gelbooru {
+        self.api_credentials = if matches!(self.site, Site::Gelbooru | Site::Safebooru) {
             user_id
                 .filter(|value| !value.is_empty())
                 .zip(api_key.filter(|value| !value.is_empty()))
@@ -1010,11 +1026,20 @@ impl Booru {
     }
 
     async fn call(&self, root: &Url, path: &str, query: &[(&str, &str)]) -> Result<Vec<u8>> {
+        self.call_kind(root, path, query, RequestKind::Api).await
+    }
+    async fn call_kind(
+        &self,
+        root: &Url,
+        path: &str,
+        query: &[(&str, &str)],
+        kind: RequestKind,
+    ) -> Result<Vec<u8>> {
         let mut endpoint = root.join(path).expect("validated booru path");
         if !query.is_empty() {
             endpoint.query_pairs_mut().extend_pairs(query);
         }
-        tokio::time::timeout(self.timeout, self.request(&endpoint))
+        tokio::time::timeout(self.timeout, self.request(&endpoint, kind))
             .await
             .map_err(|_| error(format!("native {} extraction timed out", self.site.name())))?
     }
@@ -1057,11 +1082,45 @@ impl Booru {
             if let Some(collection) = &state.collection
                 && !number(post.get("id")).is_some_and(|id| collection.positions.contains_key(&id))
             {
-                state.pending_error = Some("invalid booru collection member");
+                state.pending_error = Some(error("invalid booru collection member"));
                 break;
             }
+            let prepared = if state.dapi_pool.is_some() {
+                match dapi_pool::prepare(self.site, post) {
+                    Ok(Some(prepared)) => Some(prepared),
+                    Ok(None) => continue,
+                    Err(failure) => {
+                        state.pending_error = Some(failure);
+                        break;
+                    }
+                }
+            } else {
+                None
+            };
+            let post = prepared.as_ref().map_or(post, |prepared| &prepared.post);
             if let Some(mut media) = parse_post(self.site, post) {
+                if let Some(fallback) = prepared
+                    .as_ref()
+                    .and_then(|prepared| prepared.fallback.clone())
+                {
+                    media.handoff.insert("_fallback".into(), fallback);
+                }
                 if let Some(metadata) = &mut media.metadata {
+                    if let Some(pool) = &state.dapi_pool {
+                        metadata.pool = Some(pool.value.clone());
+                        metadata.booru_pool_name = Some(pool.name.clone());
+                        if let Some(fields) = &mut metadata.booru_keywords {
+                            let fields = Arc::make_mut(fields);
+                            for key in ["id", "tags"] {
+                                if key == "id" && self.site != Site::Safebooru {
+                                    continue;
+                                }
+                                if let Some(value) = post.get(key) {
+                                    fields.insert(key.into(), value.clone());
+                                }
+                            }
+                        }
+                    }
                     metadata.search_tags = state.search_tags.clone();
                     metadata.booru_user_id = state.favorite_user_id.as_deref().map(Value::from);
                     if let Some(collection) = &state.collection {
@@ -1087,7 +1146,9 @@ impl Booru {
                     } else {
                         &["num", "index", "media_id"]
                     };
-                let post_fields: &[&str] = if state.collection.is_some() {
+                let post_fields: &[&str] = if state.dapi_pool.is_some() {
+                    &["filename", "name", "extension", "pool", "pool_name"]
+                } else if state.collection.is_some() {
                     &["filename", "name", "extension", "num"]
                 } else if state.favorite_user_id.is_some() {
                     &["filename", "name", "extension", "user_id"]
@@ -1125,6 +1186,9 @@ impl Booru {
     }
 
     async fn next_page(&self, state: &mut State) -> Result<()> {
+        if state.dapi_pool.is_some() {
+            return dapi_pool::next(self, state).await;
+        }
         let limit = self.site.page_limit();
         let limit_text = limit.to_string();
         if !matches!(state.cursor, Cursor::Tags { .. } | Cursor::Favorites { .. }) {
@@ -1258,6 +1322,31 @@ impl Booru {
         };
         let root = self.api_root.clone().unwrap_or(root);
         let (tags, cursor) = match target {
+            Target::Pool { id } if !self.site.danbooru_dialect() => {
+                return stream::once(async move {
+                    let pool = dapi_pool::start(self, &root, id).await?;
+                    Ok::<_, crate::Error>(self.listing(State {
+                        dapi_pool: Some(pool),
+                        favorite_user_id: None,
+                        collection: None,
+                        root,
+                        tags: String::new(),
+                        search_tags: None,
+                        cursor: Cursor::Page(0),
+                        pages: 0,
+                        done: false,
+                        pending: VecDeque::new(),
+                        pending_cursor: None,
+                        pending_error: None,
+                    }))
+                })
+                .map(|result| match result {
+                    Ok(events) => events,
+                    Err(failure) => stream::once(async move { Err(failure) }).boxed(),
+                })
+                .flatten()
+                .boxed();
+            }
             Target::Favorites { params } => {
                 let user_id = params
                     .iter()
@@ -1265,6 +1354,7 @@ impl Booru {
                     .map(|(_, value)| value.as_str())
                     .unwrap_or_default();
                 return self.listing(State {
+                    dapi_pool: None,
                     favorite_user_id: Some(Arc::from(user_id)),
                     collection: None,
                     root,
@@ -1282,6 +1372,7 @@ impl Booru {
                 return stream::once(async move {
                     let raw = self.post(&root, id).await?;
                     let mut state = State {
+                        dapi_pool: None,
                         favorite_user_id: None,
                         collection: None,
                         root,
@@ -1332,6 +1423,7 @@ impl Booru {
                         .map(|(num, id)| (*id, num + 1))
                         .collect();
                     let mut state = State {
+                        dapi_pool: None,
                         favorite_user_id: None,
                         collection: Some(Collection {
                             kind,
@@ -1448,7 +1540,7 @@ impl Booru {
                         state.done = true;
                         self.emit(&mut state, &ordered);
                         if duplicate {
-                            state.pending_error = Some("invalid repeated e621 pool member");
+                            state.pending_error = Some(error("invalid repeated e621 pool member"));
                         }
                     }
                     Ok::<_, crate::Error>(self.listing(state))
@@ -1468,6 +1560,7 @@ impl Booru {
             tags
         };
         self.listing(State {
+            dapi_pool: None,
             favorite_user_id: None,
             collection: None,
             root,
@@ -1490,7 +1583,7 @@ impl Booru {
                     return Some((Ok(event), Some(state)));
                 }
                 if let Some(message) = state.pending_error.take() {
-                    return Some((Err(error(message)), None));
+                    return Some((Err(message), None));
                 }
                 if state.done {
                     return None;
@@ -1503,9 +1596,9 @@ impl Booru {
         .boxed()
     }
 
-    async fn request(&self, endpoint: &Url) -> Result<Vec<u8>> {
+    async fn request(&self, endpoint: &Url, kind: RequestKind) -> Result<Vec<u8>> {
         for attempt in 0..=self.retries {
-            match self.attempt(endpoint, attempt).await {
+            match self.attempt(endpoint, attempt, kind).await {
                 Ok(body) => return Ok(body),
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
@@ -1516,7 +1609,12 @@ impl Booru {
         unreachable!()
     }
 
-    async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
+    async fn attempt(
+        &self,
+        endpoint: &Url,
+        attempt: u8,
+        kind: RequestKind,
+    ) -> std::result::Result<Vec<u8>, Failure> {
         let name = self.site.name();
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
@@ -1525,7 +1623,9 @@ impl Booru {
             // Keep the canonical URL free of secrets. Redirects are restricted
             // to this origin, and credentials are added only to each API request.
             let mut request_url = target.clone();
-            if let Some((user_id, api_key)) = &self.api_credentials {
+            if kind != RequestKind::Html
+                && let Some((user_id, api_key)) = &self.api_credentials
+            {
                 let query: Vec<_> = request_url
                     .query_pairs()
                     .filter(|(key, _)| !matches!(key.as_ref(), "user_id" | "api_key"))
@@ -1541,7 +1641,14 @@ impl Booru {
                 .client
                 .get(request_url)
                 .timeout(self.request_timeout)
-                .header(header::ACCEPT, "application/json");
+                .header(
+                    header::ACCEPT,
+                    match kind {
+                        RequestKind::Api => "application/json",
+                        RequestKind::Xml => "application/xml",
+                        RequestKind::Html => "text/html",
+                    },
+                );
             if let Some((username, password)) = &self.credentials {
                 request = request.basic_auth(username, Some(password));
             }
@@ -1698,6 +1805,7 @@ mod tests {
             // ascending/non-ID source pagination remains a separate parity gap.
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
+                dapi_pool: None,
                 favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
@@ -1869,6 +1977,7 @@ mod tests {
             )]));
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
+                dapi_pool: None,
                 favorite_user_id: None,
                 collection: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
@@ -2063,16 +2172,20 @@ mod tests {
             .unwrap(),
             Target::Tags { tags: "cat".into() }
         );
+        assert_eq!(
+            t(
+                Site::Gelbooru,
+                "https://gelbooru.com/index.php?page=pool&s=show&id=1"
+            )
+            .unwrap(),
+            Target::Pool { id: "1".into() }
+        );
         for (site, raw) in [
             (Site::Danbooru, "https://danbooru.donmai.us/posts"),
             (Site::Danbooru, "https://danbooru.donmai.us/posts/abc"),
             (Site::Danbooru, "https://danbooru.donmai.us:444/posts/1"),
             (Site::Danbooru, "https://safebooru.donmai.us/posts/1"),
             (Site::E621, "https://e621.net/users/1"),
-            (
-                Site::Gelbooru,
-                "https://gelbooru.com/index.php?page=pool&s=show&id=1",
-            ),
             (
                 Site::Gelbooru,
                 "https://gelbooru.com/index.php?page=post&s=view&id=0",
@@ -2345,7 +2458,7 @@ mod tests {
             .with_api_credentials(Some("1"), Some("key"))
             .unwrap();
         assert!(client.credentials.is_none());
-        assert!(client.api_credentials.is_none());
+        assert_eq!(client.api_credentials, Some(("1".into(), "key".into())));
     }
 
     #[test]
@@ -2602,3 +2715,7 @@ mod defaults_tests;
 #[cfg(test)]
 #[path = "booru_favorites_tests.rs"]
 mod favorites_tests;
+
+#[cfg(test)]
+#[path = "booru_dapi_pool_tests.rs"]
+mod dapi_pool_tests;

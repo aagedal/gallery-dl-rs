@@ -688,7 +688,7 @@ pub struct PostMetadata {
     /// Exact booru constructor search text, separate from API wire sentinels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_tags: Option<std::sync::Arc<str>>,
-    /// Complete booru pool response without its member ID list.
+    /// Booru pool response without member IDs, or the scalar DAPI pool keyword.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pool: Option<std::sync::Arc<Value>>,
     /// Complete Danbooru favorite-group response without its member ID list.
@@ -718,6 +718,9 @@ pub struct PostMetadata {
     /// Exact favorite owner keyword, independent of API authentication/identity.
     #[serde(skip_serializing)]
     pub booru_user_id: Option<Value>,
+    /// Exact scalar DAPI pool display name, separate from nested pool objects.
+    #[serde(skip_serializing)]
+    pub booru_pool_name: Option<Value>,
     /// Immutable source class path defaults, separate from live keywords.
     #[serde(skip_serializing)]
     pub source_defaults: Option<std::sync::Arc<crate::naming::SourceDefaults>>,
@@ -1993,6 +1996,8 @@ fn compatibility_metadata(
                 .filter(|value| value.is_object())
                 .cloned()
                 .map(std::sync::Arc::new)
+        } else if matches!(category, "gelbooru" | "safebooru") {
+            data.get("pool").cloned().map(std::sync::Arc::new)
         } else {
             None
         },
@@ -2002,6 +2007,9 @@ fn compatibility_metadata(
             .filter(|tags| tags.len() <= 1024)
             .map(std::sync::Arc::from),
         source_defaults: None,
+        booru_pool_name: matches!(category, "gelbooru" | "safebooru")
+            .then(|| data.get("pool_name").cloned())
+            .flatten(),
         booru_user_id: matches!(category, "e621" | "e926")
             .then(|| data.get("user_id").cloned())
             .flatten(),
@@ -2015,6 +2023,11 @@ fn compatibility_metadata(
             std::sync::Arc::new(
                 ["filename", "extension", "md5"]
                     .into_iter()
+                    .chain(["id", "tags"].into_iter().filter(|key| {
+                        matches!(category, "gelbooru" | "safebooru")
+                            && data.contains_key("pool_name")
+                            && (*key == "tags" || category == "safebooru")
+                    }))
                     .filter_map(|key| data.get(key).map(|value| (key.to_owned(), value.clone())))
                     .collect(),
             )
@@ -2345,7 +2358,7 @@ mod collection_metadata_tests {
             let metadata = compatibility_metadata(fields.as_object().unwrap(), category).unwrap();
             assert_eq!(
                 metadata.pool.is_some(),
-                matches!(category, "danbooru" | "e621"),
+                matches!(category, "danbooru" | "e621" | "gelbooru" | "safebooru"),
                 "{category}"
             );
             assert_eq!(

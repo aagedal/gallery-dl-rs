@@ -109,6 +109,7 @@ const FIELDS: &[&str] = &[
     "score",
     "search_tags",
     "pool",
+    "pool_name",
     "favgroup",
     "filesize",
     "revision",
@@ -681,6 +682,13 @@ fn lookup(
         .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
         .unwrap_or((&media.filename, ""));
     let metadata = media.metadata.as_ref();
+    if matches!(name, "id" | "tags")
+        && let Some(value) = metadata
+            .and_then(|metadata| metadata.booru_keywords.as_ref())
+            .and_then(|fields| fields.get(name))
+    {
+        return Some(convert(&crate::filter::json_value(value), name));
+    }
     if matches!(name, "filename" | "extension" | "md5")
         && let Some(fields) = metadata.and_then(|metadata| metadata.booru_keywords.as_deref())
     {
