@@ -468,6 +468,7 @@ impl MetadataOptions {
                 key.clone(),
                 Value::String(destination.to_string_lossy().into_owned()),
             );
+            super::objects::record(&[key], context);
         }
         if self.skip
             && tokio::fs::try_exists(&destination)
@@ -998,19 +999,22 @@ fn mutate(context: &mut Map<String, Value>, path: &str, value: Option<Value>) {
         return;
     };
     let keys = std::iter::once(first).chain(keys).collect::<Vec<_>>();
-    fn apply(map: &mut Map<String, Value>, keys: &[&str], value: Option<Value>) {
+    fn apply(map: &mut Map<String, Value>, keys: &[&str], value: Option<Value>) -> bool {
         if keys.len() == 1 {
             if let Some(v) = value {
                 map.insert(keys[0].into(), v);
+                true
             } else {
-                map.remove(keys[0]);
+                map.remove(keys[0]).is_some()
             }
         } else if let Some(Value::Object(inner)) = map.get_mut(keys[0]) {
-            apply(inner, &keys[1..], value);
+            apply(inner, &keys[1..], value)
+        } else {
+            false
         }
     }
-    if keys.len() <= 128 {
-        apply(context, &keys, value);
+    if keys.len() <= 128 && apply(context, &keys, value) {
+        super::objects::record(&keys, context);
     }
 }
 

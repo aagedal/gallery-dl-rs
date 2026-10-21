@@ -9,7 +9,7 @@
 //! CDN hosts.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, KeywordFeedback, KeywordPolicy, group_with_keywords},
+    event::{ExtractionEvent, KeywordFeedback, KeywordObject, KeywordPolicy, group_with_keywords},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
@@ -38,9 +38,6 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 /// Bound DAPI listings to 100 pages (10,000 Gelbooru posts).
 const MAX_PAGES: usize = 100;
 const MAX_TAGS: usize = 1024;
-/// Pool members fetched per `id:` query.
-const POOL_CHUNK: usize = 100;
-const MAX_POOL: usize = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Site {
@@ -511,6 +508,26 @@ pub fn posts(site: Site, bytes: &[u8]) -> Result<Vec<Value>> {
     Ok(list)
 }
 
+/// Parse the complete pool object while retaining its original member positions.
+fn pool(site: Site, bytes: &[u8]) -> Result<(serde_json::Map<String, Value>, Vec<u64>)> {
+    let Value::Object(mut body) =
+        serde_json::from_slice::<Value>(bytes).map_err(|_| invalid(site))?
+    else {
+        return Err(invalid(site));
+    };
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(site))?;
+    body.insert("name".into(), name.replace('_', " ").into());
+    let ids = match body.remove("post_ids") {
+        None => Vec::new(),
+        Some(Value::Array(ids)) => ids.iter().filter_map(|id| number(Some(id))).collect(),
+        Some(_) => return Err(invalid(site)),
+    };
+    Ok((body, ids))
+}
+
 /// Parse a `/pools/ID.json` response into ordered post IDs.
 pub fn pool_ids(site: Site, bytes: &[u8]) -> Result<Vec<u64>> {
     let body: Value = serde_json::from_slice(bytes).map_err(|_| invalid(site))?;
@@ -518,14 +535,21 @@ pub fn pool_ids(site: Site, bytes: &[u8]) -> Result<Vec<u64>> {
         .get("post_ids")
         .and_then(Value::as_array)
         .ok_or_else(|| invalid(site))?;
-    Ok(ids
-        .iter()
-        .filter_map(|id| number(Some(id)))
-        .take(MAX_POOL)
-        .collect())
+    Ok(ids.iter().filter_map(|id| number(Some(id))).collect())
+}
+
+/// Danbooru collection order. E621 always restores the pool member order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PoolOrder {
+    #[default]
+    Pool,
+    PoolReverse,
+    IdDescending,
+    IdAscending,
 }
 
 pub struct Booru {
+    pool_order: PoolOrder,
     site: Site,
     client: Client,
     network: NetworkOptions,
@@ -577,8 +601,6 @@ enum Cursor {
     },
     /// Gelbooru `pid` page number.
     Page(usize),
-    /// Remaining pool members in pool order.
-    Pool(VecDeque<u64>),
 }
 
 struct PendingTagCursor {
@@ -586,7 +608,13 @@ struct PendingTagCursor {
     feedback: KeywordFeedback,
 }
 
+struct Pool {
+    metadata: KeywordObject,
+    positions: HashMap<u64, usize>,
+}
+
 struct State {
+    pool: Option<Pool>,
     root: Url,
     tags: String,
     search_tags: Option<Arc<str>>,
@@ -595,11 +623,13 @@ struct State {
     done: bool,
     pending: VecDeque<ExtractionEvent>,
     pending_cursor: Option<PendingTagCursor>,
+    pending_error: Option<&'static str>,
 }
 
 impl Booru {
     pub fn new(site: Site, timeout: Duration) -> Result<Self> {
         Ok(Self {
+            pool_order: PoolOrder::Pool,
             site,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
@@ -678,6 +708,12 @@ impl Booru {
         self
     }
 
+    /// Select Danbooru pool traversal order; e621 retains member order.
+    pub fn with_pool_order(mut self, order: PoolOrder) -> Self {
+        self.pool_order = order;
+        self
+    }
+
     /// Minimum raw page length that continues Danbooru/e621 searches.
     /// None uses the source default of twenty fewer than the API page size.
     pub fn with_threshold(mut self, threshold: Option<usize>) -> Self {
@@ -737,10 +773,26 @@ impl Booru {
     }
 
     fn emit(&self, state: &mut State, raw: &[Value]) {
+        let pool_snapshot = state
+            .pool
+            .as_ref()
+            .map(|pool| Arc::new(Value::Object(pool.metadata.snapshot())));
         for (position, post) in raw.iter().enumerate() {
+            if let Some(pool) = &state.pool
+                && !number(post.get("id")).is_some_and(|id| pool.positions.contains_key(&id))
+            {
+                state.pending_error = Some("invalid booru pool member");
+                break;
+            }
             if let Some(mut media) = parse_post(self.site, post) {
                 if let Some(metadata) = &mut media.metadata {
                     metadata.search_tags = state.search_tags.clone();
+                    if let Some(pool) = &state.pool {
+                        metadata.pool = pool_snapshot.clone();
+                        metadata.source_num = number(post.get("id"))
+                            .and_then(|id| pool.positions.get(&id))
+                            .map(|num| (*num).into());
+                    }
                 }
                 self.network.apply_media(&mut media);
                 // DAPI search metadata lives in extractor.kwdict and the source
@@ -748,21 +800,41 @@ impl Booru {
                 let fields: &[&str] =
                     if state.search_tags.is_some() && !self.site.danbooru_dialect() {
                         &["num", "index", "media_id", "search_tags"]
+                    } else if state.pool.is_some() {
+                        &["index", "media_id"]
                     } else {
                         &["num", "index", "media_id"]
                     };
-                let mut keywords = KeywordPolicy::shared(fields)
-                    .with_post_fields(&media, &["filename", "name", "extension"]);
+                let post_fields: &[&str] = if state.pool.is_some() {
+                    &["filename", "name", "extension", "num"]
+                } else {
+                    &["filename", "name", "extension"]
+                };
+                let mut keywords =
+                    KeywordPolicy::shared(fields).with_post_fields(&media, post_fields);
+                if let Some(pool) = &state.pool {
+                    keywords = keywords.with_shared_object("pool", pool.metadata.clone());
+                }
                 if position + 1 == raw.len()
                     && let Some(cursor) = &state.pending_cursor
                 {
                     keywords = keywords.with_feedback(cursor.feedback.clone());
                 }
-                state.pending.extend(group_with_keywords(
-                    vec![media],
-                    self.site.category(),
-                    keywords,
-                ));
+                let source_num = media
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.source_num.clone());
+                let mut events = group_with_keywords(vec![media], self.site.category(), keywords);
+                if state.pool.is_some() {
+                    for event in &mut events {
+                        if let ExtractionEvent::Post(post) = event
+                            && let Some(metadata) = &mut post.metadata
+                        {
+                            metadata.source_num = source_num.clone();
+                        }
+                    }
+                }
+                state.pending.extend(events);
             }
         }
     }
@@ -837,31 +909,6 @@ impl Booru {
                 }
                 self.emit(state, &raw);
             }
-            Cursor::Pool(ids) => {
-                let chunk: Vec<u64> = ids.drain(..ids.len().min(POOL_CHUNK)).collect();
-                if ids.is_empty() {
-                    state.done = true;
-                }
-                if chunk.is_empty() {
-                    return Ok(());
-                }
-                let tags = format!(
-                    "id:{}",
-                    chunk
-                        .iter()
-                        .map(u64::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                );
-                let query = [("tags", tags.as_str()), ("limit", &limit_text)];
-                let body = self.call(&state.root, "posts.json", &query).await?;
-                let mut by_id: HashMap<u64, Value> = posts(self.site, &body)?
-                    .into_iter()
-                    .filter_map(|p| Some((number(p.get("id"))?, p)))
-                    .collect();
-                let ordered: Vec<_> = chunk.iter().filter_map(|id| by_id.remove(id)).collect();
-                self.emit(state, &ordered);
-            }
         }
         Ok(())
     }
@@ -882,6 +929,7 @@ impl Booru {
                 return stream::once(async move {
                     let raw = self.post(&root, id).await?;
                     let mut state = State {
+                        pool: None,
                         root,
                         tags: String::new(),
                         search_tags: None,
@@ -890,6 +938,7 @@ impl Booru {
                         done: true,
                         pending: VecDeque::new(),
                         pending_cursor: None,
+                        pending_error: None,
                     };
                     self.emit(&mut state, &raw);
                     if state.pending.is_empty() {
@@ -915,17 +964,125 @@ impl Booru {
             Target::Pool { id } => {
                 return stream::once(async move {
                     let body = self.call(&root, &format!("pools/{id}.json"), &[]).await?;
-                    let ids = pool_ids(self.site, &body)?;
-                    Ok::<_, crate::Error>(self.listing(State {
+                    let (metadata, ids) = pool(self.site, &body)?;
+                    let positions = ids
+                        .iter()
+                        .enumerate()
+                        .map(|(num, id)| (*id, num + 1))
+                        .collect();
+                    let mut state = State {
+                        pool: Some(Pool {
+                            metadata: KeywordObject::new(metadata),
+                            positions,
+                        }),
                         root,
-                        tags: String::new(),
+                        tags: format!(
+                            "{}pool:{id}",
+                            if self.site == Site::Danbooru
+                                && matches!(
+                                    self.pool_order,
+                                    PoolOrder::Pool | PoolOrder::PoolReverse
+                                )
+                            {
+                                "ord"
+                            } else {
+                                ""
+                            }
+                        ),
                         search_tags: None,
-                        done: ids.is_empty(),
-                        cursor: Cursor::Pool(ids.into()),
+                        done: false,
+                        cursor: Cursor::Tags {
+                            order: if self.site == Site::Danbooru
+                                && matches!(
+                                    self.pool_order,
+                                    PoolOrder::Pool
+                                        | PoolOrder::PoolReverse
+                                        | PoolOrder::IdAscending
+                                ) {
+                                TagOrder::Numbered
+                            } else {
+                                TagOrder::Before
+                            },
+                            page: None,
+                        },
                         pages: 0,
                         pending: VecDeque::new(),
                         pending_cursor: None,
-                    }))
+                        pending_error: None,
+                    };
+                    if self.site == Site::E621
+                        || matches!(
+                            self.pool_order,
+                            PoolOrder::PoolReverse | PoolOrder::IdAscending
+                        )
+                    {
+                        // e621 consumes the complete API feed before yielding,
+                        // retaining the last response for every repeated ID.
+                        let mut by_id = HashMap::new();
+                        let mut all = Vec::new();
+                        let mut page_number = 1;
+                        let mut page: Option<String> = None;
+                        loop {
+                            let limit = self.site.page_limit().to_string();
+                            let mut query =
+                                vec![("tags", state.tags.as_str()), ("limit", limit.as_str())];
+                            if let Some(page) = &page {
+                                query.push(("page", page));
+                            }
+                            let body = self.call(&state.root, "posts.json", &query).await?;
+                            let raw = posts(self.site, &body)?;
+                            let done =
+                                raw.len() < self.threshold.unwrap_or(self.site.page_limit() - 20);
+                            page_number += 1;
+                            page = Some(page_number.to_string());
+                            for post in raw {
+                                if self.site == Site::E621 {
+                                    if let Some(id) = number(post.get("id")) {
+                                        by_id.insert(id, post);
+                                    }
+                                } else {
+                                    all.push(post);
+                                }
+                            }
+                            if done {
+                                break;
+                            }
+                        }
+                        let mut duplicate = false;
+                        let ordered: Vec<_> = if self.site == Site::E621 {
+                            let mut seen = std::collections::HashSet::new();
+                            ids.iter()
+                                .filter_map(|id| by_id.get(id).map(|post| (*id, post)))
+                                .take_while(|(id, _)| {
+                                    if seen.insert(*id) {
+                                        true
+                                    } else {
+                                        duplicate = true;
+                                        false
+                                    }
+                                })
+                                .map(|(_, post)| post.clone())
+                                .collect()
+                        } else {
+                            all.reverse();
+                            all
+                        };
+                        if self.site == Site::Danbooru
+                            && ordered.iter().any(|post| {
+                                !number(post.get("id")).is_some_and(|id| {
+                                    state.pool.as_ref().unwrap().positions.contains_key(&id)
+                                })
+                            })
+                        {
+                            return Err(error("invalid booru pool member"));
+                        }
+                        state.done = true;
+                        self.emit(&mut state, &ordered);
+                        if duplicate {
+                            state.pending_error = Some("invalid repeated e621 pool member");
+                        }
+                    }
+                    Ok::<_, crate::Error>(self.listing(state))
                 })
                 .map(|result| match result {
                     Ok(events) => events,
@@ -942,6 +1099,7 @@ impl Booru {
             tags
         };
         self.listing(State {
+            pool: None,
             root,
             tags,
             search_tags,
@@ -950,6 +1108,7 @@ impl Booru {
             done: false,
             pending: VecDeque::new(),
             pending_cursor: None,
+            pending_error: None,
         })
     }
 
@@ -959,6 +1118,9 @@ impl Booru {
             loop {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), Some(state)));
+                }
+                if let Some(message) = state.pending_error.take() {
+                    return Some((Err(error(message)), None));
                 }
                 if state.done {
                     return None;
@@ -1166,6 +1328,7 @@ mod tests {
             // ascending/non-ID source pagination remains a separate parity gap.
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
+                pool: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
                 tags: wire.into(),
                 search_tags: Some(Arc::from(source)),
@@ -1174,6 +1337,7 @@ mod tests {
                 done: false,
                 pending: VecDeque::new(),
                 pending_cursor: None,
+                pending_error: None,
             };
             client.emit(&mut state, std::slice::from_ref(&case["input_post"]));
             let ExtractionEvent::Post(post) = state.pending.pop_front().unwrap() else {
@@ -1334,6 +1498,7 @@ mod tests {
             )]));
             let client = Booru::new(site, Duration::from_secs(1)).unwrap();
             let mut state = State {
+                pool: None,
                 root: Url::parse("https://example.invalid/").unwrap(),
                 tags: "Original".into(),
                 search_tags: Some(Arc::from("Original")),
@@ -1342,6 +1507,7 @@ mod tests {
                 done: false,
                 pending: VecDeque::new(),
                 pending_cursor: None,
+                pending_error: None,
             };
             client.emit(&mut state, std::slice::from_ref(&case["input_post"]));
             // Exercise publication and file hooks without any HTTP. The native
@@ -1721,7 +1887,11 @@ mod tests {
     #[tokio::test]
     async fn fetches_pool_in_order_and_gelbooru_pages() {
         let (root, server) = serve(vec![
-            response("200 OK", "", br#"{"id": 42, "post_ids": [3, 1, 2]}"#),
+            response(
+                "200 OK",
+                "",
+                br#"{"id": 42, "name":"test_pool", "post_ids": [3, 1, 2]}"#,
+            ),
             response(
                 "200 OK",
                 "",
@@ -1735,9 +1905,9 @@ mod tests {
             .map(|m| m.unwrap().metadata.unwrap().post_id)
             .collect()
             .await;
-        assert_eq!(ids, ["3", "1", "2"]);
+        assert_eq!(ids, ["1", "2", "3"]);
         let requests = server.join().unwrap();
-        assert!(requests[1].starts_with("GET /posts.json?tags=id%3A3%2C1%2C2&limit=200 "));
+        assert!(requests[1].starts_with("GET /posts.json?tags=ordpool%3A42&limit=200 "));
 
         let (root, server) = serve(vec![response("200 OK", "", b"[]")]);
         let media: Vec<_> = booru(Site::Safebooru, root)
@@ -2044,3 +2214,7 @@ mod tests {
         assert_eq!(server.join().unwrap().len(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "booru_pool_tests.rs"]
+mod pool_tests;

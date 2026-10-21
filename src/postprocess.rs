@@ -46,6 +46,8 @@ pub(crate) mod keywords;
 pub mod metadata;
 #[path = "postprocess_mtime.rs"]
 pub mod mtime;
+#[path = "postprocess_objects.rs"]
+pub(crate) mod objects;
 #[path = "postprocess_template.rs"]
 pub mod template;
 

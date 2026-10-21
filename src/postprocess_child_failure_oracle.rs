@@ -60,6 +60,7 @@ async fn failed_child_after_mutations_survive_explicit_and_eof_finalization() {
                 count: None,
                 keywords: KeywordPolicy::Shared {
                     feedback: None,
+                    objects: Arc::from([]),
                     file_fields: Arc::from([]),
                     post_fields: Arc::new(
                         json!({"id":42,"num":0,"seed":42,"suffix":"original"})

@@ -3771,3 +3771,99 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         }
     }
 }
+
+#[test]
+fn danbooru_pool_order_aliases_and_falsy_resets_are_independent_of_kemono() {
+    use gallery_dl_rs::{booru::PoolOrder, kemono::PostOrder};
+    for (values, expected) in [
+        (
+            vec![
+                serde_json::json!(null),
+                serde_json::json!(false),
+                serde_json::json!(0),
+                serde_json::json!(""),
+                serde_json::json!([]),
+                serde_json::json!({}),
+                serde_json::json!("asc"),
+                serde_json::json!("pool"),
+                serde_json::json!("pool_asc"),
+                serde_json::json!("asc_pool"),
+            ],
+            PoolOrder::Pool,
+        ),
+        (
+            vec![
+                serde_json::json!("desc"),
+                serde_json::json!("desc_pool"),
+                serde_json::json!("pool_desc"),
+            ],
+            PoolOrder::PoolReverse,
+        ),
+        (
+            vec![
+                serde_json::json!("id"),
+                serde_json::json!("desc_id"),
+                serde_json::json!("id_desc"),
+            ],
+            PoolOrder::IdDescending,
+        ),
+        (
+            vec![serde_json::json!("asc_id"), serde_json::json!("id_asc")],
+            PoolOrder::IdAscending,
+        ),
+    ] {
+        for value in values {
+            let doc = serde_json::json!({"extractor":{"order-posts":"reverse","danbooru":{"order-posts":value},"kemono":{"order-posts":"asc"}}});
+            let cfg = parse(&doc.to_string()).unwrap();
+            let dan = cfg.resolve("danbooru").unwrap();
+            assert_eq!(dan.booru_order_posts, Some(expected), "{value}");
+            assert_eq!(dan.order_posts, Some(PostOrder::Reverse));
+            assert_eq!(
+                cfg.resolve("kemono").unwrap().order_posts,
+                Some(PostOrder::Forward)
+            );
+            let override_settings = dan.overlay(&Options {
+                order_posts: Some(PostOrder::Forward),
+                ..Default::default()
+            });
+            assert_eq!(override_settings.booru_order_posts, Some(PoolOrder::Pool));
+        }
+    }
+    let cfg = parse(r#"{"order-posts":"desc","extractor":{"danbooru":{"order-posts":"id_asc"}}}"#)
+        .unwrap();
+    assert_eq!(
+        cfg.resolve("danbooru").unwrap().booru_order_posts,
+        Some(PoolOrder::PoolReverse)
+    );
+    assert_eq!(
+        parse("{}")
+            .unwrap()
+            .resolve("danbooru")
+            .unwrap()
+            .booru_order_posts,
+        None
+    );
+    for value in [
+        serde_json::json!(true),
+        serde_json::json!(1),
+        serde_json::json!(["pool"]),
+        serde_json::json!("PRIVATE_INVALID_ORDER"),
+    ] {
+        let doc = serde_json::json!({"extractor":{"danbooru":{"order-posts":value}}});
+        let err = parse(&doc.to_string()).unwrap_err().to_string();
+        assert!(
+            err.contains("order-posts") && !err.contains("PRIVATE_INVALID_ORDER"),
+            "{err}"
+        );
+        // Unlike Danbooru, upstream e621 does not consult this option.
+        let doc = serde_json::json!({"extractor":{"e621":{"order-posts":value}}});
+        assert_eq!(
+            parse(&doc.to_string())
+                .unwrap()
+                .resolve("e621")
+                .unwrap()
+                .booru_order_posts,
+            None
+        );
+    }
+}

@@ -107,6 +107,7 @@ const FIELDS: &[&str] = &[
     "rating",
     "score",
     "search_tags",
+    "pool",
     "filesize",
     "revision",
     "revision_id",
@@ -458,6 +459,35 @@ impl DirectoryTemplate {
                 return Err(error("rendered directory exceeds 3072 bytes"));
             }
             output.push(component);
+        }
+        Ok(Some(output))
+    }
+    pub(crate) fn render_keywords(
+        &self,
+        media: &Media,
+        keywords: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Option<PathBuf>> {
+        let mut selected = self.components.as_deref();
+        for (filter, components) in &self.conditions {
+            if filter.matches_keywords(keywords)? {
+                selected = Some(components);
+                break;
+            }
+        }
+        let Some(components) = selected else {
+            return Ok(None);
+        };
+        let mut output = PathBuf::new();
+        let mut bytes = 0;
+        for component in components {
+            let value = component
+                .render_keywords(media, keywords)?
+                .ok_or_else(|| error("invalid directory component"))?;
+            bytes += value.len() + 1;
+            if bytes > 3072 {
+                return Err(error("rendered directory exceeds 3072 bytes"));
+            }
+            output.push(value);
         }
         Ok(Some(output))
     }

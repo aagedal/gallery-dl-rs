@@ -324,9 +324,16 @@ Searches stop below the source page-length threshold (180/300 by default), on
 cancellation, or on an API error. They have no fixed 100-page cutoff. The
 `threshold` configuration option accepts an integer, clamps values below one to
 one, and restores the default for other JSON types, including null and booleans.
-Gelbooru-style sites use `pid` (100 per page) and remain capped at 100 pages;
-pools are fetched in pool order, up to 10,000 posts. Posts without a file URL
-(deleted, banned or restricted) are skipped. Files are accepted only from the site's own HTTPS
+Gelbooru-style sites use `pid` (100 per page) and remain capped at 100 pages.
+Danbooru pools paginate `ordpool:` in API order; e621 pools buffer numbered
+`pool:` pages and restore member order. Both retain original member positions
+as `num`, including unavailable-member gaps, and expose the pool response as
+`pool` with a normalized name and without `post_ids`. Danbooru's category-scoped
+`order-posts` also accepts `pool`, `pool_desc`, `id`, and `id_asc` (and source
+aliases). Nested pool hook edits reach later posts; replacing or deleting the
+root pool keyword detaches the current post. Metadata postprocessor archives
+use the source default key `p_{pool[id]}_{id}`. Posts without a file URL (deleted,
+banned or restricted) are skipped. Files are accepted only from the site's own HTTPS
 CDN. `post_id` is the post ID, `media_id` the MD5, `content`/caption the
 space-separated tag string, `username` the uploader name when the API provides
 one (Gelbooru `owner`). Default filenames are `{category}_{post_id}_{md5}.{extension}`;

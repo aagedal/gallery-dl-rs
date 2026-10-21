@@ -270,6 +270,7 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
         source_num: None,
         source_suffix: None,
         search_tags: None,
+        pool: None,
         keyword_updates: None,
         tags: None,
         sketch: None,

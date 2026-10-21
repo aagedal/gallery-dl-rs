@@ -1365,6 +1365,9 @@ fn extract_input<'a>(
                                             options.api_key.as_deref(),
                                         )?
                                         .with_threshold(options.booru_threshold.flatten())
+                                        .with_pool_order(
+                                            options.booru_order_posts.unwrap_or_default(),
+                                        )
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1422,6 +1425,9 @@ fn extract_input<'a>(
                                 .flatten(),
                             favorites: matches!(category, "kemono" | "coomer")
                                 .then_some(options.favorites)
+                                .flatten(),
+                            booru_order_posts: (category == "danbooru")
+                                .then_some(options.booru_order_posts)
                                 .flatten(),
                             order_posts: matches!(category, "kemono" | "coomer")
                                 .then_some(options.order_posts)
@@ -1661,6 +1667,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         bluesky_endpoint: None,
         api_server: None,
         order_posts: None,
+        booru_order_posts: None,
         favorites: None,
         username: None,
         password: None,

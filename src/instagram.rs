@@ -661,6 +661,7 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                 metadata: Some(PostMetadata {
                     source_num: None,
                     source_suffix: None,
+                    pool: None,
                     search_tags: None,
                     keyword_updates: None,
                     tags: None,

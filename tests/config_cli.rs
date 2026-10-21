@@ -1841,3 +1841,45 @@ async fn pixiv_novel_switches_truthiness_forward_only_to_novel_jobs() {
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn danbooru_pool_order_forwards_canonical_values_with_category_scope() {
+    for (input, expected) in [
+        (serde_json::json!(false), "pool"),
+        (serde_json::json!("desc_pool"), "pool_desc"),
+        (serde_json::json!("id_desc"), "id"),
+        (serde_json::json!("asc_id"), "id_asc"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let cfg = config(
+            root.path(),
+            serde_json::json!({"extractor":{"order-posts":"reverse","danbooru":{"order-posts":input},"e621":{"order-posts":"id_asc"}}}),
+        );
+        for (url, expected) in [
+            ("https://danbooru.donmai.us/pools/1", Some(expected)),
+            ("https://e621.net/pools/1", None),
+            ("https://kemono.cr/discord/server/1/2", Some("desc")),
+            ("https://x.com/alice/status/42", None),
+        ] {
+            let log = root.path().join("backend.log");
+            let _ = std::fs::remove_file(&log);
+            let mut command = binary(root.path(), &cfg);
+            command
+                .arg("--extractor-command")
+                .arg(backend(root.path()))
+                .env("CONFIG_TEST_LOG", &log)
+                .args(["-g", url]);
+            success(&output(&mut command).await);
+            let log = std::fs::read_to_string(&log).unwrap();
+            if let Some(expected) = expected {
+                assert!(
+                    log.contains(&format!("--option\norder-posts=\"{expected}\"\n")),
+                    "{log}"
+                );
+            } else {
+                assert!(!log.contains("order-posts="), "{log}");
+            }
+        }
+    }
+}

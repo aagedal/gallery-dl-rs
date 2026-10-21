@@ -81,6 +81,8 @@ pub struct Options {
     /// Explicit Bluesky AppView server; empty restores the default.
     pub api_server: Option<String>,
     pub order_posts: Option<crate::kemono::PostOrder>,
+    /// Danbooru pool member ordering, independent of Kemono post ordering.
+    pub booru_order_posts: Option<crate::booru::PoolOrder>,
     pub favorites: Option<crate::kemono::Favorites>,
     pub username: Option<String>,
     pub password: Option<String>,
@@ -291,6 +293,15 @@ impl Options {
                 .clone()
                 .or_else(|| self.api_server.clone()),
             order_posts: overrides.order_posts.or(self.order_posts),
+            booru_order_posts: overrides
+                .booru_order_posts
+                .or_else(|| {
+                    overrides.order_posts.map(|order| match order {
+                        crate::kemono::PostOrder::Forward => crate::booru::PoolOrder::Pool,
+                        crate::kemono::PostOrder::Reverse => crate::booru::PoolOrder::PoolReverse,
+                    })
+                })
+                .or(self.booru_order_posts),
             favorites: overrides.favorites.or(self.favorites),
             username: overrides.username.clone().or_else(|| self.username.clone()),
             password: overrides.password.clone().or_else(|| self.password.clone()),
@@ -1101,9 +1112,23 @@ impl Config {
             } else {
                 None
             };
+            let booru_order_posts = if name == "danbooru" {
+                settings
+                    .order_posts
+                    .0
+                    .take()
+                    .map(danbooru_pool_order)
+                    .transpose()?
+            } else {
+                if name == "e621" {
+                    settings.order_posts.0.take();
+                }
+                None
+            };
             // Boxed: unoptimized builds overflow the stack with inline settings.
             let mut resolved = (*settings).resolve(directory)?;
             resolved.bluesky_endpoint = bluesky_endpoint;
+            resolved.booru_order_posts = booru_order_posts;
             if matches!(name, "pixeldrain" | "gelbooru") {
                 resolved.api_key = opaque_key;
             }
@@ -1827,6 +1852,10 @@ impl RawOptions {
             revisions,
             order_revisions,
             endpoint,
+            booru_order_posts: order_posts.map(|order| match order {
+                crate::kemono::PostOrder::Forward => crate::booru::PoolOrder::Pool,
+                crate::kemono::PostOrder::Reverse => crate::booru::PoolOrder::PoolReverse,
+            }),
             order_posts,
             favorites,
             username,
@@ -2226,6 +2255,23 @@ fn selection_names(value: Value) -> Option<Vec<String>> {
             .map(|name| name.as_str().map(str::to_owned))
             .collect(),
         _ => None,
+    }
+}
+
+/// Resolve the source Danbooru collection ordering aliases.
+fn danbooru_pool_order(value: Value) -> Result<crate::booru::PoolOrder> {
+    use crate::booru::PoolOrder;
+    if !value_truthy(&value) {
+        return Ok(PoolOrder::Pool);
+    }
+    match value.as_str() {
+        Some("asc" | "pool" | "pool_asc" | "asc_pool") => Ok(PoolOrder::Pool),
+        Some("desc" | "desc_pool" | "pool_desc") => Ok(PoolOrder::PoolReverse),
+        Some("id" | "desc_id" | "id_desc") => Ok(PoolOrder::IdDescending),
+        Some("asc_id" | "id_asc") => Ok(PoolOrder::IdAscending),
+        _ => Err(error(
+            "native configuration Danbooru order-posts must select pool or ID ordering",
+        )),
     }
 }
 

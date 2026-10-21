@@ -218,6 +218,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
         source_num: None,
         source_suffix: None,
         search_tags: None,
+        pool: None,
         keyword_updates: None,
         tags: None,
         sketch: None,

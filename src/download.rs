@@ -298,6 +298,37 @@ pub fn destination_with_templates(
     }
 }
 
+/// Hook-aware destination rendering without reconstructing typed API metadata.
+pub(crate) fn destination_with_keyword_templates(
+    root: &Path,
+    media: &Media,
+    filename: Option<&FilenameTemplate>,
+    directory: Option<&DirectoryTemplate>,
+    keywords: &serde_json::Map<String, serde_json::Value>,
+) -> Result<PathBuf> {
+    let default = destination(root, media);
+    let name = filename
+        .map(|template| template.render_keywords(media, keywords))
+        .transpose()?
+        .flatten();
+    let basename = name
+        .as_deref()
+        .map(std::ffi::OsStr::new)
+        .or_else(|| default.file_name())
+        .ok_or_else(|| error("invalid media filename"))?;
+    let directory = directory
+        .map(|template| template.render_keywords(media, keywords))
+        .transpose()?
+        .flatten();
+    Ok(match directory {
+        Some(directory) => root.join(directory).join(basename),
+        None => default
+            .parent()
+            .ok_or_else(|| error("invalid media directory"))?
+            .join(basename),
+    })
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Downloaded(PathBuf),

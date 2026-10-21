@@ -50,6 +50,8 @@ struct Shared {
     notify: Notify,
     failed: Arc<AtomicBool>,
     processors: Mutex<Option<Arc<Postprocessors>>>,
+    objects: crate::postprocess::objects::Bindings,
+    directory: Mutex<Option<PathBuf>>,
     halt: Mutex<Option<Arc<AtomicBool>>>,
 }
 /// One emitted file's participation in its owning post. Drop on every outcome,
@@ -65,6 +67,16 @@ impl std::fmt::Debug for ScopeLease {
     }
 }
 impl ScopeLease {
+    pub(crate) fn directory(&self) -> Option<PathBuf> {
+        self.shared
+            .directory
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+    pub(crate) fn objects(&self) -> crate::postprocess::objects::Bindings {
+        self.shared.objects.clone()
+    }
     pub(crate) fn processors(&self) -> Option<Arc<Postprocessors>> {
         self.shared
             .processors
@@ -119,6 +131,7 @@ impl ScopeLease {
                         &state.initial
                     };
                     inherit_keywords(&state.policy, &state.original, latest, context);
+                    self.shared.objects.refresh(context);
                     if shared {
                         // Remember fields introduced by this emission as well, so
                         // deleting a file-only field survives into the next file.
@@ -214,9 +227,19 @@ impl Drop for ScopeLease {
 impl Shared {
     fn new(
         original: Map<String, Value>,
+        context: Map<String, Value>,
+        policy: KeywordPolicy,
+        failed: Arc<AtomicBool>,
+    ) -> Arc<Self> {
+        let objects = crate::postprocess::objects::Bindings::new(&policy);
+        Self::new_with_objects(original, context, policy, failed, objects)
+    }
+    fn new_with_objects(
+        original: Map<String, Value>,
         mut context: Map<String, Value>,
         policy: KeywordPolicy,
         failed: Arc<AtomicBool>,
+        objects: crate::postprocess::objects::Bindings,
     ) -> Arc<Self> {
         if let KeywordPolicy::CopiedAfterPost { removed_fields, .. } = &policy {
             for key in removed_fields.iter() {
@@ -237,6 +260,8 @@ impl Shared {
             notify: Notify::new(),
             failed,
             processors: Mutex::new(None),
+            objects,
+            directory: Mutex::new(None),
             halt: Mutex::new(None),
         })
     }
@@ -286,10 +311,11 @@ impl Shared {
             {
                 let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
                 if state.pending == 0 {
-                    let latest = state.last.as_ref().map_or_else(
+                    let mut latest = state.last.as_ref().map_or_else(
                         || (state.initial.clone(), None),
                         |(_, ctx, path)| (ctx.clone(), path.clone()),
                     );
+                    self.objects.refresh(&mut latest.0);
                     if let KeywordPolicy::Shared {
                         feedback: Some(feedback),
                         ..
@@ -342,20 +368,30 @@ struct Runtime {
     paths: HookPaths,
     failed: Arc<AtomicBool>,
     halt: Arc<AtomicBool>,
+    objects: crate::postprocess::objects::Bindings,
 }
 impl Runtime {
     async fn hook(&mut self, hook: Hook) -> Result<()> {
-        let result = self
-            .configuration
-            .processors
-            .run_job_hook(
+        self.hook_observed(hook, self.objects.clone()).await
+    }
+    async fn hook_independent(&mut self, hook: Hook) -> Result<()> {
+        self.hook_observed(hook, Default::default()).await
+    }
+    async fn hook_observed(
+        &mut self,
+        hook: Hook,
+        objects: crate::postprocess::objects::Bindings,
+    ) -> Result<()> {
+        objects.refresh(&mut self.context);
+        let result = objects
+            .observe(self.configuration.processors.run_job_hook(
                 hook,
                 &mut self.context,
                 &self.media,
                 &mut self.paths,
                 &self.configuration.root,
                 self.configuration.filename.as_ref(),
-            )
+            ))
             .await;
         if result.is_err() {
             self.failed.store(true, Ordering::Release);
@@ -485,12 +521,17 @@ fn fake(post: Post) -> Media {
         handoff: BTreeMap::new(),
     }
 }
-fn post_directory(configuration: &JobConfiguration, media: &Media) -> Result<PathBuf> {
-    crate::download::destination_with_templates(
+fn post_directory(
+    configuration: &JobConfiguration,
+    media: &Media,
+    keywords: &Map<String, Value>,
+) -> Result<PathBuf> {
+    crate::download::destination_with_keyword_templates(
         &configuration.root,
         media,
         None,
         configuration.directory.as_ref(),
+        keywords,
     )?
     .parent()
     .map(Path::to_owned)
@@ -534,6 +575,7 @@ impl State<'_> {
             paths: HookPaths::default(),
             failed: Arc::new(AtomicBool::new(frame.failed)),
             halt: Arc::new(AtomicBool::new(false)),
+            objects: Default::default(),
         });
         let runtime = frame.runtime.as_mut().unwrap();
         let descriptor = frame.archive_descriptor.clone().or_else(|| {
@@ -594,7 +636,11 @@ impl State<'_> {
                 }
                 if let Some(runtime) = &mut parent.runtime {
                     runtime.context = frame.queue.take().unwrap_or_default();
-                    let result = runtime.hook(Hook::ChildAfter).await;
+                    let result = if frame.queue_shared {
+                        runtime.hook(Hook::ChildAfter).await
+                    } else {
+                        runtime.hook_independent(Hook::ChildAfter).await
+                    };
                     if frame.queue_shared
                         && let Some(post) = &parent.post
                     {
@@ -645,6 +691,8 @@ impl State<'_> {
                             .map(|(key, value)| (key.clone(), value.clone())),
                     );
                 }
+                let objects = crate::postprocess::objects::Bindings::new(&policy);
+                objects.refresh(&mut original);
                 let mut initialized = false;
                 if frame.runtime.is_none()
                     && let Some(configuration) = self.configurations.get(&media.category)
@@ -655,7 +703,7 @@ impl State<'_> {
                         configuration: configuration.clone(),
                         context: original.clone(),
                         paths: HookPaths {
-                            directory: post_directory(&configuration, &media)?,
+                            directory: post_directory(&configuration, &media, &original)?,
                             filename: None,
                             realpath: None,
                             extension: String::new(),
@@ -663,6 +711,7 @@ impl State<'_> {
                         media: media.clone(),
                         failed: Arc::new(AtomicBool::new(frame.failed)),
                         halt: Arc::new(AtomicBool::new(false)),
+                        objects: objects.clone(),
                     };
                     frame.runtime = Some(runtime);
                     let runtime = frame.runtime.as_mut().unwrap();
@@ -687,18 +736,34 @@ impl State<'_> {
                     initialized = true;
                 }
                 if let Some(runtime) = &mut frame.runtime {
+                    runtime.objects = objects;
                     if !initialized {
                         runtime.context = original.clone();
                     }
-                    runtime.paths.directory = post_directory(&runtime.configuration, &media)?;
+                    if !initialized {
+                        runtime.paths.directory =
+                            post_directory(&runtime.configuration, &media, &original)?;
+                    }
                     runtime.media = media;
                     runtime.hook(Hook::Post).await?;
-                    frame.post = Some(Shared::new(
+                    frame.post = Some(Shared::new_with_objects(
                         original,
                         runtime.context.clone(),
                         policy,
                         runtime.failed.clone(),
+                        runtime.objects.clone(),
                     ));
+                    *frame
+                        .post
+                        .as_ref()
+                        .unwrap()
+                        .directory
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) = runtime
+                        .configuration
+                        .directory
+                        .as_ref()
+                        .map(|_| runtime.paths.directory.clone());
                     *frame
                         .post
                         .as_ref()
@@ -764,7 +829,12 @@ impl State<'_> {
                     } else {
                         runtime.context = queue.clone();
                     }
-                    if let Err(error) = runtime.hook(Hook::Child).await {
+                    let result = if live {
+                        runtime.hook(Hook::Child).await
+                    } else {
+                        runtime.hook_independent(Hook::Child).await
+                    };
+                    if let Err(error) = result {
                         if live && let Some(post) = &parent.post {
                             post.checkpoint(&runtime.context);
                         }
@@ -829,7 +899,11 @@ impl State<'_> {
                 }
                 if let Some(runtime) = &mut parent.runtime {
                     runtime.context = child.queue.take().unwrap_or_default();
-                    let result = runtime.hook(Hook::ChildAfter).await;
+                    let result = if child.queue_shared {
+                        runtime.hook(Hook::ChildAfter).await
+                    } else {
+                        runtime.hook_independent(Hook::ChildAfter).await
+                    };
                     if child.queue_shared
                         && let Some(post) = &parent.post
                     {
@@ -1685,5 +1759,286 @@ mod keyword_feedback_tests {
                 .is_empty()
         );
         assert_eq!(feedback.take(), None);
+    }
+}
+
+#[cfg(test)]
+mod keyword_object_tests {
+    use super::*;
+    use crate::{event::KeywordObject, extract::PostMetadata, postprocess::Specification};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn file_mutations_and_post_after_update_prepared_next_post_unless_root_replaced() {
+        for detach in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let object = KeywordObject::new(
+                json!({"id":7,"name":"ORIGINAL"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            );
+            let mut specs = vec![
+                json!({"name":"metadata","mode":"custom","event":"post","base-directory":root.path(),"filename":"posts.txt","format":"{pool[id]}:{pool[name]}|","open":"a"}),
+            ];
+            specs.push(json!({"name":"metadata","mode":"modify","event":"post","filter":"id == 1","fields":{"pool[name]":"POST"}}));
+            if detach {
+                specs.push(json!({"name":"metadata","mode":"modify","event":"file","filter":"id == 1","fields":{"pool":"{pool}"}}));
+            }
+            specs.extend([
+                json!({"name":"metadata","mode":"modify","event":"file","filter":"id == 1","fields":{"pool[id]":"{next_pool_id}"}}),
+                json!({"name":"metadata","mode":"modify","event":"post-after","filter":"id == 1","fields":{"pool[name]":"AFTER"}}),
+            ]);
+            let processors = Arc::new(Postprocessors::new(
+                specs
+                    .iter()
+                    .map(|spec| Specification::parse(spec, root.path()).unwrap())
+                    .collect(),
+            ));
+            // Prepare both Directory snapshots before any hook runs, as source
+            // generators can do. Binding identity must outlive their copies.
+            let mut events = Vec::new();
+            for id in [1, 2] {
+                let metadata = PostMetadata {
+                    post_id: id.to_string(),
+                    ..Default::default()
+                };
+                let mut policy = KeywordPolicy::shared(&[
+                    "num",
+                    "index",
+                    "media_id",
+                    "filename",
+                    "name",
+                    "extension",
+                ])
+                .with_shared_object("pool", object.clone());
+                if let KeywordPolicy::Shared { post_fields, .. } = &mut policy {
+                    *post_fields = Arc::new(
+                        json!({"id":id,"pool":object.snapshot(),"next_pool_id":900})
+                            .as_object()
+                            .unwrap()
+                            .clone(),
+                    );
+                }
+                events.push(Ok(ExtractionEvent::Post(Box::new(Post {
+                    keywords: policy,
+                    category: "fixture".into(),
+                    metadata: Some(metadata.clone()),
+                    count: Some(1),
+                }))));
+                let (url, job) = crate::extract::inline_text("file bytes".into()).unwrap();
+                events.push(Ok(ExtractionEvent::Media(Box::new(Media {
+                    url,
+                    job,
+                    category: "fixture".into(),
+                    filename: format!("{id}.txt"),
+                    metadata: Some(metadata),
+                    headers: Default::default(),
+                    handoff: Default::default(),
+                }))));
+                events.push(Ok(ExtractionEvent::EndPost));
+            }
+            let mut jobs = apply(
+                futures_util::stream::iter(events).boxed(),
+                Arc::new(BTreeMap::from([(
+                    "fixture".into(),
+                    JobConfiguration {
+                        processors: processors.clone(),
+                        root: root.path().to_owned(),
+                        filename: None,
+                        directory: Some(
+                            DirectoryTemplate::parse(&["{pool[name]}".into()]).unwrap(),
+                        ),
+                        init: false,
+                    },
+                )])),
+            );
+            let client = crate::download::client(std::time::Duration::from_secs(2)).unwrap();
+            let mut count = 0;
+            while let Some(item) = jobs.next().await {
+                let item = item.unwrap();
+                let outcome = crate::download::download_with_options(
+                    &client,
+                    root.path(),
+                    &item.media,
+                    crate::download::DownloadOptions {
+                        postprocessors: Some(&processors),
+                        postprocessor_scope: item.scope.as_ref(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                let expected_directory = if count == 0 {
+                    "ORIGINAL"
+                } else if detach {
+                    "POST"
+                } else {
+                    "AFTER"
+                };
+                assert_eq!(
+                    outcome.saved_path().unwrap().parent().unwrap(),
+                    root.path().join(expected_directory)
+                );
+                count += 1;
+            }
+            assert_eq!(count, 2);
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("posts.txt")).unwrap(),
+                if detach {
+                    "7:ORIGINAL|7:POST|"
+                } else {
+                    "7:ORIGINAL|900:AFTER|"
+                }
+            );
+            assert_eq!(
+                object.snapshot(),
+                if detach {
+                    json!({"id":7,"name":"POST"})
+                } else {
+                    json!({"id":900,"name":"AFTER"})
+                }
+                .as_object()
+                .unwrap()
+                .clone()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod independent_object_queue_tests {
+    use super::*;
+    use crate::{
+        event::{ChildMetadata, ChildScope, KeywordObject},
+        postprocess::Specification,
+    };
+    use serde_json::json;
+    #[tokio::test]
+    async fn independent_queue_callbacks_neither_inject_nor_detach_parent_objects() {
+        let root = tempfile::tempdir().unwrap();
+        let object = KeywordObject::new(
+            json!({"id":7,"name":"ORIGINAL"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        let specs = [
+            json!({"name":"metadata","mode":"custom","event":"child","base-directory":root.path(),"filename":"child.txt","format":"{pool}|"}),
+            json!({"name":"metadata","mode":"modify","event":"child","fields":{"pool":"QUEUE"}}),
+            json!({"name":"metadata","mode":"custom","event":"child-after","base-directory":root.path(),"filename":"child-after.txt","format":"{pool}|"}),
+            json!({"name":"metadata","mode":"modify","event":"post-after","fields":{"pool[name]":"PARENT_AFTER"}}),
+        ];
+        let configuration = JobConfiguration {
+            processors: Arc::new(Postprocessors::new(
+                specs
+                    .iter()
+                    .map(|v| Specification::parse(v, root.path()).unwrap())
+                    .collect(),
+            )),
+            root: root.path().to_owned(),
+            filename: None,
+            directory: None,
+            init: false,
+        };
+        let child = ChildScope::new(ChildMetadata::from_raw("unused", "empty", &Map::new()));
+        let events = vec![
+            Ok(ExtractionEvent::Post(Box::new(Post {
+                category: "fixture".into(),
+                metadata: None,
+                count: Some(0),
+                keywords: KeywordPolicy::shared(&[]).with_shared_object("pool", object.clone()),
+            }))),
+            Ok(ExtractionEvent::BeginChild(child.clone())),
+            Ok(ExtractionEvent::EndChild(child.control)),
+            Ok(ExtractionEvent::EndPost),
+        ];
+        assert!(
+            apply(
+                futures_util::stream::iter(events).boxed(),
+                Arc::new(BTreeMap::from([("fixture".into(), configuration)]))
+            )
+            .collect::<Vec<_>>()
+            .await
+            .is_empty()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("child.txt")).unwrap(),
+            "None|"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("child-after.txt")).unwrap(),
+            "QUEUE|"
+        );
+        assert_eq!(object.snapshot()["name"], "PARENT_AFTER");
+    }
+}
+
+#[cfg(test)]
+mod directory_scope_tests {
+    use super::*;
+    use crate::postprocess::Specification;
+    use serde_json::json;
+    #[tokio::test]
+    async fn absent_job_directory_preserves_caller_download_root_and_directory() {
+        let configuration_root = tempfile::tempdir().unwrap();
+        let download_root = tempfile::tempdir().unwrap();
+        let processors=Arc::new(Postprocessors::new(vec![Specification::parse(&json!({"name":"metadata","mode":"modify","event":"post","fields":{"flag":"present"}}),configuration_root.path()).unwrap()]));
+        let (url, job) = crate::extract::inline_text("bytes".into()).unwrap();
+        let media = Media {
+            url,
+            job,
+            category: "fixture".into(),
+            filename: "file.txt".into(),
+            metadata: None,
+            headers: Default::default(),
+            handoff: Default::default(),
+        };
+        let events = vec![
+            Ok(ExtractionEvent::Post(Box::new(Post {
+                keywords: KeywordPolicy::shared(&[]),
+                category: "fixture".into(),
+                metadata: None,
+                count: Some(1),
+            }))),
+            Ok(ExtractionEvent::Media(Box::new(media))),
+            Ok(ExtractionEvent::EndPost),
+        ];
+        let mut jobs = apply(
+            futures_util::stream::iter(events).boxed(),
+            Arc::new(BTreeMap::from([(
+                "fixture".into(),
+                JobConfiguration {
+                    processors: processors.clone(),
+                    root: configuration_root.path().to_owned(),
+                    filename: None,
+                    directory: None,
+                    init: false,
+                },
+            )])),
+        );
+        let item = jobs.next().await.unwrap().unwrap();
+        assert_eq!(item.scope.as_ref().unwrap().directory(), None);
+        let directory = DirectoryTemplate::parse(&["CALLER".into()]).unwrap();
+        let client = crate::download::client(std::time::Duration::from_secs(2)).unwrap();
+        let outcome = crate::download::download_with_options(
+            &client,
+            download_root.path(),
+            &item.media,
+            crate::download::DownloadOptions {
+                postprocessors: Some(&processors),
+                postprocessor_scope: item.scope.as_ref(),
+                directory: Some(&directory),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            outcome.saved_path().unwrap().parent().unwrap(),
+            download_root.path().join("CALLER")
+        );
+        drop(item);
+        assert!(jobs.next().await.is_none());
     }
 }

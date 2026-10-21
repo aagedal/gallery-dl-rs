@@ -1168,19 +1168,33 @@ Shared keyword feedback captures the last post's live ID after selected file
 leases drain, before post-after hooks. Cursor generation resumes from that value,
 so supported post/file-hook changes and deletions affect the next request.
 
-**Next booru pool step (source audit, 1.32.17):** preserve the response pool
-object, remove `post_ids`, and replace underscores in its name once. Default keys
-use the response `pool[id]`; feed queries retain the requested pool ID. Danbooru
-uses `ordpool:ID` pagination and emits API order with original pool positions.
-E621 buffers `pool:ID` pages, then restores original positions and unavailable
-member gaps. Native ID chunks currently discard metadata and drop duplicates;
-these need source feed/order semantics before enabling pool default keys.
-The source shallow-copies one shared nested pool object into every post. Nested
-`pool[id]`/`pool[name]` hook writes reach later posts, while replacing or deleting
-the root `pool` detaches only that post. Previous post-after nested writes are
-visible even in the next already-prepared Directory dictionary. Implement
-shared object identity with root detachment and nested mutation tracking;
-static pool copies or whole-root feedback cannot preserve this contract.
+**Implemented booru pools (source oracle, 1.32.17):** preserve the full response
+pool object without `post_ids`, normalize its name once, and retain original
+member positions as `num`. Feed queries use the requested ID; archive keys use
+the response `pool[id]`. Danbooru streams numbered `ordpool:` pages in API order
+and supports pool/id ordering options; reverse modes buffer and validate first.
+E621 buffers numbered `pool:` pages, retains the final response per ID, then
+restores member order with unavailable-member gaps. Repeated e621 members retain
+the source's partial-output failure. No native ID-chunk truncation remains.
+A job-scoped object binding carries nested pool hook mutations across posts and
+post-after boundaries; root replacement/deletion, including equal replacements,
+detaches only that post. Mutation observers stay outside public JSON. Source
+fixtures and native traversal/live download-hook replay cover the contract;
+default pool archive keys are enabled. Native logical filename defaults remain
+different from upstream's MD5-based pool filenames. Generic root order settings
+retain the existing asc/desc/reverse grammar; extra pool aliases require the
+Danbooru category scope.
+
+**Next booru collection step (source audit):** Danbooru favorite groups
+(`/favorite_groups/ID` and `/favorite_group/show/ID`) reuse the pool collection
+methods with keyword `favgroup`, endpoint `/favorite_groups/ID.json`, and
+`ordfavgroup:`/`favgroup:` feeds. Preserve the response ID and shared nested
+object, and use default metadata archive key `fg_{favgroup[id]}_{id}`. E621
+favorites are a separate `/favorites.json` feed with numbered pagination and
+query-derived scalar `user_id`; its default key is `f_{user_id}_{id}`. Danbooru
+has no matching `/favorites` extractor in the audited source. Legacy collection
+URL aliases and lexical ID preservation (such as leading zeroes) still need
+route-level parity checks.
 
 **Implemented directory step:** native configuration `directory` lists replace
 category folders with ordered component templates; explicit `[]` selects the

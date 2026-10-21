@@ -688,6 +688,9 @@ pub struct PostMetadata {
     /// Exact booru constructor search text, separate from API wire sentinels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_tags: Option<std::sync::Arc<str>>,
+    /// Complete booru pool response without its member ID list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool: Option<std::sync::Arc<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<crate::twitter::CommunityMetadata>,
     /// Community feeds use their own archive namespace; ordinary posts do not.
@@ -935,6 +938,7 @@ pub struct BackendOptions {
     pub bluesky_endpoint: Option<crate::bluesky::LikesEndpoint>,
     pub api_server: Option<String>,
     pub order_posts: Option<crate::kemono::PostOrder>,
+    pub booru_order_posts: Option<crate::booru::PoolOrder>,
     pub favorites: Option<crate::kemono::Favorites>,
 }
 impl std::fmt::Debug for BackendOptions {
@@ -1208,7 +1212,17 @@ impl Backend {
                 .arg("--option")
                 .arg(format!("favorites={}", serde_json::json!(value)));
         }
-        if let Some(order) = options.order_posts {
+        if let Some(order) = options.booru_order_posts {
+            let order = match order {
+                crate::booru::PoolOrder::Pool => "pool",
+                crate::booru::PoolOrder::PoolReverse => "pool_desc",
+                crate::booru::PoolOrder::IdDescending => "id",
+                crate::booru::PoolOrder::IdAscending => "id_asc",
+            };
+            command
+                .arg("--option")
+                .arg(format!("order-posts={}", serde_json::json!(order)));
+        } else if let Some(order) = options.order_posts {
             let order = match order {
                 crate::kemono::PostOrder::Forward => "asc",
                 crate::kemono::PostOrder::Reverse => "desc",
@@ -1954,6 +1968,11 @@ fn compatibility_metadata(
         tags_bookmark: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
             .flatten(),
+        pool: data
+            .get("pool")
+            .filter(|value| value.is_object())
+            .cloned()
+            .map(std::sync::Arc::new),
         search_tags: crate::booru::Site::from_category(category)
             .or_else(|| (category == "e926").then_some(crate::booru::Site::E621))
             .and_then(|_| data.get("search_tags").and_then(Value::as_str))

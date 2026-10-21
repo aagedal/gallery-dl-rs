@@ -294,6 +294,27 @@ impl std::fmt::Debug for KeywordFeedback {
     }
 }
 
+/// A producer-owned nested dictionary shared by distinct post dictionaries.
+/// Root assignment detaches a post; nested edits retain this object identity.
+#[derive(Clone)]
+pub struct KeywordObject(Arc<Mutex<serde_json::Map<String, serde_json::Value>>>);
+impl KeywordObject {
+    pub fn new(value: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self(Arc::new(Mutex::new(value)))
+    }
+    pub fn snapshot(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+    pub(crate) fn replace(&self, value: &serde_json::Map<String, serde_json::Value>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = value.clone();
+    }
+}
+impl std::fmt::Debug for KeywordObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KeywordObject { fields: [redacted] }")
+    }
+}
+
 /// Ownership of public keyword dictionaries emitted around one post.
 /// Shared producers explicitly declare the fields they assign again per file.
 #[derive(Clone, Debug, Default)]
@@ -308,6 +329,7 @@ pub enum KeywordPolicy {
         file_fields: Arc<[String]>,
         post_fields: Arc<serde_json::Map<String, serde_json::Value>>,
         feedback: Option<KeywordFeedback>,
+        objects: Arc<[(String, KeywordObject)]>,
     },
 }
 impl KeywordPolicy {
@@ -328,6 +350,7 @@ impl KeywordPolicy {
         Self::Shared {
             post_fields: Arc::new(serde_json::Map::new()),
             feedback: None,
+            objects: Arc::from([]),
             file_fields: fields.iter().map(|field| (*field).to_owned()).collect(),
         }
     }
@@ -335,6 +358,20 @@ impl KeywordPolicy {
     pub fn with_feedback(mut self, value: KeywordFeedback) -> Self {
         if let Self::Shared { feedback, .. } = &mut self {
             *feedback = Some(value);
+        }
+        self
+    }
+    /// Bind a root field to a producer-owned nested dictionary. Each post gets
+    /// a fresh attachment, while cloned handles retain the nested identity.
+    pub fn with_shared_object(mut self, name: &str, value: KeywordObject) -> Self {
+        if let Self::Shared { objects, .. } = &mut self {
+            let mut bindings = objects.to_vec();
+            if let Some((_, object)) = bindings.iter_mut().find(|(key, _)| key == name) {
+                *object = value;
+            } else {
+                bindings.push((name.to_owned(), value));
+            }
+            *objects = bindings.into();
         }
         self
     }

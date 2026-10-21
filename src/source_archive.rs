@@ -70,9 +70,13 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "artstation" => format == "{asset[id]}",
         "twitter" => matches!(format, TWITTER | COMMUNITY),
         "kemono" | "coomer" => matches!(format, KEMONO | DISCORD),
-        "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru" => {
-            matches!(format, "{id}" | "t_{search_tags}_{id}")
+        "danbooru" | "e621" | "e926" => {
+            matches!(
+                format,
+                "{id}" | "t_{search_tags}_{id}" | "p_{pool[id]}_{id}"
+            )
         }
+        "gelbooru" | "safebooru" => matches!(format, "{id}" | "t_{search_tags}_{id}"),
         "flickr" | "wallhaven" | "imgur" | "furaffinity" | "vsco" | "pixeldrain" => {
             format == "{id}"
         }
@@ -574,6 +578,9 @@ mod tests {
             ("danbooru", "{id}"),
             ("danbooru", "t_{search_tags}_{id}"),
             ("e926", "{id}"),
+            ("danbooru", "p_{pool[id]}_{id}"),
+            ("e621", "p_{pool[id]}_{id}"),
+            ("e926", "p_{pool[id]}_{id}"),
             ("flickr", "{id}"),
             ("wallhaven", "{id}"),
             ("instagram", "{media_id}"),
@@ -598,7 +605,7 @@ mod tests {
             ("newgrounds", "{_type}{_index}"),
             ("flickr", "a_{album[id]}_{id}"),
             ("imgur", "{album[id]}_{id}"),
-            ("e621", "p_{pool[id]}_{id}"),
+            ("gelbooru", "p_{pool[id]}_{id}"),
             ("pinterest", "{board[id]}_{id}"),
             ("twitter", "AV_{user[id]}_{date}"),
         ] {

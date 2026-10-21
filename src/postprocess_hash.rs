@@ -172,7 +172,8 @@ impl HashOptions {
         let path = path.to_owned();
         let values = tokio::task::spawn_blocking(move || options.compute(&path, &flag)).await??;
         for (key, value) in values {
-            context.insert(key, Value::String(value));
+            context.insert(key.clone(), Value::String(value));
+            super::objects::record(&[&key], context);
         }
         Ok(self.filename)
     }

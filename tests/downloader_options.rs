@@ -19,6 +19,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         source_num: None,
         source_suffix: None,
         search_tags: None,
+        pool: None,
         keyword_updates: None,
         tags: None,
         sketch: None,
