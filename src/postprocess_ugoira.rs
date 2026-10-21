@@ -984,11 +984,16 @@ mod tests {
                 plan.commands
                     .iter()
                     .map(|args| {
-                        // Joined paths use native separators, as in gallery-dl.
+                        // Joined paths and the null device are native, as in
+                        // gallery-dl; the oracle was recorded on POSIX.
                         strings(args)
                             .into_iter()
                             .map(|arg| {
-                                if cfg!(windows) {
+                                if !cfg!(windows) {
+                                    arg
+                                } else if arg == "NUL" {
+                                    "/dev/null".to_owned()
+                                } else if arg.contains("$WORK") {
                                     arg.replace('\\', "/")
                                 } else {
                                     arg

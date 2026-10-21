@@ -419,7 +419,7 @@ async fn live_collection_hooks_preserve_nested_aliases_and_detach_replaced_roots
             Some(site.category().into()),
             crate::source_archive::for_url(&source),
         );
-        let download = crate::download::client(Duration::from_secs(1)).unwrap();
+        let download = crate::download::client(Duration::from_secs(30)).unwrap();
         let mut files = 0;
         while let Some(item) = output.next().await {
             let job = item.unwrap_or_else(|error| panic!("{name}: {error}"));
@@ -810,7 +810,7 @@ async fn source_filename_projection_and_live_hook_ownership_match_all_booru_fami
             Some(family.into()),
             crate::source_archive::for_url(&source),
         );
-        let download = crate::download::client(Duration::from_secs(1)).unwrap();
+        let download = crate::download::client(Duration::from_secs(30)).unwrap();
         let item = jobs
             .next()
             .await

@@ -149,6 +149,21 @@ fn entries(path: &Path) -> Vec<String> {
         .collect::<Result<Vec<_>, _>>()
         .unwrap()
 }
+/// Source oracles were recorded on POSIX; Windows path restriction also
+/// replaces the characters gallery-dl's "auto" mode forbids there.
+fn native_published(published: &Value) -> Value {
+    let mut published = published.clone();
+    if cfg!(windows) {
+        for file in published.as_array_mut().unwrap() {
+            let path = file["path"]
+                .as_str()
+                .unwrap()
+                .replace(['\\', '|', '<', '>', ':', '"', '?', '*'], "_");
+            file["path"] = Value::String(path);
+        }
+    }
+    published
+}
 fn artifacts(root: &Path) -> Value {
     fn visit(root: &Path, directory: &Path, files: &mut Vec<Value>) {
         for entry in std::fs::read_dir(directory).unwrap() {
@@ -313,7 +328,7 @@ async fn replay_jobs(cases: &[Value]) -> usize {
             let expected = if caveat {
                 json!([])
             } else {
-                case["published"].clone()
+                native_published(&case["published"])
             };
             assert_eq!(
                 artifacts(root.path()),
@@ -328,7 +343,7 @@ async fn replay_jobs(cases: &[Value]) -> usize {
             assert_eq!(completed, 1, "{name}: one source file completes");
             assert_eq!(
                 artifacts(root.path()),
-                case["published"],
+                native_published(&case["published"]),
                 "{name}: complete published relative paths and bytes"
             );
             assert_eq!(
