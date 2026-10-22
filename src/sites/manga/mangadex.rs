@@ -396,7 +396,7 @@ pub(crate) fn manga_info(manga: &Value) -> Map<String, Value> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|t| t.as_object()?.values().last().cloned())
+        .filter_map(|t| t.as_object()?.values().next_back().cloned())
         .collect();
     let tags = attr
         .get("tags")

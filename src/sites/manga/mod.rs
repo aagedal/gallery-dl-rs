@@ -7,7 +7,6 @@
 //! lazily, newest-last by default (`reverse = True`).
 use crate::event::ExtractionEvent;
 use crate::sites::{Events, Http, Item, Route, Site};
-use crate::{Result, error};
 use futures_util::StreamExt;
 use serde_json::{Map, Value};
 use url::Url;
@@ -16,122 +15,6 @@ mod mangadex;
 mod text;
 
 pub(super) static SITES: &[&Site] = &[&mangadex::SITE];
-
-/// `ChapterExtractor.filename_fmt`.
-pub(super) const CHAPTER_FILENAME: &str =
-    "{manga}_c{chapter:>03}{chapter_minor:?//}_{page:>03}.{extension}";
-/// `ChapterExtractor.directory_fmt`.
-pub(super) const CHAPTER_DIRECTORY: &[&str] = &[
-    "{category}",
-    "{manga}",
-    "{volume:?v/ />02}c{chapter:>03}{chapter_minor:?//}{title:?: //}",
-];
-/// `ChapterExtractor.archive_fmt`.
-pub(super) const CHAPTER_ARCHIVE: &str = "{manga}_{chapter}{chapter_minor}_{page}";
-/// `Extractor.filename_fmt`, inherited by `MangaExtractor`.
-pub(super) const FILENAME: &str = "{filename}.{extension}";
-/// `Extractor.directory_fmt`, inherited by `MangaExtractor`.
-pub(super) const DIRECTORY: &[&str] = &["{category}"];
-
-/// A `ChapterExtractor` subclass with the inherited formats.
-pub(super) const fn chapter_route() -> Route {
-    Route::new(
-        "chapter",
-        CHAPTER_FILENAME,
-        CHAPTER_DIRECTORY,
-        CHAPTER_ARCHIVE,
-    )
-}
-
-/// A `MangaExtractor` subclass with the inherited formats.
-pub(super) const fn manga_route() -> Route {
-    Route::new("manga", FILENAME, DIRECTORY, "")
-}
-
-/// `util.USERAGENT_FIREFOX`, whose version follows the current date.
-pub(super) fn firefox_agent() -> &'static str {
-    static AGENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    AGENT.get_or_init(|| {
-        // Proleptic Gregorian ordinal of today, as Python's date.toordinal().
-        let days = time::OffsetDateTime::now_utc()
-            .unix_timestamp()
-            .div_euclid(86_400);
-        let version = (days + 719_163 - 735_513) / 28;
-        format!(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{version}.0) \
-             Gecko/20100101 Firefox/{version}.0"
-        )
-    })
-}
-
-/// Default upstream session headers: the Firefox user agent unless the user
-/// configured one, and `Referer: ROOT/` (`Extractor.referer = True`).
-fn session_headers<'h>(
-    http: &Http,
-    root: &str,
-    extra: &[(&'h str, &'h str)],
-) -> Vec<(&'h str, String)> {
-    let has = |name: &str| extra.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
-    let mut headers = Vec::new();
-    if http.network.user_agent().is_none() && !has("User-Agent") {
-        headers.push(("User-Agent", firefox_agent().to_owned()));
-    }
-    if !root.is_empty() && !has("Referer") {
-        headers.push(("Referer", format!("{root}/")));
-    }
-    headers.extend(extra.iter().map(|(k, v)| (*k, (*v).to_owned())));
-    headers
-}
-
-/// GET a page as text with upstream session headers. The URL is routed
-/// through [`Http::api`].
-pub(super) async fn get_text(
-    http: &Http,
-    url: &str,
-    root: &str,
-    extra: &[(&str, &str)],
-) -> Result<String> {
-    let url = http.api(url)?;
-    let headers = session_headers(http, root, extra);
-    let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    http.text_with(&url, &headers).await
-}
-
-/// GET JSON with upstream session headers.
-pub(super) async fn get_json(
-    http: &Http,
-    url: &str,
-    root: &str,
-    extra: &[(&str, &str)],
-) -> Result<Value> {
-    let url = http.api(url)?;
-    let headers = session_headers(http, root, extra);
-    let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    http.json_with(&url, &headers).await
-}
-
-/// POST JSON with upstream session headers.
-pub(super) async fn post_json(
-    http: &Http,
-    url: &str,
-    root: &str,
-    body: &Value,
-    extra: &[(&str, &str)],
-) -> Result<Value> {
-    let url = http.api(url)?;
-    let headers = session_headers(http, root, extra);
-    let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    http.post_json(&url, body, &headers).await
-}
-
-/// Append query parameters to an absolute URL string.
-pub(super) fn with_query(base: &str, params: &[(&str, &str)]) -> Result<String> {
-    let mut url = Url::parse(base).map_err(|_| error("invalid site URL"))?;
-    if !params.is_empty() {
-        url.query_pairs_mut().extend_pairs(params);
-    }
-    Ok(url.into())
-}
 
 /// Insert a key into a keyword map.
 pub(super) fn set(map: &mut Map<String, Value>, key: &str, value: impl Into<Value>) {
@@ -197,11 +80,6 @@ impl Gallery {
         self
     }
 
-    pub fn enum_key(mut self, key: &'static str) -> Self {
-        self.enum_key = key;
-        self
-    }
-
     pub fn id(mut self, id: impl Into<String>) -> Self {
         self.post_id = id.into();
         self
@@ -214,14 +92,6 @@ impl Gallery {
 
     pub fn header(mut self, name: &'static str, value: impl Into<String>) -> Self {
         self.headers.push((name, value.into()));
-        self
-    }
-
-    /// Image headers matching upstream session defaults for `root`.
-    pub fn session(mut self, http: &Http, root: &str) -> Self {
-        for (name, value) in session_headers(http, root, &[]) {
-            self.headers.push((name, value));
-        }
         self
     }
 
@@ -284,23 +154,6 @@ impl Gallery {
     }
 }
 
-/// `MangaExtractor.items`: queue chapters, reversed when `reverse` (the
-/// upstream default for sites listing newest first) unless the
-/// `chapter-reverse` option flips it. URLs another site would handle are
-/// dropped.
-pub(super) fn queue_chapters<'a>(
-    http: &'a Http,
-    site: &'static Site,
-    route: &'static Route,
-    mut chapters: Vec<(Url, Map<String, Value>)>,
-    reverse: bool,
-) -> Events<'a> {
-    if reverse != http.option_bool("chapter-reverse", false) {
-        chapters.reverse();
-    }
-    queue_urls(http, site, route, chapters)
-}
-
 /// Queue child URLs of this site, in order.
 pub(super) fn queue_urls<'a>(
     http: &'a Http,
@@ -346,23 +199,8 @@ pub(super) fn option_list(http: &Http, key: &str) -> Option<Vec<String>> {
     }
 }
 
-/// Parse an absolute or root-relative link on `root`.
-pub(super) fn link(root: &str, href: &str) -> Option<Url> {
-    let href = crate::sites::unescape(href.trim());
-    let url = if href.starts_with('/') && !href.starts_with("//") {
-        Url::parse(&format!("{root}{href}"))
-    } else if let Some(rest) = href.strip_prefix("//") {
-        Url::parse(&format!("https://{rest}"))
-    } else {
-        Url::parse(&href)
-    };
-    url.ok().filter(crate::sites::plain)
-}
-
 #[cfg(test)]
 pub(super) mod tests {
-    use super::*;
-    use serde_json::json;
 
     /// Render a file's default path as `directory/filename`.
     pub fn path(media: &crate::extract::Media) -> String {
@@ -377,85 +215,5 @@ pub(super) mod tests {
 
     pub fn archive(media: &crate::extract::Media) -> String {
         crate::sites::archive_key(media).unwrap().1
-    }
-
-    static TEST_SITE: Site = Site {
-        category: "mangatest",
-        name: "test",
-        matches: |_| false,
-        extract: |_, _| crate::sites::fail(error("unused")),
-        routes: &[&TEST_CHAPTER],
-        api_key: false,
-    };
-    static TEST_CHAPTER: Route = chapter_route();
-
-    #[test]
-    fn gallery_numbers_pages_and_honours_count() {
-        let http = crate::sites::testing::http("test", Url::parse("http://127.0.0.1:1/").unwrap());
-        let data = keywords([("manga", "M".into()), ("count", 2.into())]);
-        let pages = vec![
-            ("https://cdn.test/a/01.JPG".into(), None),
-            ("not a url".into(), None),
-            ("https://cdn.test/a/03.png".into(), None),
-        ];
-        let events = Gallery::chapter(&TEST_CHAPTER, data, pages)
-            .id("c1")
-            .header("Referer", "https://site.test/")
-            .events(&TEST_SITE, &http);
-        let media: Vec<_> = events
-            .into_iter()
-            .filter_map(|e| match e {
-                ExtractionEvent::Media(m) => Some(*m),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(media.len(), 1);
-        let k = &media[0]
-            .metadata
-            .as_ref()
-            .unwrap()
-            .site_keywords
-            .as_ref()
-            .unwrap()
-            .fields;
-        assert_eq!(k["page"], 1);
-        assert_eq!(k["count"], 2);
-        assert_eq!(k["extension"], "jpg");
-        assert_eq!(media[0].headers["Referer"], "https://site.test/");
-        let data = keywords([("manga", "M".into())]);
-        let pages = vec![
-            ("https://cdn.test/1.jpg".into(), Some(Map::new())),
-            (
-                "https://cdn.test/2".into(),
-                Some(
-                    json!({"extension": "webp", "filename": "two"})
-                        .as_object()
-                        .unwrap()
-                        .clone(),
-                ),
-            ),
-        ];
-        let events = Gallery::chapter(&TEST_CHAPTER, data, pages).events(&TEST_SITE, &http);
-        let names: Vec<_> = events
-            .iter()
-            .filter_map(|e| match e {
-                ExtractionEvent::Media(m) => Some(m.filename.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(names, ["1.jpg", "two.webp"]);
-    }
-
-    #[test]
-    fn links_resolve_on_root() {
-        assert_eq!(
-            link("https://a.test", "/x?a=1&amp;b=2").unwrap().as_str(),
-            "https://a.test/x?a=1&b=2"
-        );
-        assert_eq!(
-            link("https://a.test", "//b.test/y").unwrap().as_str(),
-            "https://b.test/y"
-        );
-        assert!(link("https://a.test", "javascript:x").is_none());
     }
 }

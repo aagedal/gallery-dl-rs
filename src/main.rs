@@ -897,13 +897,15 @@ async fn run(args: Args) -> Result<()> {
         }
     }
     if let Some(path) = &args.error_file {
-        let sources = input_sources.borrow();
-        let lines: String = failed_inputs
-            .borrow()
-            .iter()
-            .filter_map(|index| sources.get(index))
-            .map(|source| format!("{source}\n"))
-            .collect();
+        let lines: String = {
+            let sources = input_sources.borrow();
+            failed_inputs
+                .borrow()
+                .iter()
+                .filter_map(|index| sources.get(index))
+                .map(|source| format!("{source}\n"))
+                .collect()
+        };
         if !lines.is_empty() {
             use tokio::io::AsyncWriteExt;
             let mut file = tokio::fs::OpenOptions::new()
