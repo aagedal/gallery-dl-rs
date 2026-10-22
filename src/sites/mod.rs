@@ -95,6 +95,14 @@ impl std::fmt::Debug for Route {
     }
 }
 
+/// Category used for compatibility runs of URLs outside every native
+/// category; files then carry the upstream extractor's own category.
+pub const GENERIC_CATEGORY: &str = "gallery-dl";
+
+/// Defaults for generic compatibility output, whose upstream formats are
+/// not reported by gallery-dl.
+pub static GENERIC: Route = Route::new("", "{filename}.{extension}", &["{category}"], "");
+
 /// A file's upstream keyword dictionary and the class that produced it.
 #[derive(Clone, Debug)]
 pub struct SiteKeywords {
@@ -508,7 +516,6 @@ pub(crate) fn default_templates(
     crate::naming::FilenameTemplate,
     crate::naming::DirectoryTemplate,
 )> {
-    site(&media.category)?;
     Some(
         media
             .metadata

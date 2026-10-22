@@ -1469,6 +1469,7 @@ pub(crate) fn parse_post_message(message: &Value, category: &str) -> Result<crat
         _ => None,
     }
     .ok_or_else(|| error("backend post message has no metadata"))?;
+    let category = &message_category(category, data);
     let mut metadata = compatibility_metadata(data, category);
     if let Some(metadata) = &mut metadata {
         metadata.file = None;
@@ -1506,6 +1507,7 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
         .get(2)
         .and_then(Value::as_object)
         .ok_or_else(|| error("media message has no metadata"))?;
+    let category = &message_category(category, metadata);
     let marker = metadata.get("_ytdl_manifest").filter(|v| !v.is_null());
     let inline_data = metadata.get("_ytdl_manifest_data").filter(|v| !v.is_null());
     let (url, job) = if let Some(data) = source.strip_prefix("text:") {
@@ -1740,6 +1742,71 @@ fn valid_extension(value: &str) -> bool {
 /// post_id/media_id, Twitter tweet_id/num, Facebook id/extension (including
 /// separate audio and video files with the same id). Missing IDs stay empty;
 /// they never acquire an inferred identity from a URL, filename or row number.
+/// Categories with dedicated handling in this crate; output from any other
+/// gallery-dl extractor is treated generically.
+const DEDICATED_CATEGORIES: &[&str] = &[
+    "instagram",
+    "twitter",
+    "facebook",
+    "imgur",
+    "bluesky",
+    "reddit",
+    "danbooru",
+    "e621",
+    "e926",
+    "gelbooru",
+    "safebooru",
+    "mastodon",
+    "mastodon.social",
+    "pawoo",
+    "baraag",
+    "kemono",
+    "coomer",
+    "pixeldrain",
+    "catbox",
+    "imgbox",
+    "postimg",
+    "tumblr",
+    "pixiv",
+    "pixiv-novel",
+    "deviantart",
+    "flickr",
+    "wallhaven",
+    "artstation",
+    "pinterest",
+    "newgrounds",
+    "furaffinity",
+    "weasyl",
+    "vsco",
+    "direct",
+    "directlink",
+];
+
+/// Whether a category came from generic gallery-dl compatibility output.
+pub(crate) fn generic_category(category: &str) -> bool {
+    !DEDICATED_CATEGORIES.contains(&category) && !crate::sites::is_category(category)
+}
+
+/// The category for a compatibility message. Generic runs take the upstream
+/// extractor's own category when it is a plain label.
+fn message_category(category: &str, data: &serde_json::Map<String, Value>) -> String {
+    if category != crate::sites::GENERIC_CATEGORY {
+        return category.to_owned();
+    }
+    data.get("category")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            (1..=64).contains(&value.len())
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                && !matches!(*value, "." | "..")
+                && !DEDICATED_CATEGORIES.contains(value)
+        })
+        .unwrap_or(crate::sites::GENERIC_CATEGORY)
+        .to_owned()
+}
+
 fn compatibility_metadata(
     data: &serde_json::Map<String, Value>,
     category: &str,
@@ -1920,6 +1987,15 @@ fn compatibility_metadata(
             String::new(),
             None,
             string("title"),
+        ),
+        // Registry sites and generic gallery-dl output keep the whole
+        // keyword dictionary; identities come from upstream's `id`.
+        _ if crate::sites::is_category(category) || generic_category(category) => (
+            id("id"),
+            id("id"),
+            String::new(),
+            string("username").or_else(|| string("user")),
+            None,
         ),
         _ => return None,
     };
@@ -2213,12 +2289,19 @@ fn compatibility_metadata(
                 .then(|| string("service").filter(|service| crate::kemono::valid_service(service)))
                 .flatten()
         }),
-        site_keywords: crate::sites::site(category).map(|site| {
-            std::sync::Arc::new(crate::sites::SiteKeywords {
+        site_keywords: match crate::sites::site(category) {
+            Some(site) => Some(std::sync::Arc::new(crate::sites::SiteKeywords {
                 route: crate::sites::route_for(site, data),
                 fields: data.clone(),
-            })
-        }),
+            })),
+            None if generic_category(category) => {
+                Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+                    route: &crate::sites::GENERIC,
+                    fields: data.clone(),
+                }))
+            }
+            None => None,
+        },
         post_id,
         media_id,
         shortcode,

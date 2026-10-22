@@ -61,7 +61,12 @@ configuration for site-specific settings. Default gallery-dl config files are
 ignored. `--extractor-command /path/to/gallery-dl` selects another executable;
 it is invoked directly, without a shell.
 
-`--extractor compatibility` is the default. `--extractor native` experimentally
+`--extractor compatibility` is the default. In compatibility mode, URLs outside
+every category listed here are still passed to gallery-dl, so any site it
+supports works; those files keep gallery-dl's category and complete keyword
+dictionary for filters, templates and postprocessors, and default to
+`CATEGORY/{filename}.{extension}` paths (per-extractor upstream path formats
+are not reported by gallery-dl, and no download-archive identity is derived). `--extractor native` experimentally
 supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
 `/USERNAME/feed/` profiles, Instagram reels/tagged/saved collections and
 stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
@@ -1997,6 +2002,12 @@ When no explicit native configuration is given, discovery checks
 The first existing file is loaded. `--native-config-ignore` disables discovery.
 Upstream gallery-dl config files are not discovered because the native schema
 is a strict subset. Compatibility config is loaded only when explicitly selected.
+
+`-o KEY=VALUE` (`--option`) sets one value on top of the loaded native
+configuration, like upstream: `KEY` is a dotted path (`extractor.4chan.retries`)
+and `VALUE` is parsed as JSON, falling back to plain text. Options apply in
+order after the file, and are validated like file settings. Options under
+`extractor.` are also forwarded to the compatibility backend as `--option`.
 
 ```json
 {

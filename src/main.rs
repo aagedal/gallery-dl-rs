@@ -288,7 +288,18 @@ fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
         category
     }
 }
-fn media_settings_key(media: &extract::Media, extractor: Extractor) -> &str {
+fn media_settings_key<'a>(
+    media: &'a extract::Media,
+    extractor: Extractor,
+    settings: &BTreeMap<&str, Settings>,
+) -> &'a str {
+    if !settings.contains_key(media.category.as_str()) {
+        // Generic compatibility output from other gallery-dl extractors.
+        return "direct";
+    }
+    media_settings_key_known(media, extractor)
+}
+fn media_settings_key_known(media: &extract::Media, extractor: Extractor) -> &str {
     if matches!(extractor, Extractor::Native)
         && media.metadata.as_ref().is_some_and(|metadata| {
             metadata.booru_artist_parent.is_some()
@@ -537,7 +548,7 @@ async fn run(args: Args) -> Result<()> {
             })
         })
         .map(|(index, mut job)| {
-            settings[media_settings_key(&job.media, args.extractor)]
+            settings[media_settings_key(&job.media, args.extractor, &settings)]
                 .network
                 .apply_media(&mut job.media);
             (index, job)
@@ -612,7 +623,7 @@ async fn run(args: Args) -> Result<()> {
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
-                let settings = &settings[media_settings_key(&item, args.extractor)];
+                let settings = &settings[media_settings_key(&item, args.extractor, &settings)];
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap())
@@ -1688,9 +1699,24 @@ fn extract_input<'a>(
             }
         } else if let Some(item) = extract::direct(&url) {
             stream::iter(event::group(vec![item], "direct").into_iter().map(Ok)).boxed()
+        } else if matches!(extractor, Extractor::Compatibility) {
+            // Any other gallery-dl extractor; files keep its category.
+            let configured = &settings["direct"];
+            let mut backend = backend.clone();
+            backend.cookies = configured.options.cookies.clone();
+            backend.events_with_options(
+                &url,
+                BackendOptions {
+                    browser: configured.browser_spec.clone(),
+                    proxy: configured.network.proxy().map(str::to_owned),
+                    user_agent: configured.network.user_agent().map(str::to_owned),
+                    options: configured.cli_options.clone(),
+                    ..BackendOptions::default()
+                },
+            )
         } else {
             return Err(error(
-                "unsupported URL; expected a social URL or direct media file",
+                "unsupported URL; expected a social URL or direct media file (other gallery-dl sites need --extractor compatibility)",
             ));
         };
         let input = if routed_site(&url, extractor) == Some("mastodon") {
