@@ -1,0 +1,249 @@
+query GetMoodboardItemsAndRecommendations(
+  $id: Int!
+  $firstItem: Int!
+  $afterItem: String
+  $shouldGetRecommendations: Boolean!
+  $shouldGetItems: Boolean!
+  $shouldGetMoodboardFields: Boolean!
+) {
+  viewer @include(if: $shouldGetMoodboardFields) {
+    isOptedOutOfRecommendations
+    isAdmin
+  }
+  moodboard(id: $id) {
+    ...moodboardFields @include(if: $shouldGetMoodboardFields)
+
+    items(first: $firstItem, after: $afterItem) @include(if: $shouldGetItems) {
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      nodes {
+        ...nodesFields
+      }
+    }
+
+    recommendedItems(first: 80) @include(if: $shouldGetRecommendations) {
+      nodes {
+        ...nodesFields
+        fetchSource
+      }
+    }
+  }
+}
+
+fragment moodboardFields on Moodboard {
+  id
+  label
+  privacy
+  followerCount
+  isFollowing
+  projectCount
+  url
+  isOwner
+  owners {
+    ...OwnerFields
+    images {
+      size_50 {
+        url
+      }
+      size_100 {
+        url
+      }
+      size_115 {
+        url
+      }
+      size_230 {
+        url
+      }
+      size_138 {
+        url
+      }
+      size_276 {
+        url
+      }
+    }
+  }
+}
+
+fragment projectFields on Project {
+  __typename
+  id
+  isOwner
+  publishedOn
+  matureAccess
+  hasMatureContent
+  modifiedOn
+  name
+  url
+  isPrivate
+  slug
+  license {
+    license
+    description
+    id
+    label
+    url
+    text
+    images
+  }
+  fields {
+    label
+  }
+  colors {
+    r
+    g
+    b
+  }
+  owners {
+    ...OwnerFields
+    images {
+      size_50 {
+        url
+      }
+      size_100 {
+        url
+      }
+      size_115 {
+        url
+      }
+      size_230 {
+        url
+      }
+      size_138 {
+        url
+      }
+      size_276 {
+        url
+      }
+    }
+  }
+  covers {
+    size_original {
+      url
+    }
+    size_max_808 {
+      url
+    }
+    size_808 {
+      url
+    }
+    size_404 {
+      url
+    }
+    size_202 {
+      url
+    }
+    size_230 {
+      url
+    }
+    size_115 {
+      url
+    }
+  }
+  stats {
+    views {
+      all
+    }
+    appreciations {
+      all
+    }
+    comments {
+      all
+    }
+  }
+}
+
+fragment exifDataValueFields on exifDataValue {
+  id
+  label
+  value
+  searchValue
+}
+
+fragment nodesFields on MoodboardItem {
+  id
+  entityType
+  width
+  height
+  flexWidth
+  flexHeight
+  images {
+    size
+    url
+  }
+
+  entity {
+    ... on Project {
+      ...projectFields
+    }
+
+    ... on ImageModule {
+      project {
+        ...projectFields
+      }
+
+      colors {
+        r
+        g
+        b
+      }
+
+      exifData {
+        lens {
+          ...exifDataValueFields
+        }
+        software {
+          ...exifDataValueFields
+        }
+        makeAndModel {
+          ...exifDataValueFields
+        }
+        focalLength {
+          ...exifDataValueFields
+        }
+        iso {
+          ...exifDataValueFields
+        }
+        location {
+          ...exifDataValueFields
+        }
+        flash {
+          ...exifDataValueFields
+        }
+        exposureMode {
+          ...exifDataValueFields
+        }
+        shutterSpeed {
+          ...exifDataValueFields
+        }
+        aperture {
+          ...exifDataValueFields
+        }
+      }
+    }
+
+    ... on MediaCollectionComponent {
+      project {
+        ...projectFields
+      }
+    }
+  }
+}
+
+fragment OwnerFields on User {
+  displayName
+  hasPremiumAccess
+  id
+  isFollowing
+  isProfileOwner
+  location
+  locationUrl
+  url
+  username
+  availabilityInfo {
+    availabilityTimeline
+    isAvailableFullTime
+    isAvailableFreelance
+  }
+}
