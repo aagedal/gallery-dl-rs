@@ -467,6 +467,21 @@ pub struct CliOption {
     pub value: Value,
     /// The original argument, for forwarding to the compatibility backend.
     pub raw: String,
+    /// Append to a list setting instead of replacing it.
+    pub append: bool,
+}
+
+impl CliOption {
+    /// Append one postprocessor definition to the root `postprocessors` list.
+    pub fn postprocessor(value: Value) -> Self {
+        Self {
+            path: Vec::new(),
+            key: "postprocessors".into(),
+            value,
+            raw: String::new(),
+            append: true,
+        }
+    }
 }
 
 impl std::fmt::Debug for CliOption {
@@ -490,6 +505,7 @@ pub fn parse_option(option: &str) -> Result<CliOption> {
         key,
         value,
         raw: option.to_owned(),
+        append: false,
     })
 }
 
@@ -945,9 +961,19 @@ impl Config {
                     .entry(part.clone())
                     .or_insert_with(|| Value::Object(Default::default()));
             }
-            node.as_object_mut()
-                .ok_or_else(|| error("option path crosses a non-object setting"))?
-                .insert(option.key.clone(), option.value.clone());
+            let object = node
+                .as_object_mut()
+                .ok_or_else(|| error("option path crosses a non-object setting"))?;
+            if option.append {
+                let list = object
+                    .entry(option.key.clone())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                list.as_array_mut()
+                    .ok_or_else(|| error("option appends to a non-list setting"))?
+                    .push(option.value.clone());
+            } else {
+                object.insert(option.key.clone(), option.value.clone());
+            }
         }
         let bytes = serde_json::to_vec(&root).map_err(|_| invalid())?;
         Self::parse(&bytes, directory)
