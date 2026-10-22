@@ -8,14 +8,21 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod agnph;
+mod furry34;
+mod gelbooru_v01;
+mod gelbooru_v02;
 mod moebooru;
 mod paheal;
 mod philomena;
 mod realbooru;
 mod rule34us;
+mod rule34vault;
+mod rule34xyz;
 mod shimmie2;
+mod szurubooru;
 mod threedbooru;
 mod twibooru;
+mod yiffverse;
 mod zerochan;
 
 pub(super) static SITES: &[&Site] = &[
@@ -39,6 +46,23 @@ pub(super) static SITES: &[&Site] = &[
     &zerochan::ZEROCHAN,
     &agnph::AGNPH,
     &threedbooru::THREEDBOORU,
+    &szurubooru::BCBNSFW,
+    &szurubooru::SNOOTBOORU,
+    &szurubooru::VISUABUSTERS,
+    &gelbooru_v02::RULE34,
+    &gelbooru_v02::TBIB,
+    &gelbooru_v02::HYPNOHUB,
+    &gelbooru_v02::XBOORU,
+    &gelbooru_v01::THECOLLECTION,
+    &gelbooru_v01::ILLUSIONCARDSBOORU,
+    &gelbooru_v01::ALLGIRLBOORU,
+    &gelbooru_v01::DRAWFRIENDS,
+    &gelbooru_v01::VIDYART2,
+    &rule34xyz::RULE34XYZ,
+    &rule34xyz::RULE34WORLD,
+    &rule34vault::SITE,
+    &furry34::SITE,
+    &yiffverse::SITE,
 ];
 
 // ---------------------------------------------------------------------------
@@ -135,41 +159,6 @@ pub(crate) fn query_get<'q>(query: &'q [(String, String)], name: &str) -> Option
         .map(|(_, v)| v.as_str())
 }
 
-/// `str.rpartition(sep)`: (head, tail); without `sep`, ("", text).
-pub(crate) fn rpartition<'t>(text: &'t str, sep: &str) -> (&'t str, &'t str) {
-    text.rsplit_once(sep).unwrap_or(("", text))
-}
-
-// ---------------------------------------------------------------------------
-// gallery_dl/dt.py
-
-/// `dt.parse_iso` as Unix seconds; `None` stands for the invalid datetime.
-pub(crate) fn iso_timestamp(text: &str) -> Option<i64> {
-    let text = text.trim();
-    if text.len() < 10 || text.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    crate::date::parse_date(text).ok()
-}
-
-/// The `date` keyword for Unix seconds (`None` is the invalid datetime).
-pub(crate) fn date_value(timestamp: Option<i64>) -> Value {
-    crate::filter::source_date_text(timestamp).into()
-}
-
-/// Python `urllib.parse.quote` with its default `safe="/"`.
-pub(crate) fn quote(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'~' | b'/') {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
 /// `text.parse_int`: an integer, or 0 for empty/invalid input.
 pub(crate) fn parse_int(text: &str) -> i64 {
     text.trim().replace('_', "").parse().unwrap_or(0)
@@ -178,39 +167,6 @@ pub(crate) fn parse_int(text: &str) -> i64 {
 /// `text.parse_int` as a JSON value (Python `int`).
 pub(crate) fn int_value(text: &str) -> Value {
     parse_int(text).into()
-}
-
-/// `text.parse_float`: a float, or 0.0 for empty/invalid input.
-pub(crate) fn parse_float(text: &str) -> f64 {
-    text.trim()
-        .parse::<f64>()
-        .ok()
-        .filter(|f| f.is_finite())
-        .unwrap_or(0.0)
-}
-
-/// A float as a JSON value, keeping Python's `1.0` spelling.
-pub(crate) fn float_value(value: f64) -> Value {
-    serde_json::Number::from_f64(value).map_or(Value::Null, Value::Number)
-}
-
-/// `text.parse_bytes`: "500k", "2.5M" or a plain count, as bytes.
-pub(crate) fn parse_bytes(text: &str) -> i64 {
-    let value = text.trim();
-    let Some(last) = value.chars().last() else {
-        return 0;
-    };
-    let (number, mul) = match "bkmgtp".find(last.to_ascii_lowercase()) {
-        Some(power) => (
-            &value[..value.len() - last.len_utf8()],
-            1024f64.powi(power as i32),
-        ),
-        None => (value, 1.0),
-    };
-    match number.trim().parse::<f64>() {
-        Ok(n) if n.is_finite() => (n * mul).round_ties_even() as i64,
-        _ => 0,
-    }
 }
 
 /// `text.extract_iter`: every substring between `begin` and the next `end`.
@@ -253,6 +209,79 @@ impl<'t> Extr<'t> {
     }
 }
 
+/// `str.rpartition(sep)`: (head, tail); without `sep`, ("", text).
+pub(crate) fn rpartition<'t>(text: &'t str, sep: &str) -> (&'t str, &'t str) {
+    text.rsplit_once(sep).unwrap_or(("", text))
+}
+
+/// `str.partition(sep)[0]`.
+pub(crate) fn before<'t>(text: &'t str, sep: &str) -> &'t str {
+    text.split_once(sep).map_or(text, |(head, _)| head)
+}
+
+// ---------------------------------------------------------------------------
+// gallery_dl/dt.py
+
+/// `dt.parse_iso` as Unix seconds; `None` stands for the invalid datetime.
+pub(crate) fn iso_timestamp(text: &str) -> Option<i64> {
+    let text = text.trim();
+    if text.len() < 10 || text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    crate::date::parse_date(text).ok()
+}
+
+/// The `date` keyword for Unix seconds (`None` is the invalid datetime).
+pub(crate) fn date_value(timestamp: Option<i64>) -> Value {
+    crate::filter::source_date_text(timestamp).into()
+}
+
+/// Python `urllib.parse.quote` with its default `safe="/"`.
+pub(crate) fn quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'~' | b'/') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// `text.parse_float`: a float, or 0.0 for empty/invalid input.
+pub(crate) fn parse_float(text: &str) -> f64 {
+    text.trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|f| f.is_finite())
+        .unwrap_or(0.0)
+}
+
+/// A float as a JSON value, keeping Python's `1.0` spelling.
+pub(crate) fn float_value(value: f64) -> Value {
+    serde_json::Number::from_f64(value).map_or(Value::Null, Value::Number)
+}
+
+/// `text.parse_bytes`: "500k", "2.5M" or a plain count, as bytes.
+pub(crate) fn parse_bytes(text: &str) -> i64 {
+    let value = text.trim();
+    let Some(last) = value.chars().last() else {
+        return 0;
+    };
+    let (number, mul) = match "bkmgtp".find(last.to_ascii_lowercase()) {
+        Some(power) => (
+            &value[..value.len() - last.len_utf8()],
+            1024f64.powi(power as i32),
+        ),
+        None => (value, 1.0),
+    };
+    match number.trim().parse::<f64>() {
+        Ok(n) if n.is_finite() => (n * mul).round_ties_even() as i64,
+        _ => 0,
+    }
+}
+
 /// `text.split_html`: unescaped, stripped text between HTML tags.
 pub(crate) fn split_html(text: &str) -> Vec<String> {
     let mut parts = Vec::new();
@@ -274,11 +303,6 @@ pub(crate) fn split_html(text: &str) -> Vec<String> {
         }
     }
     parts
-}
-
-/// `str.partition(sep)[0]`.
-pub(crate) fn before<'t>(text: &'t str, sep: &str) -> &'t str {
-    text.split_once(sep).map_or(text, |(head, _)| head)
 }
 
 /// directives; naive values are UTC. The whole input must match, and a
