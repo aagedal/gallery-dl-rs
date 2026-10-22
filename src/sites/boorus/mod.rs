@@ -8,12 +8,18 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod moebooru;
+mod philomena;
+mod twibooru;
 
 pub(super) static SITES: &[&Site] = &[
     &moebooru::YANDERE,
     &moebooru::KONACHAN,
     &moebooru::SAKUGABOORU,
     &moebooru::LOLIBOORU,
+    &philomena::DERPIBOORU,
+    &philomena::PONYBOORU,
+    &philomena::FURBOORU,
+    &twibooru::SITE,
 ];
 
 // ---------------------------------------------------------------------------
@@ -159,7 +165,10 @@ pub(crate) fn parse_bytes(text: &str) -> i64 {
         return 0;
     };
     let (number, mul) = match "bkmgtp".find(last.to_ascii_lowercase()) {
-        Some(power) => (&value[..value.len() - last.len_utf8()], 1024f64.powi(power as i32)),
+        Some(power) => (
+            &value[..value.len() - last.len_utf8()],
+            1024f64.powi(power as i32),
+        ),
         None => (value, 1.0),
     };
     match number.trim().parse::<f64>() {
@@ -537,10 +546,7 @@ mod tests {
         );
         assert_eq!(iso_timestamp("1500000000"), None);
         assert_eq!(
-            strptime(
-                "Fri Jul 14 04:40:00 +0200 2017",
-                "%a %b %d %H:%M:%S %z %Y"
-            ),
+            strptime("Fri Jul 14 04:40:00 +0200 2017", "%a %b %d %H:%M:%S %z %Y"),
             Some(1_500_000_000)
         );
         assert_eq!(
