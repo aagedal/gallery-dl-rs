@@ -1,6 +1,6 @@
 //! Moebooru sites (yande.re, Konachan, Sakugabooru, Lolibooru), mirroring
 //! gallery_dl/extractor/moebooru.py through the `post.json` API.
-use super::{Events, Http, Item, Route, Site};
+use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
@@ -88,14 +88,14 @@ fn digits(text: &str) -> bool {
 
 fn target(category: &str, url: &Url) -> Option<Target> {
     let host = url.host_str()?;
-    if !super::plain(url)
+    if !crate::sites::plain(url)
         || !hosts(category)
             .iter()
             .any(|h| host == *h || (category != "yandere" && host == format!("www.{h}")))
     {
         return None;
     }
-    let parts = super::segments(url);
+    let parts = crate::sites::segments(url);
     match parts
         .iter()
         .map(String::as_str)
@@ -124,7 +124,7 @@ fn target(category: &str, url: &Url) -> Option<Target> {
 
 fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
     let Some(target) = target(category, &url) else {
-        return super::fail(error("unsupported Moebooru URL"));
+        return crate::sites::fail(error("unsupported Moebooru URL"));
     };
     let base = root(category);
     match target {
@@ -141,10 +141,10 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
             );
             paginate(http, category, &POOL, format!("pool:{id}"), data)
         }
-        Target::Post(id) => super::once(async move {
+        Target::Post(id) => crate::sites::once(async move {
             let url = http.api(&format!("{base}/post.json?tags=id:{id}"))?;
             let posts = http.json(&url).await?;
-            Ok(super::events(posts_events(
+            Ok(crate::sites::events(posts_events(
                 category,
                 http,
                 &POST,
@@ -152,14 +152,14 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
                 &Map::new(),
             )))
         }),
-        Target::Popular { scale, query } => super::once(async move {
+        Target::Popular { scale, query } => crate::sites::once(async move {
             let data = popular_metadata(&scale, &query, today())?;
             let mut url = http.api(&format!("{base}/post/popular_{scale}.json"))?;
             if !query.is_empty() {
                 url.query_pairs_mut().extend_pairs(&query);
             }
             let posts = http.json(&url).await?;
-            Ok(super::events(posts_events(
+            Ok(crate::sites::events(posts_events(
                 category, http, &POPULAR, posts, &data,
             )))
         }),
@@ -225,7 +225,7 @@ fn paginate<'a>(
     data: Map<String, Value>,
 ) -> Events<'a> {
     let base = root(category);
-    super::paginate(Some(1u64), move |page| {
+    crate::sites::paginate(Some(1u64), move |page| {
         let tags = tags.clone();
         let data = data.clone();
         async move {
@@ -241,7 +241,7 @@ fn paginate<'a>(
             let count = posts.as_array().map_or(0, Vec::len);
             let events = posts_events(category, http, route, posts, &data);
             let next = (count >= PER_PAGE && page < 10_000).then_some(page + 1);
-            Ok(Some((super::events(events), next)))
+            Ok(Some((crate::sites::events(events), next)))
         }
     })
 }
@@ -258,7 +258,7 @@ fn posts_events(
     let mut events = Vec::new();
     for post in posts.as_array().into_iter().flatten() {
         if let Some(item) = parse_post(category, post, data) {
-            events.extend(super::post(site, http, route, vec![item]));
+            events.extend(crate::sites::post(site, http, route, vec![item]));
         }
     }
     events
@@ -272,10 +272,10 @@ pub(crate) fn parse_post(category: &str, post: &Value, data: &Map<String, Value>
     } else {
         raw.to_owned()
     };
-    let url = Url::parse(&raw).ok().filter(super::plain)?;
-    let id = fields.get("id").map(super::scalar)?;
+    let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
+    let id = fields.get("id").map(crate::sites::scalar)?;
     if !fields.contains_key("extension") {
-        let (name, ext) = super::nameext(&url);
+        let (name, ext) = crate::sites::nameext(&url);
         fields.insert("filename".into(), name.into());
         fields.insert("extension".into(), ext.into());
     }
@@ -306,8 +306,8 @@ pub(crate) fn parse_post(category: &str, post: &Value, data: &Map<String, Value>
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{http, json, keywords, media, serve};
     use super::*;
+    use crate::sites::testing::{http, json, keywords, media, serve};
     use serde_json::json;
 
     #[test]
@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(t("yandere", "https://konachan.com/post/show/1"), None);
         assert_eq!(t("yandere", "https://yande.re/post/popular_by_year"), None);
         assert!(
-            super::super::find(&Url::parse("https://konachan.com/post/show/1").unwrap())
+            crate::sites::find(&Url::parse("https://konachan.com/post/show/1").unwrap())
                 .is_some_and(|site| site.category == "konachan")
         );
     }
@@ -390,13 +390,13 @@ mod tests {
         assert_eq!(k["filename"], "yande.re 1 tag");
         assert_eq!(k["extension"], "png");
         assert_eq!(k["date"], "2017-07-14 02:40:00");
-        let (file, dir) = super::super::default_templates(&files[0]).unwrap();
+        let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(file.render(&files[0]).unwrap(), "yandere_1_md51.png");
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
             std::path::PathBuf::from("yandere/a b")
         );
-        let (_, identity) = super::super::archive_key(&files[0]).unwrap();
+        let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert_eq!(identity, r#"["t_{search_tags}_{id}",["a b","1"]]"#);
         let requests = server.join().unwrap();
         assert!(
@@ -419,7 +419,7 @@ mod tests {
         .await;
         let k = keywords(&files[0]);
         assert_eq!(k["scale"], "day");
-        let (_, identity) = super::super::archive_key(&files[0]).unwrap();
+        let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert_eq!(
             identity,
             r#"["P_{scale[0]}_{date}_{id}",["d","2017-07-14 02:40:00","5"]]"#

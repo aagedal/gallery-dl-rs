@@ -542,143 +542,119 @@ struct RawRoot {
     extractor: RawExtractor,
 }
 
-/// Declare `RawExtractor` with one scope per registry site (`crate::sites`).
-macro_rules! raw_extractor {
-    ($($field:ident => $name:literal),* $(,)?) => {
-        #[derive(Default, Deserialize)]
-        #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
-        struct RawExtractor {
-            init: Field,
-            postprocessors: Field,
-            postprocessor_options: Field,
-            base_directory: Field,
-            filename: Field,
-            file_range: Field,
-            file_filter: Field,
-            image_filter: Field,
-            post_range: Field,
-            post_filter: Field,
-            child_range: Field,
-            child_filter: Field,
-            include: Field,
-            date_before: Field,
-            date_after: Field,
-            retweets: Field,
-            quoted: Field,
-            expand: Field,
-            unique: Field,
-            videos: Field,
-            previews: Field,
-            mp4: Field,
-            reblogs: Field,
-            posts: Field,
-            inline: Field,
-            original: Field,
-            files: Field,
-            duplicates: Field,
-            revisions: Field,
-            order_revisions: Field,
-            endpoint: Field,
-            order_posts: Field,
-            parent_metadata: Field,
-            metadata_parent: Field,
-            favorites: Field,
-            reposts: Field,
-            ugoira: Field,
-            tags: Field,
-            cursor: Field,
-            text_posts: Field,
-            unavailable: Field,
-            text_tweets: Field,
-            size: Field,
-            fallback: Field,
-            articles: Field,
-            cards: Field,
-            cards_blacklist: Field,
-            tweet_endpoint: Field,
-            conversations: Field,
-            pinned: Field,
-            replies: Field,
-            strategy: Field,
-            search_pagination: Field,
-            search_results: Field,
-            limit: Field,
-            search_limit: Field,
-            search_stop: Field,
-            max_posts: Field,
-            threshold: Field,
-            metadata: Field,
-            comments: Field,
-            captions: Field,
-            sanity: Field,
-            embeds: Field,
-            metadata_bookmark: Field,
-            covers: Field,
-            full_series: Field,
-            directory: Field,
-            cookies: Field,
-            proxy: Field,
-            user_agent: Field,
-            archive: Field,
-            filesize_min: Field,
-            filesize_max: Field,
-            retries: Field,
-            timeout: Field,
-            instagram: Box<RawOptions>,
-            twitter: Box<RawOptions>,
-            facebook: Box<RawOptions>,
-            imgur: Box<RawOptions>,
-            bluesky: Box<RawOptions>,
-            reddit: Box<RawOptions>,
-            danbooru: Box<RawOptions>,
-            e621: Box<RawOptions>,
-            gelbooru: Box<RawOptions>,
-            safebooru: Box<RawOptions>,
-            mastodon: Box<RawOptions>,
-            #[serde(rename = "mastodon.social")]
-            mastodon_social: Box<RawOptions>,
-            pawoo: Box<RawOptions>,
-            baraag: Box<RawOptions>,
-            kemono: Box<RawOptions>,
-            coomer: Box<RawOptions>,
-            pixeldrain: Box<RawOptions>,
-            catbox: Box<RawOptions>,
-            imgbox: Box<RawOptions>,
-            postimg: Box<RawOptions>,
-            tumblr: Box<RawOptions>,
-            pixiv: Box<RawOptions>,
-            pixiv_novel: Box<RawOptions>,
-            deviantart: Box<RawOptions>,
-            flickr: Box<RawOptions>,
-            wallhaven: Box<RawOptions>,
-            artstation: Box<RawOptions>,
-            pinterest: Box<RawOptions>,
-            newgrounds: Box<RawOptions>,
-            furaffinity: Box<RawOptions>,
-            weasyl: Box<RawOptions>,
-            vsco: Box<RawOptions>,
-            direct: Box<RawOptions>,
-            $(
-                #[serde(rename = $name)]
-                $field: Box<RawOptions>,
-            )*
-        }
-        impl RawExtractor {
-            /// Registry site scopes, in declaration order.
-            fn take_sites(&mut self) -> Vec<(&'static str, Box<RawOptions>)> {
-                vec![$(($name, std::mem::take(&mut self.$field))),*]
-            }
-        }
-        /// Registry site categories accepted as configuration scopes.
-        const SITE_SCOPES: &[&str] = &[$($name),*];
-    };
-}
-raw_extractor! {
-    site_4chan => "4chan",
-    site_yandere => "yandere",
-    site_konachan => "konachan",
-    site_sakugabooru => "sakugabooru",
-    site_lolibooru => "lolibooru",
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct RawExtractor {
+    init: Field,
+    postprocessors: Field,
+    postprocessor_options: Field,
+    base_directory: Field,
+    filename: Field,
+    file_range: Field,
+    file_filter: Field,
+    image_filter: Field,
+    post_range: Field,
+    post_filter: Field,
+    child_range: Field,
+    child_filter: Field,
+    include: Field,
+    date_before: Field,
+    date_after: Field,
+    retweets: Field,
+    quoted: Field,
+    expand: Field,
+    unique: Field,
+    videos: Field,
+    previews: Field,
+    mp4: Field,
+    reblogs: Field,
+    posts: Field,
+    inline: Field,
+    original: Field,
+    files: Field,
+    duplicates: Field,
+    revisions: Field,
+    order_revisions: Field,
+    endpoint: Field,
+    order_posts: Field,
+    parent_metadata: Field,
+    metadata_parent: Field,
+    favorites: Field,
+    reposts: Field,
+    ugoira: Field,
+    tags: Field,
+    cursor: Field,
+    text_posts: Field,
+    unavailable: Field,
+    text_tweets: Field,
+    size: Field,
+    fallback: Field,
+    articles: Field,
+    cards: Field,
+    cards_blacklist: Field,
+    tweet_endpoint: Field,
+    conversations: Field,
+    pinned: Field,
+    replies: Field,
+    strategy: Field,
+    search_pagination: Field,
+    search_results: Field,
+    limit: Field,
+    search_limit: Field,
+    search_stop: Field,
+    max_posts: Field,
+    threshold: Field,
+    metadata: Field,
+    comments: Field,
+    captions: Field,
+    sanity: Field,
+    embeds: Field,
+    metadata_bookmark: Field,
+    covers: Field,
+    full_series: Field,
+    directory: Field,
+    cookies: Field,
+    proxy: Field,
+    user_agent: Field,
+    archive: Field,
+    filesize_min: Field,
+    filesize_max: Field,
+    retries: Field,
+    timeout: Field,
+    instagram: Box<RawOptions>,
+    twitter: Box<RawOptions>,
+    facebook: Box<RawOptions>,
+    imgur: Box<RawOptions>,
+    bluesky: Box<RawOptions>,
+    reddit: Box<RawOptions>,
+    danbooru: Box<RawOptions>,
+    e621: Box<RawOptions>,
+    gelbooru: Box<RawOptions>,
+    safebooru: Box<RawOptions>,
+    mastodon: Box<RawOptions>,
+    #[serde(rename = "mastodon.social")]
+    mastodon_social: Box<RawOptions>,
+    pawoo: Box<RawOptions>,
+    baraag: Box<RawOptions>,
+    kemono: Box<RawOptions>,
+    coomer: Box<RawOptions>,
+    pixeldrain: Box<RawOptions>,
+    catbox: Box<RawOptions>,
+    imgbox: Box<RawOptions>,
+    postimg: Box<RawOptions>,
+    tumblr: Box<RawOptions>,
+    pixiv: Box<RawOptions>,
+    pixiv_novel: Box<RawOptions>,
+    deviantart: Box<RawOptions>,
+    flickr: Box<RawOptions>,
+    wallhaven: Box<RawOptions>,
+    artstation: Box<RawOptions>,
+    pinterest: Box<RawOptions>,
+    newgrounds: Box<RawOptions>,
+    furaffinity: Box<RawOptions>,
+    weasyl: Box<RawOptions>,
+    vsco: Box<RawOptions>,
+    direct: Box<RawOptions>,
 }
 
 #[derive(Default, Deserialize)]
@@ -780,6 +756,59 @@ struct RawOptions {
 /// silently inheriting a potentially surprising parent value.
 #[derive(Default)]
 struct Field(Option<Value>);
+
+/// Validates that no JSON object repeats a key, at any depth.
+struct NoDuplicateKeys;
+impl<'de> Deserialize<'de> for NoDuplicateKeys {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = NoDuplicateKeys;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("JSON")
+            }
+            fn visit_bool<E>(self, _: bool) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateKeys)
+            }
+            fn visit_i64<E>(self, _: i64) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateKeys)
+            }
+            fn visit_u64<E>(self, _: u64) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateKeys)
+            }
+            fn visit_f64<E>(self, _: f64) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateKeys)
+            }
+            fn visit_str<E>(self, _: &str) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateKeys)
+            }
+            fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateKeys)
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                while seq.next_element::<NoDuplicateKeys>()?.is_some() {}
+                Ok(NoDuplicateKeys)
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                let mut keys = std::collections::HashSet::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if !keys.insert(key) {
+                        return Err(serde::de::Error::custom("duplicate key"));
+                    }
+                    map.next_value::<NoDuplicateKeys>()?;
+                }
+                Ok(NoDuplicateKeys)
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
 impl<'de> Deserialize<'de> for Field {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
         Value::deserialize(deserializer).map(|value| Self(Some(value)))
@@ -874,7 +903,7 @@ impl Config {
                 "direct",
             ]
             .into_iter()
-            .chain(SITE_SCOPES.iter().copied())
+            .chain(crate::sites::categories())
             {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
@@ -963,8 +992,27 @@ impl Config {
         }
         parent_keywords.sort();
         parent_keywords.dedup();
-        // Decode the original bytes to keep duplicate-key rejection intact.
-        let root: RawRoot = serde_json::from_slice(bytes)
+        // Registry site scopes are decoded separately, so the typed root
+        // decoder does not need one field per site. Reject duplicate keys in
+        // the original bytes first, because the reserialized shape cannot.
+        serde_json::from_slice::<NoDuplicateKeys>(bytes)
+            .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
+        let mut site_scopes = Vec::new();
+        let mut original: Value = serde_json::from_slice(bytes)
+            .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
+        if let Some(extractor) = original.get_mut("extractor").and_then(Value::as_object_mut) {
+            for category in crate::sites::categories() {
+                if let Some(value) = extractor.remove(category) {
+                    let raw: RawOptions = serde_json::from_value(value).map_err(|_| {
+                        error("invalid native configuration JSON or unsupported option")
+                    })?;
+                    site_scopes.push((category, Box::new(raw)));
+                }
+            }
+        }
+        let stripped = serde_json::to_vec(&original)
+            .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
+        let root: RawRoot = serde_json::from_slice(&stripped)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let global = RawOptions {
             tag: None,
@@ -1058,8 +1106,7 @@ impl Config {
             timeout: root.timeout,
         }
         .resolve(directory, &parent_keywords)?;
-        let mut extractor = root.extractor;
-        let site_scopes = extractor.take_sites();
+        let extractor = root.extractor;
         let defaults = RawOptions {
             tag: None,
             artist: None,
@@ -2525,10 +2572,23 @@ fn value_truthy(value: &Value) -> bool {
 #[cfg(test)]
 mod site_scope_tests {
     #[test]
-    fn site_scopes_match_registry() {
-        assert_eq!(
-            super::SITE_SCOPES,
-            crate::sites::categories().collect::<Vec<_>>()
-        );
+    fn registry_scopes_decode_and_reject_duplicates() {
+        let dir = std::env::temp_dir();
+        let config = super::Config::parse(
+            br#"{"extractor":{"4chan":{"filename":"{tim}.{extension}","retries":2}}}"#,
+            &dir,
+        )
+        .unwrap();
+        let resolved = config.resolve("4chan").unwrap();
+        assert_eq!(resolved.retries, Some(2));
+        for bad in [
+            &br#"{"extractor":{"4chan":{"retries":1},"4chan":{"retries":2}}}"#[..],
+            br#"{"extractor":{"4chan":{"retries":1,"retries":2}}}"#,
+            br#"{"extractor":{"4chan":{"unknown-option":1}}}"#,
+            br#"{"extractor":{"4chan":[]}}"#,
+            br#"{"retries":1,"retries":2}"#,
+        ] {
+            assert!(super::Config::parse(bad, &dir).is_err());
+        }
     }
 }

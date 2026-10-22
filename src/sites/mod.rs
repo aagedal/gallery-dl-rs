@@ -8,8 +8,12 @@
 //! `directory_fmt`; archive identities use the upstream `archive_fmt` fields.
 pub mod http;
 
-mod fourchan;
-mod moebooru;
+mod art;
+mod boorus;
+mod filehosts;
+mod imageboards;
+mod manga;
+mod media;
 
 pub use http::Http;
 
@@ -124,13 +128,21 @@ pub struct Site {
     pub api_key: bool,
 }
 
-pub static SITES: &[&Site] = &[
-    &fourchan::SITE,
-    &moebooru::YANDERE,
-    &moebooru::KONACHAN,
-    &moebooru::SAKUGABOORU,
-    &moebooru::LOLIBOORU,
-];
+/// Every registry site, in matching order.
+pub fn sites() -> &'static [&'static Site] {
+    static ALL: std::sync::OnceLock<Vec<&'static Site>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        [
+            imageboards::SITES,
+            boorus::SITES,
+            media::SITES,
+            filehosts::SITES,
+            manga::SITES,
+            art::SITES,
+        ]
+        .concat()
+    })
+}
 
 /// Lazily initialized per-site HTTP state for one CLI invocation.
 pub struct Runtime {
@@ -140,7 +152,10 @@ pub struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
-            cells: SITES.iter().map(|_| tokio::sync::OnceCell::new()).collect(),
+            cells: sites()
+                .iter()
+                .map(|_| tokio::sync::OnceCell::new())
+                .collect(),
         }
     }
 }
@@ -149,7 +164,7 @@ impl Runtime {
     /// The site's HTTP state, created by `init` on first use. An
     /// initialization failure is retained for later inputs of the site.
     pub async fn get(&self, site: &Site, init: impl FnOnce() -> Result<Http>) -> Result<&Http> {
-        let index = SITES
+        let index = sites()
             .iter()
             .position(|candidate| candidate.category == site.category)
             .ok_or_else(|| error("unknown registry site"))?;
@@ -163,12 +178,15 @@ impl Runtime {
 
 /// The registry site handling a URL, if any.
 pub fn find(url: &Url) -> Option<&'static Site> {
-    SITES.iter().copied().find(|site| (site.matches)(url))
+    sites().iter().copied().find(|site| (site.matches)(url))
 }
 
 /// The registry site for a category name.
 pub fn site(category: &str) -> Option<&'static Site> {
-    SITES.iter().copied().find(|site| site.category == category)
+    sites()
+        .iter()
+        .copied()
+        .find(|site| site.category == category)
 }
 
 pub fn is_category(category: &str) -> bool {
@@ -176,7 +194,7 @@ pub fn is_category(category: &str) -> bool {
 }
 
 pub fn categories() -> impl Iterator<Item = &'static str> {
-    SITES.iter().map(|site| site.category)
+    sites().iter().map(|site| site.category)
 }
 
 /// Extract any registry URL, for child jobs that cross site boundaries.
@@ -626,7 +644,7 @@ mod tests {
     #[test]
     fn registry_templates_parse() {
         let mut seen = std::collections::BTreeSet::new();
-        for site in SITES {
+        for site in sites() {
             assert!(seen.insert(site.category), "{}", site.category);
             assert!(!site.routes.is_empty() && site.category.len() <= 64);
             for route in site.routes {

@@ -1,6 +1,6 @@
 //! 4chan threads and boards, mirroring gallery_dl/extractor/4chan.py through
 //! the read-only JSON API on `a.4cdn.org`.
-use super::{Events, Http, Item, Route, Site};
+use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
@@ -33,10 +33,12 @@ fn valid_board(board: &str) -> bool {
 }
 
 fn target(url: &Url) -> Option<Target> {
-    if !super::plain(url) || !super::host_is(url, &["boards.4chan.org", "boards.4channel.org"]) {
+    if !crate::sites::plain(url)
+        || !crate::sites::host_is(url, &["boards.4chan.org", "boards.4channel.org"])
+    {
         return None;
     }
-    let parts = super::segments(url);
+    let parts = crate::sites::segments(url);
     match parts.as_slice() {
         [board, kind, thread, ..]
             if kind == "thread"
@@ -68,12 +70,12 @@ fn target(url: &Url) -> Option<Target> {
 fn extract(http: &Http, url: Url) -> Events<'_> {
     match target(&url) {
         Some(Target::Thread { board, thread }) => {
-            super::once(async move { thread_events(http, &board, &thread).await })
+            crate::sites::once(async move { thread_events(http, &board, &thread).await })
         }
         Some(Target::Board { board }) => {
-            super::once(async move { board_events(http, &board).await })
+            crate::sites::once(async move { board_events(http, &board).await })
         }
-        None => super::fail(error("unsupported 4chan URL")),
+        None => crate::sites::fail(error("unsupported 4chan URL")),
     }
 }
 
@@ -91,9 +93,9 @@ pub(crate) fn parse_thread(body: &Value, board: &str, thread: &str) -> Result<Ve
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| {
-            super::remove_html(op.get("com").and_then(Value::as_str).unwrap_or_default())
+            crate::sites::remove_html(op.get("com").and_then(Value::as_str).unwrap_or_default())
         });
-    let title: String = super::unescape(&title).chars().take(50).collect();
+    let title: String = crate::sites::unescape(&title).chars().take(50).collect();
     let mut items = Vec::new();
     for post in posts {
         let Some(fields) = post.as_object() else {
@@ -102,7 +104,10 @@ pub(crate) fn parse_thread(body: &Value, board: &str, thread: &str) -> Result<Ve
         if !fields.contains_key("filename") {
             continue;
         }
-        let tim = fields.get("tim").map(super::scalar).unwrap_or_default();
+        let tim = fields
+            .get("tim")
+            .map(crate::sites::scalar)
+            .unwrap_or_default();
         let ext = fields
             .get("ext")
             .and_then(Value::as_str)
@@ -125,7 +130,7 @@ pub(crate) fn parse_thread(body: &Value, board: &str, thread: &str) -> Result<Ve
         keywords.insert("extension".into(), ext[1..].into());
         keywords.insert(
             "filename".into(),
-            super::unescape(
+            crate::sites::unescape(
                 fields
                     .get("filename")
                     .and_then(Value::as_str)
@@ -133,7 +138,10 @@ pub(crate) fn parse_thread(body: &Value, board: &str, thread: &str) -> Result<Ve
             )
             .into(),
         );
-        let no = fields.get("no").map(super::scalar).unwrap_or_default();
+        let no = fields
+            .get("no")
+            .map(crate::sites::scalar)
+            .unwrap_or_default();
         items.push(
             Item::new(url, keywords)
                 .ids(thread, tim)
@@ -158,7 +166,9 @@ async fn thread_events<'a>(http: &'a Http, board: &str, thread: &str) -> Result<
     let url = http.api(&format!("https://a.4cdn.org/{board}/thread/{thread}.json"))?;
     let body = http.json(&url).await?;
     let items = parse_thread(&body, board, thread)?;
-    Ok(super::events(super::post(&SITE, http, &THREAD, items)))
+    Ok(crate::sites::events(crate::sites::post(
+        &SITE, http, &THREAD, items,
+    )))
 }
 
 async fn board_events<'a>(http: &'a Http, board: &str) -> Result<Events<'a>> {
@@ -189,17 +199,17 @@ async fn board_events<'a>(http: &'a Http, board: &str) -> Result<Events<'a>> {
     }
     Ok(futures_util::StreamExt::boxed(
         futures_util::StreamExt::flatten(futures_util::stream::iter(
-            children
-                .into_iter()
-                .map(move |(child, data)| super::queue(http, "4chan", "board", child, &data)),
+            children.into_iter().map(move |(child, data)| {
+                crate::sites::queue(http, "4chan", "board", child, &data)
+            }),
         )),
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{http, json, keywords, media, serve};
     use super::*;
+    use crate::sites::testing::{http, json, keywords, media, serve};
     use serde_json::json;
 
     #[test]
@@ -263,13 +273,13 @@ mod tests {
         assert_eq!(k["thread"], "100");
         assert_eq!(k["extension"], "jpg");
         assert_eq!(keywords(&files[1])["extension"], "webm");
-        let (namespace, identity) = super::super::archive_key(&files[1]).unwrap();
+        let (namespace, identity) = crate::sites::archive_key(&files[1]).unwrap();
         assert_eq!(namespace, "4chan");
         assert_eq!(
             identity,
             r#"["{board}_{thread}_{tim}",["a","100","1500000200456"]]"#
         );
-        let (file, dir) = super::super::default_templates(&files[0]).unwrap();
+        let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(file.render(&files[0]).unwrap(), "1500000000123 a&b.jpg");
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
