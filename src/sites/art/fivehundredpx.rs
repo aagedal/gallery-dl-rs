@@ -733,6 +733,7 @@ fragment GalleriesDetailPaginationContainer_gallery_3e6UuE on Gallery {
 mod tests {
     use super::*;
     use crate::sites::testing::{http, json, keywords, media, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -879,5 +880,15 @@ mod tests {
         assert_eq!(keywords(&files[0])["subcategory"], "image");
         let requests = server.join().unwrap();
         assert!(requests[0].contains("&ids=7 "));
+    }
+
+    #[tokio::test]
+    async fn unknown_user_is_an_error() {
+        let (root, server) = serve(vec![json(json!({"data": {"user": null}}))]);
+        let http = http("500px", root);
+        let events = extract(&http, Url::parse("https://500px.com/nobody").unwrap());
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

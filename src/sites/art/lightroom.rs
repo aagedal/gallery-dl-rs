@@ -194,6 +194,7 @@ pub(crate) fn parse_resources(
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -263,7 +264,8 @@ mod tests {
         assert_eq!(k["title"], "Album");
         assert_eq!(k["gallery_id"], "abc");
         let (file, dir) = crate::sites::default_templates(&files[1]).unwrap();
-        assert_eq!(file.render(&files[1]).unwrap(), "0002_two");
+        // The size component has no extension; upstream renders the dot too.
+        assert_eq!(file.render(&files[1]).unwrap(), "0002_two.");
         assert_eq!(
             dir.render(&files[1]).unwrap().unwrap(),
             std::path::PathBuf::from("lightroom/Ann/Album")
@@ -274,5 +276,18 @@ mod tests {
         assert!(requests[0].starts_with("GET /shares/abc "));
         assert!(requests[1].starts_with("GET /v2/spaces/s/albums/a/assets "));
         assert!(requests[2].starts_with("GET /v2/spaces/s/albums/a/assets?page=2 "));
+    }
+
+    #[tokio::test]
+    async fn share_without_album_is_an_error() {
+        let (root, server) = serve(vec![html("<html></html>")]);
+        let http = http("lightroom", root);
+        let events = extract(
+            &http,
+            Url::parse("https://lightroom.adobe.com/shares/abc").unwrap(),
+        );
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

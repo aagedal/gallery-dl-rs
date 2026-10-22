@@ -3,8 +3,8 @@
 //! upstream default) and the public Meilisearch endpoint.
 //!
 //! Supported options: `quality`, `quality-videos`, `nsfw`, `period`, `sort`,
-//! `include` (user dispatch) and `token` (search). Not supported: `api`
-//! (REST), `api-key`, `metadata` and `files`. Reactions, the generator feed
+//! `include` (user dispatch), `api-key` (tRPC) and `token` (search). Not
+//! supported: `api` (REST), `metadata` and `files`. Reactions, the generator feed
 //! and anything else needing an account are not matched.
 use crate::sites::art;
 use crate::sites::{Events, Http, Item, Route, Site};
@@ -43,7 +43,7 @@ pub static SITE: Site = Site {
         &USER_VIDEOS,
         &USER_COLLECTIONS,
     ],
-    api_key: false,
+    api_key: true,
 };
 
 const FILENAME: &str = "{file[id]}.{extension}";
@@ -622,13 +622,17 @@ async fn trpc(
     url.query_pairs_mut()
         .append_pair("input", &input.to_string());
     let date = now_ms();
-    let headers = [
+    let mut headers = vec![
         ("content-type", "application/json"),
         ("x-client-version", "5.0.1386"),
         ("x-client-date", date.as_str()),
         ("x-client", "web"),
         ("x-fingerprint", "undefined"),
     ];
+    let authorization = http.api_key().map(|key| format!("Bearer {key}"));
+    if let Some(authorization) = &authorization {
+        headers.push(("Authorization", authorization));
+    }
     let mut body = http.json_with(&url, &headers).await?;
     body.pointer_mut("/result/data/json")
         .map(Value::take)
@@ -1441,6 +1445,34 @@ mod tests {
         assert!(requests[0].starts_with("GET /api/trpc/image.get?input="));
         assert!(requests[0].contains("x-client: web"));
         assert_eq!(input(&requests[0]), json!({"json": {"id": 26962948}}));
+    }
+
+    #[tokio::test]
+    async fn api_key_is_sent_as_bearer_token() {
+        let (root, server) = serve(vec![trpc_reply(image(1, 2))]);
+        let http = http("civitai", root).with_api_key(Some("secret"));
+        let files = media(extract(
+            &http,
+            Url::parse("https://civitai.com/images/1").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn response_without_result_is_an_error() {
+        let (root, server) = serve(vec![reply(json!({"error": {"message": "nope"}}))]);
+        let http = http("civitai", root);
+        let events = extract(&http, Url::parse("https://civitai.com/images/1").unwrap());
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 
     #[tokio::test]

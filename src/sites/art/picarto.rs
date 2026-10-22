@@ -142,6 +142,7 @@ pub(crate) fn parse_post(post: Value) -> Result<Vec<Item>> {
 mod tests {
     use super::*;
     use crate::sites::testing::{http, json, keywords, media, serve};
+    use futures_util::StreamExt;
     use serde_json::json;
 
     #[test]
@@ -206,5 +207,22 @@ mod tests {
             "GET /api/channel-gallery?first=30&page=1&filter_params%5Balbum_id%5D=&filter_params%5Bchannel_name%5D=fnook&"
         ), "{}", requests[0]);
         assert!(requests[1].starts_with("GET /api/channel-gallery?first=30&page=2&"));
+    }
+
+    #[tokio::test]
+    async fn api_errors_end_the_stream() {
+        let (root, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "application/json",
+            b"{}",
+        )]);
+        let http = http("picarto", root);
+        let events = extract(
+            &http,
+            Url::parse("https://picarto.tv/nobody/gallery").unwrap(),
+        );
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

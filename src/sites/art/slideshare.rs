@@ -148,6 +148,7 @@ pub(crate) fn parse_page(page: &str, presentation: &str) -> Result<Vec<Item>> {
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -209,5 +210,15 @@ mod tests {
         let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert_eq!(identity, r#"["{presentation}_{num}",["get-started","1"]]"#);
         assert!(server.join().unwrap()[0].starts_with("GET /Slideshare/get-started "));
+    }
+
+    #[tokio::test]
+    async fn page_without_slideshow_is_an_error() {
+        let (root, server) = serve(vec![html("<html></html>")]);
+        let http = http("slideshare", root);
+        let events = extract(&http, Url::parse("https://www.slideshare.net/u/p").unwrap());
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

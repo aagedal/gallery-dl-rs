@@ -198,6 +198,7 @@ pub(crate) fn parse_post(post: Value) -> Result<Vec<Item>> {
 mod tests {
     use super::*;
     use crate::sites::testing::{http, json, keywords, media, serve};
+    use futures_util::StreamExt;
     use serde_json::json;
 
     #[test]
@@ -306,5 +307,15 @@ mod tests {
         let (_, identity) = crate::sites::archive_key(&files[1]).unwrap();
         assert_eq!(identity, r#"["{id}_{num}",["7","1"]]"#);
         assert!(server.join().unwrap()[0].starts_with("GET /api/gallery/7 "));
+    }
+
+    #[tokio::test]
+    async fn response_without_data_is_an_error() {
+        let (root, server) = serve(vec![json(json!({"message": "nope"}))]);
+        let http = http("piczel", root);
+        let events = extract(&http, Url::parse("https://piczel.tv/gallery/me").unwrap());
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

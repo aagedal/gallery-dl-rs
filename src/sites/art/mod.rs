@@ -9,9 +9,35 @@ use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod arena;
 mod behance;
+mod booth;
+mod civitai;
+mod fivehundredpx;
+mod issuu;
+mod itaku;
+mod lightroom;
+mod picarto;
+mod piczel;
+mod slideshare;
+mod speakerdeck;
+mod wikiart;
 
-pub(super) static SITES: &[&Site] = &[&behance::SITE];
+pub(super) static SITES: &[&Site] = &[
+    &behance::SITE,
+    &arena::SITE,
+    &booth::SITE,
+    &civitai::SITE,
+    &fivehundredpx::SITE,
+    &issuu::SITE,
+    &itaku::SITE,
+    &lightroom::SITE,
+    &picarto::SITE,
+    &piczel::SITE,
+    &slideshare::SITE,
+    &speakerdeck::SITE,
+    &wikiart::SITE,
+];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
 /// cursor; a miss returns `""` and leaves the cursor in place.

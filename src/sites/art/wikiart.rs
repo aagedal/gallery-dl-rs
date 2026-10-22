@@ -482,4 +482,17 @@ mod tests {
         );
         assert!(requests[4].contains("&page=2&"));
     }
+
+    #[tokio::test]
+    async fn invalid_artist_response_is_an_error() {
+        let (root, server) = serve(vec![json(json!([]))]);
+        let http = http("wikiart", root);
+        let events = extract(
+            &http,
+            Url::parse("https://www.wikiart.org/en/thomas-cole").unwrap(),
+        );
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
+    }
 }

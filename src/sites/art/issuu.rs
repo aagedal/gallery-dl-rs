@@ -1,6 +1,6 @@
 //! Issuu publications and publishers, mirroring gallery_dl/extractor/issuu.py
 //! by reading the document data embedded in the publication pages.
-use super::{extr, on_host, parse_int, raw_segments, segment, str_of};
+use super::{extr, parse_int, raw_segments, segment, str_of};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -186,6 +186,7 @@ fn user_pages(http: &Http, user: String, page: i64) -> Events<'_> {
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -281,5 +282,35 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /issuu "));
         assert!(requests[1].starts_with("GET /issuu/docs/motions "));
+    }
+
+    #[tokio::test]
+    async fn user_pages_continue_while_full() {
+        let docs = vec![r#"{\"uri\":\"skipped\"}"#; 48].join(",");
+        let full = format!(r#"x{{\"docs\":[{docs}]}}]\n"]"#);
+        let (root, server) = serve(vec![html(&full), html(r#"x{\"docs\":[]}]\n"]"#)]);
+        let http = http("issuu", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://issuu.com/issuu").unwrap(),
+        ))
+        .await;
+        assert!(files.is_empty());
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /issuu "));
+        assert!(requests[1].starts_with("GET /issuu/2 "));
+    }
+
+    #[tokio::test]
+    async fn publication_without_data_is_an_error() {
+        let (root, server) = serve(vec![html("<html></html>")]);
+        let http = http("issuu", root);
+        let events = extract(
+            &http,
+            Url::parse("https://issuu.com/issuu/docs/motions").unwrap(),
+        );
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

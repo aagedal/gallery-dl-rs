@@ -212,6 +212,7 @@ pub(crate) fn parse_contents(
 mod tests {
     use super::*;
     use crate::sites::testing::{http, json, keywords, media, serve};
+    use futures_util::StreamExt;
     use serde_json::json;
 
     #[test]
@@ -292,5 +293,19 @@ mod tests {
         assert!(requests[0].starts_with("GET /v2/channels/cassette "));
         assert!(requests[1].starts_with("GET /v2/channels/cassette/contents?page=1&per=100 "));
         assert!(requests[2].starts_with("GET /v2/channels/cassette/contents?page=2&per=100 "));
+    }
+
+    #[tokio::test]
+    async fn missing_channel_is_an_error() {
+        let (root, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "application/json",
+            b"{}",
+        )]);
+        let http = http("arena", root);
+        let events = extract(&http, Url::parse("https://www.are.na/u/gone").unwrap());
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

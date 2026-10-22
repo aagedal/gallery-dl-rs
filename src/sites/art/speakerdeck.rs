@@ -115,6 +115,7 @@ pub(crate) fn parse_player(page: &str, data: &Map<String, Value>) -> Result<Vec<
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, json, keywords, media, serve};
+    use futures_util::StreamExt;
     use serde_json::json;
 
     #[test]
@@ -173,5 +174,17 @@ mod tests {
             requests[0]
         );
         assert!(requests[1].starts_with("GET /player/abc123 "));
+    }
+
+    #[tokio::test]
+    async fn oembed_without_player_is_an_error() {
+        let (root, server) = serve(vec![json(
+            json!({"title": "T", "author_name": "A", "html": ""}),
+        )]);
+        let http = http("speakerdeck", root);
+        let events = extract(&http, Url::parse("https://speakerdeck.com/u/p").unwrap());
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

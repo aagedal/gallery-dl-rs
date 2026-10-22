@@ -102,8 +102,15 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 
 async fn item(http: &Http, id: String) -> Result<Events<'_>> {
     let page_url = format!("{ROOT}/ja/items/{id}");
-    let page = http.text_with(&http.api(&page_url)?, &[COOKIE]).await?;
-    let token = extr(&page, "name=\"csrf-token\" content=\"", "\"");
+    let fallback = http.option_str("strategy") == Some("fallback");
+    let page = if fallback {
+        None
+    } else {
+        Some(http.text_with(&http.api(&page_url)?, &[COOKIE]).await?)
+    };
+    let token = page.as_deref().map_or("", |page| {
+        extr(page, "name=\"csrf-token\" content=\"", "\"")
+    });
     let mut headers = vec![
         ("Accept", "application/json"),
         ("Content-Type", "application/json"),
@@ -119,14 +126,15 @@ async fn item(http: &Http, id: String) -> Result<Events<'_>> {
     let data = http
         .json_with(&http.api(&format!("{page_url}.json"))?, &headers)
         .await?;
-    let items = parse_item(data, &page)?;
+    let items = parse_item(data, page.as_deref())?;
     Ok(crate::sites::events(crate::sites::post(
         &SITE, http, &ITEM, items,
     )))
 }
 
-/// The item description merged into each `data-origin` image of its page.
-pub(crate) fn parse_item(data: Value, page: &str) -> Result<Vec<Item>> {
+/// The item description merged into each original image. Without a page
+/// (`strategy` = `fallback`) the images come from the JSON description.
+pub(crate) fn parse_item(data: Value, page: Option<&str>) -> Result<Vec<Item>> {
     let Value::Object(mut item) = data else {
         return Err(error("BOOTH item is not an object"));
     };
@@ -146,9 +154,20 @@ pub(crate) fn parse_item(data: Value, page: &str) -> Result<Vec<Item>> {
         .filter_map(|tag| tag.get("name").cloned())
         .collect();
     item.insert("tags".into(), tags.into());
-    item.remove("images");
-
-    let files: Vec<&str> = extract_iter(page, "data-origin=\"", "\"");
+    let images = item.remove("images");
+    let files: Vec<String> = match page {
+        Some(page) => extract_iter(page, "data-origin=\"", "\"")
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        None => images
+            .as_ref()
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|image| str_of(image, "original").replace("_base_resized", ""))
+            .collect(),
+    };
     let mut shop = match item.remove("shop") {
         Some(Value::Object(shop)) => shop,
         _ => Map::new(),
@@ -157,12 +176,12 @@ pub(crate) fn parse_item(data: Value, page: &str) -> Result<Vec<Item>> {
         .get("thumbnail_url")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let shop_id = thumbnail.rsplitn(4, '/').nth(2).unwrap_or_default();
+    let shop_id = thumbnail.rsplit('/').nth(2).unwrap_or_default();
     shop.insert("id".into(), parse_int(shop_id, 0).into());
     item.insert("count".into(), files.len().into());
     let uuid = files
         .first()
-        .and_then(|url| url.splitn(5, '/').nth(3))
+        .and_then(|url| url.split('/').nth(3))
         .map_or(Value::Null, Value::from);
     shop.insert("uuid".into(), uuid);
     let shop_name = shop.get("name").and_then(Value::as_str).map(str::to_owned);
@@ -172,13 +191,13 @@ pub(crate) fn parse_item(data: Value, page: &str) -> Result<Vec<Item>> {
     let name = item.get("name").and_then(Value::as_str).map(str::to_owned);
     let mut items = Vec::new();
     for (index, raw) in files.into_iter().enumerate() {
-        let Some(url) = super::file_url(raw, ROOT) else {
+        let Some(url) = super::file_url(&raw, ROOT) else {
             continue;
         };
         let mut fields = item.clone();
-        fields.insert("url".into(), raw.into());
+        fields.insert("url".into(), raw.clone().into());
         fields.insert("num".into(), (index + 1).into());
-        super::nameext_into(raw, &mut fields);
+        super::nameext_into(&raw, &mut fields);
         let media = format!(
             "{id}_{}",
             str_of(&Value::Object(fields.clone()), "filename")
@@ -258,6 +277,7 @@ fn pagination(http: &Http, root: String, first: String, json: bool) -> Events<'_
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, json, keywords, media, serve};
+    use futures_util::StreamExt;
     use serde_json::json;
 
     #[test]
@@ -332,7 +352,8 @@ mod tests {
         assert_eq!(k["shop"]["uuid"], "uuid-1");
         assert_eq!(k["count"], 2);
         assert_eq!(k["num"], 2);
-        assert!(!k.contains_key("images") && !k.contains_key("category"));
+        assert!(!k.contains_key("images"));
+        assert_eq!(k["category"], "booth");
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(file.render(&files[0]).unwrap(), "01 a_base_resized.jpg");
         assert_eq!(
@@ -350,6 +371,44 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("x-csrf-token: tok")
         );
+    }
+
+    #[tokio::test]
+    async fn fallback_strategy_uses_json_images() {
+        let mut data = item_json();
+        data["images"] =
+            json!([{"original": "https://booth.pximg.net/uuid-2/i/12/a_base_resized.jpg"}]);
+        let (root, server) = serve(vec![json(data)]);
+        let options = json!({"strategy": "fallback"}).as_object().cloned();
+        let http = http("booth", root).with_options(options.map(std::sync::Arc::new));
+        let files = media(extract(
+            &http,
+            Url::parse("https://booth.pm/ja/items/12").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].url.as_str(),
+            "https://booth.pximg.net/uuid-2/i/12/a.jpg"
+        );
+        assert_eq!(keywords(&files[0])["shop"]["uuid"], "uuid-2");
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with("GET /ja/items/12.json "));
+    }
+
+    #[tokio::test]
+    async fn missing_item_is_an_error() {
+        let (root, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("booth", root);
+        let events = extract(&http, Url::parse("https://booth.pm/ja/items/9").unwrap());
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 
     #[tokio::test]
