@@ -120,7 +120,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 mod tests {
     use super::super::rule34xyz::tests::{body, with_options};
     use super::*;
-    use crate::sites::testing::{http, json, keywords, media, serve};
+    use crate::sites::testing::{fails, http, json, keywords, media, serve};
     use serde_json::json;
 
     fn t(raw: &str) -> Option<Target> {
@@ -131,7 +131,9 @@ mod tests {
 
     #[test]
     fn classifies_urls() {
-        assert!(matches!(t("https://rule34vault.com/post/280517"), Some(Target::Post(id)) if id == "280517"));
+        assert!(
+            matches!(t("https://rule34vault.com/post/280517"), Some(Target::Post(id)) if id == "280517")
+        );
         assert!(matches!(
             t("https://rule34vault.com/playlists/view/20164"),
             Some(Target::Search { route, .. }) if route.subcategory == "playlist"
@@ -260,12 +262,12 @@ mod tests {
         full.insert("tags".into(), json!([{"type": null, "value": "x"}]));
         let (root, _server) = serve(vec![json(Value::Object(full))]);
         let http = with_options(http("rule34vault", root), json!({"tags": true}));
-        let events = crate::event::media_only(extract(
-            &http,
-            Url::parse("https://rule34vault.com/post/1").unwrap(),
-        ));
-        use futures_util::StreamExt;
-        let results: Vec<_> = events.collect().await;
-        assert!(results.iter().any(|r| r.is_err()));
+        assert!(
+            fails(extract(
+                &http,
+                Url::parse("https://rule34vault.com/post/1").unwrap(),
+            ))
+            .await
+        );
     }
 }

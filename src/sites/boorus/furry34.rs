@@ -157,7 +157,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 mod tests {
     use super::super::rule34xyz::tests::{body, with_options};
     use super::*;
-    use crate::sites::testing::{http, json, keywords, media, serve};
+    use crate::sites::testing::{fails, http, json, keywords, media, serve};
     use serde_json::json;
 
     fn t(raw: &str) -> Option<Target> {
@@ -180,7 +180,9 @@ mod tests {
 
     #[test]
     fn classifies_urls() {
-        assert!(matches!(t("https://www.furry34.com/post/541949"), Some(Target::Post(id)) if id == "541949"));
+        assert!(
+            matches!(t("https://www.furry34.com/post/541949"), Some(Target::Post(id)) if id == "541949")
+        );
         assert!(matches!(
             t("https://furry34.com/playlists/view/8966"),
             Some(Target::Search { route, .. }) if route.subcategory == "playlist"
@@ -338,5 +340,23 @@ mod tests {
             body(&requests[0]).to_string(),
             r#"{"includeTags":["big tree"],"type":1,"sortBy":0,"take":30}"#
         );
+    }
+
+    #[tokio::test]
+    async fn missing_post_is_an_error() {
+        let (root, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "application/json",
+            b"{}",
+        )]);
+        let http = http("furry34", root);
+        assert!(
+            fails(extract(
+                &http,
+                Url::parse("https://furry34.com/post/9").unwrap()
+            ))
+            .await
+        );
+        server.join().unwrap();
     }
 }

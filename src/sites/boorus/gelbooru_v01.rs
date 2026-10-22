@@ -361,7 +361,7 @@ mod tests {
         let item = parse_page(
             "allgirlbooru",
             "3",
-            "Rating: <img alt=\"img\" src=\"/i/a.png\">",
+            "Rating: <br /><img alt=\"img\" src=\"/i/a.png\">",
             &Map::new(),
         )
         .unwrap();
@@ -462,5 +462,22 @@ mod tests {
             crate::sites::archive_key(&files[0]).unwrap().1,
             r#"["{id}",["5"]]"#
         );
+    }
+
+    #[tokio::test]
+    async fn missing_post_page_is_an_error() {
+        let (root, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("allgirlbooru", root);
+        let events = extract(
+            "allgirlbooru",
+            &http,
+            Url::parse("https://allgirl.booru.org/index.php?page=post&s=view&id=9").unwrap(),
+        );
+        assert!(crate::sites::testing::fails(events).await);
+        server.join().unwrap();
     }
 }

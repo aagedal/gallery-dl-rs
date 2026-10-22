@@ -618,6 +618,13 @@ pub(crate) mod testing {
             .await
     }
 
+    /// Whether extraction ends in an error.
+    pub async fn fails(events: Events<'_>) -> bool {
+        crate::event::media_only(events)
+            .any(|m| async move { m.is_err() })
+            .await
+    }
+
     pub fn keywords(media: &Media) -> &Map<String, Value> {
         media
             .metadata

@@ -417,4 +417,31 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /api/post/9 "));
     }
+
+    #[tokio::test]
+    async fn missing_results_and_posts_are_errors() {
+        let (root, server) = serve(vec![json(json!({"name": "ValidationError"}))]);
+        let http = http("snootbooru", root);
+        let events = extract(
+            "snootbooru",
+            &http,
+            Url::parse("https://snootbooru.com/posts/query=x").unwrap(),
+        );
+        assert!(crate::sites::testing::fails(events).await);
+        server.join().unwrap();
+
+        let (root, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "application/json",
+            b"{}",
+        )]);
+        let http = crate::sites::testing::http("snootbooru", root);
+        let events = extract(
+            "snootbooru",
+            &http,
+            Url::parse("https://snootbooru.com/post/1").unwrap(),
+        );
+        assert!(crate::sites::testing::fails(events).await);
+        server.join().unwrap();
+    }
 }

@@ -105,7 +105,11 @@ fn advance(params: &mut Map<String, Value>, cursor: Option<&Value>, per_page: us
 /// The `format` option: an ordered list of `files` keys. Non-string list
 /// entries never match a key; `None` means iteration fails upstream.
 fn formats(http: &Http) -> Option<Vec<Option<String>>> {
-    let default = || ["100", "101", "102", "10"].map(|f| Some(f.to_owned())).to_vec();
+    let default = || {
+        ["100", "101", "102", "10"]
+            .map(|f| Some(f.to_owned()))
+            .to_vec()
+    };
     Some(match http.option("format") {
         None | Some(Value::Null | Value::Bool(false)) => default(),
         Some(Value::String(s)) if s.is_empty() => default(),
@@ -143,6 +147,9 @@ fn file_url(api: &Api, http: &Http, post: &mut Map<String, Value>) -> Option<Str
 // ---------------------------------------------------------------------------
 // Shared engine for the rule34xyz-style JSON API.
 
+/// `_pagination` parameters for the next page, given `data["cursor"]`.
+pub(super) type Advance = fn(&mut Map<String, Value>, Option<&Value>, usize) -> Result<()>;
+
 pub(super) struct Api {
     pub site: &'static Site,
     /// Accepted hosts (exact).
@@ -161,7 +168,7 @@ pub(super) struct Api {
     /// `_pagination` initial parameters.
     pub start: fn(&mut Map<String, Value>, usize),
     /// `_pagination` parameters for the next page, given `data["cursor"]`.
-    pub advance: fn(&mut Map<String, Value>, Option<&Value>, usize) -> Result<()>,
+    pub advance: Advance,
 }
 
 /// What an URL asks for.
@@ -315,9 +322,9 @@ pub(super) fn run<'a>(api: &'static Api, http: &'a Http, target: Target) -> Even
                     state.pending = items
                         .iter()
                         .map(|post| {
-                            post.as_object()
-                                .cloned()
-                                .ok_or_else(|| error(format!("{} returned an invalid post", api.site.name)))
+                            post.as_object().cloned().ok_or_else(|| {
+                                error(format!("{} returned an invalid post", api.site.name))
+                            })
                         })
                         .collect::<Result<_>>()?;
                     Ok(Some((crate::sites::events(Vec::new()), state)))
@@ -382,10 +389,7 @@ async fn emit(
             .collect::<Vec<_>>();
         post.insert("tags".into(), values.into());
     }
-    let id = post
-        .get("id")
-        .map(crate::sites::scalar)
-        .unwrap_or_default();
+    let id = post.get("id").map(crate::sites::scalar).unwrap_or_default();
     let user = post
         .get("uploader")
         .and_then(|u| u.get("userName"))
@@ -419,10 +423,7 @@ fn tag_list(api: &Api, tags: &Value) -> Result<Vec<(Option<Value>, Value)>> {
 /// in first-seen order, as upstream's dict assignment does.
 async fn tags(api: &Api, http: &Http, post: &mut Map<String, Value>) -> Result<()> {
     if !post.contains_key("tags") {
-        let id = post
-            .get("id")
-            .map(crate::sites::scalar)
-            .unwrap_or_default();
+        let id = post.get("id").map(crate::sites::scalar).unwrap_or_default();
         for (key, value) in fetch_post(api, http, &id).await? {
             post.insert(key, value);
         }
@@ -488,7 +489,7 @@ fn extract<'a>(api: &'static Api, http: &'a Http, url: Url) -> Events<'a> {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::sites::testing::{http, json, keywords, media, serve};
+    use crate::sites::testing::{fails, http, json, keywords, media, serve};
     use serde_json::json;
     use std::sync::Arc;
 
@@ -522,16 +523,30 @@ pub(super) mod tests {
             t("https://www.rule34.world/post/12x"),
             Some(("rule34world", Target::Post(id))) if id == "12"
         ));
-        let Some(("rule34xyz", Target::Search { route, endpoint, data, .. })) =
-            t("https://rule34.xyz/playlists/view/119")
+        let Some((
+            "rule34xyz",
+            Target::Search {
+                route,
+                endpoint,
+                data,
+                ..
+            },
+        )) = t("https://rule34.xyz/playlists/view/119")
         else {
             panic!()
         };
         assert_eq!(route.subcategory, "playlist");
         assert_eq!(endpoint, "/v2/post/search/playlist/119");
         assert_eq!(data["playlist_id"], "119");
-        let Some(("rule34world", Target::Search { route, params, data, .. })) =
-            t("https://rule34.world/preview_%2528preview0%2529%7Cb")
+        let Some((
+            "rule34world",
+            Target::Search {
+                route,
+                params,
+                data,
+                ..
+            },
+        )) = t("https://rule34.world/preview_%2528preview0%2529%7Cb")
         else {
             panic!()
         };
@@ -570,7 +585,10 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn post_selects_format_and_tags() {
-        let mut full = post(3613851, json!({"10": [true]})).as_object().unwrap().clone();
+        let mut full = post(3613851, json!({"10": [true]}))
+            .as_object()
+            .unwrap()
+            .clone();
         full.insert(
             "tags".into(),
             json!([{"type": 8, "value": "artist a"}, {"type": 1, "value": "g1"},
@@ -637,7 +655,10 @@ pub(super) mod tests {
         );
         assert_eq!(p["format"], "mov720");
         assert_eq!(p["format_id"], "101");
-        let custom = with_options(http("rule34.world", root.clone()), json!({"format": "10,4,5"}));
+        let custom = with_options(
+            http("rule34.world", root.clone()),
+            json!({"format": "10,4,5"}),
+        );
         assert_eq!(
             file_url(&WORLD, &custom, &mut p).as_deref(),
             Some("https://rule34storage.b-cdn.net/posts/3571/3571567/3571567.pic.jpg")
@@ -724,5 +745,20 @@ pub(super) mod tests {
             body(&requests[0]).to_string(),
             r#"{"Skip":0,"take":60,"CountTotal":false,"IncludeLinks":true,"OrderBy":0}"#
         );
+    }
+
+    #[tokio::test]
+    async fn search_without_items_is_an_error() {
+        let (root, server) = serve(vec![json(json!({"cursor": "c"}))]);
+        let http = http("rule34.xyz", root);
+        assert!(
+            fails(extract(
+                &XYZ,
+                &http,
+                Url::parse("https://rule34.xyz/sfw").unwrap()
+            ))
+            .await
+        );
+        server.join().unwrap();
     }
 }

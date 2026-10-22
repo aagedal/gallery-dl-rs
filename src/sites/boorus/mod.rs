@@ -7,9 +7,16 @@ use crate::sites::{Http, Item, Route, Site};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod furry34;
+mod gelbooru_v01;
+mod gelbooru_v02;
 mod moebooru;
 mod philomena;
+mod rule34vault;
+mod rule34xyz;
+mod szurubooru;
 mod twibooru;
+mod yiffverse;
 
 pub(super) static SITES: &[&Site] = &[
     &moebooru::YANDERE,
@@ -20,6 +27,23 @@ pub(super) static SITES: &[&Site] = &[
     &philomena::PONYBOORU,
     &philomena::FURBOORU,
     &twibooru::SITE,
+    &szurubooru::BCBNSFW,
+    &szurubooru::SNOOTBOORU,
+    &szurubooru::VISUABUSTERS,
+    &gelbooru_v02::RULE34,
+    &gelbooru_v02::TBIB,
+    &gelbooru_v02::HYPNOHUB,
+    &gelbooru_v02::XBOORU,
+    &gelbooru_v01::THECOLLECTION,
+    &gelbooru_v01::ILLUSIONCARDSBOORU,
+    &gelbooru_v01::ALLGIRLBOORU,
+    &gelbooru_v01::DRAWFRIENDS,
+    &gelbooru_v01::VIDYART2,
+    &rule34xyz::RULE34XYZ,
+    &rule34xyz::RULE34WORLD,
+    &rule34vault::SITE,
+    &furry34::SITE,
+    &yiffverse::SITE,
 ];
 
 // ---------------------------------------------------------------------------
@@ -116,9 +140,64 @@ pub(crate) fn query_get<'q>(query: &'q [(String, String)], name: &str) -> Option
         .map(|(_, v)| v.as_str())
 }
 
+/// `text.parse_int`: an integer, or 0 for empty/invalid input.
+pub(crate) fn parse_int(text: &str) -> i64 {
+    text.trim().replace('_', "").parse().unwrap_or(0)
+}
+
+/// `text.parse_int` as a JSON value (Python `int`).
+pub(crate) fn int_value(text: &str) -> Value {
+    parse_int(text).into()
+}
+
+/// `text.extract_iter`: every substring between `begin` and the next `end`.
+pub(crate) fn extract_iter<'t>(text: &'t str, begin: &str, end: &str) -> Vec<&'t str> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while let Some(start) = text[pos..].find(begin) {
+        let first = pos + start + begin.len();
+        let Some(stop) = text[first..].find(end) else {
+            break;
+        };
+        out.push(&text[first..first + stop]);
+        pos = first + stop + end.len();
+    }
+    out
+}
+
+/// `text.extract_from`: a cursor returning the text between `begin` and the
+/// next `end` after the previous match, or `""` without moving.
+pub(crate) struct Extr<'t> {
+    text: &'t str,
+    pub pos: usize,
+}
+
+impl<'t> Extr<'t> {
+    pub fn new(text: &'t str) -> Self {
+        Self { text, pos: 0 }
+    }
+
+    pub fn next(&mut self, begin: &str, end: &str) -> &'t str {
+        let Some(start) = self.text[self.pos..].find(begin) else {
+            return "";
+        };
+        let first = self.pos + start + begin.len();
+        let Some(stop) = self.text[first..].find(end) else {
+            return "";
+        };
+        self.pos = first + stop + end.len();
+        &self.text[first..first + stop]
+    }
+}
+
 /// `str.rpartition(sep)`: (head, tail); without `sep`, ("", text).
 pub(crate) fn rpartition<'t>(text: &'t str, sep: &str) -> (&'t str, &'t str) {
     text.rsplit_once(sep).unwrap_or(("", text))
+}
+
+/// `str.partition(sep)[0]`.
+pub(crate) fn before<'t>(text: &'t str, sep: &str) -> &'t str {
+    text.split_once(sep).map_or(text, |(head, _)| head)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 //! Gelbooru Beta 0.2 sites (rule34, tbib, hypnohub, xbooru), mirroring
 //! gallery_dl/extractor/gelbooru_v02.py through the XML `dapi` endpoint.
 use crate::sites::boorus::{
-    Extr, booru_fields, date_value, extract_iter, leading_digits, strptime, unquote_plus, until,
+    Extr, booru_fields, date_value, extract_iter, leading_digits, unquote_plus, until,
 };
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -500,6 +500,18 @@ const EXTS_VIDEO: &[&str] = &[
     "mp4", "m4v", "mov", "webm", "mkv", "ogv", "flv", "avi", "wmv",
 ];
 
+/// `dt.parse(created_at, "%a %b %d %H:%M:%S %z %Y")` as Unix seconds.
+fn parse_created(text: &str) -> Option<i64> {
+    let format = time::format_description::parse_borrowed::<2>(
+        "[weekday repr:short] [month repr:short] [day padding:none] [hour]:[minute]:[second] \
+         [offset_hour sign:mandatory][offset_minute] [year]",
+    )
+    .ok()?;
+    time::OffsetDateTime::parse(text, &format)
+        .ok()
+        .map(time::OffsetDateTime::unix_timestamp)
+}
+
 /// `BooruExtractor.items` for one API post, with `_file_url_rule34` and
 /// `GelbooruV02Extractor._prepare`.
 fn parse_post(
@@ -531,7 +543,7 @@ fn parse_post(
     let timestamp = fields
         .get("created_at")
         .and_then(Value::as_str)
-        .and_then(|c| strptime(c, "%a %b %d %H:%M:%S %z %Y"));
+        .and_then(parse_created);
     fields.insert("date".into(), date_value(timestamp));
     let id = fields
         .get("id")
@@ -898,5 +910,28 @@ mod tests {
         assert!(requests[1].starts_with("GET /index.php?page=pool&s=show&id=5&pid=0 "));
         assert!(requests[2].starts_with("GET /index.php?page=dapi&s=post&q=index&id=8 "));
         assert!(requests[2].to_ascii_lowercase().contains("host: 127.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn api_errors_and_missing_pools_fail() {
+        let (root, server) = serve(vec![xml("<error>Missing authentication</error>")]);
+        let http = http("tbib", root);
+        let events = extract(
+            "tbib",
+            &http,
+            Url::parse("https://tbib.org/index.php?page=post&s=view&id=1").unwrap(),
+        );
+        assert!(crate::sites::testing::fails(events).await);
+        server.join().unwrap();
+
+        let (root, server) = serve(vec![page("<html>no pool</html>")]);
+        let http = crate::sites::testing::http("tbib", root);
+        let events = extract(
+            "tbib",
+            &http,
+            Url::parse("https://tbib.org/index.php?page=pool&s=show&id=1").unwrap(),
+        );
+        assert!(crate::sites::testing::fails(events).await);
+        server.join().unwrap();
     }
 }

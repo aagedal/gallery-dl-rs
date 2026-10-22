@@ -92,7 +92,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 mod tests {
     use super::super::rule34xyz::tests::{body, with_options};
     use super::*;
-    use crate::sites::testing::{http, json, keywords, media, serve};
+    use crate::sites::testing::{fails, http, json, keywords, media, serve};
     use serde_json::json;
 
     fn t(raw: &str) -> Option<Target> {
@@ -103,7 +103,9 @@ mod tests {
 
     #[test]
     fn classifies_urls() {
-        assert!(matches!(t("https://yiffverse.com/post/574342"), Some(Target::Post(id)) if id == "574342"));
+        assert!(
+            matches!(t("https://yiffverse.com/post/574342"), Some(Target::Post(id)) if id == "574342")
+        );
         assert!(matches!(
             t("https://www.yiffverse.com/playlist/6842"),
             Some(Target::Search { route, .. }) if route.subcategory == "playlist"
@@ -128,7 +130,10 @@ mod tests {
             t("https://yiffverse.com/?tags=x"),
             Some(Target::Search { .. })
         ));
-        assert!(matches!(t("https://yiffverse.com/"), Some(Target::Search { .. })));
+        assert!(matches!(
+            t("https://yiffverse.com/"),
+            Some(Target::Search { .. })
+        ));
         for bad in [
             "https://yiffverse.com/tree",
             "https://yiffverse.com/tag/",
@@ -214,5 +219,19 @@ mod tests {
             body(&requests[1]).to_string(),
             r#"{"includeTags":["tree"],"sortOrder":1,"status":2,"take":30,"cursor":7}"#
         );
+    }
+
+    #[tokio::test]
+    async fn search_without_items_is_an_error() {
+        let (root, server) = serve(vec![json(json!({"message": "bad"}))]);
+        let http = http("yiffverse", root);
+        assert!(
+            fails(extract(
+                &http,
+                Url::parse("https://yiffverse.com/tag/x").unwrap()
+            ))
+            .await
+        );
+        server.join().unwrap();
     }
 }
