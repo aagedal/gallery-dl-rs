@@ -9,7 +9,9 @@ use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
-pub(super) static SITES: &[&Site] = &[];
+mod behance;
+
+pub(super) static SITES: &[&Site] = &[&behance::SITE];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
 /// cursor; a miss returns `""` and leaves the cursor in place.
