@@ -46,7 +46,7 @@ use tokio::sync::OnceCell;
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
-    #[arg(required_unless_present = "input_files")]
+    #[arg(required_unless_present_any = ["input_files", "list_extractors", "list_modules"])]
     urls: Vec<String>,
     /// Read URLs from a UTF-8 file; repeat for multiple files, or use - for stdin
     #[arg(short = 'i', long = "input-file", value_name = "FILE")]
@@ -61,10 +61,21 @@ struct Args {
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=32))]
     jobs: u8,
     /// Select one-based file positions per extractor job (e.g. 5, 8-20, or 1:24:3)
-    #[arg(long = "range", allow_hyphen_values = true)]
+    #[arg(
+        long = "range",
+        visible_alias = "file-range",
+        alias = "image-range",
+        allow_hyphen_values = true
+    )]
     file_range: Option<String>,
     /// Select files with a metadata expression; repeat to require all expressions
-    #[arg(long = "filter", value_name = "EXPR", allow_hyphen_values = true)]
+    #[arg(
+        long = "filter",
+        visible_alias = "file-filter",
+        alias = "image-filter",
+        value_name = "EXPR",
+        allow_hyphen_values = true
+    )]
     file_filter: Vec<String>,
     /// Select one-based post positions per extractor job
     #[arg(long = "post-range", allow_hyphen_values = true)]
@@ -73,10 +84,19 @@ struct Args {
     #[arg(long = "post-filter", value_name = "EXPR", allow_hyphen_values = true)]
     post_filter: Vec<String>,
     /// Select one-based child extractor positions within each parent job
-    #[arg(long = "child-range", allow_hyphen_values = true)]
+    #[arg(
+        long = "child-range",
+        alias = "chapter-range",
+        allow_hyphen_values = true
+    )]
     child_range: Option<String>,
     /// Select child extractors before requests; repeat to require all expressions
-    #[arg(long = "child-filter", value_name = "EXPR", allow_hyphen_values = true)]
+    #[arg(
+        long = "child-filter",
+        alias = "chapter-filter",
+        value_name = "EXPR",
+        allow_hyphen_values = true
+    )]
     child_filter: Vec<String>,
     /// Emit metadata for native X posts without media
     #[arg(long, conflicts_with = "no_text_tweets")]
@@ -97,10 +117,16 @@ struct Args {
     #[arg(long, value_parser = parse_size)]
     filesize_max: Option<u64>,
     /// Print media URLs without downloading (still performs extraction)
-    #[arg(short = 'g', long, conflicts_with = "dump_json")]
+    #[arg(
+        short = 'g',
+        long,
+        visible_alias = "resolve-urls",
+        short_alias = 'G',
+        conflicts_with = "dump_json"
+    )]
     get_urls: bool,
     /// Print extracted media as a JSON array without downloading
-    #[arg(short = 'j', long)]
+    #[arg(short = 'j', long, visible_alias = "resolve-json", short_alias = 'J')]
     dump_json: bool,
     /// Save post metadata in a JSON sidecar beside each completed media file
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
@@ -165,16 +191,51 @@ struct Args {
     /// Do not load the discovered default native configuration file
     #[arg(long, conflicts_with = "native_config")]
     native_config_ignore: bool,
+    /// Additional native setting KEY=VALUE (VALUE is JSON or text), e.g.
+    /// extractor.4chan.retries=3; `extractor.*` keys also reach the
+    /// compatibility backend
+    #[arg(short = 'o', long = "option", value_name = "KEY=VALUE")]
+    options: Vec<String>,
+    /// Simulate: print destination paths ("# PATH") without downloading
+    #[arg(short = 's', long, visible_alias = "no-download", conflicts_with_all = ["get_urls", "dump_json"])]
+    simulate: bool,
+    /// Print available keywords and example values for the first file of each input
+    #[arg(short = 'K', long, conflicts_with_all = ["get_urls", "dump_json", "simulate"])]
+    list_keywords: bool,
+    /// Do not print downloaded/skipped file paths
+    #[arg(short = 'q', long)]
+    quiet: bool,
+    /// Append input URLs that returned an error to FILE
+    #[arg(short = 'e', long, value_name = "FILE")]
+    error_file: Option<PathBuf>,
+    /// Print supported extractor categories and their subcategories
+    #[arg(long)]
+    list_extractors: bool,
+    /// Print supported extractor categories
+    #[arg(long)]
+    list_modules: bool,
+    /// Seconds to wait before starting extraction for each input (SECONDS or MIN-MAX)
+    #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
+    sleep_extractor: Option<gallery_dl_rs::sleep::SleepRange>,
+    /// Activate a native postprocessor by name; repeatable
+    #[arg(short = 'P', long = "postprocessor", value_name = "NAME")]
+    postprocessor: Vec<String>,
+    /// Write gallery metadata to an info.json file per directory
+    #[arg(long, alias = "write-infojson")]
+    write_info_json: bool,
+    /// Write tags to a separate text file per downloaded file
+    #[arg(long)]
+    write_tags: bool,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
     /// Seconds for native extraction or active compatibility reading (excludes backpressure)
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
     /// Seconds per media attempt/native HTTP request (default: 60)
-    #[arg(long, value_parser = parse_timeout)]
+    #[arg(long, visible_alias = "http-timeout", value_parser = parse_timeout)]
     timeout: Option<Duration>,
     /// Additional download/native extraction attempts (default: 2)
-    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=10))]
+    #[arg(short = 'R', long, value_parser = clap::value_parser!(u8).range(0..=10))]
     retries: Option<u8>,
 }
 
@@ -283,7 +344,18 @@ fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
         category
     }
 }
-fn media_settings_key(media: &extract::Media, extractor: Extractor) -> &str {
+fn media_settings_key<'a>(
+    media: &'a extract::Media,
+    extractor: Extractor,
+    settings: &BTreeMap<&str, Settings>,
+) -> &'a str {
+    if !settings.contains_key(media.category.as_str()) {
+        // Generic compatibility output from other gallery-dl extractors.
+        return "direct";
+    }
+    media_settings_key_known(media, extractor)
+}
+fn media_settings_key_known(media: &extract::Media, extractor: Extractor) -> &str {
     if matches!(extractor, Extractor::Native)
         && media.metadata.as_ref().is_some_and(|metadata| {
             metadata.booru_artist_parent.is_some()
@@ -354,6 +426,10 @@ async fn async_main(args: Args) {
 }
 
 async fn run(args: Args) -> Result<()> {
+    if args.list_extractors || args.list_modules {
+        list_extractors(args.list_extractors);
+        return Ok(());
+    }
     if matches!(args.extractor, Extractor::Native) && args.config.is_some() {
         return Err(error(
             "--config is only supported with --extractor compatibility",
@@ -374,6 +450,9 @@ async fn run(args: Args) -> Result<()> {
         timeout: Duration::from_secs(args.extraction_timeout),
     };
     let failed = Cell::new(0);
+    // Input URLs by index, and the inputs that failed, for -e/--error-file.
+    let input_sources = std::cell::RefCell::new(BTreeMap::<usize, String>::new());
+    let failed_inputs = std::cell::RefCell::new(std::collections::BTreeSet::<usize>::new());
     // Inputs stopped by -A/--abort; their remaining media are neither
     // extracted nor downloaded.
     let aborted = std::sync::Mutex::new(HashSet::<usize>::new());
@@ -407,6 +486,12 @@ async fn run(args: Args) -> Result<()> {
         .take_while(|_| std::future::ready(!terminated.load(std::sync::atomic::Ordering::Acquire)))
         .enumerate()
         .flat_map(|(index, source)| {
+            if args.error_file.is_some()
+                && let Ok(source) = &source
+            {
+                input_sources.borrow_mut().insert(index, source.clone());
+            }
+            let failed_inputs = &failed_inputs;
             let failed = &failed;
             let aborted = &aborted;
             let terminated = &terminated;
@@ -475,6 +560,15 @@ async fn run(args: Args) -> Result<()> {
                         .map(|url| &settings[settings_key(&url, args.extractor)]);
                     let input =
                         extract_input(source, &extractors, &backend, args.extractor, &settings);
+                    let input = match args.sleep_extractor {
+                        Some(delay) => stream::once(async move {
+                            tokio::time::sleep(delay.sample()).await;
+                            input
+                        })
+                        .flatten()
+                        .boxed(),
+                        None => input,
+                    };
                     match selected_settings {
                         Some(selected) => {
                             let classes = if matches!(
@@ -526,13 +620,14 @@ async fn run(args: Args) -> Result<()> {
                     Err(e) => {
                         eprintln!("extraction failed for input {}: {e}", index + 1);
                         failed.set(failed.get() + 1);
+                        failed_inputs.borrow_mut().insert(index);
                         None
                     }
                 })
             })
         })
         .map(|(index, mut job)| {
-            settings[media_settings_key(&job.media, args.extractor)]
+            settings[media_settings_key(&job.media, args.extractor, &settings)]
                 .network
                 .apply_media(&mut job.media);
             (index, job)
@@ -544,7 +639,7 @@ async fn run(args: Args) -> Result<()> {
             }
             let mut identity = item.identity();
             // Distinct social files can share a URL and request context.
-            if matches!(
+            if (matches!(
                 item.category.as_str(),
                 "instagram"
                     | "twitter"
@@ -578,7 +673,8 @@ async fn run(args: Args) -> Result<()> {
                     | "furaffinity"
                     | "weasyl"
                     | "vsco"
-            ) && let Some(file_key) = item.archive_key()
+            ) || gallery_dl_rs::sites::is_category(&item.category))
+                && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
             }
@@ -587,7 +683,44 @@ async fn run(args: Args) -> Result<()> {
             std::future::ready(seen.insert(digest))
         });
     tokio::pin!(media);
-    if args.dump_json {
+    if args.list_keywords {
+        let mut shown = HashSet::new();
+        while let Some((index, job)) = media.next().await {
+            if !shown.insert(index) {
+                continue;
+            }
+            let keywords = gallery_dl_rs::postprocess::public_keywords(
+                &gallery_dl_rs::postprocess::context(&job.media),
+            );
+            let mut out = String::from(
+                "Keywords for filenames and --filter:\n------------------------------------\n",
+            );
+            print_keywords(&mut out, &keywords, "");
+            println!("{out}");
+            // One file per input suffices; stop its extraction.
+            aborted
+                .lock()
+                .expect("abort state lock poisoned")
+                .insert(index);
+        }
+    } else if args.simulate {
+        while let Some((_, job)) = media.next().await {
+            let item = &job.media;
+            let settings = &settings[media_settings_key(item, args.extractor, &settings)];
+            match download::destination_with_templates(
+                settings.options.base_directory.as_ref().unwrap(),
+                item,
+                settings.filename.as_ref(),
+                settings.directory.as_ref(),
+            ) {
+                Ok(path) => println!("# {}", path.display()),
+                Err(e) => {
+                    eprintln!("simulation failed: {e}");
+                    failed.set(failed.get() + 1);
+                }
+            }
+        }
+    } else if args.dump_json {
         let media: Vec<_> = media.map(|(_, job)| job.media).collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
     } else if args.get_urls {
@@ -606,7 +739,7 @@ async fn run(args: Args) -> Result<()> {
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
-                let settings = &settings[media_settings_key(&item, args.extractor)];
+                let settings = &settings[media_settings_key(&item, args.extractor, &settings)];
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap())
@@ -724,7 +857,9 @@ async fn run(args: Args) -> Result<()> {
             }
             match result {
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
-                    eprintln!("downloaded {}", path.display());
+                    if !args.quiet {
+                        eprintln!("downloaded {}", path.display());
+                    }
                     for command in &args.exec {
                         if let Err(e) = gallery_dl_rs::exec::run(command, Some(&path)).await {
                             eprintln!("postprocessing failed for {}: {e}", path.display());
@@ -733,7 +868,9 @@ async fn run(args: Args) -> Result<()> {
                     }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
-                    eprintln!("skipped {}", path.display())
+                    if !args.quiet {
+                        eprintln!("skipped {}", path.display())
+                    }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Filtered(reason))) => {
                     eprintln!("filtered media: {reason}")
@@ -742,6 +879,7 @@ async fn run(args: Args) -> Result<()> {
                 Err(e) => {
                     eprintln!("download failed: {e}");
                     failed.set(failed.get() + 1);
+                    failed_inputs.borrow_mut().insert(index);
                 }
             }
             if args.terminate.is_some_and(|limit| skipped >= limit)
@@ -758,11 +896,129 @@ async fn run(args: Args) -> Result<()> {
             failed.set(failed.get() + 1);
         }
     }
+    if let Some(path) = &args.error_file {
+        let lines: String = {
+            let sources = input_sources.borrow();
+            failed_inputs
+                .borrow()
+                .iter()
+                .filter_map(|index| sources.get(index))
+                .map(|source| format!("{source}\n"))
+                .collect()
+        };
+        if !lines.is_empty() {
+            use tokio::io::AsyncWriteExt;
+            let mut file = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .await
+                .map_err(|_| error("cannot open error file"))?;
+            file.write_all(lines.as_bytes())
+                .await
+                .map_err(|_| error("cannot write error file"))?;
+        }
+    }
     let failed = failed.get();
     if failed > 0 {
         Err(error(format!("{failed} operation(s) failed")))
     } else {
         Ok(())
+    }
+}
+
+/// Print one keyword tree like upstream `KeywordJob.print_kwdict`.
+fn print_keywords(
+    out: &mut String,
+    keywords: &serde_json::Map<String, serde_json::Value>,
+    prefix: &str,
+) {
+    use serde_json::Value;
+    let suffix = if prefix.is_empty() { "" } else { "']" };
+    let mut keys: Vec<_> = keywords.keys().collect();
+    keys.sort();
+    for key in keys {
+        if key.starts_with('_') || prefix.is_empty() && key.starts_with("exts_") {
+            continue;
+        }
+        let value = &keywords[key];
+        let name = format!("{prefix}{key}{suffix}");
+        match value {
+            Value::Object(map) => print_keywords(out, map, &format!("{name}['")),
+            Value::Array(items) if items.is_empty() => {}
+            Value::Array(items) => {
+                if let Some(Value::Object(first)) = items.first() {
+                    print_keywords(out, first, &format!("{name}[N]['"));
+                } else {
+                    out.push_str(&format!("{name}[N]\n"));
+                    let width = items.len().to_string().len();
+                    for (index, item) in items.iter().enumerate() {
+                        out.push_str(&format!("  {index:>width$} {}\n", python_text(item)));
+                    }
+                }
+            }
+            value => out.push_str(&format!("{name}\n  {}\n", python_text(value))),
+        }
+    }
+}
+
+fn python_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Null => "None".into(),
+        serde_json::Value::Bool(true) => "True".into(),
+        serde_json::Value::Bool(false) => "False".into(),
+        other => other.to_string(),
+    }
+}
+
+/// `--list-extractors` / `--list-modules`.
+fn list_extractors(detailed: bool) {
+    let dedicated = [
+        "instagram",
+        "twitter",
+        "facebook",
+        "imgur",
+        "bluesky",
+        "reddit",
+        "danbooru",
+        "e621",
+        "gelbooru",
+        "safebooru",
+        "mastodon.social",
+        "pawoo",
+        "baraag",
+        "kemono",
+        "coomer",
+        "pixeldrain",
+        "catbox",
+        "imgbox",
+        "postimg",
+        "tumblr",
+        "pixiv",
+        "pixiv-novel",
+        "deviantart",
+        "flickr",
+        "wallhaven",
+        "artstation",
+        "pinterest",
+        "newgrounds",
+        "furaffinity",
+        "weasyl",
+        "vsco",
+    ];
+    let mut lines: Vec<String> = dedicated.iter().map(|c| (*c).to_owned()).collect();
+    for site in gallery_dl_rs::sites::sites() {
+        if detailed {
+            let routes: Vec<_> = site.routes.iter().map(|route| route.subcategory).collect();
+            lines.push(format!("{}: {}", site.category, routes.join(", ")));
+        } else {
+            lines.push(site.category.to_owned());
+        }
+    }
+    lines.sort();
+    for line in lines {
+        println!("{line}");
     }
 }
 
@@ -793,6 +1049,7 @@ struct Extractors {
     furaffinity: OnceCell<Result<gallery_dl_rs::furaffinity::FurAffinity>>,
     weasyl: OnceCell<Result<gallery_dl_rs::weasyl::Weasyl>>,
     vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
+    sites: gallery_dl_rs::sites::Runtime,
 }
 
 impl Extractors {
@@ -1149,6 +1406,28 @@ fn extract_input<'a>(
                         .as_ref()
                         .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
                     native.events(&url)
+                }
+                Extractor::Native if gallery_dl_rs::sites::is_category(category) => {
+                    let site = gallery_dl_rs::sites::site(category).expect("registry site");
+                    let native = extractors
+                        .sites
+                        .get(site, || {
+                            gallery_dl_rs::sites::Http::new(site.name, backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_api_key(options.api_key.as_deref())
+                                        .with_options(options.site_options.clone())
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .map_err(|e| {
+                            error(format!("native {} initialization failed: {e}", site.name))
+                        })?;
+                    (site.extract)(native, url.clone())
                 }
                 Extractor::Native if category == "weasyl" => {
                     let native = extractors
@@ -1652,15 +1931,31 @@ fn extract_input<'a>(
                             search_stop: (category == "twitter")
                                 .then_some(options.search_stop)
                                 .flatten(),
+                            options: configured.cli_options.clone(),
                         },
                     )
                 }
             }
         } else if let Some(item) = extract::direct(&url) {
             stream::iter(event::group(vec![item], "direct").into_iter().map(Ok)).boxed()
+        } else if matches!(extractor, Extractor::Compatibility) {
+            // Any other gallery-dl extractor; files keep its category.
+            let configured = &settings["direct"];
+            let mut backend = backend.clone();
+            backend.cookies = configured.options.cookies.clone();
+            backend.events_with_options(
+                &url,
+                BackendOptions {
+                    browser: configured.browser_spec.clone(),
+                    proxy: configured.network.proxy().map(str::to_owned),
+                    user_agent: configured.network.user_agent().map(str::to_owned),
+                    options: configured.cli_options.clone(),
+                    ..BackendOptions::default()
+                },
+            )
         } else {
             return Err(error(
-                "unsupported URL; expected a social URL or direct media file",
+                "unsupported URL; expected a social URL or direct media file (other gallery-dl sites need --extractor compatibility)",
             ));
         };
         let input = if routed_site(&url, extractor) == Some("mastodon") {
@@ -1691,6 +1986,8 @@ fn extract_input<'a>(
 
 struct Settings {
     options: ConfigOptions,
+    /// Raw `-o extractor.*` settings for the compatibility backend.
+    cli_options: Vec<String>,
     browser: Option<FirefoxProfile>,
     browser_spec: Option<String>,
     filename: Option<FilenameTemplate>,
@@ -1727,9 +2024,37 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
     } else {
         None
     };
+    let mut options = args
+        .options
+        .iter()
+        .map(|option| gallery_dl_rs::config::parse_option(option))
+        .collect::<Result<Vec<_>>>()?;
+    // Upstream CLI postprocessor shortcuts.
+    use gallery_dl_rs::config::CliOption;
+    for name in &args.postprocessor {
+        options.push(CliOption::postprocessor(serde_json::json!(name)));
+    }
+    if args.write_info_json {
+        options.push(CliOption::postprocessor(serde_json::json!({
+            "name": "metadata",
+            "event": "init",
+            "filename": "info.json",
+        })));
+    }
+    if args.write_tags {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "metadata", "mode": "tags"}),
+        ));
+    }
+    let cli_options: Vec<String> = options
+        .iter()
+        .filter(|option| option.path.first().is_some_and(|part| part == "extractor"))
+        .map(|option| option.raw.clone())
+        .collect();
     let config = match args.native_config.as_ref().or(discovered.as_ref()) {
-        Some(path) => Config::load(path).await?,
-        None => Config::default(),
+        Some(path) => Config::load_with_options(path, &options).await?,
+        None if options.is_empty() => Config::default(),
+        None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
@@ -1849,6 +2174,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         filesize_max: args.filesize_max,
         retries: args.retries,
         timeout: args.timeout,
+        site_options: None,
     };
     let mut settings = BTreeMap::new();
     for category in [
@@ -1891,7 +2217,10 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "e621.artist",
         "e621.artist-search",
         "e621.tag",
-    ] {
+    ]
+    .into_iter()
+    .chain(gallery_dl_rs::sites::categories())
+    {
         let class = category
             .split_once('.')
             .filter(|(base, _)| matches!(*base, "danbooru" | "e621"));
@@ -1987,6 +2316,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             category,
             Settings {
                 options,
+                cli_options: cli_options.clone(),
                 browser,
                 browser_spec,
                 filename,

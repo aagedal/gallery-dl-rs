@@ -64,7 +64,7 @@ fn category(key: &str) -> bool {
             | "weasyl"
             | "vsco"
             | "direct"
-    )
+    ) || crate::sites::is_category(key)
 }
 
 /// Return repaired bytes only when a date-bound unpaired escape was changed.

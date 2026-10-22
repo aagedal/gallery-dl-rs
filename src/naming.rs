@@ -544,10 +544,9 @@ fn keyword_context(
 }
 
 fn source_paths(media: &Media) -> bool {
-    media
-        .metadata
-        .as_ref()
-        .is_some_and(|metadata| metadata.source_defaults.is_some())
+    media.metadata.as_ref().is_some_and(|metadata| {
+        metadata.source_defaults.is_some() || metadata.site_keywords.is_some()
+    })
 }
 fn unwrap_source_value(mut value: Value) -> Value {
     while let Value::SourcePrimitive(inner) = value {
@@ -675,7 +674,9 @@ pub(crate) fn effective_filename(
         }
         (Some(template), None) => Some(template.clone()),
         (None, Some(source)) => Some(source.filename.clone()),
-        (None, None) => None,
+        (None, None) => {
+            crate::sites::default_templates(media).map(|(filename, _)| filename.clone())
+        }
     }
 }
 pub(crate) fn effective_directory(
@@ -696,7 +697,9 @@ pub(crate) fn effective_directory(
         }
         (Some(template), None) => Some(template.clone()),
         (None, Some(source)) => Some(source.directory.clone()),
-        (None, None) => None,
+        (None, None) => {
+            crate::sites::default_templates(media).map(|(_, directory)| directory.clone())
+        }
     }
 }
 
@@ -951,6 +954,12 @@ fn lookup(
     if metadata
         .and_then(|metadata| metadata.booru_keywords.as_ref())
         .is_some_and(|fields| fields.contains_key(name))
+    {
+        return context.get(name).map(|value| convert(value, name));
+    }
+    if metadata
+        .and_then(|metadata| metadata.site_keywords.as_ref())
+        .is_some_and(|keywords| keywords.fields.contains_key(name))
     {
         return context.get(name).map(|value| convert(value, name));
     }

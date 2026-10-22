@@ -54,6 +54,13 @@ impl Media {
     /// Social IDs never derive from signed URLs or private transport options.
     /// Direct links explicitly use the full request identity, hashed for privacy.
     pub fn archive_key(&self) -> Option<String> {
+        if crate::sites::is_category(&self.category) {
+            let (namespace, identity) = crate::sites::archive_key(self)?;
+            return Some(format!(
+                "{namespace}:v1:{:x}",
+                Sha256::digest(identity.as_bytes())
+            ));
+        }
         let (namespace, identity) = match self.category.as_str() {
             "direct" => ("url", self.identity()),
             // Imgur media IDs are global; the album or gallery is not part of it.
@@ -751,6 +758,9 @@ pub struct PostMetadata {
     /// service name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
+    /// Upstream gallery-dl keyword dictionary for registry sites.
+    #[serde(rename = "keywords", skip_serializing_if = "Option::is_none")]
+    pub site_keywords: Option<std::sync::Arc<crate::sites::SiteKeywords>>,
 }
 
 #[derive(Clone, Debug)]
@@ -799,6 +809,9 @@ pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
 
 pub fn social_site(url: &Url) -> Option<&'static str> {
     let host = url.host_str()?;
+    if let Some(site) = crate::sites::find(url) {
+        return Some(site.category);
+    }
     if crate::mastodon::INSTANCES.contains(&host) {
         return Some("mastodon");
     }
@@ -899,6 +912,8 @@ pub fn direct(url: &Url) -> Option<Media> {
 /// Runtime overrides passed as individual arguments to the compatibility process.
 #[derive(Clone, Default)]
 pub struct BackendOptions {
+    /// Raw `extractor.*` KEY=VALUE settings forwarded with `--option`.
+    pub options: Vec<String>,
     pub include: Option<crate::dispatch::Include>,
     pub child_range: Option<String>,
     pub child_filter: Option<Vec<String>>,
@@ -1034,6 +1049,9 @@ impl Backend {
         }
         if let Some(proxy) = &options.proxy {
             command.arg("--proxy").arg(proxy);
+        }
+        for option in &options.options {
+            command.arg("--option").arg(option);
         }
         if let Some(agent) = &options.user_agent {
             command.arg("--user-agent").arg(agent);
@@ -1451,6 +1469,7 @@ pub(crate) fn parse_post_message(message: &Value, category: &str) -> Result<crat
         _ => None,
     }
     .ok_or_else(|| error("backend post message has no metadata"))?;
+    let category = &message_category(category, data);
     let mut metadata = compatibility_metadata(data, category);
     if let Some(metadata) = &mut metadata {
         metadata.file = None;
@@ -1488,6 +1507,7 @@ pub(crate) fn parse_message(message: Value, category: &str) -> Result<Option<Med
         .get(2)
         .and_then(Value::as_object)
         .ok_or_else(|| error("media message has no metadata"))?;
+    let category = &message_category(category, metadata);
     let marker = metadata.get("_ytdl_manifest").filter(|v| !v.is_null());
     let inline_data = metadata.get("_ytdl_manifest_data").filter(|v| !v.is_null());
     let (url, job) = if let Some(data) = source.strip_prefix("text:") {
@@ -1722,6 +1742,71 @@ fn valid_extension(value: &str) -> bool {
 /// post_id/media_id, Twitter tweet_id/num, Facebook id/extension (including
 /// separate audio and video files with the same id). Missing IDs stay empty;
 /// they never acquire an inferred identity from a URL, filename or row number.
+/// Categories with dedicated handling in this crate; output from any other
+/// gallery-dl extractor is treated generically.
+const DEDICATED_CATEGORIES: &[&str] = &[
+    "instagram",
+    "twitter",
+    "facebook",
+    "imgur",
+    "bluesky",
+    "reddit",
+    "danbooru",
+    "e621",
+    "e926",
+    "gelbooru",
+    "safebooru",
+    "mastodon",
+    "mastodon.social",
+    "pawoo",
+    "baraag",
+    "kemono",
+    "coomer",
+    "pixeldrain",
+    "catbox",
+    "imgbox",
+    "postimg",
+    "tumblr",
+    "pixiv",
+    "pixiv-novel",
+    "deviantart",
+    "flickr",
+    "wallhaven",
+    "artstation",
+    "pinterest",
+    "newgrounds",
+    "furaffinity",
+    "weasyl",
+    "vsco",
+    "direct",
+    "directlink",
+];
+
+/// Whether a category came from generic gallery-dl compatibility output.
+pub(crate) fn generic_category(category: &str) -> bool {
+    !DEDICATED_CATEGORIES.contains(&category) && !crate::sites::is_category(category)
+}
+
+/// The category for a compatibility message. Generic runs take the upstream
+/// extractor's own category when it is a plain label.
+fn message_category(category: &str, data: &serde_json::Map<String, Value>) -> String {
+    if category != crate::sites::GENERIC_CATEGORY {
+        return category.to_owned();
+    }
+    data.get("category")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            (1..=64).contains(&value.len())
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                && !matches!(*value, "." | "..")
+                && !DEDICATED_CATEGORIES.contains(value)
+        })
+        .unwrap_or(crate::sites::GENERIC_CATEGORY)
+        .to_owned()
+}
+
 fn compatibility_metadata(
     data: &serde_json::Map<String, Value>,
     category: &str,
@@ -1902,6 +1987,15 @@ fn compatibility_metadata(
             String::new(),
             None,
             string("title"),
+        ),
+        // Registry sites and generic gallery-dl output keep the whole
+        // keyword dictionary; identities come from upstream's `id`.
+        _ if crate::sites::is_category(category) || generic_category(category) => (
+            id("id"),
+            id("id"),
+            String::new(),
+            string("username").or_else(|| string("user")),
+            None,
         ),
         _ => return None,
     };
@@ -2195,6 +2289,19 @@ fn compatibility_metadata(
                 .then(|| string("service").filter(|service| crate::kemono::valid_service(service)))
                 .flatten()
         }),
+        site_keywords: match crate::sites::site(category) {
+            Some(site) => Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+                route: crate::sites::route_for(site, data),
+                fields: data.clone(),
+            })),
+            None if generic_category(category) => {
+                Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+                    route: &crate::sites::GENERIC,
+                    fields: data.clone(),
+                }))
+            }
+            None => None,
+        },
         post_id,
         media_id,
         shortcode,

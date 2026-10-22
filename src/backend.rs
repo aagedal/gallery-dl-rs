@@ -113,9 +113,8 @@ impl Process {
         options: BackendOptions,
         require_media: bool,
     ) -> Result<Self> {
-        let category = extract::social_site(&url).ok_or_else(|| {
-            error("unsupported URL; use an Instagram, Facebook, Twitter/X, Imgur, Bluesky, Reddit, Danbooru, e621, Gelbooru, Safebooru, Mastodon, Kemono, Coomer, Pixeldrain, Catbox, imgbox, Postimg, Tumblr, Pixiv, DeviantArt, Flickr, Wallhaven, ArtStation, Pinterest, VSCO, Newgrounds, Fur Affinity, Weasyl URL or direct media link")
-        })?;
+        // gallery-dl decides support for URLs outside every native category.
+        let category = extract::social_site(&url).unwrap_or(crate::sites::GENERIC_CATEGORY);
         let source_defaults = crate::booru::defaults_for_url(&url);
         crate::network::NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
         let spawn = || {

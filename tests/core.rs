@@ -97,6 +97,7 @@ async fn metadata_sidecars_preserve_post_fields_without_transport_secrets() {
         reposted_by_id: None,
         article: None,
         instance: None,
+        site_keywords: None,
         post_id: "post-1".into(),
         media_id: "media-2".into(),
         shortcode: "example".into(),

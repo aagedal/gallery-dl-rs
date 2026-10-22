@@ -571,6 +571,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 reposted_by_id: None,
                 article: None,
                 instance: None,
+                site_keywords: None,
                 post_id: requested_id.into(),
                 media_id: format!("{requested_id}.{extension}"),
                 shortcode: String::new(),
