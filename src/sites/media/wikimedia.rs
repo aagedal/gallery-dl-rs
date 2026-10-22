@@ -3,8 +3,9 @@
 //!
 //! The `wikimedia` instance derives its category from the host
 //! (`en.wikipedia.org` is `wikipedia`), so each project has its own site.
+use crate::error;
 use crate::sites::{Events, Http, Item, Route, Site};
-use crate::{Result, error};
+use futures_util::StreamExt;
 use serde_json::{Map, Value};
 use url::Url;
 
@@ -25,8 +26,7 @@ static PORTAL: Route = Route::new("portal", FILENAME, ARTICLE_DIR, ARCHIVE);
 static SPECIAL: Route = Route::new("special", FILENAME, ARTICLE_DIR, ARCHIVE);
 static TALK: Route = Route::new("talk", FILENAME, ARTICLE_DIR, ARCHIVE);
 static ROUTES: &[&Route] = &[
-    &ARTICLE, &WIKI, &CATEGORY, &FILE, &IMAGE, &USER, &TEMPLATE, &HELP, &PORTAL, &SPECIAL,
-    &TALK,
+    &ARTICLE, &WIKI, &CATEGORY, &FILE, &IMAGE, &USER, &TEMPLATE, &HELP, &PORTAL, &SPECIAL, &TALK,
 ];
 
 fn prefix_route(prefix: Option<&str>) -> &'static Route {
@@ -56,14 +56,15 @@ enum Hosts {
     },
 }
 
-pub(crate) struct Instance {
+struct Instance {
     hosts: Hosts,
     api_path: &'static str,
     user_agent: Option<&'static str>,
 }
 
-macro_rules! instance {
-    ($ident:ident, $category:literal, $name:literal, $instance:expr) => {
+macro_rules! wiki {
+    ($ident:ident, $instance:ident, $category:literal, $name:literal, $def:expr) => {
+        static $instance: Instance = $def;
         pub static $ident: Site = Site {
             category: $category,
             name: $name,
@@ -76,9 +77,10 @@ macro_rules! instance {
 }
 
 macro_rules! project {
-    ($ident:ident, $category:literal, $name:literal) => {
-        instance!(
+    ($ident:ident, $instance:ident, $category:literal, $name:literal) => {
+        wiki!(
             $ident,
+            $instance,
             $category,
             $name,
             Instance {
@@ -91,9 +93,10 @@ macro_rules! project {
 }
 
 macro_rules! fixed {
-    ($ident:ident, $category:literal, $name:literal, $root:literal, $hosts:expr, $api:literal, $ua:expr) => {
-        instance!(
+    ($ident:ident, $instance:ident, $category:literal, $name:literal, $root:literal, $hosts:expr, $api:literal, $ua:expr) => {
+        wiki!(
             $ident,
+            $instance,
             $category,
             $name,
             Instance {
@@ -108,17 +111,23 @@ macro_rules! fixed {
     };
 }
 
-project!(WIKIPEDIA, "wikipedia", "Wikipedia");
-project!(WIKTIONARY, "wiktionary", "Wiktionary");
-project!(WIKIQUOTE, "wikiquote", "Wikiquote");
-project!(WIKIBOOKS, "wikibooks", "Wikibooks");
-project!(WIKISOURCE, "wikisource", "Wikisource");
-project!(WIKINEWS, "wikinews", "Wikinews");
-project!(WIKIVERSITY, "wikiversity", "Wikiversity");
-project!(WIKIDATA, "wikidata", "Wikidata");
-project!(WIKIVOYAGE, "wikivoyage", "Wikivoyage");
+project!(WIKIPEDIA, WIKIPEDIA_INSTANCE, "wikipedia", "Wikipedia");
+project!(WIKTIONARY, WIKTIONARY_INSTANCE, "wiktionary", "Wiktionary");
+project!(WIKIQUOTE, WIKIQUOTE_INSTANCE, "wikiquote", "Wikiquote");
+project!(WIKIBOOKS, WIKIBOOKS_INSTANCE, "wikibooks", "Wikibooks");
+project!(WIKISOURCE, WIKISOURCE_INSTANCE, "wikisource", "Wikisource");
+project!(WIKINEWS, WIKINEWS_INSTANCE, "wikinews", "Wikinews");
+project!(
+    WIKIVERSITY,
+    WIKIVERSITY_INSTANCE,
+    "wikiversity",
+    "Wikiversity"
+);
+project!(WIKIDATA, WIKIDATA_INSTANCE, "wikidata", "Wikidata");
+project!(WIKIVOYAGE, WIKIVOYAGE_INSTANCE, "wikivoyage", "Wikivoyage");
 fixed!(
     WIKISPECIES,
+    WIKISPECIES_INSTANCE,
     "wikispecies",
     "Wikispecies",
     "https://species.wikimedia.org",
@@ -128,6 +137,7 @@ fixed!(
 );
 fixed!(
     WIKIMEDIACOMMONS,
+    WIKIMEDIACOMMONS_INSTANCE,
     "wikimediacommons",
     "Wikimedia Commons",
     "https://commons.wikimedia.org",
@@ -137,6 +147,7 @@ fixed!(
 );
 fixed!(
     MEDIAWIKI,
+    MEDIAWIKI_INSTANCE,
     "mediawiki",
     "MediaWiki",
     "https://www.mediawiki.org",
@@ -146,6 +157,7 @@ fixed!(
 );
 fixed!(
     MARIOWIKI,
+    MARIOWIKI_INSTANCE,
     "mariowiki",
     "Super Mario Wiki",
     "https://www.mariowiki.com",
@@ -155,6 +167,7 @@ fixed!(
 );
 fixed!(
     BULBAPEDIA,
+    BULBAPEDIA_INSTANCE,
     "bulbapedia",
     "Bulbapedia",
     "https://bulbapedia.bulbagarden.net",
@@ -164,6 +177,7 @@ fixed!(
 );
 fixed!(
     PIDGIWIKI,
+    PIDGIWIKI_INSTANCE,
     "pidgiwiki",
     "PidgiWiki",
     "https://www.pidgi.net",
@@ -173,6 +187,7 @@ fixed!(
 );
 fixed!(
     AZURLANEWIKI,
+    AZURLANEWIKI_INSTANCE,
     "azurlanewiki",
     "Azur Lane Wiki",
     "https://azurlane.koumakan.jp",
@@ -182,6 +197,7 @@ fixed!(
 );
 fixed!(
     MGEWIKI,
+    MGEWIKI_INSTANCE,
     "mgewiki",
     "MGE Wiki",
     "https://mgewiki.moe",
@@ -276,9 +292,7 @@ fn extract<'a>(
     };
     let per_page = http
         .option("limit")
-        .and_then(Value::as_u64)
-        .unwrap_or(50)
-        .to_string();
+        .map_or_else(|| "50".into(), crate::sites::scalar);
     let (route, params, info, subcategories) = match &target.kind {
         Kind::Wiki => (
             &WIKI,
@@ -317,10 +331,8 @@ fn extract<'a>(
             (prefix_route(prefix.as_deref()), params, info, subcategories)
         }
     };
-    let mut params: Vec<(String, String)> = params
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v))
-        .collect();
+    let mut params: Vec<(String, String)> =
+        params.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
     let revisions = match http.option("image-revisions") {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(s)) => s.clone(),
@@ -339,7 +351,15 @@ fn extract<'a>(
         params.push((key.into(), value.into()));
     }
     let api = format!("{}{}", target.root, instance.api_path);
-    let files = query(site, instance, http, route, api.clone(), params.clone(), info);
+    let files = query(
+        site,
+        instance,
+        http,
+        route,
+        api.clone(),
+        params.clone(),
+        info,
+    );
     if !subcategories {
         return files;
     }
@@ -350,31 +370,23 @@ fn extract<'a>(
             *value = "subcat".into();
         }
     }
-    let subcats = pages(instance, http, api, params, move |pages| {
-        let mut children = Vec::new();
-        for page in pages {
-            let title = crate::sites::media::str_of(&page, "title").replace(' ', "_");
-            let Some(data) = page.as_object().cloned() else {
-                continue;
-            };
-            if title.is_empty() {
-                continue;
-            }
-            let mut url = match Url::parse(&base) {
-                Ok(url) => url,
-                Err(_) => continue,
-            };
-            url.set_path(&format!("{}{title}", url.path()));
-            children.push((url, data));
-        }
-        let category = site.category;
-        futures_util::StreamExt::boxed(futures_util::StreamExt::flatten(
-            futures_util::stream::iter(children.into_iter().map(move |(url, data)| {
-                crate::sites::queue(http, category, "category", url, &data)
-            })),
-        ))
-    });
-    futures_util::StreamExt::boxed(futures_util::StreamExt::chain(files, subcats))
+    let subcats =
+        pages(instance, http, api, params, move |pages| {
+            let children: Vec<_> = pages
+                .iter()
+                .filter_map(|page| {
+                    let title = crate::sites::media::str_of(page, "title").replace(' ', "_");
+                    let url = Url::parse(&format!("{base}{title}")).ok()?;
+                    Some((url, page.as_object()?.clone()))
+                })
+                .collect();
+            futures_util::stream::iter(children.into_iter().map(|(url, data)| {
+                crate::sites::queue(http, site.category, "category", url, &data)
+            }))
+            .flatten()
+            .boxed()
+        });
+    files.chain(subcats).boxed()
 }
 
 fn query<'a>(
@@ -423,8 +435,12 @@ where
                 .map(|ua| vec![("User-Agent", ua)])
                 .unwrap_or_default();
             let data = http.json_with(&url, &headers).await?;
-            if data.get("error").is_some() {
-                return Err(error("MediaWiki API returned an error"));
+            if let Some(failure) = data.get("error") {
+                return Err(error(format!(
+                    "MediaWiki API error {}: {}",
+                    crate::sites::media::str_of(failure, "code"),
+                    crate::sites::media::str_of(failure, "info")
+                )));
             }
             let entries: Vec<Value> = data
                 .get("query")
@@ -452,6 +468,16 @@ where
     })
 }
 
+/// gallery-dl `text.nameext_from_name`.
+fn nameext_from_name(name: &str) -> (String, String) {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && ext.chars().count() <= 16 => {
+            (stem.to_owned(), ext.to_lowercase())
+        }
+        _ => (name.to_owned(), String::new()),
+    }
+}
+
 fn page_events(
     site: &'static Site,
     http: &Http,
@@ -469,7 +495,10 @@ fn page_events(
     };
     info.insert("count".into(), images.len().into());
     info.extend(extra.clone());
-    let page_id = info.get("pageid").map(crate::sites::scalar).unwrap_or_default();
+    let page_id = info
+        .get("pageid")
+        .map(crate::sites::scalar)
+        .unwrap_or_default();
     let mut items = Vec::new();
     let mut num = 0;
     for image in images {
@@ -501,7 +530,7 @@ fn page_events(
             .split_once(':')
             .map(|(_, name)| name.to_owned())
             .unwrap_or_default();
-        crate::sites::media::set_nameext(&mut image, crate::sites::media::nameext_name(&title));
+        crate::sites::media::set_nameext(&mut image, nameext_from_name(&title));
         let ts = crate::sites::media::iso_ts(
             image.get("timestamp").and_then(Value::as_str).unwrap_or(""),
         );
@@ -521,7 +550,10 @@ fn page_events(
         };
         // `image.update(info)`: page fields win.
         image.extend(info.clone());
-        let sha1 = image.get("sha1").map(crate::sites::scalar).unwrap_or_default();
+        let sha1 = image
+            .get("sha1")
+            .map(crate::sites::scalar)
+            .unwrap_or_default();
         let user = image.get("user").and_then(Value::as_str).map(str::to_owned);
         let caption = image
             .get("comment")
@@ -544,17 +576,9 @@ mod tests {
     use crate::sites::testing::{http, json, keywords, media, serve};
     use serde_json::json;
 
-    fn project(category: &'static str) -> &'static Instance {
-        Box::leak(Box::new(Instance {
-            hosts: Hosts::Project(category),
-            api_path: "/w/api.php",
-            user_agent: None,
-        }))
-    }
-
     #[test]
     fn classifies_urls() {
-        let wp = project("wikipedia");
+        let wp = &WIKIPEDIA_INSTANCE;
         let t = |i: &Instance, raw: &str| target(i, &Url::parse(raw).unwrap());
         assert_eq!(
             t(wp, "https://en.wikipedia.org/wiki/Athena_Parthenos"),
@@ -578,17 +602,7 @@ mod tests {
             t(wp, "https://en.wikipedia.org/").map(|t| t.kind),
             Some(Kind::Wiki)
         );
-        let commons = match WIKIMEDIACOMMONS.category {
-            "wikimediacommons" => &Instance {
-                hosts: Hosts::Fixed {
-                    root: "https://commons.wikimedia.org",
-                    hosts: &["commons.wikimedia.org"],
-                },
-                api_path: "/w/api.php",
-                user_agent: None,
-            },
-            _ => unreachable!(),
-        };
+        let commons = &WIKIMEDIACOMMONS_INSTANCE;
         assert!(t(commons, "https://commons.wikimedia.org/wiki/File:A.jpg").is_some());
         for raw in [
             "https://en.m.wikipedia.org/wiki/X",
@@ -601,13 +615,19 @@ mod tests {
             assert_eq!(t(wp, raw), None, "{raw}");
         }
         let find = |raw: &str| crate::sites::find(&Url::parse(raw).unwrap()).map(|s| s.category);
-        assert_eq!(find("https://fr.wiktionary.org/wiki/chat"), Some("wiktionary"));
+        assert_eq!(
+            find("https://fr.wiktionary.org/wiki/chat"),
+            Some("wiktionary")
+        );
         assert_eq!(find("https://www.wikidata.org/wiki/Q1"), Some("wikidata"));
         assert_eq!(
             find("https://archives.bulbagarden.net/wiki/File:X.png"),
             Some("bulbapedia")
         );
-        assert_eq!(find("https://commons.wikimedia.org/wiki/File:A.jpg"), Some("wikimediacommons"));
+        assert_eq!(
+            find("https://commons.wikimedia.org/wiki/File:A.jpg"),
+            Some("wikimediacommons")
+        );
     }
 
     fn page(id: u64, title: &str) -> Value {
@@ -622,14 +642,16 @@ mod tests {
     #[tokio::test]
     async fn article_paginates_with_continue() {
         let (root, server) = serve(vec![
-            json(json!({"continue": {"gimcontinue": "1|2", "continue": "gimcontinue||"},
-                "query": {"pages": {"1": page(1, "File:One.JPG")}}})),
+            json(
+                json!({"continue": {"gimcontinue": "1|2", "continue": "gimcontinue||"},
+                "query": {"pages": {"1": page(1, "File:One.JPG")}}}),
+            ),
             json(json!({"query": {"pages": {"2": page(2, "File:Two words.png")}}})),
         ]);
         let http = http("wikipedia", root);
         let files = media(extract(
             &WIKIPEDIA,
-            project("wikipedia"),
+            &WIKIPEDIA_INSTANCE,
             &http,
             Url::parse("https://en.wikipedia.org/wiki/Athena").unwrap(),
         ))
@@ -668,21 +690,16 @@ mod tests {
     async fn category_queues_subcategories() {
         let (root, server) = serve(vec![
             json(json!({"query": {"pages": {"1": page(1, "File:A.jpg")}}})),
-            json(json!({"query": {"pages": {"5": {"pageid": 5, "ns": 14, "title": "Category:Sub cat"}}}})),
+            json(
+                json!({"query": {"pages": {"5": {"pageid": 5, "ns": 14, "title": "Category:Sub cat"}}}}),
+            ),
             json(json!({"query": {"pages": {"2": page(2, "File:B.jpg")}}})),
             json(json!({"query": {"pages": {}}})),
         ]);
         let http = http("wikimediacommons", root);
         let files = media(extract(
             &WIKIMEDIACOMMONS,
-            Box::leak(Box::new(Instance {
-                hosts: Hosts::Fixed {
-                    root: "https://commons.wikimedia.org",
-                    hosts: &["commons.wikimedia.org"],
-                },
-                api_path: "/w/api.php",
-                user_agent: None,
-            })),
+            &WIKIMEDIACOMMONS_INSTANCE,
             &http,
             Url::parse("https://commons.wikimedia.org/wiki/Category:Top").unwrap(),
         ))
@@ -691,8 +708,58 @@ mod tests {
         assert_eq!(keywords(&files[0])["subcategory"], "category");
         assert_eq!(keywords(&files[1])["page"], "Category:Sub_cat");
         let requests = server.join().unwrap();
-        assert!(requests[0].contains("generator=categorymembers&gcmtitle=Category%3ATop&gcmtype=file"));
+        assert!(
+            requests[0].contains("generator=categorymembers&gcmtitle=Category%3ATop&gcmtype=file")
+        );
         assert!(requests[1].contains("gcmtype=subcat"));
         assert!(requests[2].contains("gcmtitle=Category%3ASub_cat&gcmtype=file"));
+    }
+
+    #[tokio::test]
+    async fn wiki_lists_all_files() {
+        let (root, server) = serve(vec![json(
+            json!({"query": {"pages": {"1": page(1, "File:One.JPG")}}}),
+        )]);
+        let http = http("wikipedia", root);
+        let files = media(extract(
+            &WIKIPEDIA,
+            &WIKIPEDIA_INSTANCE,
+            &http,
+            Url::parse("https://en.wikipedia.org/").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(keywords(&files[0])["subcategory"], "wiki");
+        assert!(!keywords(&files[0]).contains_key("page"));
+        assert_eq!(
+            crate::sites::default_templates(&files[0])
+                .unwrap()
+                .1
+                .render(&files[0])
+                .unwrap()
+                .unwrap(),
+            std::path::PathBuf::from("wikipedia")
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("generator=allpages&gapnamespace=6&gaplimit=50&"));
+    }
+
+    #[tokio::test]
+    async fn api_error_ends_with_failure() {
+        let (root, server) = serve(vec![json(
+            json!({"error": {"code": "badtitle", "info": "Bad title"}}),
+        )]);
+        let http = http("wikipedia", root);
+        let results = extract(
+            &WIKIPEDIA,
+            &WIKIPEDIA_INSTANCE,
+            &http,
+            Url::parse("https://en.wikipedia.org/wiki/X").unwrap(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let message = results[0].as_ref().unwrap_err().to_string();
+        assert!(message.contains("badtitle: Bad title"), "{message}");
+        server.join().unwrap();
     }
 }

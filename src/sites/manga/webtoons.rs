@@ -1,9 +1,14 @@
 //! WEBTOON episodes, comics and artists, mirroring
 //! gallery_dl/extractor/webtoons.py.
-use super::{Gallery, get_json, get_text, keywords, set, text};
+//!
+//! Not ported: the `thumbnails`, `banners` and `bgm` options (extra assets;
+//! background music needs ytdl/HLS handoff) and the age-gate redirect check.
+use super::{Gallery, keywords, set, text};
+use crate::sites::media::{parse_query, query_get};
 use crate::sites::{Events, Http, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
+use text::parse_int;
 use url::Url;
 
 pub static SITE: Site = Site {
@@ -24,8 +29,82 @@ const COOKIES: &str = "atGDPR=AD_CONSENT; needCCPA=false; needCOPPA=false; \
                        needGDPR=false; pagGDPR=true; ageGatePass=true";
 
 static EPISODE: Route = Route::new("episode", FILENAME, DIRECTORY, ARCHIVE);
-static COMIC: Route = Route::new("comic", "{type}.{extension}", DIRECTORY, "{title_no}_{type}");
+static COMIC: Route = Route::new(
+    "comic",
+    "{type}.{extension}",
+    DIRECTORY,
+    "{title_no}_{type}",
+);
 static ARTIST: Route = Route::new("artist", FILENAME, DIRECTORY, ARCHIVE);
+
+/// `util.CODES`, for `code_to_language`.
+const LANGUAGES: &[(&str, &str)] = &[
+    ("ar", "Arabic"),
+    ("bg", "Bulgarian"),
+    ("bn", "Bengali"),
+    ("ca", "Catalan"),
+    ("cs", "Czech"),
+    ("da", "Danish"),
+    ("de", "German"),
+    ("el", "Greek"),
+    ("en", "English"),
+    ("es", "Spanish"),
+    ("fa", "Persian"),
+    ("fi", "Finnish"),
+    ("fr", "French"),
+    ("he", "Hebrew"),
+    ("hi", "Hindi"),
+    ("hu", "Hungarian"),
+    ("id", "Indonesian"),
+    ("it", "Italian"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+    ("ms", "Malay"),
+    ("nl", "Dutch"),
+    ("no", "Norwegian"),
+    ("pl", "Polish"),
+    ("pt", "Portuguese"),
+    ("ro", "Romanian"),
+    ("ru", "Russian"),
+    ("sk", "Slovak"),
+    ("sl", "Slovenian"),
+    ("sr", "Serbian"),
+    ("sv", "Swedish"),
+    ("th", "Thai"),
+    ("tr", "Turkish"),
+    ("uk", "Ukrainian"),
+    ("vi", "Vietnamese"),
+    ("zh", "Chinese"),
+];
+
+fn code_to_language(code: &str) -> Option<&'static str> {
+    let code = code.to_lowercase();
+    LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, l)| *l)
+}
+
+/// `text.extract_from`: successive extractions from one position; a miss
+/// returns `""` and leaves the position alone.
+struct Extr<'a> {
+    text: &'a str,
+    pos: usize,
+}
+
+impl<'a> Extr<'a> {
+    fn new(text: &'a str) -> Self {
+        Self { text, pos: 0 }
+    }
+
+    fn find(&mut self, begin: &str, end: &str) -> Option<&'a str> {
+        let first = self.text[self.pos..].find(begin)? + self.pos + begin.len();
+        let last = self.text[first..].find(end)? + first;
+        self.pos = last + end.len();
+        Some(&self.text[first..last])
+    }
+
+    fn get(&mut self, begin: &str, end: &str) -> &'a str {
+        self.find(begin, end).unwrap_or_default()
+    }
+}
 
 #[derive(Debug, PartialEq)]
 enum Target {
@@ -50,13 +129,11 @@ enum Target {
         artist: String,
     },
 }
-
 fn target(url: &Url) -> Option<Target> {
     if !crate::sites::plain(url) || !crate::sites::host_is(url, &["webtoons.com"]) {
         return None;
     }
     let raw: Vec<&str> = url.path().split('/').skip(1).collect();
-    let decoded = crate::sites::segments(url);
     let query = url.query().unwrap_or_default();
     match raw.as_slice() {
         [lang, genre, comic, episode, "viewer"]
@@ -66,9 +143,9 @@ fn target(url: &Url) -> Option<Target> {
         {
             Some(Target::Episode {
                 base: format!("{lang}/{genre}/{comic}/{episode}"),
-                lang: decoded[0].clone(),
-                genre: decoded[1].clone(),
-                comic: decoded[2].clone(),
+                lang: (*lang).into(),
+                genre: (*genre).into(),
+                comic: (*comic).into(),
                 query: query.into(),
             })
         }
@@ -77,9 +154,9 @@ fn target(url: &Url) -> Option<Target> {
         {
             Some(Target::Comic {
                 base: format!("{lang}/{genre}/{comic}"),
-                lang: decoded[0].clone(),
-                genre: decoded[1].clone(),
-                comic: decoded[2].clone(),
+                lang: (*lang).into(),
+                genre: (*genre).into(),
+                comic: (*comic).into(),
                 query: query.into(),
             })
         }
@@ -102,13 +179,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             comic,
             query,
         }) => crate::sites::once(async move {
-            let page = get_text(
-                http,
-                &format!("{ROOT}/{base}/viewer?{query}"),
-                ROOT,
-                &[("Cookie", COOKIES)],
-            )
-            .await?;
+            let page = fetch(http, &format!("{ROOT}/{base}/viewer?{query}")).await?;
             Ok(crate::sites::events(episode_events(
                 http, &page, &lang, &genre, &comic, &query,
             )))
@@ -127,21 +198,32 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     }
 }
 
+/// A page with the age-gate cookies and Referer upstream sends.
+async fn fetch(http: &Http, url: &str) -> Result<String> {
+    http.text_with(
+        &http.api(url)?,
+        &[
+            ("Cookie", COOKIES),
+            ("Referer", "https://www.webtoons.com/"),
+        ],
+    )
+    .await
+}
+
 /// `WebtoonsEpisodeExtractor.metadata`.
 fn metadata(page: &str, lang: &str, genre: &str, comic: &str, query: &str) -> Map<String, Value> {
-    let params = text::parse_query(query);
-    let param = |name| {
-        text::query_get(&params, name)
-            .map(Value::from)
-            .unwrap_or(Value::Null)
-    };
-    let mut e = text::Extr::new(page);
+    let params = parse_query(Some(query));
+    let param = |name| query_get(&params, name).map_or(Value::Null, Value::from);
+    let mut e = Extr::new(page);
     let title = e.get(r#"<meta property="og:title" content=""#, "\"");
     let descr = e.get(r#"<meta property="og:description" content=""#, "\"");
     let (comic_name, episode_name) = if e.get(r#"<div class="subj_info""#, "\n").is_empty() {
         ("", "")
     } else {
-        (e.get(">", "<"), e.get(r#"<h1 class="subj_episode" title=""#, "\""))
+        (
+            e.get(">", "<"),
+            e.get(r#"<h1 class="subj_episode" title=""#, "\""),
+        )
     };
     let episode = if e
         .get(r#"<span class="tx _btnOpenEpisodeLis"#, "\"")
@@ -170,7 +252,10 @@ fn metadata(page: &str, lang: &str, genre: &str, comic: &str, query: &str) -> Ma
         ("author_name", unescape(author_name)),
         ("description", unescape(descr)),
         ("lang", lang.into()),
-        ("language", text::code_to_language(lang)),
+        (
+            "language",
+            code_to_language(lang).map_or(Value::Null, Value::from),
+        ),
     ])
 }
 
@@ -179,57 +264,60 @@ fn image_host(url: &str) -> String {
     url.replace("://webtoon-phinf.", "://swebtoon-phinf.")
 }
 
-/// The `quality` option: per-extension `type` parameters, where `false`
-/// drops the query to request originals. `None` leaves URLs unchanged.
-enum Quality {
-    Keep,
-    Map(Map<String, Value>),
+/// Python truthiness of a JSON value.
+fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64() != Some(0.0),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(o) => !o.is_empty(),
+    }
 }
 
-fn quality(http: &Http) -> Quality {
+/// The `quality` option as per-extension `type` parameters, where `false`
+/// drops the query to request originals. `None` leaves URLs unchanged.
+fn quality(http: &Http) -> Option<Map<String, Value>> {
     let original = || {
-        Quality::Map(keywords([
+        Some(keywords([
             ("jpg", false.into()),
             ("jpeg", false.into()),
             ("webp", false.into()),
         ]))
     };
-    let both = |value: Value| Quality::Map(keywords([("jpg", value.clone()), ("jpeg", value)]));
+    let both = |value: Value| Some(keywords([("jpg", value.clone()), ("jpeg", value)]));
     match http.option("quality") {
-        None => original(),
+        None | Some(Value::Null) => original(),
         Some(Value::String(s)) if s == "original" => original(),
-        Some(Value::String(s)) if !s.is_empty() => both(s.clone().into()),
-        Some(Value::Number(n)) if n.as_f64() != Some(0.0) => {
-            both(format!("q{}", crate::sites::scalar(&Value::Number(n.clone()))).into())
-        }
-        Some(Value::Object(map)) => Quality::Map(map.clone()),
-        Some(_) => Quality::Keep,
+        Some(value) if !truthy(value) => None,
+        Some(Value::String(s)) => both(s.clone().into()),
+        Some(Value::Bool(b)) => both(format!("q{}", crate::sites::scalar(&Value::Bool(*b))).into()),
+        Some(Value::Number(n)) if n.is_i64() || n.is_u64() => both(format!("q{n}").into()),
+        Some(Value::Object(map)) => Some(map.clone()),
+        Some(_) => None,
     }
 }
 
 /// `WebtoonsEpisodeExtractor.images`.
-fn images(page: &str, quality: &Quality) -> Vec<String> {
-    text::extract_iter(page, r#"class="_images" data-url=""#, "\"")
-        .into_iter()
-        .map(|url| {
-            let url = crate::sites::unescape(url);
-            let (path, _, _) = text::rpartition(&url, "?");
-            let url = match quality {
-                Quality::Map(map) => {
-                    let ext = text::rpartition(path, ".").2.to_lowercase();
-                    match map.get(&ext) {
-                        Some(Value::Bool(false)) => path.to_owned(),
-                        Some(Value::String(kind)) if !kind.is_empty() => {
-                            format!("{path}?type={kind}")
-                        }
-                        _ => url.clone(),
-                    }
-                }
-                Quality::Keep => url.clone(),
-            };
-            image_host(&url)
-        })
-        .collect()
+fn images(page: &str, quality: Option<&Map<String, Value>>) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut extr = Extr::new(page);
+    while let Some(url) = extr.find(r#"class="_images" data-url=""#, "\"") {
+        let path = url.rsplit_once('?').map_or(url, |(path, _)| path);
+        let ext = path
+            .rsplit_once('.')
+            .map_or(path, |(_, e)| e)
+            .to_lowercase();
+        let kind = quality.and_then(|map| map.get(&ext));
+        let url = match kind {
+            Some(Value::Bool(false)) => path.to_owned(),
+            Some(kind) if truthy(kind) => format!("{path}?type={}", crate::sites::scalar(kind)),
+            _ => url.to_owned(),
+        };
+        urls.push(image_host(&url));
+    }
+    urls
 }
 
 fn episode_events(
@@ -243,31 +331,39 @@ fn episode_events(
     let data = metadata(page, lang, genre, comic, query);
     let id = format!(
         "{}_{}",
-        data.get("title_no").map(crate::sites::scalar).unwrap_or_default(),
-        data.get("episode_no").map(crate::sites::scalar).unwrap_or_default()
+        data.get("title_no")
+            .map(crate::sites::scalar)
+            .unwrap_or_default(),
+        data.get("episode_no")
+            .map(crate::sites::scalar)
+            .unwrap_or_default()
     );
-    let pages = images(page, &quality(http))
+    let pages = images(page, quality(http).as_ref())
         .into_iter()
         .map(|url| (url, None))
         .collect();
-    Gallery::chapter(&EPISODE, data, pages)
-        .enum_key("num")
+    let mut gallery = Gallery::chapter(&EPISODE, data, pages)
         .id(id)
-        .session(http, ROOT)
-        .events(&SITE, http)
+        .header("Referer", "https://www.webtoons.com/");
+    gallery.enum_key = "num";
+    gallery.events(&SITE, http)
 }
 
-/// Episode URLs in the episode list, as `pattern.finditer` would find them.
+/// `WebtoonsComicExtractor.get_episode_urls`: every episode URL in the
+/// episode list, as `EPISODE.pattern.finditer` finds them.
 fn episode_urls(page: &str) -> Vec<Url> {
-    let list = text::extr(page, r#"id="_listUl""#, "</ul>");
+    let mut extr = Extr::new(page);
+    let list = extr.get(r#"id="_listUl""#, "</ul>");
     let mut urls = Vec::new();
     let mut search = 0;
     while let Some(found) = list[search..].find("webtoons.com/").map(|i| search + i) {
         search = found + 1;
         let mut start = found;
-        if list[..start].ends_with("www.") {
-            start -= 4;
-        }
+        start -= if list[..start].ends_with("www.") {
+            4
+        } else {
+            0
+        };
         for scheme in ["https://", "http://"] {
             if list[..start].ends_with(scheme) {
                 start -= scheme.len();
@@ -277,8 +373,7 @@ fn episode_urls(page: &str) -> Vec<Url> {
         let end = list[found..]
             .find(['#', '\'', '"'])
             .map_or(list.len(), |i| found + i);
-        let raw = crate::sites::unescape(&list[start..end]);
-        let raw = text::ensure_http_scheme(&raw);
+        let raw = text::ensure_http_scheme(&list[start..end]);
         if let Ok(url) = Url::parse(&raw)
             && matches!(target(&url), Some(Target::Episode { .. }))
         {
@@ -298,31 +393,20 @@ fn comic_events(
     comic: String,
     query: String,
 ) -> Events<'_> {
-    let params = text::parse_query(&query);
-    let title_no = text::parse_int(text::query_get(&params, "title_no").unwrap_or_default());
-    let first = match text::query_get(&params, "page") {
-        Some(page) if !page.is_empty() => text::parse_int(page),
+    let params = parse_query(Some(&query));
+    let title_no = parse_int(query_get(&params, "title_no").unwrap_or_default());
+    let first = match query_get(&params, "page") {
+        Some(page) if !page.is_empty() => parse_int(page),
         _ => 1,
     };
     let path = move |page_no: i64| format!("/{base}/list?title_no={title_no}&page={page_no}");
-    crate::sites::paginate(Some((first, None::<String>)), move |state| {
+    crate::sites::paginate(Some(first), move |state| {
         let (path, lang, genre, comic) = (path.clone(), lang.clone(), genre.clone(), comic.clone());
         async move {
-            let Some((page_no, page)) = state else {
+            let Some(page_no) = state else {
                 return Ok(None);
             };
-            let page = match page {
-                Some(page) => page,
-                None => {
-                    get_text(
-                        http,
-                        &format!("{ROOT}{}", path(page_no)),
-                        ROOT,
-                        &[("Cookie", COOKIES)],
-                    )
-                    .await?
-                }
-            };
+            let page = fetch(http, &format!("{ROOT}{}", path(page_no))).await?;
             let mut kw = keywords([
                 ("lang", lang.into()),
                 ("genre", genre.into()),
@@ -333,51 +417,51 @@ fn comic_events(
             let children = episode_urls(&page)
                 .into_iter()
                 .map(|url| {
-                    let params = text::parse_query(url.query().unwrap_or_default());
-                    set(
-                        &mut kw,
-                        "episode_no",
-                        text::parse_int(text::query_get(&params, "episode_no").unwrap_or_default()),
-                    );
+                    let params = parse_query(url.query());
+                    let episode_no =
+                        parse_int(query_get(&params, "episode_no").unwrap_or_default());
+                    set(&mut kw, "episode_no", episode_no);
                     (url, kw.clone())
                 })
                 .collect();
             let events = super::queue_urls(http, &SITE, &COMIC, children);
             let next = page_no + 1;
             let more = page.contains(&path(next)) && next < 10_000;
-            Ok(Some((events, more.then_some((next, None)))))
+            Ok(Some((events, more.then_some(next))))
         }
     })
 }
 
 /// `WebtoonsArtistExtractor`: the creator's titles from the community API.
 async fn artist_events<'a>(http: &'a Http, lang: &str, artist: &str) -> Result<Events<'a>> {
-    let language = text::code_to_language(lang)
-        .as_str()
+    let language = code_to_language(lang)
         .map(str::to_uppercase)
         .ok_or_else(|| error("unsupported WEBTOON community language"))?;
-    let page = get_text(
-        http,
-        &format!("{ROOT}/p/community/{lang}/u/{artist}"),
-        ROOT,
-        &[("Cookie", COOKIES)],
-    )
-    .await?;
-    let creator = text::extr(&page, r#"\"creatorId\":\""#, "\\");
-    if creator.is_empty() || !creator.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+    let page = fetch(http, &format!("{ROOT}/p/community/{lang}/u/{artist}")).await?;
+    let creator = Extr::new(&page).get(r#"\"creatorId\":\""#, "\\");
+    if creator.is_empty()
+        || !creator
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
         return Err(error("WEBTOON creator ID not found"));
     }
-    let url = super::with_query(
-        &format!("{ROOT}/p/community/api/v1/creator/{creator}/titles"),
-        &[("language", &language), ("nextSize", "50")],
-    )?;
-    let data = get_json(
-        http,
-        &url,
-        ROOT,
-        &[("Cookie", COOKIES), ("language", &language)],
-    )
-    .await?;
+    let mut url = http.api(&format!(
+        "{ROOT}/p/community/api/v1/creator/{creator}/titles"
+    ))?;
+    url.query_pairs_mut()
+        .append_pair("language", &language)
+        .append_pair("nextSize", "50");
+    let data = http
+        .json_with(
+            &url,
+            &[
+                ("Cookie", COOKIES),
+                ("Referer", "https://www.webtoons.com/"),
+                ("language", &language),
+            ],
+        )
+        .await?;
     let children = data
         .pointer("/result/titles")
         .and_then(Value::as_array)
@@ -385,7 +469,7 @@ async fn artist_events<'a>(http: &'a Http, lang: &str, artist: &str) -> Result<E
         .flatten()
         .filter_map(|comic| {
             let path = comic.pointer("/extra/episodeListPath")?.as_str()?;
-            let url = super::link(ROOT, path).filter(|_| path.starts_with('/'))?;
+            let url = Url::parse(&format!("{ROOT}{path}")).ok()?;
             Some((url, comic.as_object()?.clone()))
         })
         .collect();
@@ -396,11 +480,11 @@ async fn artist_events<'a>(http: &'a Http, lang: &str, artist: &str) -> Result<E
 mod tests {
     use super::super::tests::{archive, path};
     use super::*;
-    use crate::sites::testing::{html, http, json, keywords as kw, media, serve};
+    use crate::sites::testing::{html, http, json, keywords as kw, media, response, serve};
+    use futures_util::StreamExt;
     use serde_json::json;
 
-    const EPISODE_URL: &str =
-        "https://www.webtoons.com/en/fantasy/tower-of-god/season-3-ep-1/viewer?title_no=95&episode_no=1";
+    const EPISODE_URL: &str = "https://www.webtoons.com/en/fantasy/tower-of-god/season-3-ep-1/viewer?title_no=95&episode_no=1";
 
     #[test]
     fn classifies_urls() {
@@ -490,10 +574,11 @@ mod tests {
     fn quality_option_selects_image_types() {
         let page = r#"class="_images" data-url="https://webtoon-phinf.x/1.JPG?type=q90""#;
         let q = |value: Value| {
-            let http = http("WEBTOON", Url::parse("http://127.0.0.1:1/").unwrap()).with_options(Some(
-                std::sync::Arc::new(json!({"quality": value}).as_object().unwrap().clone()),
-            ));
-            images(page, &quality(&http)).remove(0)
+            let http =
+                http("WEBTOON", Url::parse("http://127.0.0.1:1/").unwrap()).with_options(Some(
+                    std::sync::Arc::new(json!({"quality": value}).as_object().unwrap().clone()),
+                ));
+            images(page, quality(&http).as_ref()).remove(0)
         };
         assert_eq!(q(json!(50)), "https://swebtoon-phinf.x/1.JPG?type=q50");
         assert_eq!(q(json!("x")), "https://swebtoon-phinf.x/1.JPG?type=x");
@@ -503,7 +588,10 @@ mod tests {
 
     fn list(page: u32, next: bool) -> String {
         let more = if next {
-            format!(r#"<a href="/en/fantasy/tower-of-god/list?title_no=95&page={}">"#, page + 1)
+            format!(
+                r#"<a href="/en/fantasy/tower-of-god/list?title_no=95&page={}">"#,
+                page + 1
+            )
         } else {
             String::new()
         };
@@ -524,13 +612,17 @@ mod tests {
         let http = http("WEBTOON", root);
         let files = media(extract(
             &http,
-            Url::parse("https://www.webtoons.com/en/fantasy/tower-of-god/list?title_no=95").unwrap(),
+            Url::parse("https://www.webtoons.com/en/fantasy/tower-of-god/list?title_no=95")
+                .unwrap(),
         ))
         .await;
         assert_eq!(files.len(), 4);
         let requests = requests.join().unwrap();
         assert!(requests[0].starts_with("GET /en/fantasy/tower-of-god/list?title_no=95&page=1 "));
-        assert!(requests[1].starts_with("GET /en/fantasy/tower-of-god/ep-1/viewer?title_no=95&episode_no=1 "));
+        assert!(
+            requests[1]
+                .starts_with("GET /en/fantasy/tower-of-god/ep-1/viewer?title_no=95&episode_no=1 ")
+        );
         assert!(requests[2].starts_with("GET /en/fantasy/tower-of-god/list?title_no=95&page=2 "));
         assert!(requests[3].starts_with("GET /en/fantasy/tower-of-god/ep-2/viewer?"));
     }
@@ -558,5 +650,35 @@ mod tests {
         ));
         assert!(requests[1].contains("language: ENGLISH"));
         assert!(requests[2].starts_with("GET /en/fantasy/t/list?title_no=7&page=1 "));
+    }
+
+    #[tokio::test]
+    async fn artist_without_creator_id_fails() {
+        let (root, requests) = serve(vec![html("<html>no creator</html>")]);
+        let http = http("WEBTOON", root);
+        let events = extract(
+            &http,
+            Url::parse("https://www.webtoons.com/p/community/en/u/abc").unwrap(),
+        );
+        let results = events.collect::<Vec<_>>().await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("creator ID")
+        );
+        requests.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn missing_episode_is_an_error() {
+        let (root, requests) = serve(vec![response("404 Not Found", "text/html", b"")]);
+        let http = http("WEBTOON", root);
+        let events = extract(&http, Url::parse(EPISODE_URL).unwrap());
+        let results = events.collect::<Vec<_>>().await;
+        assert!(results.iter().any(Result::is_err));
+        requests.join().unwrap();
     }
 }

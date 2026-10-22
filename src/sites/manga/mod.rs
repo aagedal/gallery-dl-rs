@@ -13,8 +13,9 @@ use url::Url;
 
 mod mangadex;
 mod text;
+mod webtoons;
 
-pub(super) static SITES: &[&Site] = &[&mangadex::SITE];
+pub(super) static SITES: &[&Site] = &[&mangadex::SITE, &webtoons::SITE];
 
 /// Insert a key into a keyword map.
 pub(super) fn set(map: &mut Map<String, Value>, key: &str, value: impl Into<Value>) {
