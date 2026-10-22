@@ -165,6 +165,11 @@ struct Args {
     /// Do not load the discovered default native configuration file
     #[arg(long, conflicts_with = "native_config")]
     native_config_ignore: bool,
+    /// Additional native setting KEY=VALUE (VALUE is JSON or text), e.g.
+    /// extractor.4chan.retries=3; `extractor.*` keys also reach the
+    /// compatibility backend
+    #[arg(short = 'o', long = "option", value_name = "KEY=VALUE")]
+    options: Vec<String>,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
     /// Seconds for native extraction or active compatibility reading (excludes backpressure)
@@ -1161,6 +1166,7 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_api_key(options.api_key.as_deref())
+                                        .with_options(options.site_options.clone())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1675,6 +1681,7 @@ fn extract_input<'a>(
                             search_stop: (category == "twitter")
                                 .then_some(options.search_stop)
                                 .flatten(),
+                            options: configured.cli_options.clone(),
                         },
                     )
                 }
@@ -1714,6 +1721,8 @@ fn extract_input<'a>(
 
 struct Settings {
     options: ConfigOptions,
+    /// Raw `-o extractor.*` settings for the compatibility backend.
+    cli_options: Vec<String>,
     browser: Option<FirefoxProfile>,
     browser_spec: Option<String>,
     filename: Option<FilenameTemplate>,
@@ -1750,9 +1759,20 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
     } else {
         None
     };
+    let options = args
+        .options
+        .iter()
+        .map(|option| gallery_dl_rs::config::parse_option(option))
+        .collect::<Result<Vec<_>>>()?;
+    let cli_options: Vec<String> = options
+        .iter()
+        .filter(|option| option.path.first().is_some_and(|part| part == "extractor"))
+        .map(|option| option.raw.clone())
+        .collect();
     let config = match args.native_config.as_ref().or(discovered.as_ref()) {
-        Some(path) => Config::load(path).await?,
-        None => Config::default(),
+        Some(path) => Config::load_with_options(path, &options).await?,
+        None if options.is_empty() => Config::default(),
+        None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
@@ -1872,6 +1892,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         filesize_max: args.filesize_max,
         retries: args.retries,
         timeout: args.timeout,
+        site_options: None,
     };
     let mut settings = BTreeMap::new();
     for category in [
@@ -2013,6 +2034,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             category,
             Settings {
                 options,
+                cli_options: cli_options.clone(),
                 browser,
                 browser_spec,
                 filename,

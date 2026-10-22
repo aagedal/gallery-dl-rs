@@ -25,6 +25,7 @@ pub struct Http {
     retries: u8,
     rate_limits: RateLimits,
     api_key: Option<String>,
+    options: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     root: Option<Url>,
 }
 
@@ -40,6 +41,7 @@ impl Http {
             retries: 0,
             rate_limits: RateLimits::default(),
             api_key: None,
+            options: None,
             root: None,
         })
     }
@@ -67,6 +69,38 @@ impl Http {
     pub fn with_api_key(mut self, key: Option<&str>) -> Self {
         self.api_key = key.map(Into::into);
         self
+    }
+
+    /// Site-specific configuration values, by upstream option name.
+    pub fn with_options(
+        mut self,
+        options: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
+    ) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// A site-specific configuration value.
+    pub fn option(&self, key: &str) -> Option<&Value> {
+        self.options.as_ref()?.get(key)
+    }
+
+    /// A site option interpreted with Python truthiness, or `default`.
+    pub fn option_bool(&self, key: &str, default: bool) -> bool {
+        match self.option(key) {
+            None => default,
+            Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(Value::Number(n)) => n.as_f64() != Some(0.0),
+            Some(Value::String(s)) => !s.is_empty(),
+            Some(Value::Array(a)) => !a.is_empty(),
+            Some(Value::Object(o)) => !o.is_empty(),
+        }
+    }
+
+    /// A string site option.
+    pub fn option_str(&self, key: &str) -> Option<&str> {
+        self.option(key)?.as_str()
     }
 
     /// Send every API request to this origin instead; intended for local tests.
