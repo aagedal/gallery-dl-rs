@@ -912,6 +912,8 @@ pub fn direct(url: &Url) -> Option<Media> {
 /// Runtime overrides passed as individual arguments to the compatibility process.
 #[derive(Clone, Default)]
 pub struct BackendOptions {
+    /// Raw `extractor.*` KEY=VALUE settings forwarded with `--option`.
+    pub options: Vec<String>,
     pub include: Option<crate::dispatch::Include>,
     pub child_range: Option<String>,
     pub child_filter: Option<Vec<String>>,
@@ -1047,6 +1049,9 @@ impl Backend {
         }
         if let Some(proxy) = &options.proxy {
             command.arg("--proxy").arg(proxy);
+        }
+        for option in &options.options {
+            command.arg("--option").arg(option);
         }
         if let Some(agent) = &options.user_agent {
             command.arg("--user-agent").arg(agent);

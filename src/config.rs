@@ -180,6 +180,9 @@ pub struct Options {
     pub filesize_max: Option<u64>,
     pub retries: Option<u8>,
     pub timeout: Option<Duration>,
+    /// Site-specific settings for registry sites (`crate::sites`), keyed by
+    /// their upstream option names and passed through unvalidated.
+    pub site_options: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
 }
 
 impl std::fmt::Debug for Options {
@@ -444,8 +447,50 @@ impl Options {
             filesize_max: overrides.filesize_max.or(self.filesize_max),
             retries: overrides.retries.or(self.retries),
             timeout: overrides.timeout.or(self.timeout),
+            site_options: match (&self.site_options, &overrides.site_options) {
+                (Some(base), Some(specific)) => {
+                    let mut merged = (**base).clone();
+                    merged.extend(specific.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    Some(std::sync::Arc::new(merged))
+                }
+                (base, specific) => specific.clone().or_else(|| base.clone()),
+            },
         }
     }
+}
+
+/// One `-o KEY=VALUE` setting: dotted path, final key and JSON value.
+#[derive(Clone)]
+pub struct CliOption {
+    pub path: Vec<String>,
+    pub key: String,
+    pub value: Value,
+    /// The original argument, for forwarding to the compatibility backend.
+    pub raw: String,
+}
+
+impl std::fmt::Debug for CliOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CliOption { [redacted] }")
+    }
+}
+
+/// Parse `KEY=VALUE` like upstream: VALUE is JSON when it parses, otherwise
+/// text; KEY is split on dots into a path and final key.
+pub fn parse_option(option: &str) -> Result<CliOption> {
+    let (key, value) = option.split_once('=').unwrap_or((option, ""));
+    if key.len() > 1024 || value.len() > MAX_CONFIG_BYTES {
+        return Err(error("option exceeds size limits"));
+    }
+    let value = serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.into()));
+    let mut path: Vec<String> = key.split('.').map(str::to_owned).collect();
+    let key = path.pop().unwrap_or_default();
+    Ok(CliOption {
+        path,
+        key,
+        value,
+        raw: option.to_owned(),
+    })
 }
 
 #[derive(Clone, Debug, Default)]
@@ -843,6 +888,71 @@ impl Config {
         Self::parse(&bytes, &parent)
     }
 
+    /// Load like [`Config::load`], then apply `-o` settings in order.
+    pub async fn load_with_options(path: &Path, options: &[CliOption]) -> Result<Self> {
+        if options.is_empty() {
+            return Self::load(path).await;
+        }
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|_| error("cannot resolve native configuration directory"))?
+                .join(path)
+        };
+        let parent = absolute
+            .parent()
+            .ok_or_else(|| error("native configuration has no parent directory"))?;
+        let parent = tokio::fs::canonicalize(parent)
+            .await
+            .map_err(|_| error("cannot resolve native configuration directory"))?;
+        let file = tokio::fs::File::open(&absolute)
+            .await
+            .map_err(|_| error("cannot open native configuration"))?;
+        let mut bytes = Vec::new();
+        file.take((MAX_CONFIG_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|_| error("cannot read native configuration"))?;
+        Self::parse_with_options(&bytes, &parent, options)
+    }
+
+    /// Parse, then set each `-o` value at its dotted path, as upstream
+    /// `config.set` does. Duplicate keys in `bytes` are still rejected.
+    pub fn parse_with_options(
+        bytes: &[u8],
+        directory: &Path,
+        options: &[CliOption],
+    ) -> Result<Self> {
+        if options.is_empty() {
+            return Self::parse(bytes, directory);
+        }
+        if bytes.len() > MAX_CONFIG_BYTES {
+            return Err(error("native configuration exceeds 1 MiB"));
+        }
+        let invalid = || error("invalid native configuration JSON or unsupported option");
+        let normalized = crate::source_date_json::normalize(bytes);
+        let bytes = normalized.as_deref().unwrap_or(bytes);
+        serde_json::from_slice::<NoDuplicateKeys>(bytes).map_err(|_| invalid())?;
+        let mut root: Value = serde_json::from_slice(bytes).map_err(|_| invalid())?;
+        for option in options {
+            let mut node = &mut root;
+            for part in &option.path {
+                let object = node
+                    .as_object_mut()
+                    .ok_or_else(|| error("option path crosses a non-object setting"))?;
+                node = object
+                    .entry(part.clone())
+                    .or_insert_with(|| Value::Object(Default::default()));
+            }
+            node.as_object_mut()
+                .ok_or_else(|| error("option path crosses a non-object setting"))?
+                .insert(option.key.clone(), option.value.clone());
+        }
+        let bytes = serde_json::to_vec(&root).map_err(|_| invalid())?;
+        Self::parse(&bytes, directory)
+    }
+
     /// Parse using an absolute directory for relative paths. This never reads
     /// cookies or archives and never evaluates shell/environment expressions.
     pub fn parse(bytes: &[u8], directory: &Path) -> Result<Self> {
@@ -998,11 +1108,57 @@ impl Config {
         serde_json::from_slice::<NoDuplicateKeys>(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let mut site_scopes = Vec::new();
+        let mut site_options = BTreeMap::new();
         let mut original: Value = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         if let Some(extractor) = original.get_mut("extractor").and_then(Value::as_object_mut) {
+            // Shared job options keep their typed meaning; all other keys
+            // belong to the site, even where another site uses the name.
+            const SHARED: &[&str] = &[
+                "postprocessor",
+                "init",
+                "postprocessors",
+                "postprocessor-options",
+                "base-directory",
+                "filename",
+                "directory",
+                "file-range",
+                "file-filter",
+                "image-filter",
+                "post-range",
+                "post-filter",
+                "child-range",
+                "child-filter",
+                "date-before",
+                "date-after",
+                "parent-metadata",
+                "metadata-parent",
+                "cookies",
+                "proxy",
+                "user-agent",
+                "archive",
+                "filesize-min",
+                "filesize-max",
+                "retries",
+                "timeout",
+                "api-key",
+            ];
             for category in crate::sites::categories() {
-                if let Some(value) = extractor.remove(category) {
+                if let Some(mut value) = extractor.remove(category) {
+                    // Keys outside the shared option set are site options.
+                    if let Some(fields) = value.as_object_mut() {
+                        let extra: serde_json::Map<String, Value> = fields
+                            .keys()
+                            .filter(|key| !SHARED.contains(&key.as_str()))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .filter_map(|key| fields.remove_entry(&key))
+                            .collect();
+                        if !extra.is_empty() {
+                            site_options.insert(category, std::sync::Arc::new(extra));
+                        }
+                    }
                     let raw: RawOptions = serde_json::from_value(value).map_err(|_| {
                         error("invalid native configuration JSON or unsupported option")
                     })?;
@@ -1387,6 +1543,7 @@ impl Config {
                 resolved.api_key = opaque_key;
             }
             resolved.tumblr_reblogs = tumblr_reblogs;
+            resolved.site_options = site_options.remove(name);
             categories.insert(name.into(), resolved);
         }
         let classes = raw_classes
@@ -2196,6 +2353,7 @@ impl RawOptions {
             filesize_max: size(self.filesize_max)?,
             retries,
             timeout,
+            site_options: None,
         })
     }
 }
@@ -2581,10 +2739,36 @@ mod site_scope_tests {
         .unwrap();
         let resolved = config.resolve("4chan").unwrap();
         assert_eq!(resolved.retries, Some(2));
+        assert_eq!(resolved.site_options, None);
+        let config = super::Config::parse(
+            br#"{"extractor":{"yandere":{"tags":true,"notes":"x","retries":1}}}"#,
+            &dir,
+        )
+        .unwrap();
+        let resolved = config.resolve("yandere").unwrap();
+        assert_eq!(resolved.retries, Some(1));
+        let options = resolved.site_options.unwrap();
+        assert_eq!(options.get("notes"), Some(&serde_json::json!("x")));
+        assert_eq!(options.get("tags"), Some(&serde_json::json!(true)));
+        let cli = [
+            super::parse_option("extractor.4chan.retries=5").unwrap(),
+            super::parse_option("extractor.yandere.notes=true").unwrap(),
+            super::parse_option("extractor.yandere.lang=en").unwrap(),
+        ];
+        let config = super::Config::parse_with_options(
+            br#"{"extractor":{"4chan":{"retries":1}}}"#,
+            &dir,
+            &cli,
+        )
+        .unwrap();
+        assert_eq!(config.resolve("4chan").unwrap().retries, Some(5));
+        let options = config.resolve("yandere").unwrap().site_options.unwrap();
+        assert_eq!(options["notes"], serde_json::json!(true));
+        assert_eq!(options["lang"], serde_json::json!("en"));
+        assert!(super::Config::parse_with_options(br#"{"a":1,"a":2}"#, &dir, &cli).is_err());
         for bad in [
             &br#"{"extractor":{"4chan":{"retries":1},"4chan":{"retries":2}}}"#[..],
             br#"{"extractor":{"4chan":{"retries":1,"retries":2}}}"#,
-            br#"{"extractor":{"4chan":{"unknown-option":1}}}"#,
             br#"{"extractor":{"4chan":[]}}"#,
             br#"{"retries":1,"retries":2}"#,
         ] {
