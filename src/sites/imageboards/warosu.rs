@@ -61,7 +61,10 @@ fn parse_page(page: &str, board: &str, thread: &str) -> Result<Vec<Item>> {
     let content = crate::sites::extr(page, "<div class=content", "</form>").unwrap_or_default();
     let posts: Vec<Map<String, Value>> = content.split("<table>").map(parse_post).collect();
     if title.is_empty() {
-        let com = posts[0].get("com").and_then(Value::as_str).unwrap_or_default();
+        let com = posts[0]
+            .get("com")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         title = super::truncate(&crate::sites::unescape(&crate::sites::remove_html(com)), 50);
     }
     let mut data = Map::new();
@@ -85,7 +88,10 @@ fn parse_page(page: &str, board: &str, thread: &str) -> Result<Vec<Item>> {
         let time = post.get("time").and_then(Value::as_i64).unwrap_or_default();
         post.insert("now".into(), now(time).into());
         post.extend(data.clone());
-        let tim = post.get("tim").map(crate::sites::scalar).unwrap_or_default();
+        let tim = post
+            .get("tim")
+            .map(crate::sites::scalar)
+            .unwrap_or_default();
         let name = post.get("name").and_then(Value::as_str).map(str::to_owned);
         items.push(
             Item::new(url, post)
@@ -124,7 +130,10 @@ fn parse_post(post: &str) -> Map<String, Value> {
         "name".into(),
         extr.next("class=postername>", "<").trim().into(),
     );
-    data.insert("time".into(), extr.next("class=posttime title=", "000>").into());
+    data.insert(
+        "time".into(),
+        extr.next("class=posttime title=", "000>").into(),
+    );
     data.insert(
         "com".into(),
         crate::sites::unescape(&crate::sites::remove_html(
@@ -133,7 +142,10 @@ fn parse_post(post: &str) -> Map<String, Value> {
         .into(),
     );
     if post.contains("<span class=\"fileinfo") && extract_image(post, &mut data) {
-        let image = data.get("image").and_then(Value::as_str).unwrap_or_default();
+        let image = data
+            .get("image")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let part = super::rpartition(image, "/").1;
         let (tim, extension) = part.split_once('.').unwrap_or((part, ""));
         let (tim, extension) = (tim.to_owned(), extension.to_owned());
@@ -270,5 +282,20 @@ mod tests {
     #[test]
     fn now_avoids_zero_padding() {
         assert_eq!(now(1_000_000_000), "Sun, Sep 9, 2001 01:46:40");
+    }
+
+    #[tokio::test]
+    async fn missing_thread_is_an_error() {
+        let (origin, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("warosu", origin);
+        let events = extract(&http, Url::parse("https://warosu.org/g/thread/5").unwrap());
+        let results: Vec<_> = futures_util::StreamExt::collect(events).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+        assert!(server.join().unwrap()[0].starts_with("GET /g/thread/5 "));
     }
 }

@@ -205,7 +205,10 @@ fn process(category: &str, root: &str, post: &mut Map<String, Value>) -> Option<
     let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
     post.insert("url".into(), raw.into());
     post.insert("extension".into(), ext[1..].into());
-    let thread = post.get("thread").map(crate::sites::scalar).unwrap_or_default();
+    let thread = post
+        .get("thread")
+        .map(crate::sites::scalar)
+        .unwrap_or_default();
     let time = post.get("time").and_then(Value::as_i64);
     let name = post.get("name").and_then(Value::as_str).map(str::to_owned);
     let title = post.get("title").and_then(Value::as_str).map(str::to_owned);
@@ -355,9 +358,31 @@ mod tests {
         ))
         .await;
         assert_eq!(files.len(), 2);
-        assert_eq!(files[0].url.as_str(), "https://smuglo.li/a/src/1500000000123.jpg");
+        assert_eq!(
+            files[0].url.as_str(),
+            "https://smuglo.li/a/src/1500000000123.jpg"
+        );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /a/threads.json "));
         assert!(requests[1].starts_with("GET /a/res/100.json "));
+    }
+
+    #[tokio::test]
+    async fn missing_thread_is_an_error() {
+        let (origin, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("gurochan", origin);
+        let events = extract(
+            "gurochan",
+            &http,
+            Url::parse("https://boards.guro.cx/g/res/100.html").unwrap(),
+        );
+        let results: Vec<_> = futures_util::StreamExt::collect(events).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+        assert!(server.join().unwrap()[0].starts_with("GET /g/res/100.json"));
     }
 }

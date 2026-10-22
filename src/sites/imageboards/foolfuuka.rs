@@ -396,7 +396,11 @@ async fn files(
         let Value::Object(mut post) = post else {
             continue;
         };
-        let Some(media) = post.get("media").filter(|m| super::truthy(Some(m))).cloned() else {
+        let Some(media) = post
+            .get("media")
+            .filter(|m| super::truthy(Some(m)))
+            .cloned()
+        else {
             continue;
         };
         let board = post
@@ -444,7 +448,10 @@ async fn files(
             .get("thread_num")
             .map(crate::sites::scalar)
             .unwrap_or_default();
-        let num = post.get("num").map(crate::sites::scalar).unwrap_or_default();
+        let num = post
+            .get("num")
+            .map(crate::sites::scalar)
+            .unwrap_or_default();
         let user = post.get("name").and_then(Value::as_str).map(str::to_owned);
         let caption = post
             .get("comment")
@@ -500,7 +507,11 @@ async fn remote(category: &str, http: &Http, board: &str, media: &Value) -> Resu
 fn redirect_target(category: &str, board: &str, url: &str) -> String {
     if url.starts_with("https://thebarchive.com/") {
         // '.webm' -> '.web' (#5116)
-        return url.strip_suffix('m').filter(|_| url.ends_with(".webm")).unwrap_or(url).into();
+        return url
+            .strip_suffix('m')
+            .filter(|_| url.ends_with(".webm"))
+            .unwrap_or(url)
+            .into();
     }
     if category != "archivedmoe" {
         return url.into();
@@ -564,7 +575,10 @@ mod tests {
             })
         );
         assert_eq!(
-            t("archiveofsins", "https://www.archiveofsins.com/_/search/text/yuri/page/2/"),
+            t(
+                "archiveofsins",
+                "https://www.archiveofsins.com/_/search/text/yuri/page/2/"
+            ),
             Some(Target::Search {
                 board: "_".into(),
                 params: vec![("text".into(), "yuri".into()), ("page".into(), "2".into())]
@@ -574,7 +588,10 @@ mod tests {
             t("palanq", "https://archive.palanq.win/a/search/subject/x/"),
             Some(Target::Search {
                 board: "a".into(),
-                params: vec![("subject".into(), "x".into()), ("boards".into(), "a".into())]
+                params: vec![
+                    ("subject".into(), "x".into()),
+                    ("boards".into(), "a".into())
+                ]
             })
         );
         assert_eq!(
@@ -607,7 +624,10 @@ mod tests {
         }
         let find = |raw: &str| crate::sites::find(&Url::parse(raw).unwrap()).map(|s| s.category);
         assert_eq!(find("https://rbt.asia/g/thread/1"), Some("rbt"));
-        assert_eq!(find("https://thebarchive.com/b/thread/1"), Some("thebarchive"));
+        assert_eq!(
+            find("https://thebarchive.com/b/thread/1"),
+            Some("thebarchive")
+        );
     }
 
     fn post(num: u64, timestamp: i64, media: Value) -> Value {
@@ -617,7 +637,7 @@ mod tests {
     }
 
     fn file(orig: &str) -> Value {
-        json!({"media": format!("{orig}"), "media_filename": "orig name.jpg",
+        json!({"media": orig.to_string(), "media_filename": "orig name.jpg",
             "media_orig": orig, "media_link": format!("https://img.test/a/{orig}"),
             "remote_media_link": null})
     }
@@ -644,15 +664,24 @@ mod tests {
         ))
         .await;
         assert_eq!(files.len(), 3);
-        assert_eq!(files[1].url.as_str(), "https://i.4cdn.org/a/1500000100789.gif");
-        assert_eq!(files[2].url.as_str(), "https://img.test/a/1500000200456.png");
+        assert_eq!(
+            files[1].url.as_str(),
+            "https://i.4cdn.org/a/1500000100789.gif"
+        );
+        assert_eq!(
+            files[2].url.as_str(),
+            "https://img.test/a/1500000200456.png"
+        );
         let k = keywords(&files[0]);
         assert_eq!(k["filename"], "1500000000123");
         assert_eq!(k["extension"], "jpg");
         assert_eq!(k["filename_media"], "orig name");
         assert_eq!(k["timestamp_ms"], 1500000000123u64);
         let (file, dir) = crate::sites::default_templates(&files[2]).unwrap();
-        assert_eq!(file.render(&files[2]).unwrap(), "1500000200456 orig name.png");
+        assert_eq!(
+            file.render(&files[2]).unwrap(),
+            "1500000200456 orig name.png"
+        );
         assert_eq!(
             dir.render(&files[2]).unwrap().unwrap(),
             std::path::PathBuf::from("4plebs/a/100 Thread title")
@@ -719,7 +748,9 @@ mod tests {
 
     #[tokio::test]
     async fn search_paginates_and_names_directory() {
-        let page: Vec<_> = (1..=4).map(|n| post(n, n as i64, file(&format!("{n}.jpg")))).collect();
+        let page: Vec<_> = (1..=4)
+            .map(|n| post(n, n as i64, file(&format!("{n}.jpg"))))
+            .collect();
         let (origin, server) = serve(vec![
             json(json!({"0": {"posts": page}})),
             json(json!([{"posts": [post(9, 9, file("9.jpg"))]}])),
@@ -771,5 +802,24 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /_/api/chan/gallery/?board=sci&page=1 "));
         assert!(requests[1].starts_with("GET /_/api/chan/gallery/?board=sci&page=2 "));
+    }
+
+    #[tokio::test]
+    async fn missing_thread_is_an_error() {
+        let (origin, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("desuarchive", origin);
+        let events = extract(
+            "desuarchive",
+            &http,
+            Url::parse("https://desuarchive.org/a/thread/5/").unwrap(),
+        );
+        let results: Vec<_> = futures_util::StreamExt::collect(events).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+        assert!(server.join().unwrap()[0].starts_with("GET /_/api/chan/thread/"));
     }
 }

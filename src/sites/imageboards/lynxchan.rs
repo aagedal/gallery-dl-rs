@@ -164,7 +164,10 @@ fn parse_thread(root: &str, body: &Value) -> Result<Vec<Item>> {
                 .to_owned();
             super::set_nameext(&mut file, &original);
             file.insert(DIRECTORY.into(), directory.clone());
-            let post_id = file.get("postId").map(crate::sites::scalar).unwrap_or_default();
+            let post_id = file
+                .get("postId")
+                .map(crate::sites::scalar)
+                .unwrap_or_default();
             let created = file
                 .get("creation")
                 .and_then(Value::as_str)
@@ -205,7 +208,9 @@ mod tests {
         );
         assert_eq!(
             t("kohlchan", "https://kohlchan.net/int/catalog.html"),
-            Some(Target::Board { board: "int".into() })
+            Some(Target::Board {
+                board: "int".into()
+            })
         );
         assert_eq!(
             t("bbw-chan", "https://bbw-chan.nl/bbwdraw/"),
@@ -227,16 +232,16 @@ mod tests {
 
     fn thread() -> Value {
         json!({"threadId": 10, "boardUri": "art", "subject": "Topic", "message": "op text",
-            "name": "Anon", "creation": "2023-01-02T03:04:05.000Z",
-            "files": [{"originalName": "My Pic.PNG", "path": "/.media/aaa.png", "size": 3}],
-            "posts": [
-                {"postId": 11, "message": "reply", "subject": null,
-                 "creation": "2023-01-02T03:05:00.000Z",
-                 "files": [{"originalName": "a.jpg", "path": "/.media/bbb.jpg"},
-                           {"originalName": "b.gif", "path": "/.media/ccc.gif"}]},
-                {"postId": 12, "message": "no files", "files": []},
-                {"postId": 13, "files": [{"originalName": "x", "path": "//evil.test/x"}]},
-            ]})
+        "name": "Anon", "creation": "2023-01-02T03:04:05.000Z",
+        "files": [{"originalName": "My Pic.PNG", "path": "/.media/aaa.png", "size": 3}],
+        "posts": [
+            {"postId": 11, "message": "reply", "subject": null,
+             "creation": "2023-01-02T03:05:00.000Z",
+             "files": [{"originalName": "a.jpg", "path": "/.media/bbb.jpg"},
+                       {"originalName": "b.gif", "path": "/.media/ccc.gif"}]},
+            {"postId": 12, "message": "no files", "files": []},
+            {"postId": 13, "files": [{"originalName": "x", "path": "//evil.test/x"}]},
+        ]})
     }
 
     #[tokio::test]
@@ -276,7 +281,10 @@ mod tests {
             );
         }
         let (_, identity) = crate::sites::archive_key(&files[1]).unwrap();
-        assert_eq!(identity, r#"["{boardUri}_{postId}_{num}",["art","11","0"]]"#);
+        assert_eq!(
+            identity,
+            r#"["{boardUri}_{postId}_{num}",["art","11","0"]]"#
+        );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /art/res/10.json "));
     }
@@ -321,5 +329,24 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /art/catalog.json "));
         assert!(requests[1].starts_with("GET /art/res/10.json "));
+    }
+
+    #[tokio::test]
+    async fn missing_thread_is_an_error() {
+        let (origin, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("endchan", origin);
+        let events = extract(
+            "endchan",
+            &http,
+            Url::parse("https://endchan.org/art/res/10.html").unwrap(),
+        );
+        let results: Vec<_> = futures_util::StreamExt::collect(events).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+        assert!(server.join().unwrap()[0].starts_with("GET /art/res/10.json"));
     }
 }

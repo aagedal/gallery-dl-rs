@@ -161,7 +161,10 @@ fn parse_thread(body: &Value) -> Result<Vec<Item>> {
                 .to_owned();
             super::set_nameext(&mut file, &original);
             file.insert(DIRECTORY.into(), directory.clone());
-            let id = file.get("postId").map(crate::sites::scalar).unwrap_or_default();
+            let id = file
+                .get("postId")
+                .map(crate::sites::scalar)
+                .unwrap_or_default();
             let date = file
                 .get("date")
                 .and_then(Value::as_str)
@@ -207,7 +210,13 @@ mod tests {
             "https://94chan.org/art/catalog.html",
             "https://94chan.org/art/index.html",
         ] {
-            assert_eq!(t(raw), Some(Target::Board { board: "art".into() }), "{raw}");
+            assert_eq!(
+                t(raw),
+                Some(Target::Board {
+                    board: "art".into()
+                }),
+                "{raw}"
+            );
         }
         for raw in [
             "https://94chan.org/art/thread/25",
@@ -223,13 +232,13 @@ mod tests {
 
     fn thread() -> Value {
         json!({"postId": 25, "board": "art", "subject": "Gallery", "nomarkup": "op",
-            "date": "2023-05-06T07:08:09.000Z", "name": "Anon",
-            "files": [{"filename": "abc123.png", "originalFilename": "Orig.PNG", "size": 1}],
-            "replies": [
-                {"postId": 26, "nomarkup": "reply", "subject": null,
-                 "files": [{"filename": "def456.jpg", "originalFilename": "r.jpg"},
-                           {"filename": "../x", "originalFilename": "bad.jpg"}]},
-            ]})
+        "date": "2023-05-06T07:08:09.000Z", "name": "Anon",
+        "files": [{"filename": "abc123.png", "originalFilename": "Orig.PNG", "size": 1}],
+        "replies": [
+            {"postId": 26, "nomarkup": "reply", "subject": null,
+             "files": [{"filename": "def456.jpg", "originalFilename": "r.jpg"},
+                       {"filename": "../x", "originalFilename": "bad.jpg"}]},
+        ]})
     }
 
     #[tokio::test]
@@ -274,10 +283,32 @@ mod tests {
     async fn board_queues_catalog_threads() {
         let (origin, server) = serve(vec![json(json!([{"postId": 25}])), json(thread())]);
         let http = http("94chan", origin);
-        let files = media(extract(&http, Url::parse("https://94chan.org/art/").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://94chan.org/art/").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 2);
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /art/catalog.json "));
         assert!(requests[1].starts_with("GET /art/thread/25.json "));
+    }
+
+    #[tokio::test]
+    async fn missing_thread_is_an_error() {
+        let (origin, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("94chan", origin);
+        let events = extract(
+            &http,
+            Url::parse("https://94chan.org/a/thread/5.html").unwrap(),
+        );
+        let results: Vec<_> = futures_util::StreamExt::collect(events).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+        assert!(server.join().unwrap()[0].starts_with("GET /a/thread/5.json"));
     }
 }

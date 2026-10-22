@@ -160,10 +160,7 @@ fn parse_post(html: &str) -> Map<String, Value> {
         post.insert("fsize".into(), extr.next("(", ", ").into());
         post.insert("w".into(), parse_int(extr.next("", "x")).into());
         post.insert("h".into(), parse_int(extr.next("", ")")).into());
-        post.insert(
-            "extension".into(),
-            super::rpartition(&url, ".").1.into(),
-        );
+        post.insert("extension".into(), super::rpartition(&url, ".").1.into());
         post.insert("url".into(), url.into());
     }
     post
@@ -228,7 +225,7 @@ mod tests {
         ))
         .await;
         assert_eq!(files.len(), 1);
-        assert!(files[0].headers.get("Referer").is_none());
+        assert!(!files[0].headers.contains_key("Referer"));
         let k = keywords(&files[0]);
         assert_eq!(k["no"], 100);
         assert_eq!(k["name"], "Anonymous");
@@ -267,5 +264,23 @@ mod tests {
         assert!(requests[0].starts_with("GET /board/c/1 "));
         assert!(requests[1].starts_with("GET /board/c/thread/100 "));
         assert!(requests[2].starts_with("GET /board/c/2 "));
+    }
+
+    #[tokio::test]
+    async fn missing_thread_is_an_error() {
+        let (origin, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let http = http("4chanarchives", origin);
+        let events = extract(
+            &http,
+            Url::parse("https://4chanarchives.com/board/c/thread/5").unwrap(),
+        );
+        let results: Vec<_> = futures_util::StreamExt::collect(events).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+        assert!(server.join().unwrap()[0].starts_with("GET /board/c/thread/5 "));
     }
 }
