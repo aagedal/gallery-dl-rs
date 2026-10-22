@@ -129,7 +129,10 @@ fn paginate<'a>(
                     .filter(roxmltree::Node::is_element)
                     .map(xml_to_dict)
                     .collect();
-                let attr = |name| root.attribute(name).and_then(|v| v.trim().parse::<i64>().ok());
+                let attr = |name| {
+                    root.attribute(name)
+                        .and_then(|v| v.trim().parse::<i64>().ok())
+                };
                 let done = match (attr("offset"), attr("count")) {
                     (Some(offset), Some(count)) => offset + posts.len() as i64 >= count,
                     _ => true,
@@ -138,7 +141,7 @@ fn paginate<'a>(
             };
             let items = prepare(http, posts, &data).await?;
             let events = per_post(&AGNPH, http, &TAG, items);
-            let next = (!done && page < 10_000).then_some(page + 1);
+            let next = (!done).then_some(page + 1);
             Ok(Some((crate::sites::events(events), next)))
         }
     })
@@ -242,6 +245,7 @@ fn extended_tags(fields: &mut Map<String, Value>, page: &str) {
 mod tests {
     use super::*;
     use crate::sites::testing::{http, keywords, media, response, serve};
+    use futures_util::StreamExt;
 
     fn t(raw: &str) -> Option<Target> {
         target(&Url::parse(raw).unwrap())
@@ -302,7 +306,10 @@ mod tests {
         .await;
         assert_eq!(files.len(), 3);
         let file = &files[0];
-        assert_eq!(file.url.as_str(), "http://agn.ph/gallery/data/7d/a5/md51.png");
+        assert_eq!(
+            file.url.as_str(),
+            "http://agn.ph/gallery/data/7d/a5/md51.png"
+        );
         assert_eq!(file.headers["Cookie"], COOKIE);
         let k = keywords(file);
         assert_eq!(k["id"], "1");
@@ -315,7 +322,10 @@ mod tests {
         assert_eq!(k["description"], Value::Null);
         assert_eq!(k["filename"], "md51");
         assert_eq!(k["extension"], "png");
-        assert_eq!(file.metadata.as_ref().unwrap().timestamp, Some(1_722_041_591));
+        assert_eq!(
+            file.metadata.as_ref().unwrap().timestamp,
+            Some(1_722_041_591)
+        );
         let (name, dir) = crate::sites::default_templates(file).unwrap();
         assert_eq!(name.render(file).unwrap(), "agnph_1_md51.png");
         assert_eq!(
@@ -332,7 +342,11 @@ mod tests {
             "{}",
             requests[0]
         );
-        assert!(requests[0].to_ascii_lowercase().contains("cookie: confirmed_age=true"));
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("cookie: confirmed_age=true")
+        );
         assert!(requests[1].starts_with("GET /gallery/post/?search=a+b&page=3&api=xml "));
     }
 
@@ -372,5 +386,28 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /gallery/post/show/501604/?api=xml "));
         assert!(requests[1].starts_with("GET /gallery/post/show/501604/ "));
+    }
+
+    #[tokio::test]
+    async fn reports_invalid_xml_and_missing_posts() {
+        let (root, _server) = serve(vec![
+            xml("<posts count=\"1\""),
+            response("404 Not Found", "text/html", b""),
+        ]);
+        let http = http("agnph", root);
+        let results: Vec<_> = extract(
+            &http,
+            Url::parse("https://agn.ph/gallery/post/?search=a").unwrap(),
+        )
+        .collect()
+        .await;
+        assert!(results.iter().any(Result::is_err));
+        let results: Vec<_> = extract(
+            &http,
+            Url::parse("https://agn.ph/gallery/post/show/1/").unwrap(),
+        )
+        .collect()
+        .await;
+        assert!(results.iter().any(Result::is_err));
     }
 }

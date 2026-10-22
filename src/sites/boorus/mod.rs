@@ -7,9 +7,16 @@ use crate::sites::{Http, Item, Route, Site};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod agnph;
 mod moebooru;
+mod paheal;
 mod philomena;
+mod realbooru;
+mod rule34us;
+mod shimmie2;
+mod threedbooru;
 mod twibooru;
+mod zerochan;
 
 pub(super) static SITES: &[&Site] = &[
     &moebooru::YANDERE,
@@ -20,6 +27,18 @@ pub(super) static SITES: &[&Site] = &[
     &philomena::PONYBOORU,
     &philomena::FURBOORU,
     &twibooru::SITE,
+    &shimmie2::CAVEMANON,
+    &shimmie2::RULE34HENTAI,
+    &shimmie2::VIDYAPICS,
+    &shimmie2::NOZRIP,
+    &shimmie2::THECOLLECTIONS,
+    &shimmie2::SOYBOORU,
+    &paheal::SITE,
+    &realbooru::SITE,
+    &rule34us::SITE,
+    &zerochan::ZEROCHAN,
+    &agnph::AGNPH,
+    &threedbooru::THREEDBOORU,
 ];
 
 // ---------------------------------------------------------------------------
@@ -136,6 +155,271 @@ pub(crate) fn iso_timestamp(text: &str) -> Option<i64> {
 /// The `date` keyword for Unix seconds (`None` is the invalid datetime).
 pub(crate) fn date_value(timestamp: Option<i64>) -> Value {
     crate::filter::source_date_text(timestamp).into()
+}
+
+/// Python `urllib.parse.quote` with its default `safe="/"`.
+pub(crate) fn quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'~' | b'/') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// `text.parse_int`: an integer, or 0 for empty/invalid input.
+pub(crate) fn parse_int(text: &str) -> i64 {
+    text.trim().replace('_', "").parse().unwrap_or(0)
+}
+
+/// `text.parse_int` as a JSON value (Python `int`).
+pub(crate) fn int_value(text: &str) -> Value {
+    parse_int(text).into()
+}
+
+/// `text.parse_float`: a float, or 0.0 for empty/invalid input.
+pub(crate) fn parse_float(text: &str) -> f64 {
+    text.trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|f| f.is_finite())
+        .unwrap_or(0.0)
+}
+
+/// A float as a JSON value, keeping Python's `1.0` spelling.
+pub(crate) fn float_value(value: f64) -> Value {
+    serde_json::Number::from_f64(value).map_or(Value::Null, Value::Number)
+}
+
+/// `text.parse_bytes`: "500k", "2.5M" or a plain count, as bytes.
+pub(crate) fn parse_bytes(text: &str) -> i64 {
+    let value = text.trim();
+    let Some(last) = value.chars().last() else {
+        return 0;
+    };
+    let (number, mul) = match "bkmgtp".find(last.to_ascii_lowercase()) {
+        Some(power) => (
+            &value[..value.len() - last.len_utf8()],
+            1024f64.powi(power as i32),
+        ),
+        None => (value, 1.0),
+    };
+    match number.trim().parse::<f64>() {
+        Ok(n) if n.is_finite() => (n * mul).round_ties_even() as i64,
+        _ => 0,
+    }
+}
+
+/// `text.extract_iter`: every substring between `begin` and the next `end`.
+pub(crate) fn extract_iter<'t>(text: &'t str, begin: &str, end: &str) -> Vec<&'t str> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while let Some(start) = text[pos..].find(begin) {
+        let first = pos + start + begin.len();
+        let Some(stop) = text[first..].find(end) else {
+            break;
+        };
+        out.push(&text[first..first + stop]);
+        pos = first + stop + end.len();
+    }
+    out
+}
+
+/// `text.extract_from`: a cursor returning the text between `begin` and the
+/// next `end` after the previous match, or `""` without moving.
+pub(crate) struct Extr<'t> {
+    text: &'t str,
+    pub pos: usize,
+}
+
+impl<'t> Extr<'t> {
+    pub fn new(text: &'t str) -> Self {
+        Self { text, pos: 0 }
+    }
+
+    pub fn next(&mut self, begin: &str, end: &str) -> &'t str {
+        let Some(start) = self.text[self.pos..].find(begin) else {
+            return "";
+        };
+        let first = self.pos + start + begin.len();
+        let Some(stop) = self.text[first..].find(end) else {
+            return "";
+        };
+        self.pos = first + stop + end.len();
+        &self.text[first..first + stop]
+    }
+}
+
+/// `text.split_html`: unescaped, stripped text between HTML tags.
+pub(crate) fn split_html(text: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    loop {
+        let (chunk, next) = match rest.find('<') {
+            Some(start) => match rest[start + 1..].find('>') {
+                Some(end) if end > 0 => (&rest[..start], Some(&rest[start + end + 2..])),
+                _ => (rest, None),
+            },
+            None => (rest, None),
+        };
+        if !chunk.trim().is_empty() {
+            parts.push(crate::sites::unescape(chunk).trim().to_owned());
+        }
+        match next {
+            Some(next) => rest = next,
+            None => break,
+        }
+    }
+    parts
+}
+
+/// `str.partition(sep)[0]`.
+pub(crate) fn before<'t>(text: &'t str, sep: &str) -> &'t str {
+    text.split_once(sep).map_or(text, |(head, _)| head)
+}
+
+/// directives; naive values are UTC. The whole input must match, and a
+/// space in `format` matches one or more whitespace characters.
+pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
+    const MONTHS: [&str; 12] = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
+    const DAYS: [&str; 7] = [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ];
+    fn number(input: &mut &str, max: usize) -> Option<i64> {
+        let end = input
+            .bytes()
+            .take(max)
+            .position(|b| !b.is_ascii_digit())
+            .unwrap_or(input.len().min(max));
+        if end == 0 {
+            return None;
+        }
+        let value = input[..end].parse().ok()?;
+        *input = &input[end..];
+        Some(value)
+    }
+    fn name(input: &mut &str, names: &[&str], full: bool) -> Option<usize> {
+        let lower = input.to_ascii_lowercase();
+        let (index, len) = names.iter().enumerate().find_map(|(i, n)| {
+            let candidate = if full { n } else { &n[..3] };
+            lower.starts_with(candidate).then_some((i, candidate.len()))
+        })?;
+        *input = &input[len..];
+        Some(index)
+    }
+    let (mut year, mut month, mut day) = (1900i64, 1i64, 1i64);
+    let (mut hour, mut minute, mut second) = (0i64, 0i64, 0i64);
+    let mut offset = 0i64;
+    let mut pm = None;
+    let mut input = text;
+    let mut chars = format.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.next()? {
+                'Y' => year = number(&mut input, 4)?,
+                'm' => month = number(&mut input, 2)?,
+                'd' => day = number(&mut input, 2)?,
+                'H' => hour = number(&mut input, 2)?,
+                'I' => hour = number(&mut input, 2)?,
+                'M' => minute = number(&mut input, 2)?,
+                'S' => second = number(&mut input, 2)?,
+                'b' => month = name(&mut input, &MONTHS, false)? as i64 + 1,
+                'B' => month = name(&mut input, &MONTHS, true)? as i64 + 1,
+                'a' => {
+                    name(&mut input, &DAYS, false)?;
+                }
+                'A' => {
+                    name(&mut input, &DAYS, true)?;
+                }
+                'p' => {
+                    let lower = input.get(..2)?.to_ascii_lowercase();
+                    pm = Some(match lower.as_str() {
+                        "am" => false,
+                        "pm" => true,
+                        _ => return None,
+                    });
+                    input = &input[2..];
+                }
+                'z' => {
+                    if let Some(rest) = input.strip_prefix('Z') {
+                        input = rest;
+                    } else {
+                        let sign = match input.as_bytes().first()? {
+                            b'+' => 1,
+                            b'-' => -1,
+                            _ => return None,
+                        };
+                        input = &input[1..];
+                        let hours = input.get(..2)?.parse::<i64>().ok()?;
+                        input = &input[2..];
+                        input = input.strip_prefix(':').unwrap_or(input);
+                        let minutes = input.get(..2)?.parse::<i64>().ok()?;
+                        input = &input[2..];
+                        offset = sign * (hours * 3600 + minutes * 60);
+                    }
+                }
+                '%' => input = input.strip_prefix('%')?,
+                _ => return None,
+            }
+        } else if c.is_whitespace() {
+            let trimmed = input.trim_start();
+            if trimmed.len() == input.len() {
+                return None;
+            }
+            input = trimmed;
+        } else {
+            input = input.strip_prefix(c)?;
+        }
+    }
+    if !input.is_empty() {
+        return None;
+    }
+    if let Some(pm) = pm {
+        if !(1..=12).contains(&hour) {
+            return None;
+        }
+        hour = hour % 12 + if pm { 12 } else { 0 };
+    }
+    let date = time::Date::from_calendar_date(
+        i32::try_from(year).ok()?,
+        time::Month::try_from(u8::try_from(month).ok()?).ok()?,
+        u8::try_from(day).ok()?,
+    )
+    .ok()?;
+    let clock = time::Time::from_hms(
+        u8::try_from(hour).ok()?,
+        u8::try_from(minute).ok()?,
+        u8::try_from(second).ok()?,
+    )
+    .ok()?;
+    Some(
+        time::PrimitiveDateTime::new(date, clock)
+            .assume_utc()
+            .unix_timestamp()
+            - offset,
+    )
 }
 
 // ---------------------------------------------------------------------------

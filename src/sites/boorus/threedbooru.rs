@@ -54,7 +54,8 @@ enum Target {
 /// The upstream patterns, `(?:https?://)?(?:www\.)?behoimi\.org/...`,
 /// matched against the URL's path, query and fragment.
 fn target(url: &Url) -> Option<Target> {
-    let rest = super::below(url, &["behoimi.org"]).or_else(|| super::below(url, &["www.behoimi.org"]))?;
+    let rest =
+        super::below(url, &["behoimi.org"]).or_else(|| super::below(url, &["www.behoimi.org"]))?;
     let rest = match url.fragment() {
         Some(fragment) => format!("{rest}#{fragment}"),
         None => rest,
@@ -111,7 +112,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 url.query_pairs_mut().extend_pairs(&params);
             }
             let posts = http.json_with(&url, HEADERS).await?;
-            Ok(crate::sites::events(posts_events(http, &POPULAR, &posts, &data)))
+            Ok(crate::sites::events(posts_events(
+                http, &POPULAR, &posts, &data,
+            )))
         }),
     }
 }
@@ -163,8 +166,8 @@ fn popular_metadata(
     let scale = scale.strip_prefix("by_").unwrap_or(scale);
     if scale == "week" {
         let format = time::macros::format_description!("[year]-[month]-[day]");
-        let day = time::Date::parse(&date, &format)
-            .map_err(|_| error("invalid 3dbooru popular date"))?;
+        let day =
+            time::Date::parse(&date, &format).map_err(|_| error("invalid 3dbooru popular date"))?;
         let monday = day - time::Duration::days(day.weekday().number_days_from_monday().into());
         date = format!(
             "{:04}-{:02}-{:02}",
@@ -204,7 +207,7 @@ fn paginate<'a>(
             let posts = http.json_with(&url, HEADERS).await?;
             let count = posts.as_array().map_or(0, Vec::len);
             let events = posts_events(http, route, &posts, &data);
-            let next = (count >= PER_PAGE && page < 10_000).then_some(page + 1);
+            let next = (count >= PER_PAGE).then_some(page + 1);
             Ok(Some((crate::sites::events(events), next)))
         }
     })
@@ -256,7 +259,8 @@ fn parse_post(post: &Value, data: &Map<String, Value>) -> Option<crate::sites::I
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{http, json, keywords, media, serve};
+    use crate::sites::testing::{http, json, keywords, media, response, serve};
+    use futures_util::StreamExt;
     use serde_json::json;
 
     fn t(raw: &str) -> Option<Target> {
@@ -363,7 +367,10 @@ mod tests {
         assert_eq!(k["extension"], "jpg");
         assert_eq!(k["date"], "2017-07-14 02:40:00");
         assert_eq!(k["subcategory"], "tag");
-        assert_eq!(file.metadata.as_ref().unwrap().timestamp, Some(1_500_000_000));
+        assert_eq!(
+            file.metadata.as_ref().unwrap().timestamp,
+            Some(1_500_000_000)
+        );
         let (name, dir) = crate::sites::default_templates(file).unwrap();
         assert_eq!(
             name.render(file).unwrap(),
@@ -382,7 +389,11 @@ mod tests {
             "{}",
             requests[0]
         );
-        assert!(requests[0].to_ascii_lowercase().contains("referer: http://behoimi.org/post/show/"));
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("referer: http://behoimi.org/post/show/")
+        );
         assert!(requests[1].starts_with("GET /post/index.json?tags=a+b&page=2&limit=100 "));
     }
 
@@ -415,7 +426,10 @@ mod tests {
         ))
         .await;
         assert_eq!(keywords(&single[0])["date"], "[Invalid DateTime]");
-        assert_eq!(crate::sites::archive_key(&single[0]).unwrap().1, r#"["{id}",["7"]]"#);
+        assert_eq!(
+            crate::sites::archive_key(&single[0]).unwrap().1,
+            r#"["{id}",["7"]]"#
+        );
         let popular = media(extract(
             &http,
             Url::parse("http://behoimi.org/post/popular_by_day?year=2013&month=2&day=3").unwrap(),
@@ -437,5 +451,21 @@ mod tests {
             "{}",
             requests[2]
         );
+    }
+
+    #[tokio::test]
+    async fn reports_http_and_json_errors() {
+        let (root, _server) = serve(vec![
+            response("403 Forbidden", "text/html", b""),
+            response("200 OK", "application/json", b"not json"),
+        ]);
+        let http = http("3dbooru", root);
+        for raw in [
+            "http://behoimi.org/post/show/1",
+            "http://behoimi.org/post?tags=a",
+        ] {
+            let results: Vec<_> = extract(&http, Url::parse(raw).unwrap()).collect().await;
+            assert!(results.iter().any(Result::is_err), "{raw}");
+        }
     }
 }

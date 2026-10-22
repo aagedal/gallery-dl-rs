@@ -99,7 +99,12 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             if http.option_bool("metadata", false) {
                 post.extend(entry_api(http, &id).await?);
             }
-            Ok(crate::sites::events(finish(http, &IMAGE, post, &Map::new())))
+            Ok(crate::sites::events(finish(
+                http,
+                &IMAGE,
+                post,
+                &Map::new(),
+            )))
         }),
         None => crate::sites::fail(error("unsupported Zerochan URL")),
     }
@@ -275,7 +280,10 @@ fn page_events<'a>(http: &'a Http, entries: Vec<Entry>, data: Map<String, Value>
                     } else {
                         // Upstream also queues the other extensions as
                         // `_fallback` URLs, which registry media lack.
-                        post.insert("file_url".into(), format!("{STATIC}{id}.{extension}").into());
+                        post.insert(
+                            "file_url".into(),
+                            format!("{STATIC}{id}.{extension}").into(),
+                        );
                     }
                     post
                 }
@@ -349,7 +357,10 @@ fn drop_last(text: &str, n: usize) -> &str {
 fn capitalize(text: &str) -> String {
     let mut chars = text.chars();
     match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars.flat_map(char::to_lowercase)).collect(),
+        Some(first) => first
+            .to_uppercase()
+            .chain(chars.flat_map(char::to_lowercase))
+            .collect(),
         None => String::new(),
     }
 }
@@ -359,7 +370,10 @@ fn jsonld(page: &str) -> Option<Map<String, Value>> {
     let raw = crate::sites::extr(page, "<script type=\"application/ld+json\">", "</script>")
         .filter(|s| !s.is_empty())
         .or_else(|| crate::sites::extr(page, "<script type='application/ld+json'>", "</script>"))?;
-    serde_json::from_str::<Value>(raw).ok()?.as_object().cloned()
+    serde_json::from_str::<Value>(raw)
+        .ok()?
+        .as_object()
+        .cloned()
 }
 
 async fn entry_html(http: &Http, id: &str) -> Result<Map<String, Value>> {
@@ -421,8 +435,9 @@ fn parse_entry_html(page: &str, id: &str) -> Map<String, Value> {
         .skip(1)
         .map(|tag| {
             let category = crate::sites::extr(tag, "\"", "\"").unwrap_or_default();
-            let name =
-                crate::sites::unescape(crate::sites::extr(tag, "data-tag=\"", "\"").unwrap_or_default());
+            let name = crate::sites::unescape(
+                crate::sites::extr(tag, "data-tag=\"", "\"").unwrap_or_default(),
+            );
             format!("{}:{name}", capitalize(super::before(category, " "))).into()
         })
         .collect();
@@ -522,11 +537,20 @@ mod tests {
             t("https://zerochan.net/Touhou/?p=3&s=fav"),
             tag("Touhou", Some("p=3&s=fav"))
         );
-        assert_eq!(t("https://www.zerochan.net/Touhou/x?p=3"), tag("Touhou", None));
-        assert_eq!(t("https://www.zerochan.net/2920445"), Some(Target::Image("2920445".into())));
+        assert_eq!(
+            t("https://www.zerochan.net/Touhou/x?p=3"),
+            tag("Touhou", None)
+        );
+        assert_eq!(
+            t("https://www.zerochan.net/2920445"),
+            Some(Target::Image("2920445".into()))
+        );
         // `(?!\d+$)` only rejects ids running to the end of the URL.
         assert_eq!(t("https://www.zerochan.net/2920445/"), tag("2920445", None));
-        assert_eq!(t("https://www.zerochan.net/2920445?x=1"), tag("2920445", Some("x=1")));
+        assert_eq!(
+            t("https://www.zerochan.net/2920445?x=1"),
+            tag("2920445", Some("x=1"))
+        );
         assert_eq!(t("https://www.zerochan.net/123abc"), tag("123abc", None));
         for raw in [
             "https://www.zerochan.net/",
@@ -562,7 +586,10 @@ mod tests {
         .await;
         assert_eq!(files.len(), 3);
         let file = &files[0];
-        assert_eq!(file.url.as_str(), "https://static.zerochan.net/.full.11.jpg");
+        assert_eq!(
+            file.url.as_str(),
+            "https://static.zerochan.net/.full.11.jpg"
+        );
         let k = keywords(file);
         assert_eq!(k["id"], 11);
         assert_eq!(k["width"], 100);
@@ -597,14 +624,18 @@ mod tests {
             response("404 Not Found", "text/html", b"<h2>No such tag</h2>"),
         ]);
         let options = json!({"extensions": "png,jpg", "tags": true});
-        let http = http("zerochan", root)
-            .with_options(Some(std::sync::Arc::new(options.as_object().unwrap().clone())));
+        let http = http("zerochan", root).with_options(Some(std::sync::Arc::new(
+            options.as_object().unwrap().clone(),
+        )));
         let files = media(extract(
             &http,
             Url::parse("https://www.zerochan.net/Touhou?p=4&l=10").unwrap(),
         ))
         .await;
-        assert_eq!(files[0].url.as_str(), "https://static.zerochan.net/.full.5.png");
+        assert_eq!(
+            files[0].url.as_str(),
+            "https://static.zerochan.net/.full.5.png"
+        );
         let k = keywords(&files[0]);
         assert_eq!(k["tags_theme"], json!(["Coat"]));
         assert_eq!(k["tags_character"], json!(["Perth"]));
@@ -647,13 +678,20 @@ mod tests {
         assert_eq!(data["width"], 1920);
         assert_eq!(data["height"], 1366);
         assert_eq!(data["size"], 1_992_294);
-        assert_eq!(data["path"], json!(["Kantai Collection", "Perth (Kantai Collection)"]));
+        assert_eq!(
+            data["path"],
+            json!(["Game", "Kantai Collection", "Perth (Kantai Collection)"])
+        );
         assert_eq!(data["uploader"], "YukinoTokisaki");
         assert_eq!(data["author"], "YeFan 葉凡");
         assert_eq!(data["source"], "https://x.test/?a=1&b=2");
         assert_eq!(
             data["tags"],
-            json!(["Mangaka:YeFan 葉凡", "Theme:Firefighter Outfit", "Character:Perth & Co"])
+            json!([
+                "Mangaka:YeFan 葉凡",
+                "Theme:Firefighter Outfit",
+                "Character:Perth & Co"
+            ])
         );
         let fallback = parse_entry_html("<html>no json-ld</html>", "7");
         assert_eq!(fallback, json!({"id": "7"}).as_object().unwrap().clone());
@@ -670,7 +708,10 @@ mod tests {
         assert_eq!(data["file_url"], "https://static.zerochan.net/a.full.1.jpg");
         assert_eq!(data["tags"], json!(["Perth", "Bad \"quote\""]));
         assert_eq!(data["source"], Value::Null);
-        let strict = parse_entry_api(r#"{"id": 2, "full": "u", "tags": ["x"], "source": "s"}"#, "2");
+        let strict = parse_entry_api(
+            r#"{"id": 2, "full": "u", "tags": ["x"], "source": "s"}"#,
+            "2",
+        );
         assert_eq!(strict["tags"], json!(["x"]));
         assert_eq!(strict["source"], "s");
     }
@@ -686,8 +727,9 @@ mod tests {
             response("404 Not Found", "text/html", b"<h2>Gone</h2>"),
         ]);
         let options = json!({"metadata": true});
-        let http = http("zerochan", root)
-            .with_options(Some(std::sync::Arc::new(options.as_object().unwrap().clone())));
+        let http = http("zerochan", root).with_options(Some(std::sync::Arc::new(
+            options.as_object().unwrap().clone(),
+        )));
         let files = media(extract(
             &http,
             Url::parse("https://www.zerochan.net/2920445").unwrap(),
@@ -730,8 +772,9 @@ mod tests {
 <a href="https://static.zerochan.net/Perth.full.11.png">x</a></li></ul> <a rel="next" href="?p=2">"#;
         let (root, server) = serve(vec![html(page), html("<ul id=\"thumbs2\"></ul>")]);
         let options = json!({"pagination": "html"});
-        let http = http("zerochan", root)
-            .with_options(Some(std::sync::Arc::new(options.as_object().unwrap().clone())));
+        let http = http("zerochan", root).with_options(Some(std::sync::Arc::new(
+            options.as_object().unwrap().clone(),
+        )));
         let files = media(extract(
             &http,
             Url::parse("https://www.zerochan.net/Perth").unwrap(),
@@ -746,7 +789,11 @@ mod tests {
         assert_eq!(k["size"], "123k");
         assert_eq!(k["extension"], "png");
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /Perth?p=1 "), "{}", requests[0]);
+        assert!(
+            requests[0].starts_with("GET /Perth?p=1 "),
+            "{}",
+            requests[0]
+        );
         assert!(requests[1].starts_with("GET /Perth?p=2 "));
     }
 }

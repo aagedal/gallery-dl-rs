@@ -53,7 +53,11 @@ fn target(url: &Url) -> Option<Target> {
     if let Some(tags) = raw.strip_prefix("/index.php?page=post&s=list&tags=") {
         return Some(Target::Tag(super::until(tags, &['&', '#']).to_owned()));
     }
-    let id = |prefix: &str| raw.strip_prefix(prefix).and_then(leading_digits).map(str::to_owned);
+    let id = |prefix: &str| {
+        raw.strip_prefix(prefix)
+            .and_then(leading_digits)
+            .map(str::to_owned)
+    };
     if let Some(id) = id("/index.php?page=favorites&s=view&id=") {
         return Some(Target::Favorite(id));
     }
@@ -72,12 +76,20 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         Target::Tag(raw) => {
             let tags = super::unquote(&raw.replace('+', " "));
             data.insert("search_tags".into(), tags.clone().into());
-            let params = vec![("page", "post".into()), ("s", "list".into()), ("tags", tags)];
+            let params = vec![
+                ("page", "post".into()),
+                ("s", "list".into()),
+                ("tags", tags),
+            ];
             posts(http, &TAG, data, State::list(params, "<a id=\"p", 42))
         }
         Target::Favorite(id) => {
             data.insert("favorite_id".into(), parse_int(&id).into());
-            let params = vec![("page", "favorites".into()), ("s", "view".into()), ("id", id)];
+            let params = vec![
+                ("page", "favorites".into()),
+                ("s", "view".into()),
+                ("id", id),
+            ];
             posts(http, &FAVORITE, data, State::list(params, "\" id=\"p", 50))
         }
         Target::Pool(id) => crate::sites::once(async move {
@@ -199,8 +211,7 @@ fn posts<'a>(
                 }
                 let page = http.text(&url).await?;
                 let ids = extract_iter(&page, list.begin, "\"");
-                list.pid = (ids.len() as i64 >= list.per_page && pid < 10_000_000)
-                    .then_some(pid + list.per_page);
+                list.pid = (ids.len() as i64 >= list.per_page).then_some(pid + list.per_page);
                 state.ids = ids.into_iter().map(str::to_owned).collect();
             }
         }
@@ -226,10 +237,7 @@ fn parse_post(id: &str, page: &str) -> Map<String, Value> {
     };
     post.insert("rating".into(), rating.into());
     post.insert("file_url".into(), file_url.into());
-    post.insert(
-        "created_at".into(),
-        extr.next(">Posted at ", " by ").into(),
-    );
+    post.insert("created_at".into(), extr.next(">Posted at ", " by ").into());
     post.insert("uploader".into(), extr.next(">", "<").into());
     post.insert("score".into(), extr.next("\">", "<").into());
     let container = extr.next("<br />", "</div>");
@@ -315,7 +323,10 @@ fn finish(mut post: Map<String, Value>, data: &Map<String, Value>) -> Option<cra
     };
     let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
     super::booru_fields(&url, &mut post, data);
-    let created = post.get("created_at").and_then(Value::as_str).unwrap_or_default();
+    let created = post
+        .get("created_at")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let timestamp = strptime(created, "%b, %d %Y");
     post.insert("date".into(), date_value(timestamp));
     Some(super::item(url, post, "uploader", "tags", timestamp))
@@ -324,7 +335,8 @@ fn finish(mut post: Map<String, Value>, data: &Map<String, Value>) -> Option<cra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{html, http, keywords, media, serve};
+    use crate::sites::testing::{html, http, keywords, media, response, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -349,11 +361,26 @@ mod tests {
             t("https://realbooru.com/index.php?page=post&s=view&id=7"),
             Some(Target::Post("7".into()))
         );
-        assert_eq!(t("https://realbooru.com/index.php?s=view&page=post&id=7"), None);
-        assert_eq!(t("https://www.realbooru.com/index.php?page=post&s=view&id=7"), None);
-        assert_eq!(t("https://realbooru.com.evil.test/index.php?page=post&s=view&id=7"), None);
-        assert_eq!(t("https://realbooru.com:444/index.php?page=post&s=view&id=7"), None);
-        assert_eq!(t("https://realbooru.com/index.php?page=post&s=view&id=x"), None);
+        assert_eq!(
+            t("https://realbooru.com/index.php?s=view&page=post&id=7"),
+            None
+        );
+        assert_eq!(
+            t("https://www.realbooru.com/index.php?page=post&s=view&id=7"),
+            None
+        );
+        assert_eq!(
+            t("https://realbooru.com.evil.test/index.php?page=post&s=view&id=7"),
+            None
+        );
+        assert_eq!(
+            t("https://realbooru.com:444/index.php?page=post&s=view&id=7"),
+            None
+        );
+        assert_eq!(
+            t("https://realbooru.com/index.php?page=post&s=view&id=x"),
+            None
+        );
     }
 
     #[test]
@@ -489,5 +516,28 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /index.php?page=pool&s=show&id=9 "));
         assert!(requests[1].starts_with("GET /index.php?page=post&s=view&id=3 "));
+    }
+
+    #[tokio::test]
+    async fn reports_missing_pool_and_post() {
+        let (root, _server) = serve(vec![
+            html("<p>no pool here</p>"),
+            response("404 Not Found", "text/html", b""),
+        ]);
+        let http = http("realbooru", root);
+        let results: Vec<_> = extract(
+            &http,
+            Url::parse("https://realbooru.com/index.php?page=pool&s=show&id=9").unwrap(),
+        )
+        .collect()
+        .await;
+        assert!(results.iter().any(Result::is_err));
+        let results: Vec<_> = extract(
+            &http,
+            Url::parse("https://realbooru.com/index.php?page=post&s=view&id=7").unwrap(),
+        )
+        .collect()
+        .await;
+        assert!(results.iter().any(Result::is_err));
     }
 }

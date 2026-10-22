@@ -237,7 +237,8 @@ fn finish(mut post: Map<String, Value>, data: &Map<String, Value>) -> Option<cra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{html, http, keywords, media, serve};
+    use crate::sites::testing::{html, http, keywords, media, response, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -252,8 +253,14 @@ mod tests {
         );
         assert_eq!(t("https://rule34.us/index.php?q=a&r=posts/index"), None);
         assert_eq!(t("https://www.rule34.us/index.php?r=posts/view&id=1"), None);
-        assert_eq!(t("https://rule34.us.evil.test/index.php?r=posts/view&id=1"), None);
-        assert_eq!(t("https://rule34.us:8443/index.php?r=posts/view&id=1"), None);
+        assert_eq!(
+            t("https://rule34.us.evil.test/index.php?r=posts/view&id=1"),
+            None
+        );
+        assert_eq!(
+            t("https://rule34.us:8443/index.php?r=posts/view&id=1"),
+            None
+        );
         assert_eq!(t("https://rule34.us/index.php?r=posts/view&id=x"), None);
     }
 
@@ -262,7 +269,10 @@ mod tests {
         let page = "<li class=\"copyright-tag\" x=\"1\"><a href=\"index.php?r=posts/index&amp;q=a%20b\">\
                     <li class=\"bad-tags\"><a href=\"x;q=n\">\
                     <li class=\"general-tag\"><a href=\"index.php?r=posts/index&amp;q=c\">";
-        assert_eq!(find_tags(page), vec![("copyright", "a%20b"), ("general", "c")]);
+        assert_eq!(
+            find_tags(page),
+            vec![("copyright", "a%20b"), ("general", "c")]
+        );
     }
 
     fn post_page(id: u32) -> String {
@@ -302,7 +312,10 @@ mod tests {
         assert_eq!(k["score"], "7");
         assert_eq!(k["width"], "640");
         assert_eq!(k["height"], "480");
-        assert_eq!(k["file_url"], "https://video.rule34.us/images/ab/md5100.webm");
+        assert_eq!(
+            k["file_url"],
+            "https://video.rule34.us/images/ab/md5100.webm"
+        );
         assert_eq!(k["md5"], "md5100");
         assert_eq!(k["tags_general"], "a b&c");
         assert_eq!(k["extension"], "webm");
@@ -331,7 +344,8 @@ mod tests {
 
     #[tokio::test]
     async fn single_post_without_uploader() {
-        let page = "<meta name=\"keywords\" content=\"x\"><img src=\"https://img.rule34.us/a/abc.png\">";
+        let page =
+            "<meta name=\"keywords\" content=\"x\"><img src=\"https://img.rule34.us/a/abc.png\">";
         let (root, _server) = serve(vec![html(page)]);
         let http = http("rule34.us", root);
         let files = media(extract(
@@ -351,5 +365,27 @@ mod tests {
         );
         let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert_eq!(identity, r#"["{id}",["5"]]"#);
+    }
+
+    #[tokio::test]
+    async fn skips_posts_without_file_and_reports_http_errors() {
+        let (root, _server) = serve(vec![
+            html("<meta name=\"keywords\" content=\"x\">"),
+            response("404 Not Found", "text/html", b""),
+        ]);
+        let http = http("rule34.us", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://rule34.us/index.php?r=posts/view&id=5").unwrap(),
+        ))
+        .await;
+        assert!(files.is_empty());
+        let results: Vec<_> = extract(
+            &http,
+            Url::parse("https://rule34.us/index.php?r=posts/view&id=6").unwrap(),
+        )
+        .collect()
+        .await;
+        assert!(results.iter().any(Result::is_err));
     }
 }

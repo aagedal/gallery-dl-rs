@@ -1,7 +1,9 @@
 //! Shimmie2 instances (cavemanon, rule34hentai, vidyapics, nozrip,
 //! thecollectionS, soybooru), mirroring gallery_dl/extractor/shimmie2.py by
 //! scraping the `post/list` and `post/view` HTML pages.
-use super::{Extr, below, leading_digits, parse_bytes, parse_int, quote, rpartition, unquote};
+use super::{
+    Extr, before, below, leading_digits, parse_bytes, parse_int, quote, rpartition, unquote,
+};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -59,7 +61,13 @@ fn instance(category: &str) -> Instance {
             None,
         ),
         "vidyapics" => (&VIDYAPICS, "https://vidya.pics", "vidya.pics", false, None),
-        "nozrip" => (&NOZRIP, "https://noz.rip/booru", "noz.rip/booru", false, None),
+        "nozrip" => (
+            &NOZRIP,
+            "https://noz.rip/booru",
+            "noz.rip/booru",
+            false,
+            None,
+        ),
         "thecollectionS" => (
             &THECOLLECTIONS,
             "https://co.llection.pics",
@@ -170,7 +178,12 @@ struct TagState {
     format: Option<Format>,
 }
 
-fn tag<'a>(category: &'static str, http: &'a Http, tags: String, page: Option<String>) -> Events<'a> {
+fn tag<'a>(
+    category: &'static str,
+    http: &'a Http,
+    tags: String,
+    page: Option<String>,
+) -> Events<'a> {
     let mut data = Map::new();
     data.insert("search_tags".into(), tags.clone().into());
     let pnum = page.as_deref().map_or(1, parse_int);
@@ -278,17 +291,15 @@ fn parse_post_page(inst: &Instance, id: &str, page: &str) -> Map<String, Value> 
         Some(pos) => &inst.root[..pos + 8],
         None => inst.root,
     };
-    let tags = before_sep(extr.next(": ", "<"), " - ").trim_end_matches(')');
+    let tags = before(extr.next(": ", "<"), " - ").trim_end_matches(')');
     let md5 = extr.next("/_thumbs/", "/");
     let mut src = extr.next(&format!("id={qt}main_image{qt} src={qt}"), &qt);
     if src.is_empty() {
         src = extr.next(&format!("<source src={qt}"), &qt);
     }
     let file_url = format!("{base}{}", src.trim_start_matches('.'));
-    let width = extr
-        .next("data-width=", " ")
-        .trim_matches(['"', '\'']);
-    let height = before_sep(extr.next("data-height=", ">"), " ").trim_matches(['"', '\'']);
+    let width = extr.next("data-width=", " ").trim_matches(['"', '\'']);
+    let height = before(extr.next("data-height=", ">"), " ").trim_matches(['"', '\'']);
     let md5 = if md5.is_empty() {
         crate::sites::extr(&file_url, "/_images/", "/").unwrap_or_default()
     } else {
@@ -304,10 +315,6 @@ fn parse_post_page(inst: &Instance, id: &str, page: &str) -> Map<String, Value> 
     post.insert("height".into(), height.into());
     post.insert("size".into(), 0.into());
     post
-}
-
-fn before_sep<'t>(text: &'t str, sep: &str) -> &'t str {
-    super::before(text, sep)
 }
 
 /// `Shimmie2Extractor.items` for a batch of scraped posts.
@@ -360,6 +367,7 @@ fn finish(mut post: Map<String, Value>, data: &Map<String, Value>) -> Option<Ite
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -373,11 +381,17 @@ mod tests {
             Some(Target::Tag("a%20b".into(), None))
         );
         assert_eq!(
-            t("cavemanon", "https://booru.cavemanon.xyz/index.php?q=post/list/x/3"),
+            t(
+                "cavemanon",
+                "https://booru.cavemanon.xyz/index.php?q=post/list/x/3"
+            ),
             Some(Target::Tag("x".into(), Some("3".into())))
         );
         assert_eq!(
-            t("cavemanon", "https://booru.cavemanon.xyz/index.php?q=/post/view/8"),
+            t(
+                "cavemanon",
+                "https://booru.cavemanon.xyz/index.php?q=/post/view/8"
+            ),
             Some(Target::Post("8".into()))
         );
         assert_eq!(
@@ -391,18 +405,25 @@ mod tests {
         assert_eq!(t("nozrip", "https://noz.rip/post/view/1"), None);
         assert_eq!(t("nozrip", "https://noz.rip/boorux/post/view/1"), None);
         assert_eq!(t("vidyapics", "https://www.vidya.pics/post/view/1"), None);
-        assert_eq!(t("vidyapics", "https://vidya.pics.evil.test/post/view/1"), None);
+        assert_eq!(
+            t("vidyapics", "https://vidya.pics.evil.test/post/view/1"),
+            None
+        );
         assert_eq!(t("vidyapics", "https://vidya.pics:8080/post/view/1"), None);
         assert_eq!(t("vidyapics", "https://vidya.pics/post/view/x"), None);
         assert_eq!(t("vidyapics", "https://vidya.pics/post/list/"), None);
         assert_eq!(t("vidyapics", "https://vidya.pics/index.php?q=x"), None);
         let find = |raw: &str| crate::sites::find(&Url::parse(raw).unwrap()).map(|s| s.category);
         assert_eq!(find("https://soybooru.com/post/view/1"), Some("soybooru"));
-        assert_eq!(find("https://rule34hentai.net/post/list/a/1"), Some("rule34hentai"));
+        assert_eq!(
+            find("https://rule34hentai.net/post/list/a/1"),
+            Some("rule34hentai")
+        );
     }
 
     fn list_page(posts: &[(u32, &str)], next: Option<u32>) -> String {
-        let mut page = String::from("<html><head><link rel='stylesheet' href='/s.css'></head><body>");
+        let mut page =
+            String::from("<html><head><link rel='stylesheet' href='/s.css'></head><body>");
         for (id, mime) in posts {
             page.push_str(&format!(
                 "<a href='/post/view/{id}' class='thumb shm-thumb' data-tags='t' data-mime='{mime}' data-post-id='{id}'>\
@@ -483,7 +504,11 @@ mod tests {
         assert_eq!(k["extension"], "jpg");
         assert_eq!(k["size"], 2048);
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /post/list/a/1 "), "{}", requests[0]);
+        assert!(
+            requests[0].starts_with("GET /post/list/a/1 "),
+            "{}",
+            requests[0]
+        );
     }
 
     #[tokio::test]
@@ -520,7 +545,11 @@ mod tests {
             std::path::PathBuf::from("nozrip")
         );
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /booru/post/view/12 "), "{}", requests[0]);
+        assert!(
+            requests[0].starts_with("GET /booru/post/view/12 "),
+            "{}",
+            requests[0]
+        );
     }
 
     #[tokio::test]
@@ -541,5 +570,36 @@ mod tests {
         assert_eq!(k["height"], 2);
         let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(file.render(&files[0]).unwrap(), "vidyapics_3.mp4");
+    }
+
+    #[tokio::test]
+    async fn reports_missing_pages_and_bad_layouts() {
+        let (root, server) = serve(vec![crate::sites::testing::response(
+            "404 Not Found",
+            "text/html",
+            b"gone",
+        )]);
+        let site = http("vidya.pics", root);
+        let events = extract(
+            "vidyapics",
+            &site,
+            Url::parse("https://vidya.pics/post/view/9").unwrap(),
+        );
+        let results: Vec<_> = events.collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
+
+        let page = "<link rel='x'><a href='/post/view/1' data-post-id='1'>\
+                    <img title='only tags'></a>";
+        let (root, server) = serve(vec![html(page)]);
+        let site = http("vidya.pics", root);
+        let events = extract(
+            "vidyapics",
+            &site,
+            Url::parse("https://vidya.pics/post/list/a").unwrap(),
+        );
+        let results: Vec<_> = events.collect().await;
+        assert!(results.iter().any(Result::is_err));
+        server.join().unwrap();
     }
 }

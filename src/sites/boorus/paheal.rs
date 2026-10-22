@@ -4,14 +4,18 @@ use super::{
     Extr, below, date_value, extract_iter, float_value, iso_timestamp, leading_digits, parse_bytes,
     parse_float, parse_int, strptime, unquote,
 };
-use crate::sites::{Events, Http, Item, Route, Site};
+use crate::sites::{Events, Http, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
 use std::collections::VecDeque;
 use url::Url;
 
 const ROOT: &str = "https://rule34.paheal.net";
-const HOSTS: &[&str] = &["rule34.paheal.net", "rule63.paheal.net", "cosplay.paheal.net"];
+const HOSTS: &[&str] = &[
+    "rule34.paheal.net",
+    "rule63.paheal.net",
+    "cosplay.paheal.net",
+];
 const COOKIE: (&str, &str) = ("Cookie", "ui-tnc-agreed=true");
 const FILENAME: &str = "{category}_{id}_{md5}.{extension}";
 
@@ -134,11 +138,13 @@ fn tag(http: &Http, raw: String) -> Events<'_> {
                             Some(pos) => extract_iter(&page[pos..], "<img id='thumb_", "Only</a>"),
                             None => Vec::new(),
                         };
-                        let next = (page.contains(">Next<") && pnum < 100_000).then_some(pnum + 1);
+                        let next = page.contains(">Next<").then_some(pnum + 1);
                         if metadata {
                             let pids = chunks
                                 .iter()
-                                .map(|chunk| chunk.split('\'').next().unwrap_or_default().to_owned())
+                                .map(|chunk| {
+                                    chunk.split('\'').next().unwrap_or_default().to_owned()
+                                })
                                 .collect();
                             step = Step::Posts { pids, next };
                             continue;
@@ -227,7 +233,10 @@ fn parse_thumb(chunk: &str) -> Result<Map<String, Value>> {
     let timestamp = strptime(date, "%B %d, %Y; %H:%M");
     let mut post = Map::new();
     post.insert("id".into(), pid.into());
-    post.insert("md5".into(), url[url.rfind('/').map_or(0, |p| p + 1)..].into());
+    post.insert(
+        "md5".into(),
+        url[url.rfind('/').map_or(0, |p| p + 1)..].into(),
+    );
     post.insert("file_url".into(), url.into());
     dimension_fields(&mut post, dimensions, size);
     post.insert("tags".into(), crate::sites::unescape(tags).into());
@@ -260,10 +269,7 @@ fn parse_post(id: &str, page: &str) -> Result<Map<String, Value>> {
     post.insert("date".into(), date_value(timestamp));
     post.insert("_ts".into(), timestamp.map_or(Value::Null, Value::from));
     post.insert("source".into(), source.into());
-    post.insert(
-        "md5".into(),
-        super::rpartition(file_url, "/").1.into(),
-    );
+    post.insert("md5".into(), super::rpartition(file_url, "/").1.into());
     dimension_fields(&mut post, dimensions, size);
     post.insert("filename".into(), format!("{id} - {tags}").into());
     post.insert("extension".into(), ext.into());
@@ -307,6 +313,7 @@ fn items(
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, response, serve};
+    use futures_util::StreamExt;
 
     #[test]
     fn classifies_urls() {
@@ -352,10 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn paginates_tag_search() {
-        let (root, server) = serve(vec![
-            html(&list(&[1, 2], true)),
-            html(&list(&[3], false)),
-        ]);
+        let (root, server) = serve(vec![html(&list(&[1, 2], true)), html(&list(&[3], false))]);
         let http = http("paheal", root);
         let files = media(extract(
             &http,
@@ -375,7 +379,10 @@ mod tests {
         assert_eq!(k["filename"], "1 - tag1 a&amp;b");
         assert_eq!(k["extension"], "webm");
         assert_eq!(k["search_tags"], "a b");
-        assert_eq!(files[0].metadata.as_ref().unwrap().timestamp, Some(1_500_000_000));
+        assert_eq!(
+            files[0].metadata.as_ref().unwrap().timestamp,
+            Some(1_500_000_000)
+        );
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(file.render(&files[0]).unwrap(), "paheal_1_md51.webm");
         assert_eq!(
@@ -385,8 +392,16 @@ mod tests {
         let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert_eq!(identity, r#"["{id}",["1"]]"#);
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /post/list/a%20b/1 "), "{}", requests[0]);
-        assert!(requests[0].to_ascii_lowercase().contains("cookie: ui-tnc-agreed=true"));
+        assert!(
+            requests[0].starts_with("GET /post/list/a%20b/1 "),
+            "{}",
+            requests[0]
+        );
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("cookie: ui-tnc-agreed=true")
+        );
         assert!(requests[1].starts_with("GET /post/list/a%20b/2 "));
     }
 
@@ -463,5 +478,28 @@ mod tests {
         let k = keywords(&files[0]);
         assert_eq!(k["id"], 77);
         assert_eq!(k["search_tags"], "tag1");
+    }
+
+    #[tokio::test]
+    async fn rejects_unexpected_layouts_and_forbidden_pages() {
+        let (root, _server) = serve(vec![
+            html("<div id='image-list'><img id='thumb_5' title='x'>Only</a>"),
+            response("403 Forbidden", "text/html", b""),
+        ]);
+        let http = http("paheal", root);
+        let results: Vec<_> = extract(
+            &http,
+            Url::parse("https://rule34.paheal.net/post/list/x/1").unwrap(),
+        )
+        .collect()
+        .await;
+        assert!(results.iter().any(Result::is_err));
+        let results: Vec<_> = extract(
+            &http,
+            Url::parse("https://rule34.paheal.net/post/view/1").unwrap(),
+        )
+        .collect()
+        .await;
+        assert!(results.iter().any(Result::is_err));
     }
 }
