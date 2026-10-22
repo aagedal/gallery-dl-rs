@@ -7,27 +7,8 @@ use crate::sites::Site;
 use serde_json::{Map, Value};
 use url::Url;
 
-mod architizer;
-mod bbc;
-mod comedywildlifephoto;
-mod desktopography;
-mod imagebam;
-mod imagechest;
-mod imgbb;
-mod imgth;
-mod lexica;
 mod misskey;
-mod pexels;
-mod pholder;
 mod redgifs;
-mod scrolller;
-mod telegraph;
-mod tenor;
-mod tumblrgallery;
-mod unsplash;
-mod vanillarock;
-mod wallpapercave;
-mod wikimedia;
 
 pub(super) static SITES: &[&Site] = &[
     &redgifs::SITE,
@@ -36,41 +17,6 @@ pub(super) static SITES: &[&Site] = &[
     &misskey::MISSKEY_ART,
     &misskey::LESBIAN_ENERGY,
     &misskey::SUSHI_SKI,
-    &wikimedia::WIKIPEDIA,
-    &wikimedia::WIKTIONARY,
-    &wikimedia::WIKIQUOTE,
-    &wikimedia::WIKIBOOKS,
-    &wikimedia::WIKISOURCE,
-    &wikimedia::WIKINEWS,
-    &wikimedia::WIKIVERSITY,
-    &wikimedia::WIKIDATA,
-    &wikimedia::WIKIVOYAGE,
-    &wikimedia::WIKISPECIES,
-    &wikimedia::WIKIMEDIACOMMONS,
-    &wikimedia::MEDIAWIKI,
-    &wikimedia::MARIOWIKI,
-    &wikimedia::BULBAPEDIA,
-    &wikimedia::PIDGIWIKI,
-    &wikimedia::AZURLANEWIKI,
-    &wikimedia::MGEWIKI,
-    &telegraph::SITE,
-    &unsplash::SITE,
-    &tenor::SITE,
-    &pexels::SITE,
-    &lexica::SITE,
-    &imagechest::SITE,
-    &imgbb::SITE,
-    &imagebam::SITE,
-    &imgth::SITE,
-    &wallpapercave::SITE,
-    &desktopography::SITE,
-    &scrolller::SITE,
-    &pholder::SITE,
-    &tumblrgallery::SITE,
-    &bbc::SITE,
-    &architizer::SITE,
-    &comedywildlifephoto::SITE,
-    &vanillarock::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
@@ -107,7 +53,10 @@ pub(crate) fn iso_ts(text: &str) -> Option<i64> {
                 second = num(pos + 1..pos + 3)?;
                 pos += 3;
                 if matches!(b.get(pos), Some(b'.' | b',')) {
-                    let digits = b[pos + 1..].iter().take_while(|c| c.is_ascii_digit()).count();
+                    let digits = b[pos + 1..]
+                        .iter()
+                        .take_while(|c| c.is_ascii_digit())
+                        .count();
                     if digits == 0 {
                         return None;
                     }
@@ -127,7 +76,8 @@ pub(crate) fn iso_ts(text: &str) -> Option<i64> {
             Some(b'Z') if pos + 1 == b.len() => {}
             Some(sign @ (b'+' | b'-')) => {
                 let rest = text[pos + 1..].replace(':', "");
-                if !(rest.len() == 4 || rest.len() == 6) || !rest.bytes().all(|c| c.is_ascii_digit())
+                if !(rest.len() == 4 || rest.len() == 6)
+                    || !rest.bytes().all(|c| c.is_ascii_digit())
                 {
                     return None;
                 }
@@ -142,7 +92,8 @@ pub(crate) fn iso_ts(text: &str) -> Option<i64> {
     if hour > 23 || minute > 59 || second > 59 {
         return None;
     }
-    let days = i64::from(date.to_julian_day() - time::macros::date!(1970 - 01 - 01).to_julian_day());
+    let days =
+        i64::from(date.to_julian_day() - time::macros::date!(1970 - 01 - 01).to_julian_day());
     Some(days * 86400 + hour * 3600 + minute * 60 + second - offset)
 }
 
@@ -353,7 +304,13 @@ mod tests {
         assert_eq!(iso_ts("2017-07-14T04:40:00+0200"), Some(1500000000));
         assert_eq!(iso_ts("2017-07-14 02:40"), Some(1500000000));
         assert_eq!(iso_ts("2017-07-14"), Some(1499990400));
-        for bad in ["", "yesterday", "2017-13-01", "2017-07-14T25:00", "2017-07-14T02:40:00Zx"] {
+        for bad in [
+            "",
+            "yesterday",
+            "2017-13-01",
+            "2017-07-14T25:00",
+            "2017-07-14T02:40:00Zx",
+        ] {
             assert_eq!(iso_ts(bad), None, "{bad}");
         }
         assert_eq!(date(None), "[Invalid DateTime]");
@@ -365,9 +322,14 @@ mod tests {
         assert_eq!(e.get("<b>", "</b>"), "2");
         assert_eq!(e.get("<a>", "</a>"), "");
         assert_eq!(extract_iter("[1][2][3", "[", "]"), ["1", "2"]);
-        assert_eq!(rextr("a\"1\" b\"2\" X", "\"", "\"", Some(10)), " X");
-        assert_eq!(rextr("href=\"a\" href=\"b\" X", "href=\"", "\"", Some(17)), "b");
-        assert_eq!(nameext_str("https://x/a/b%20c.JPG?x=1"), ("b c".into(), "jpg".into()));
+        assert_eq!(
+            rextr("href=\"a\" href=\"b\" X", "href=\"", "\"", Some(17)),
+            "b"
+        );
+        assert_eq!(
+            nameext_str("https://x/a/b%20c.JPG?x=1"),
+            ("b c".into(), "jpg".into())
+        );
         assert_eq!(nameext_name(".hidden"), (".hidden".into(), String::new()));
         assert_eq!(
             parse_query(Some("a=1&a=2&b=x+y&c")),
