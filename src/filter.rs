@@ -1387,6 +1387,19 @@ fn context_parts(
         {
             values.insert("metadata".into(), artist_value(&value));
         }
+        if let Some(keywords) = &post.site_keywords {
+            for (key, value) in keywords.fields.iter() {
+                if matches!(key.as_str(), "url" | "_url") {
+                    continue;
+                }
+                let value = if key == "date" || key.starts_with("date_") {
+                    source_date_value(value)
+                } else {
+                    json_value(value)
+                };
+                values.insert(key.clone(), value);
+            }
+        }
     }
     values
 }

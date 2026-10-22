@@ -544,7 +544,7 @@ async fn run(args: Args) -> Result<()> {
             }
             let mut identity = item.identity();
             // Distinct social files can share a URL and request context.
-            if matches!(
+            if (matches!(
                 item.category.as_str(),
                 "instagram"
                     | "twitter"
@@ -578,7 +578,8 @@ async fn run(args: Args) -> Result<()> {
                     | "furaffinity"
                     | "weasyl"
                     | "vsco"
-            ) && let Some(file_key) = item.archive_key()
+            ) || gallery_dl_rs::sites::is_category(&item.category))
+                && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
             }
@@ -793,6 +794,7 @@ struct Extractors {
     furaffinity: OnceCell<Result<gallery_dl_rs::furaffinity::FurAffinity>>,
     weasyl: OnceCell<Result<gallery_dl_rs::weasyl::Weasyl>>,
     vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
+    sites: gallery_dl_rs::sites::Runtime,
 }
 
 impl Extractors {
@@ -1149,6 +1151,27 @@ fn extract_input<'a>(
                         .as_ref()
                         .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
                     native.events(&url)
+                }
+                Extractor::Native if gallery_dl_rs::sites::is_category(category) => {
+                    let site = gallery_dl_rs::sites::site(category).expect("registry site");
+                    let native = extractors
+                        .sites
+                        .get(site, || {
+                            gallery_dl_rs::sites::Http::new(site.name, backend.timeout).and_then(
+                                |native| {
+                                    native
+                                        .with_api_key(options.api_key.as_deref())
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                },
+                            )
+                        })
+                        .await
+                        .map_err(|e| {
+                            error(format!("native {} initialization failed: {e}", site.name))
+                        })?;
+                    (site.extract)(native, url.clone())
                 }
                 Extractor::Native if category == "weasyl" => {
                     let native = extractors
@@ -1891,7 +1914,10 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         "e621.artist",
         "e621.artist-search",
         "e621.tag",
-    ] {
+    ]
+    .into_iter()
+    .chain(gallery_dl_rs::sites::categories())
+    {
         let class = category
             .split_once('.')
             .filter(|(base, _)| matches!(*base, "danbooru" | "e621"));

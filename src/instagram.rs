@@ -711,6 +711,7 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                     reposted_by_id: None,
                     article: None,
                     instance: None,
+                    site_keywords: None,
                     post_id: post_id.clone(),
                     media_id,
                     shortcode: code.into(),

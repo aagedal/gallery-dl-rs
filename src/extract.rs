@@ -54,6 +54,13 @@ impl Media {
     /// Social IDs never derive from signed URLs or private transport options.
     /// Direct links explicitly use the full request identity, hashed for privacy.
     pub fn archive_key(&self) -> Option<String> {
+        if crate::sites::is_category(&self.category) {
+            let (namespace, identity) = crate::sites::archive_key(self)?;
+            return Some(format!(
+                "{namespace}:v1:{:x}",
+                Sha256::digest(identity.as_bytes())
+            ));
+        }
         let (namespace, identity) = match self.category.as_str() {
             "direct" => ("url", self.identity()),
             // Imgur media IDs are global; the album or gallery is not part of it.
@@ -751,6 +758,9 @@ pub struct PostMetadata {
     /// service name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
+    /// Upstream gallery-dl keyword dictionary for registry sites.
+    #[serde(rename = "keywords", skip_serializing_if = "Option::is_none")]
+    pub site_keywords: Option<std::sync::Arc<crate::sites::SiteKeywords>>,
 }
 
 #[derive(Clone, Debug)]
@@ -799,6 +809,9 @@ pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
 
 pub fn social_site(url: &Url) -> Option<&'static str> {
     let host = url.host_str()?;
+    if let Some(site) = crate::sites::find(url) {
+        return Some(site.category);
+    }
     if crate::mastodon::INSTANCES.contains(&host) {
         return Some("mastodon");
     }
@@ -2194,6 +2207,12 @@ fn compatibility_metadata(
             matches!(category, "kemono" | "coomer")
                 .then(|| string("service").filter(|service| crate::kemono::valid_service(service)))
                 .flatten()
+        }),
+        site_keywords: crate::sites::site(category).map(|site| {
+            std::sync::Arc::new(crate::sites::SiteKeywords {
+                route: crate::sites::route_for(site, data),
+                fields: data.clone(),
+            })
         }),
         post_id,
         media_id,

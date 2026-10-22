@@ -308,6 +308,14 @@ pub fn for_media(media: &Media) -> Option<ArchiveDescriptor> {
     {
         return Some(descriptor(defaults.category, defaults.archive));
     }
+    if let Some(keywords) = media
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.site_keywords.as_ref())
+        .filter(|_| crate::sites::is_category(&media.category))
+    {
+        return Some(descriptor(&media.category, keywords.route.archive));
+    }
     let category = media.category.as_str();
     let format = match category {
         "pixiv" => {

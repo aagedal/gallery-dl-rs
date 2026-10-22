@@ -542,119 +542,143 @@ struct RawRoot {
     extractor: RawExtractor,
 }
 
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
-struct RawExtractor {
-    init: Field,
-    postprocessors: Field,
-    postprocessor_options: Field,
-    base_directory: Field,
-    filename: Field,
-    file_range: Field,
-    file_filter: Field,
-    image_filter: Field,
-    post_range: Field,
-    post_filter: Field,
-    child_range: Field,
-    child_filter: Field,
-    include: Field,
-    date_before: Field,
-    date_after: Field,
-    retweets: Field,
-    quoted: Field,
-    expand: Field,
-    unique: Field,
-    videos: Field,
-    previews: Field,
-    mp4: Field,
-    reblogs: Field,
-    posts: Field,
-    inline: Field,
-    original: Field,
-    files: Field,
-    duplicates: Field,
-    revisions: Field,
-    order_revisions: Field,
-    endpoint: Field,
-    order_posts: Field,
-    parent_metadata: Field,
-    metadata_parent: Field,
-    favorites: Field,
-    reposts: Field,
-    ugoira: Field,
-    tags: Field,
-    cursor: Field,
-    text_posts: Field,
-    unavailable: Field,
-    text_tweets: Field,
-    size: Field,
-    fallback: Field,
-    articles: Field,
-    cards: Field,
-    cards_blacklist: Field,
-    tweet_endpoint: Field,
-    conversations: Field,
-    pinned: Field,
-    replies: Field,
-    strategy: Field,
-    search_pagination: Field,
-    search_results: Field,
-    limit: Field,
-    search_limit: Field,
-    search_stop: Field,
-    max_posts: Field,
-    threshold: Field,
-    metadata: Field,
-    comments: Field,
-    captions: Field,
-    sanity: Field,
-    embeds: Field,
-    metadata_bookmark: Field,
-    covers: Field,
-    full_series: Field,
-    directory: Field,
-    cookies: Field,
-    proxy: Field,
-    user_agent: Field,
-    archive: Field,
-    filesize_min: Field,
-    filesize_max: Field,
-    retries: Field,
-    timeout: Field,
-    instagram: Box<RawOptions>,
-    twitter: Box<RawOptions>,
-    facebook: Box<RawOptions>,
-    imgur: Box<RawOptions>,
-    bluesky: Box<RawOptions>,
-    reddit: Box<RawOptions>,
-    danbooru: Box<RawOptions>,
-    e621: Box<RawOptions>,
-    gelbooru: Box<RawOptions>,
-    safebooru: Box<RawOptions>,
-    mastodon: Box<RawOptions>,
-    #[serde(rename = "mastodon.social")]
-    mastodon_social: Box<RawOptions>,
-    pawoo: Box<RawOptions>,
-    baraag: Box<RawOptions>,
-    kemono: Box<RawOptions>,
-    coomer: Box<RawOptions>,
-    pixeldrain: Box<RawOptions>,
-    catbox: Box<RawOptions>,
-    imgbox: Box<RawOptions>,
-    postimg: Box<RawOptions>,
-    tumblr: Box<RawOptions>,
-    pixiv: Box<RawOptions>,
-    pixiv_novel: Box<RawOptions>,
-    deviantart: Box<RawOptions>,
-    flickr: Box<RawOptions>,
-    wallhaven: Box<RawOptions>,
-    artstation: Box<RawOptions>,
-    pinterest: Box<RawOptions>,
-    newgrounds: Box<RawOptions>,
-    furaffinity: Box<RawOptions>,
-    weasyl: Box<RawOptions>,
-    vsco: Box<RawOptions>,
-    direct: Box<RawOptions>,
+/// Declare `RawExtractor` with one scope per registry site (`crate::sites`).
+macro_rules! raw_extractor {
+    ($($field:ident => $name:literal),* $(,)?) => {
+        #[derive(Default, Deserialize)]
+        #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+        struct RawExtractor {
+            init: Field,
+            postprocessors: Field,
+            postprocessor_options: Field,
+            base_directory: Field,
+            filename: Field,
+            file_range: Field,
+            file_filter: Field,
+            image_filter: Field,
+            post_range: Field,
+            post_filter: Field,
+            child_range: Field,
+            child_filter: Field,
+            include: Field,
+            date_before: Field,
+            date_after: Field,
+            retweets: Field,
+            quoted: Field,
+            expand: Field,
+            unique: Field,
+            videos: Field,
+            previews: Field,
+            mp4: Field,
+            reblogs: Field,
+            posts: Field,
+            inline: Field,
+            original: Field,
+            files: Field,
+            duplicates: Field,
+            revisions: Field,
+            order_revisions: Field,
+            endpoint: Field,
+            order_posts: Field,
+            parent_metadata: Field,
+            metadata_parent: Field,
+            favorites: Field,
+            reposts: Field,
+            ugoira: Field,
+            tags: Field,
+            cursor: Field,
+            text_posts: Field,
+            unavailable: Field,
+            text_tweets: Field,
+            size: Field,
+            fallback: Field,
+            articles: Field,
+            cards: Field,
+            cards_blacklist: Field,
+            tweet_endpoint: Field,
+            conversations: Field,
+            pinned: Field,
+            replies: Field,
+            strategy: Field,
+            search_pagination: Field,
+            search_results: Field,
+            limit: Field,
+            search_limit: Field,
+            search_stop: Field,
+            max_posts: Field,
+            threshold: Field,
+            metadata: Field,
+            comments: Field,
+            captions: Field,
+            sanity: Field,
+            embeds: Field,
+            metadata_bookmark: Field,
+            covers: Field,
+            full_series: Field,
+            directory: Field,
+            cookies: Field,
+            proxy: Field,
+            user_agent: Field,
+            archive: Field,
+            filesize_min: Field,
+            filesize_max: Field,
+            retries: Field,
+            timeout: Field,
+            instagram: Box<RawOptions>,
+            twitter: Box<RawOptions>,
+            facebook: Box<RawOptions>,
+            imgur: Box<RawOptions>,
+            bluesky: Box<RawOptions>,
+            reddit: Box<RawOptions>,
+            danbooru: Box<RawOptions>,
+            e621: Box<RawOptions>,
+            gelbooru: Box<RawOptions>,
+            safebooru: Box<RawOptions>,
+            mastodon: Box<RawOptions>,
+            #[serde(rename = "mastodon.social")]
+            mastodon_social: Box<RawOptions>,
+            pawoo: Box<RawOptions>,
+            baraag: Box<RawOptions>,
+            kemono: Box<RawOptions>,
+            coomer: Box<RawOptions>,
+            pixeldrain: Box<RawOptions>,
+            catbox: Box<RawOptions>,
+            imgbox: Box<RawOptions>,
+            postimg: Box<RawOptions>,
+            tumblr: Box<RawOptions>,
+            pixiv: Box<RawOptions>,
+            pixiv_novel: Box<RawOptions>,
+            deviantart: Box<RawOptions>,
+            flickr: Box<RawOptions>,
+            wallhaven: Box<RawOptions>,
+            artstation: Box<RawOptions>,
+            pinterest: Box<RawOptions>,
+            newgrounds: Box<RawOptions>,
+            furaffinity: Box<RawOptions>,
+            weasyl: Box<RawOptions>,
+            vsco: Box<RawOptions>,
+            direct: Box<RawOptions>,
+            $(
+                #[serde(rename = $name)]
+                $field: Box<RawOptions>,
+            )*
+        }
+        impl RawExtractor {
+            /// Registry site scopes, in declaration order.
+            fn take_sites(&mut self) -> Vec<(&'static str, Box<RawOptions>)> {
+                vec![$(($name, std::mem::take(&mut self.$field))),*]
+            }
+        }
+        /// Registry site categories accepted as configuration scopes.
+        const SITE_SCOPES: &[&str] = &[$($name),*];
+    };
+}
+raw_extractor! {
+    site_4chan => "4chan",
+    site_yandere => "yandere",
+    site_konachan => "konachan",
+    site_sakugabooru => "sakugabooru",
+    site_lolibooru => "lolibooru",
 }
 
 #[derive(Default, Deserialize)]
@@ -848,7 +872,10 @@ impl Config {
                 "weasyl",
                 "vsco",
                 "direct",
-            ] {
+            ]
+            .into_iter()
+            .chain(SITE_SCOPES.iter().copied())
+            {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
@@ -1031,7 +1058,8 @@ impl Config {
             timeout: root.timeout,
         }
         .resolve(directory, &parent_keywords)?;
-        let extractor = root.extractor;
+        let mut extractor = root.extractor;
+        let site_scopes = extractor.take_sites();
         let defaults = RawOptions {
             tag: None,
             artist: None,
@@ -1159,7 +1187,10 @@ impl Config {
             ("weasyl", extractor.weasyl),
             ("vsco", extractor.vsco),
             ("direct", extractor.direct),
-        ] {
+        ]
+        .into_iter()
+        .chain(site_scopes)
+        {
             if !matches!(name, "danbooru" | "e621")
                 && (settings.tag.is_some()
                     || settings.artist.is_some()
@@ -1178,7 +1209,8 @@ impl Config {
                     | "pixeldrain"
                     | "gelbooru"
                     | "safebooru"
-            ) && settings.api_key.0.is_some()
+            ) && !crate::sites::site(name).is_some_and(|site| site.api_key)
+                && settings.api_key.0.is_some()
             {
                 return Err(error(
                     "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain, gelbooru and safebooru",
@@ -1362,7 +1394,8 @@ impl Config {
                 | "weasyl"
                 | "vsco"
                 | "direct"
-        ) {
+        ) && !crate::sites::is_category(category)
+        {
             return Err(error("unsupported native configuration category"));
         }
         let mut settings = self.extractor.clone();
@@ -2486,5 +2519,16 @@ fn value_truthy(value: &Value) -> bool {
         Value::String(value) => !value.is_empty(),
         Value::Array(value) => !value.is_empty(),
         Value::Object(value) => !value.is_empty(),
+    }
+}
+
+#[cfg(test)]
+mod site_scope_tests {
+    #[test]
+    fn site_scopes_match_registry() {
+        assert_eq!(
+            super::SITE_SCOPES,
+            crate::sites::categories().collect::<Vec<_>>()
+        );
     }
 }
