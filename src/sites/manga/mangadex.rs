@@ -742,9 +742,11 @@ mod tests {
             Some(1500000000)
         );
         assert_eq!(files[0].headers["Referer"], "https://mangadex.org/");
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[0]),
-            "mangadex/English Title/v02 c012.5: Start/English Title_c012.5_001.png"
+            format!("mangadex/English Title/v02 c012.5{colon} Start/English Title_c012.5_001.png")
         );
         assert_eq!(
             archive(&files[1]),
