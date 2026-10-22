@@ -1,4 +1,7 @@
 //! Naver Blog, mirroring gallery_dl/extractor/naverblog.py.
+//!
+//! The `videos` option is honored. Upstream's EUC-KR fallback for lazily
+//! loaded image URLs that are not valid UTF-8 is not implemented.
 use super::{Scan, extr, extract_iter, parse_int};
 use crate::sites::{Events, Http, Item, Route, Site, unescape};
 use crate::{Result, error};
@@ -66,8 +69,7 @@ fn target(url: &Url) -> Option<Target> {
         let blog = query
             .split('&')
             .find_map(|pair| pair.strip_prefix("blogId="))?;
-        return (!blog.is_empty())
-            .then(|| Target::Blog(crate::sites::percent_decode(blog)));
+        return (!blog.is_empty()).then(|| Target::Blog(crate::sites::percent_decode(blog)));
     }
     if !bare {
         return None;
@@ -114,7 +116,12 @@ fn parse_date(text: &str, today: i64) -> Option<i64> {
     super::strptime(text, "%Y. %m. %d. %H:%M")
 }
 
-pub(crate) fn metadata(page: &str, blog: &str, post: &str, today: i64) -> (Map<String, Value>, Option<i64>) {
+pub(crate) fn metadata(
+    page: &str,
+    blog: &str,
+    post: &str,
+    today: i64,
+) -> (Map<String, Value>, Option<i64>) {
     let mut scan = Scan::new(page);
     let title = unescape(scan.extr("\"og:title\" content=\"", "\""));
     let description =
@@ -168,7 +175,10 @@ fn video_modules(page: &str) -> Vec<(String, String)> {
 }
 
 async fn video(http: &Http, vid: &str, inkey: &str) -> Result<(String, Map<String, Value>)> {
-    if !vid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+    if !vid
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
         return Err(error("invalid Naver video id"));
     }
     let mut url = http.api(&format!(
@@ -214,7 +224,12 @@ async fn post_events<'a>(http: &'a Http, blog: &str, post: &str) -> Result<Event
     let (mut data, timestamp) = metadata(&page, blog, post, today());
     let mut files: Vec<(String, Option<Map<String, Value>>)> =
         image_urls(&page).into_iter().map(|u| (u, None)).collect();
-    for (vid, inkey) in video_modules(&page) {
+    let modules = if http.option_bool("videos", true) {
+        video_modules(&page)
+    } else {
+        Vec::new()
+    };
+    for (vid, inkey) in modules {
         // Upstream logs a warning and continues on video failures.
         if let Ok((url, info)) = video(http, &vid, &inkey).await {
             files.push((url, Some(info)));
@@ -416,7 +431,10 @@ var blogNo = '12345'; var nickName = 'nick';
         assert_eq!(k["post"]["title"], "Post & title");
         assert_eq!(k["post"]["description"], "desc x");
         assert_eq!(k["post"]["num"], 221430673006u64);
-        assert_eq!(k["blog"], json!({"id": "user_1", "num": 12345, "user": "nick"}));
+        assert_eq!(
+            k["blog"],
+            json!({"id": "user_1", "num": 12345, "user": "nick"})
+        );
         assert_eq!(k["count"], 3);
         assert_eq!(k["filename"], "image 1");
         let k = keywords(&files[2]);
@@ -440,7 +458,9 @@ var blogNo = '12345'; var nickName = 'nick';
             "{}",
             requests[0]
         );
-        assert!(requests[1].starts_with("GET /rmcnmv/rmcnmv/vod/play/v2.0/ABC123?key=K&sid=2&nonce="));
+        assert!(
+            requests[1].starts_with("GET /rmcnmv/rmcnmv/vod/play/v2.0/ABC123?key=K&sid=2&nonce=")
+        );
     }
 
     #[test]
@@ -472,6 +492,8 @@ var blogNo = '12345'; var nickName = 'nick';
             "GET /PostViewBottomTitleListAsync.nhn?blogId=user_1&logNo=999&viewDate=&categoryNo=&parentCategoryNo=&showNextPage=true&showPreviousPage=false&sortDateInMilli=&"
         ), "{}", requests[1]);
         assert!(requests[2].starts_with("GET /PostView.nhn?blogId=user_1&logNo=999 "));
-        assert!(requests[3].contains("logNo=998&") && requests[3].contains("sortDateInMilli=2020&"));
+        assert!(
+            requests[3].contains("logNo=998&") && requests[3].contains("sortDateInMilli=2020&")
+        );
     }
 }

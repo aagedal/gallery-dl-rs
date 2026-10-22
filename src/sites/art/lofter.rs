@@ -55,7 +55,10 @@ fn target(url: &Url) -> Option<Target> {
     let path = url.path();
     if let Some(ids) = path.strip_prefix("/post/") {
         let (blog, post) = ids.split_once('_')?;
-        if !blog.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+        if !blog
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
             return None;
         }
         return Some(Target::Post {
@@ -102,7 +105,11 @@ async fn call(http: &Http, endpoint: &str, params: &[(&str, String)]) -> Result<
     let info = http
         .post_json(&url, &json!({}), &[("Referer", REFERER)])
         .await?;
-    match info.get("meta").and_then(|m| m.get("status")).and_then(Value::as_i64) {
+    match info
+        .get("meta")
+        .and_then(|m| m.get("status"))
+        .and_then(Value::as_i64)
+    {
         Some(200) => Ok(info.get("response").cloned().unwrap_or(Value::Null)),
         Some(4200) => Err(error("LOFTER blog not found")),
         _ => Err(error("LOFTER API request failed")),
@@ -183,7 +190,9 @@ pub(crate) fn post_items(post: &Value) -> Vec<Item> {
     post.insert("date".into(), super::date(timestamp));
     let urls: Vec<String> = match post.get("type").and_then(Value::as_i64) {
         Some(1) => extract_iter(
-            post.get("content").and_then(Value::as_str).unwrap_or_default(),
+            post.get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
             "<img src=\"",
             "\"",
         )
@@ -293,7 +302,10 @@ mod tests {
         ))
         .await;
         assert_eq!(files.len(), 2);
-        assert_eq!(files[0].url.as_str(), "https://imglf5.lf127.net/img/a/B.jpg");
+        assert_eq!(
+            files[0].url.as_str(),
+            "https://imglf5.lf127.net/img/a/B.jpg"
+        );
         let k = keywords(&files[0]);
         assert_eq!(k["blog_name"], "gengar563");
         assert_eq!(k["date"], "2023-09-17 14:52:18");
@@ -310,7 +322,7 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(
             requests[0].starts_with(
-                "POST /oldapi/post/detail.api?product=lofter-android-7.9.10&targetblogid=512940684&postid=11713110102 "
+                "POST /oldapi/post/detail.api?product=lofter-android-7.9.10&targetblogid=511892108&postid=11713110102 "
             ),
             "{}",
             requests[0]

@@ -183,11 +183,7 @@ fn page_events<'a>(
             if section.is_empty() {
                 break;
             }
-            let link = unescape(extr(
-                section,
-                "<a class=\"entry-title-link\" href=\"",
-                "\"",
-            ));
+            let link = unescape(extr(section, "<a class=\"entry-title-link\" href=\"", "\""));
             // Upstream queues `hatenablog:URL`; only canonical hosts are
             // dispatchable here.
             if let Ok(child) = Url::parse(&link)
@@ -198,11 +194,11 @@ fn page_events<'a>(
         }
         let subcategory = route.subcategory;
         return Ok(futures_util::StreamExt::boxed(
-            futures_util::StreamExt::flatten(futures_util::stream::iter(
-                children.into_iter().map(move |child| {
+            futures_util::StreamExt::flatten(futures_util::stream::iter(children.into_iter().map(
+                move |child| {
                     crate::sites::queue(http, "hatenablog", subcategory, child, &Map::new())
-                }),
-            )),
+                },
+            ))),
         ));
     }
     let mut events = Vec::new();
@@ -302,7 +298,7 @@ fn article_items(domain: &str, article: &str) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{html, http, keywords, media, serve};
+    use crate::sites::testing::{html, http, keywords, media, response, serve};
 
     fn t(raw: &str) -> Option<Target> {
         target(&Url::parse(raw).unwrap())
@@ -332,7 +328,13 @@ mod tests {
             "https://x.hatenablog.com/archive/category/A%20B",
         ] {
             assert!(
-                matches!(t(raw), Some(Target::Entries { route: "archive", .. })),
+                matches!(
+                    t(raw),
+                    Some(Target::Entries {
+                        route: "archive",
+                        ..
+                    })
+                ),
                 "{raw}"
             );
         }
@@ -461,5 +463,18 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn reports_missing_page() {
+        let (root, _server) = serve(vec![response("404 Not Found", "text/html", b"")]);
+        let http = http("hatenablog", root);
+        let events: Vec<_> = futures_util::StreamExt::collect(extract(
+            &http,
+            Url::parse("https://blog.hatenablog.com/entry/2020/01/01/x").unwrap(),
+        ))
+        .await;
+        let message = events[0].as_ref().err().unwrap().to_string();
+        assert!(message.contains("not found"), "{message}");
     }
 }

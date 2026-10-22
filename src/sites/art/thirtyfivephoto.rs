@@ -54,9 +54,9 @@ fn target(url: &Url) -> Option<Target> {
     let host = url.host_str()?;
     let sub_ok = match host.strip_suffix("35photo.pro") {
         Some("") => true,
-        Some(prefix) => prefix
-            .strip_suffix('.')
-            .is_some_and(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| b.is_ascii_lowercase())),
+        Some(prefix) => prefix.strip_suffix('.').is_some_and(|l| {
+            !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| b.is_ascii_lowercase())
+        }),
         None => false,
     };
     if !crate::sites::plain(url) || !sub_ok {
@@ -84,12 +84,7 @@ fn target(url: &Url) -> Option<Target> {
 
 fn extract(http: &Http, url: Url) -> Events<'_> {
     match target(&url) {
-        Some(Target::Image(id)) => photos(
-            http,
-            &IMAGE,
-            Map::new(),
-            stream::iter([Ok(id)]).boxed(),
-        ),
+        Some(Target::Image(id)) => photos(http, &IMAGE, Map::new(), stream::iter([Ok(id)]).boxed()),
         Some(Target::Tag(tag)) => {
             let mut data = Map::new();
             let search = crate::sites::percent_decode(&tag).to_lowercase();
@@ -97,9 +92,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             photos(http, &TAG, data, tag_ids(http, tag))
         }
         Some(Target::User(user)) => crate::sites::once(async move {
-            let page = http
-                .text(&http.api(&format!("{ROOT}/{user}/"))?)
-                .await?;
+            let page = http.text(&http.api(&format!("{ROOT}/{user}/"))?).await?;
             let user_id = parse_int(extr(&page, "/user_", ".xml"), 0);
             let mut data = Map::new();
             data.insert("user".into(), user.into());
@@ -110,7 +103,12 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 ("type", "getNextPageData".to_owned()),
                 ("lastId", "999999999".to_owned()),
             ];
-            Ok(photos(http, &USER, data, show_block(http, params, Vec::new())))
+            Ok(photos(
+                http,
+                &USER,
+                data,
+                show_block(http, params, Vec::new()),
+            ))
         }),
         Some(Target::Genre { id, new }) => crate::sites::once(async move {
             let suffix = if new { "/new/" } else { "/" };
@@ -152,14 +150,19 @@ fn photo_ids(page: &str) -> Vec<String> {
 }
 
 /// Upstream `_pagination` over `show_block.php`, after `extra` IDs.
-fn show_block<'a>(http: &'a Http, params: Vec<(&'static str, String)>, extra: Vec<String>) -> Ids<'a> {
+fn show_block<'a>(
+    http: &'a Http,
+    params: Vec<(&'static str, String)>,
+    extra: Vec<String>,
+) -> Ids<'a> {
     let first = stream::iter(extra.into_iter().map(Ok));
     let rest = stream::try_unfold(Some(params), move |params| async move {
         let Some(mut params) = params else {
             return Ok::<_, crate::Error>(None);
         };
         let mut url = http.api(&format!("{ROOT}/show_block.php"))?;
-        url.query_pairs_mut().extend_pairs(params.iter().map(|(k, v)| (*k, v.as_str())));
+        url.query_pairs_mut()
+            .extend_pairs(params.iter().map(|(k, v)| (*k, v.as_str())));
         let headers = [("Referer", ROOT), ("X-Requested-With", "XMLHttpRequest")];
         let data = http.json_with(&url, &headers).await?;
         let ids = photo_ids(data.get("data").and_then(Value::as_str).unwrap_or_default());
@@ -250,7 +253,11 @@ fn parse_photo(data: &Value, extra: &Map<String, Value>) -> Result<Vec<Item>> {
     let tags = get("tags")?;
     info.insert(
         "tags".into(),
-        if truthy(Some(&tags)) { tags } else { Value::Array(Vec::new()) },
+        if truthy(Some(&tags)) {
+            tags
+        } else {
+            Value::Array(Vec::new())
+        },
     );
     info.insert("views".into(), get("photo_see")?);
     info.insert("favorites".into(), get("photo_fav")?);
@@ -266,11 +273,17 @@ fn parse_photo(data: &Value, extra: &Map<String, Value>) -> Result<Vec<Item>> {
             for (index, photo) in series.iter().enumerate() {
                 let mut file = info.clone();
                 file.insert("num".into(), (index + 1).into());
-                file.insert("url".into(), photo.get("src").cloned().unwrap_or(Value::Null));
+                file.insert(
+                    "url".into(),
+                    photo.get("src").cloned().unwrap_or(Value::Null),
+                );
                 let id = photo.get("id").map(scalar).unwrap_or_default();
                 file.insert("id_series".into(), parse_int(&id, 0).into());
                 let title = photo.get("title").filter(|t| truthy(Some(t)));
-                file.insert("title_series".into(), title.cloned().unwrap_or_else(|| "".into()));
+                file.insert(
+                    "title_series".into(),
+                    title.cloned().unwrap_or_else(|| "".into()),
+                );
                 files.push(file);
             }
         }
@@ -282,7 +295,11 @@ fn parse_photo(data: &Value, extra: &Map<String, Value>) -> Result<Vec<Item>> {
     let mut items = Vec::new();
     for mut file in files {
         crate::sites::art::update(&mut file, extra);
-        let raw = file.get("url").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let raw = file
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
         let Some(url) = crate::sites::art::file_url(&raw, ROOT) else {
             continue;
         };
@@ -313,19 +330,31 @@ mod tests {
 
     #[test]
     fn classifies_urls() {
-        assert_eq!(t("https://35photo.pro/liya"), Some(Target::User("liya".into())));
-        assert_eq!(t("https://en.35photo.pro/liya/x"), Some(Target::User("liya".into())));
+        assert_eq!(
+            t("https://35photo.pro/liya"),
+            Some(Target::User("liya".into()))
+        );
+        assert_eq!(
+            t("https://en.35photo.pro/liya/x"),
+            Some(Target::User("liya".into()))
+        );
         assert_eq!(
             t("https://35photo.pro/tags/landscape/"),
             Some(Target::Tag("landscape".into()))
         );
         assert_eq!(
             t("https://35photo.pro/genre_109/"),
-            Some(Target::Genre { id: "109".into(), new: false })
+            Some(Target::Genre {
+                id: "109".into(),
+                new: false
+            })
         );
         assert_eq!(
             t("https://35photo.pro/genre_109/new/"),
-            Some(Target::Genre { id: "109".into(), new: true })
+            Some(Target::Genre {
+                id: "109".into(),
+                new: true
+            })
         );
         assert_eq!(
             t("https://35photo.pro/photo_753340/"),
@@ -416,7 +445,11 @@ mod tests {
             json(json!({"data": "", "lastId": ""})),
         ]);
         let http = http("35photo", root);
-        let files = media(extract(&http, Url::parse("https://35photo.pro/liya").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://35photo.pro/liya").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 2);
         let k = keywords(&files[0]);
         assert_eq!(k["user_id"], 20415);
@@ -430,14 +463,20 @@ mod tests {
             "{}",
             requests[1]
         );
-        assert!(requests[1].to_ascii_lowercase().contains("x-requested-with: xmlhttprequest"));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("x-requested-with: xmlhttprequest")
+        );
         assert!(requests[4].contains("lastId=2 "), "{}", requests[4]);
     }
 
     #[tokio::test]
     async fn tag_pages_until_empty() {
         let (root, server) = serve(vec![
-            html(r#"<a href="https://35photo.pro/photo_9/"><a href="https://35photo.pro/photo_9/">"#),
+            html(
+                r#"<a href="https://35photo.pro/photo_9/"><a href="https://35photo.pro/photo_9/">"#,
+            ),
             json(photo(9, false)),
             html("<html></html>"),
         ]);
@@ -450,7 +489,10 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(keywords(&files[0])["search_tag"], "land scape");
         let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
-        assert_eq!(identity, r#"["t{search_tag}_{id}_{num}",["land scape","9","1"]]"#);
+        assert_eq!(
+            identity,
+            r#"["t{search_tag}_{id}_{num}",["land scape","9","1"]]"#
+        );
         let (_, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
@@ -464,12 +506,18 @@ mod tests {
     #[tokio::test]
     async fn genre_uses_page_ids_first() {
         let (root, server) = serve(vec![
-            html("<title>Photo genre - Nature. x</title><div class=\"photo\"><a href=\"/photo_4/\">\n"),
+            html(
+                "<title>Photo genre - Nature. x</title><div class=\"photo\"><a href=\"/photo_4/\">\n",
+            ),
             json(photo(4, false)),
             json(json!({"data": "", "lastId": null})),
         ]);
         let http = http("35photo", root);
-        let files = media(extract(&http, Url::parse("https://35photo.pro/genre_109/").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://35photo.pro/genre_109/").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 1);
         let k = keywords(&files[0]);
         assert_eq!(k["genre"], "Nature");

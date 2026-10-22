@@ -61,7 +61,13 @@ const KINDS: &[(&str, Kind)] = &[
             route: &GRIDS,
             asset_type: "grid",
             dimensions: Some(&[
-                "460x215", "920x430", "600x900", "342x482", "660x930", "512x512", "1024x1024",
+                "460x215",
+                "920x430",
+                "600x900",
+                "342x482",
+                "660x930",
+                "512x512",
+                "1024x1024",
             ]),
             styles: &["alternate", "blurred", "no_logo", "material", "white_logo"],
             file_types: &["png", "jpeg", "jpg", "webp"],
@@ -135,9 +141,7 @@ fn target(url: &Url) -> Option<Target> {
             let (kind, page) = match rest {
                 [] => return None,
                 [kind, tail @ ..] => {
-                    let (name, _) = KINDS
-                        .iter()
-                        .find(|(name, _)| kind.starts_with(name))?;
+                    let (name, _) = KINDS.iter().find(|(name, _)| kind.starts_with(name))?;
                     // `/KIND(?:/(\d+))?` without an end anchor.
                     let page = match (kind.len() == name.len(), tail) {
                         (true, [page, ..]) => leading_digits(page).and_then(|p| p.parse().ok()),
@@ -162,9 +166,10 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         Some(Target::Asset { asset_type, id }) => crate::sites::once(async move {
             let url = http.api(&format!("{ROOT}/api/public/asset/{asset_type}/{id}"))?;
             let data = call(http.json_with(&url, &[("Cookie", COOKIE)]).await?)?;
-            let asset = data.get("asset").filter(|a| !a.is_null()).ok_or_else(|| {
-                error(format!("SteamGridDB asset ({asset_type}:{id}) not found"))
-            })?;
+            let asset = data
+                .get("asset")
+                .filter(|a| !a.is_null())
+                .ok_or_else(|| error(format!("SteamGridDB asset ({asset_type}:{id}) not found")))?;
             Ok(crate::sites::events(asset_events(http, &ASSET, asset)))
         }),
         Some(Target::List {
@@ -245,7 +250,9 @@ fn search_body(http: &Http, kind: &Kind, collection: bool, id: u64) -> Result<Ma
         return Err(error(format!("Invalid sort '{shown}'")));
     }
     let mut body = Map::new();
-    for key in ["static", "animated", "humor", "nsfw", "epilepsy", "untagged"] {
+    for key in [
+        "static", "animated", "humor", "nsfw", "epilepsy", "untagged",
+    ] {
         let value = match http.option(key) {
             None => Value::Bool(true),
             Some(value) => value.clone(),
@@ -276,10 +283,14 @@ fn search_body(http: &Http, kind: &Kind, collection: bool, id: u64) -> Result<Ma
     );
     body.insert(
         "languages".into(),
-        json!(config_list(http, "languages", "language", &|v| LANGUAGE_CODES.contains(&v))?),
+        json!(config_list(http, "languages", "language", &|v| {
+            LANGUAGE_CODES.contains(&v)
+        })?),
     );
     let file_types = kind.file_types;
-    let types = config_list(http, "file-types", "file type", &|v| file_types.contains(&v))?;
+    let types = config_list(http, "file-types", "file type", &|v| {
+        file_types.contains(&v)
+    })?;
     body.insert(
         "mime".into(),
         json!(types.iter().map(|t| mime(t)).collect::<Vec<_>>()),
@@ -398,15 +409,28 @@ mod tests {
     fn classifies_urls() {
         assert_eq!(
             t("https://www.steamgriddb.com/grid/132605"),
-            Some(Target::Asset { asset_type: "grid".into(), id: "132605".into() })
+            Some(Target::Asset {
+                asset_type: "grid".into(),
+                id: "132605".into()
+            })
         );
         assert_eq!(
             t("https://steamgriddb.com/game/5259324/grids/3"),
-            Some(Target::List { kind: "grids", collection: false, id: 5259324, page: 3 })
+            Some(Target::List {
+                kind: "grids",
+                collection: false,
+                id: 5259324,
+                page: 3
+            })
         );
         assert_eq!(
             t("https://www.steamgriddb.com/collection/332/heroes"),
-            Some(Target::List { kind: "heroes", collection: true, id: 332, page: 1 })
+            Some(Target::List {
+                kind: "heroes",
+                collection: true,
+                id: 332,
+                page: 1
+            })
         );
         for raw in [
             "https://www.steamgriddb.com/grid/",
@@ -464,7 +488,9 @@ mod tests {
     #[tokio::test]
     async fn reports_missing_and_failed_assets() {
         assert!(call(json!({"success": false, "error": "nope"})).is_err());
-        let (root, _server) = serve(vec![json(json!({"success": true, "data": {"asset": null}}))]);
+        let (root, _server) = serve(vec![json(
+            json!({"success": true, "data": {"asset": null}}),
+        )]);
         let http = http("steamgriddb", root);
         let events: Vec<_> = futures_util::StreamExt::collect(extract(
             &http,
@@ -527,7 +553,10 @@ mod tests {
         let icons = &KINDS[3].1;
         let body = search_body(&http, icons, true, 3).unwrap();
         assert_eq!(body["order"], "age_asc");
-        assert_eq!(body["mime"], json!(["image/png", "image/vnd.microsoft.icon"]));
+        assert_eq!(
+            body["mime"],
+            json!(["image/png", "image/vnd.microsoft.icon"])
+        );
         assert_eq!(body["dimensions"], json!(["16x16"]));
         assert_eq!(body["humor"], false);
         assert_eq!(body["collection_id"], 3);

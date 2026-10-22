@@ -58,7 +58,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         Some(Target::Blog(user)) => blog(http, user),
         Some(Target::Post { user, post }) => crate::sites::once(async move {
             let url = http.api(&format!("{ROOT}/{user}/archives/{post}.html"))?;
-            let page = http.text_with(&url, &[("Referer", "http://blog.livedoor.jp/")]).await?;
+            let page = http
+                .text_with(&url, &[("Referer", "http://blog.livedoor.jp/")])
+                .await?;
             let mut scan = Scan::new(&page);
             let data = scan.extr("<rdf:RDF", "</rdf:RDF>");
             let body = scan.extr("class=\"article-body-inner\">", "class=\"article-footer\">");
@@ -81,7 +83,9 @@ fn blog(http: &Http, user: String) -> Events<'_> {
                 return Ok(None);
             };
             let url = http.api(&page_url)?;
-            let page = http.text_with(&url, &[("Referer", "http://blog.livedoor.jp/")]).await?;
+            let page = http
+                .text_with(&url, &[("Referer", "http://blog.livedoor.jp/")])
+                .await?;
             let (events, next) = blog_page(http, &user, &page, &page_url)?;
             Ok(Some((crate::sites::events(events), next)))
         }
@@ -219,7 +223,7 @@ fn images(post: &Map<String, Value>, timestamp: Option<i64>, body: &str) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{html, http, keywords, media, serve};
+    use crate::sites::testing::{html, http, keywords, media, response, serve};
     use serde_json::json;
 
     fn t(raw: &str) -> Option<Target> {
@@ -269,10 +273,17 @@ mod tests {
 
     #[tokio::test]
     async fn paginates_blog() {
-        let first = format!("{}<a rel=\"next\" href=\"http://blog.livedoor.jp/u/?p=2\">", article(1));
+        let first = format!(
+            "{}<a rel=\"next\" href=\"http://blog.livedoor.jp/u/?p=2\">",
+            article(1)
+        );
         let (root, server) = serve(vec![html(&first), html(&article(2))]);
         let http = http("livedoor", root);
-        let files = media(extract(&http, Url::parse("http://blog.livedoor.jp/u").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("http://blog.livedoor.jp/u").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 4);
         assert_eq!(
             files[0].url.as_str(),
@@ -300,7 +311,10 @@ mod tests {
         );
         let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert_eq!(identity, r#"["{post[id]}_{hash}",["1","abc"]]"#);
-        assert_eq!(files[0].metadata.as_ref().unwrap().timestamp, Some(1577934000));
+        assert_eq!(
+            files[0].metadata.as_ref().unwrap().timestamp,
+            Some(1577934000)
+        );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /u "), "{}", requests[0]);
         assert!(requests[1].starts_with("GET /u/?p=2 "));
@@ -319,5 +333,18 @@ mod tests {
         assert_eq!(keywords(&files[0])["subcategory"], "post");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /u/archives/7.html "));
+    }
+
+    #[tokio::test]
+    async fn reports_missing_page() {
+        let (root, _server) = serve(vec![response("404 Not Found", "text/html", b"")]);
+        let http = http("livedoor", root);
+        let events: Vec<_> = futures_util::StreamExt::collect(extract(
+            &http,
+            Url::parse("http://blog.livedoor.jp/u/archives/7.html").unwrap(),
+        ))
+        .await;
+        let message = events[0].as_ref().err().unwrap().to_string();
+        assert!(message.contains("not found"), "{message}");
     }
 }

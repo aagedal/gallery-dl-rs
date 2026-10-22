@@ -1,7 +1,7 @@
 //! Adobe Portfolio galleries, mirroring gallery_dl/extractor/myportfolio.py:
 //! a project page lists its images, while a portfolio index queues each
 //! project cover as a gallery child.
-use crate::sites::art::{Scan, extract_iter, extr, nameext_into};
+use crate::sites::art::{Scan, extr, extract_iter, nameext_into};
 use crate::sites::{Events, Http, Item, Route, Site, unescape};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -112,7 +112,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 /// Upstream `metadata()`: user and title from `og:title` and `<h1>`.
 fn metadata(page: &str) -> Result<Map<String, Value>> {
     let mut scan = Scan::new(page);
-    let mut user = scan.extr("property=\"og:title\" content=\"", "\"").to_owned();
+    let mut user = scan
+        .extr("property=\"og:title\" content=\"", "\"")
+        .to_owned();
     if user.is_empty() {
         user = scan.extr("property=og:title content=\"", "\"").to_owned();
     }
@@ -239,7 +241,10 @@ mod tests {
         let data = metadata(r#"<meta property=og:title content="U - T">"#).unwrap();
         assert_eq!((&data["user"], &data["title"]), (&"U".into(), &"T".into()));
         assert!(metadata("<html></html>").is_err());
-        assert_eq!(images(r#"<img data-src="a.jpg"><img data-src="b.jpg">"#).len(), 2);
+        assert_eq!(
+            images(r#"<img data-src="a.jpg"><img data-src="b.jpg">"#).len(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -257,7 +262,10 @@ mod tests {
         assert_eq!(k["count"], 2);
         assert_eq!(k["filename"], "two");
         assert_eq!(k["extension"], "png");
-        assert_eq!(files[1].url.as_str(), "https://cdn.myportfolio.com/abc/two.png?h=2");
+        assert_eq!(
+            files[1].url.as_str(),
+            "https://cdn.myportfolio.com/abc/two.png?h=2"
+        );
         let (file, dir) = crate::sites::default_templates(&files[1]).unwrap();
         assert_eq!(file.render(&files[1]).unwrap(), "02.png");
         assert_eq!(
@@ -267,7 +275,11 @@ mod tests {
         let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert_eq!(identity, r#"["{user}_{filename}",["Andrew Ling","one"]]"#);
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /volvo-xc-90-hybrid "), "{}", requests[0]);
+        assert!(
+            requests[0].starts_with("GET /volvo-xc-90-hybrid "),
+            "{}",
+            requests[0]
+        );
     }
 
     #[tokio::test]

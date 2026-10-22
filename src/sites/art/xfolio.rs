@@ -1,9 +1,11 @@
 //! xfolio works, portfolios and series, mirroring
 //! gallery_dl/extractor/xfolio.py: work pages list their images, while
-//! portfolio and series pages queue their works.
+//! portfolio and series pages queue their works. Upstream's logged-in
+//! `fullsize` ZIP download needs the `xfolio_session` cookie and is not
+//! implemented; works always download their per-image files.
+use crate::error;
 use crate::sites::art::{Scan, ext_from_url, extr, extract_iter};
 use crate::sites::{Events, Http, Item, Route, Site, unescape};
-use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
@@ -145,7 +147,10 @@ fn work_data(html: &str, creator: &str, work_id: &str) -> Map<String, Value> {
     data.insert("title".into(), unescape(title).into());
     let description = scan.extr("property=\"og:description\" content=\"", "\"");
     data.insert("description".into(), unescape(description).into());
-    data.insert("creator_id".into(), scan.extr(" data-creator-id=\"", "\"").into());
+    data.insert(
+        "creator_id".into(),
+        scan.extr(" data-creator-id=\"", "\"").into(),
+    );
     data.insert(
         "creator_userid".into(),
         scan.extr(" data-creator-user-id=\"", "\"").into(),
@@ -203,7 +208,10 @@ fn parse_work(html: &str, creator: &str, work_id: &str) -> Vec<Item> {
         ));
     }
     work.insert("count".into(), files.len().into());
-    let user = work.get("creator_name").and_then(Value::as_str).map(str::to_owned);
+    let user = work
+        .get("creator_name")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let title = work.get("title").and_then(Value::as_str).map(str::to_owned);
     let mut items = Vec::new();
     for (index, (image_id, raw, ext, headers)) in files.into_iter().enumerate() {
@@ -231,7 +239,7 @@ fn parse_work(html: &str, creator: &str, work_id: &str) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{html, http, keywords, media, serve};
+    use crate::sites::testing::{html, http, keywords, media, response, serve};
 
     fn t(raw: &str) -> Option<Target> {
         target(&Url::parse(raw).unwrap())
@@ -245,8 +253,14 @@ mod tests {
                 work_id: w.into(),
             })
         };
-        assert_eq!(t("https://xfolio.jp/portfolio/yutakashii/works/23977"), work("yutakashii", "23977"));
-        assert_eq!(t("https://xfolio.jp/en/portfolio/a/works/87495"), work("a", "87495"));
+        assert_eq!(
+            t("https://xfolio.jp/portfolio/yutakashii/works/23977"),
+            work("yutakashii", "23977")
+        );
+        assert_eq!(
+            t("https://xfolio.jp/en/portfolio/a/works/87495"),
+            work("a", "87495")
+        );
         for raw in [
             "https://xfolio.jp/portfolio/yutakashii",
             "https://xfolio.jp/portfolio/yutakashii/",
@@ -344,19 +358,28 @@ mod tests {
             html(WORK_PAGE),
         ]);
         let http = http("xfolio", root);
-        let files = media(extract(&http, Url::parse("https://xfolio.jp/portfolio/u").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://xfolio.jp/portfolio/u").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 4);
         assert_eq!(keywords(&files[2])["work_id"], "2");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /portfolio/u/works "));
         assert!(requests[1].starts_with("GET /portfolio/u/works/1 "));
-        assert!(requests[2].starts_with("GET /portfolio/u/works?page=2&x=1 "), "{}", requests[2]);
+        assert!(
+            requests[2].starts_with("GET /portfolio/u/works?page=2&x=1 "),
+            "{}",
+            requests[2]
+        );
         assert!(requests[3].starts_with("GET /portfolio/u/works/2 "));
     }
 
     #[tokio::test]
     async fn series_queues_works() {
-        let page = r#"<div class="listWrap--title"><a href="https://xfolio.jp/portfolio/d/works/7">T</a>"#;
+        let page =
+            r#"<div class="listWrap--title"><a href="https://xfolio.jp/portfolio/d/works/7">T</a>"#;
         let (root, server) = serve(vec![html(page), html(WORK_PAGE)]);
         let http = http("xfolio", root);
         let files = media(extract(
@@ -368,5 +391,18 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /portfolio/d/series/9 "));
         assert!(requests[1].starts_with("GET /portfolio/d/works/7 "));
+    }
+
+    #[tokio::test]
+    async fn reports_missing_page() {
+        let (root, _server) = serve(vec![response("404 Not Found", "text/html", b"")]);
+        let http = http("xfolio", root);
+        let events: Vec<_> = futures_util::StreamExt::collect(extract(
+            &http,
+            Url::parse("https://xfolio.jp/portfolio/a/works/1").unwrap(),
+        ))
+        .await;
+        let message = events[0].as_ref().err().unwrap().to_string();
+        assert!(message.contains("not found"), "{message}");
     }
 }
