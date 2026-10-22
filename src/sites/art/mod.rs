@@ -10,8 +10,26 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod behance;
+mod hatenablog;
+mod livedoor;
+mod lofter;
+mod myportfolio;
+mod naverblog;
+mod steamgriddb;
+mod thirtyfivephoto;
+mod xfolio;
 
-pub(super) static SITES: &[&Site] = &[&behance::SITE];
+pub(super) static SITES: &[&Site] = &[
+    &behance::SITE,
+    &hatenablog::SITE,
+    &livedoor::SITE,
+    &lofter::SITE,
+    &myportfolio::SITE,
+    &naverblog::SITE,
+    &steamgriddb::SITE,
+    &thirtyfivephoto::SITE,
+    &xfolio::SITE,
+];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
 /// cursor; a miss returns `""` and leaves the cursor in place.
