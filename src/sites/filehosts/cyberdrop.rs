@@ -121,7 +121,11 @@ fn files<'a>(
 }
 
 async fn file(http: &Http, id: &str, album: &Map<String, Value>, num: usize) -> Result<Item> {
-    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
         return Err(error("invalid cyberdrop file ID"));
     }
     let info = http
@@ -183,9 +187,18 @@ mod tests {
     #[test]
     fn classifies_urls() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
-        assert_eq!(t("https://cyberdrop.me/a/8uE0wQiK"), Some(Target::Album("8uE0wQiK".into())));
-        assert_eq!(t("https://www.cyberdrop.cr/f/abc"), Some(Target::Media("abc".into())));
-        assert_eq!(t("https://cyberdrop.to/e/abc"), Some(Target::Media("abc".into())));
+        assert_eq!(
+            t("https://cyberdrop.me/a/8uE0wQiK"),
+            Some(Target::Album("8uE0wQiK".into()))
+        );
+        assert_eq!(
+            t("https://www.cyberdrop.cr/f/abc"),
+            Some(Target::Media("abc".into()))
+        );
+        assert_eq!(
+            t("https://cyberdrop.to/e/abc"),
+            Some(Target::Media("abc".into()))
+        );
         for raw in [
             "https://cyberdrop.com/a/x",
             "https://cyberdrop.me.evil.test/a/x",
@@ -216,15 +229,21 @@ mod tests {
     async fn extracts_album_files() {
         let (root, server) = serve(vec![
             html(PAGE),
-            json(json!({"name": "beach-AbC123.jpg", "size": 5, "type": "image/jpeg",
-                "auth_url": "https://api.cyberdrop.cr/api/file/auth/AAA"})),
+            json(
+                json!({"name": "beach-AbC123.jpg", "size": 5, "type": "image/jpeg",
+                "auth_url": "https://api.cyberdrop.cr/api/file/auth/AAA"}),
+            ),
             json(json!({"url": "https://sun.cyberdrop.cr/api/file/d/AAA?token=x"})),
             json(json!({"name": "other.png",
                 "auth_url": "https://api.cyberdrop.cr/api/file/auth/BBB"})),
             json(json!({"url": "https://sun.cyberdrop.cr/api/file/d/BBB"})),
         ]);
         let http = http("Cyberdrop", root);
-        let files = media(extract(&http, Url::parse("https://cyberdrop.me/a/X1").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://cyberdrop.me/a/X1").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 2);
         let k = keywords(&files[0]);
         assert_eq!(k["filename"], "beach-AbC123");
@@ -254,15 +273,45 @@ mod tests {
     #[tokio::test]
     async fn media_route_uses_empty_album() {
         let (root, _server) = serve(vec![
-            json(json!({"name": "a-b.gif", "auth_url": "https://api.cyberdrop.cr/api/file/auth/Q"})),
+            json(
+                json!({"name": "a-b.gif", "auth_url": "https://api.cyberdrop.cr/api/file/auth/Q"}),
+            ),
             json(json!({"url": "https://x.cyberdrop.cr/d/Q"})),
         ]);
         let http = http("Cyberdrop", root);
-        let files = media(extract(&http, Url::parse("https://cyberdrop.cr/f/Q").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://cyberdrop.cr/f/Q").unwrap(),
+        ))
+        .await;
         let k = keywords(&files[0]);
         assert_eq!(k["subcategory"], "media");
         assert_eq!(k["album_size"], -1);
         let (_, dir) = crate::sites::default_templates(&files[0]).unwrap();
-        assert_eq!(dir.render(&files[0]).unwrap().unwrap(), std::path::PathBuf::from("cyberdrop"));
+        assert_eq!(
+            dir.render(&files[0]).unwrap().unwrap(),
+            std::path::PathBuf::from("cyberdrop")
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_foreign_auth_url() {
+        let (root, _server) = serve(vec![json(
+            json!({"name": "a-b.gif", "auth_url": "https://evil.test/auth"}),
+        )]);
+        let http = http("Cyberdrop", root);
+        let events: Vec<_> = futures_util::StreamExt::collect(extract(
+            &http,
+            Url::parse("https://cyberdrop.cr/f/Q").unwrap(),
+        ))
+        .await;
+        assert!(
+            events[0]
+                .as_ref()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("auth URL")
+        );
     }
 }

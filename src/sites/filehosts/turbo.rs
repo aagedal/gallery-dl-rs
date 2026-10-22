@@ -108,7 +108,9 @@ fn parse_album(page: &str, album_id: &str) -> (Vec<Row>, Map<String, Value>) {
             id: crate::sites::extr(row, "data-id=\"", "\"")
                 .unwrap_or_default()
                 .to_owned(),
-            size: super::parse_int(crate::sites::extr(row, "data-size=\"", "\"").unwrap_or_default()),
+            size: super::parse_int(
+                crate::sites::extr(row, "data-size=\"", "\"").unwrap_or_default(),
+            ),
         })
         .collect();
     let mut data = Map::new();
@@ -154,7 +156,13 @@ async fn sign(http: &Http, id: &str, referer: &str) -> Result<(Url, String)> {
 }
 
 /// The upstream file dictionary before album fields are merged.
-fn file_fields(id: &str, url: &Url, size: i64, date: Option<Value>, name: &str) -> Map<String, Value> {
+fn file_fields(
+    id: &str,
+    url: &Url,
+    size: i64,
+    date: Option<Value>,
+    name: &str,
+) -> Map<String, Value> {
     let mut file = Map::new();
     file.insert("id".into(), id.into());
     file.insert("file".into(), url.as_str().into());
@@ -205,15 +213,21 @@ async fn album<'a>(http: &'a Http, id: &str) -> Result<Events<'a>> {
     let page = http.text(&http.api(&referer)?).await?;
     let (rows, data) = parse_album(&page, id);
     let inputs: Vec<(usize, Row)> = rows.into_iter().enumerate().collect();
-    Ok(super::each(&SITE, http, &ALBUM, inputs, move |(index, row)| {
-        let data = data.clone();
-        let referer = referer.clone();
-        async move {
-            let (url, name) = sign(http, &row.id, &referer).await?;
-            let file = file_fields(&row.id, &url, row.size, None, &name);
-            Ok(Some(finish(url, file, &data, index + 1, &referer, None)))
-        }
-    }))
+    Ok(super::each(
+        &SITE,
+        http,
+        &ALBUM,
+        inputs,
+        move |(index, row)| {
+            let data = data.clone();
+            let referer = referer.clone();
+            async move {
+                let (url, name) = sign(http, &row.id, &referer).await?;
+                let file = file_fields(&row.id, &url, row.size, None, &name);
+                Ok(Some(finish(url, file, &data, index + 1, &referer, None)))
+            }
+        },
+    ))
 }
 
 async fn media(http: &Http, id: &str) -> Result<Item> {
@@ -248,10 +262,22 @@ mod tests {
     #[test]
     fn classifies_urls() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
-        assert_eq!(t("https://turbo.cr/a/AbC"), Some(Target::Album("AbC".into())));
-        assert_eq!(t("https://saint2.su/embed/xyz"), Some(Target::Media("xyz".into())));
-        assert_eq!(t("https://www.turbovid.cr/d/xyz"), Some(Target::Media("xyz".into())));
-        assert_eq!(t("https://saint.to/v/xyz"), Some(Target::Media("xyz".into())));
+        assert_eq!(
+            t("https://turbo.cr/a/AbC"),
+            Some(Target::Album("AbC".into()))
+        );
+        assert_eq!(
+            t("https://saint2.su/embed/xyz"),
+            Some(Target::Media("xyz".into()))
+        );
+        assert_eq!(
+            t("https://www.turbovid.cr/d/xyz"),
+            Some(Target::Media("xyz".into()))
+        );
+        assert_eq!(
+            t("https://saint.to/v/xyz"),
+            Some(Target::Media("xyz".into()))
+        );
         for raw in [
             "https://turbo.com/a/x",
             "https://www.saint2.su/a/x",
@@ -276,7 +302,11 @@ mod tests {
             json(json!({"url": "https://cdn.turbo.cr/f2", "filename": "f2"})),
         ]);
         let http = http("Turbo", root);
-        let files = collect(extract(&http, Url::parse("https://turbo.cr/a/ALB").unwrap())).await;
+        let files = collect(extract(
+            &http,
+            Url::parse("https://turbo.cr/a/ALB").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 2);
         let k = keywords(&files[0]);
         assert_eq!(k["album_name"], "Holiday & more");
@@ -305,17 +335,27 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /a/ALB "));
         assert!(requests[1].starts_with("GET /api/sign?v=f1 "));
-        assert!(requests[1].to_ascii_lowercase().contains("referer: https://turbo.cr/a/alb"));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("referer: https://turbo.cr/a/alb")
+        );
     }
 
     #[tokio::test]
     async fn extracts_media() {
         let (root, server) = serve(vec![
-            html("<b id=\"fileSizeBytes\">1.5e&#43;3</b> File ID: x <span>2024-06-05T00:00:00Z</span>"),
+            html(
+                "<b id=\"fileSizeBytes\">1.5e&#43;3</b> File ID: x <span>2024-06-05T00:00:00Z</span>",
+            ),
             json(json!({"url": "https://cdn.turbo.cr/m", "original_filename": "clip.mp4"})),
         ]);
         let http = http("Turbo", root);
-        let files = collect(extract(&http, Url::parse("https://saint2.su/embed/MID").unwrap())).await;
+        let files = collect(extract(
+            &http,
+            Url::parse("https://saint2.su/embed/MID").unwrap(),
+        ))
+        .await;
         let k = keywords(&files[0]);
         assert_eq!(k["subcategory"], "media");
         assert_eq!(k["size"], 1500);
@@ -325,5 +365,27 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /d/MID "));
         assert!(requests[1].starts_with("GET /api/sign?v=MID "));
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_signed_url() {
+        let (root, _server) = serve(vec![
+            html("<b id=\"fileSizeBytes\">1</b>"),
+            json(json!({"url": "javascript:alert(1)", "filename": "x"})),
+        ]);
+        let http = http("Turbo", root);
+        let events: Vec<_> = futures_util::StreamExt::collect(extract(
+            &http,
+            Url::parse("https://turbo.cr/d/MID").unwrap(),
+        ))
+        .await;
+        assert!(
+            events[0]
+                .as_ref()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("invalid file URL")
+        );
     }
 }

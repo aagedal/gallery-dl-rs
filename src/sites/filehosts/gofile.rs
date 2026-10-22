@@ -17,10 +17,13 @@ pub static SITE: Site = Site {
     api_key: false,
 };
 
+/// Upstream renders `{name} ({code})` from the folder's Directory message;
+/// registry files only carry their own keywords, so the same fields are read
+/// from the nested `folder` dictionary each file includes.
 static FOLDER: Route = Route::new(
     "folder",
     "{filename}.{extension}",
-    &["{category}", "{name} ({code})"],
+    &["{category}", "{folder[name]} ({folder[code]})"],
     "{id}",
 );
 
@@ -295,12 +298,9 @@ mod tests {
         );
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(file.render(&files[0]).unwrap(), "photo.one.JPG");
-        // Upstream renders `directory_fmt` from the folder's Directory
-        // message; registry media render it from the file keywords, where
-        // `name` is the file name and `code` is absent.
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
-            std::path::PathBuf::from("gofile/photo.one.JPG (None)")
+            std::path::PathBuf::from("gofile/Folder abc (abc)")
         );
         assert_eq!(
             crate::sites::archive_key(&files[0]).unwrap().1,
@@ -321,7 +321,11 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("authorization: bearer guesttok1")
         );
-        assert!(requests[1].to_ascii_lowercase().contains("x-website-token: "));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("x-website-token: ")
+        );
         // The cached guest token is reused for the queued subfolder.
         assert!(requests[2].starts_with("GET /contents/sub?"));
     }
@@ -330,13 +334,23 @@ mod tests {
     async fn reports_api_status() {
         let (root, _server) = serve(vec![json(json!({"status": "error-notFound"}))]);
         let http = http("Gofile", root).with_options(Some(std::sync::Arc::new(
-            json!({"api-token": "Configured"}).as_object().unwrap().clone(),
+            json!({"api-token": "Configured"})
+                .as_object()
+                .unwrap()
+                .clone(),
         )));
         let events: Vec<_> = futures_util::StreamExt::collect(extract(
             &http,
             Url::parse("https://gofile.io/d/zzz").unwrap(),
         ))
         .await;
-        assert!(events[0].as_ref().err().unwrap().to_string().contains("not found"));
+        assert!(
+            events[0]
+                .as_ref()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("not found")
+        );
     }
 }

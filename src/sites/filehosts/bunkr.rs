@@ -48,8 +48,15 @@ const DOMAINS: &[&str] = &[
     "bunkr.site",
 ];
 const LEGACY_DOMAINS: &[&str] = &[
-    "bunkr.ax", "bunkr.cat", "bunkr.ru", "bunkrr.ru", "bunkr.su", "bunkrr.su", "bunkr.la",
-    "bunkr.is", "bunkr.to",
+    "bunkr.ax",
+    "bunkr.cat",
+    "bunkr.ru",
+    "bunkrr.ru",
+    "bunkr.su",
+    "bunkrr.su",
+    "bunkr.la",
+    "bunkr.is",
+    "bunkr.to",
 ];
 const TLDS: &[&str] = &[
     "sk", "si", "su", "ci", "cr", "fi", "ph", "pk", "ps", "ru", "la", "is", "to", "ac", "ax",
@@ -327,21 +334,27 @@ async fn album<'a>(http: &'a Http, root: &str, id: &str) -> Result<Events<'a>> {
     let text = page(http, root, &format!("/a/{id}?advanced=1")).await?;
     let (entries, data) = parse_album(&text, id);
     let inputs: Vec<(usize, Entry)> = entries.into_iter().enumerate().collect();
-    Ok(super::each(&SITE, http, &ALBUM, inputs, move |(index, entry)| {
-        let data = data.clone();
-        async move {
-            let data_id = entry.data_id.clone();
-            let (url, referer) = resolve(http, &data_id).await?;
-            Ok(Some(file_item(
-                url,
-                &referer,
-                &data_id,
-                entry,
-                &data,
-                index + 1,
-            )))
-        }
-    }))
+    Ok(super::each(
+        &SITE,
+        http,
+        &ALBUM,
+        inputs,
+        move |(index, entry)| {
+            let data = data.clone();
+            async move {
+                let data_id = entry.data_id.clone();
+                let (url, referer) = resolve(http, &data_id).await?;
+                Ok(Some(file_item(
+                    url,
+                    &referer,
+                    &data_id,
+                    entry,
+                    &data,
+                    index + 1,
+                )))
+            }
+        },
+    ))
 }
 
 async fn media<'a>(http: &'a Http, root: &str, path: &str) -> Result<Events<'a>> {
@@ -520,7 +533,9 @@ mod tests {
                  <div data-file-id=\"555\"></div><a href=\"../a/ALB\">",
             ),
             json(json!({"url": "https://c3.bunkr.ru/My-Video-q1w2e3r4.mp4"})),
-            html("<meta property=\"og:title\" content=\"Parent\"><span class=\"font-semibold\">(1 GB)</span>"),
+            html(
+                "<meta property=\"og:title\" content=\"Parent\"><span class=\"font-semibold\">(1 GB)</span>",
+            ),
         ]);
         let http = http("Bunkr", root);
         let files = collect(extract(

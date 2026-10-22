@@ -81,18 +81,26 @@ fn target(category: &str, url: &Url) -> Option<Target> {
     let raw: Vec<&str> = url.path().split('/').skip(1).collect();
     let segment = |i: usize| raw.get(i).copied().filter(|s| !s.is_empty());
     match parts.first().map(String::as_str) {
-        Some("img" | "image" | "video" | "i") if segment(1).is_some() => Some(Target::File(
-            format!("/{}/{}", raw[0], raw[1]),
-        )),
+        Some("img" | "image" | "video" | "i") if segment(1).is_some() => {
+            Some(Target::File(format!("/{}/{}", raw[0], raw[1])))
+        }
         Some("a" | "album") if segment(1).is_some() => {
-            let sub = if raw.get(2) == Some(&"sub") { "/sub" } else { "" };
+            let sub = if raw.get(2) == Some(&"sub") {
+                "/sub"
+            } else {
+                ""
+            };
             Some(Target::Album(format!("/{}/{}{sub}", raw[0], raw[1])))
         }
         Some("category") if segment(1).is_some() => {
             Some(Target::Category(format!("/category/{}", raw[1])))
         }
         Some(_) if segment(0).is_some() => {
-            let albums = if raw.get(1) == Some(&"albums") { "/albums" } else { "" };
+            let albums = if raw.get(1) == Some(&"albums") {
+                "/albums"
+            } else {
+                ""
+            };
             Some(Target::User(format!("/{}{albums}", raw[0])))
         }
         _ => None,
@@ -135,13 +143,15 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
                 Some(&FILE)
             })
         }
-        Some(Target::User(path)) => queue_pages(http, category, "user", format!("{base}{path}"), |url| {
-            Some(if url.contains("/album/") || url.contains("/a/") {
-                &ALBUM
-            } else {
-                &FILE
+        Some(Target::User(path)) => {
+            queue_pages(http, category, "user", format!("{base}{path}"), |url| {
+                Some(if url.contains("/album/") || url.contains("/a/") {
+                    &ALBUM
+                } else {
+                    &FILE
+                })
             })
-        }),
+        }
         None => crate::sites::fail(error("unsupported Chevereto URL")),
     }
 }
@@ -158,7 +168,9 @@ fn parse_listing(category: &str, page: &str) -> (Vec<String>, Option<String>) {
                 .join(&crate::sites::unescape(href))
                 .ok()
         })
-        .filter(|url| url.host_str().is_some_and(|h| host_matches(category, h)) && crate::sites::plain(url))
+        .filter(|url| {
+            url.host_str().is_some_and(|h| host_matches(category, h)) && crate::sites::plain(url)
+        })
         .map(String::from)
         .collect();
     let next = crate::sites::extr(page, "data-pagination=\"next\" href=\"", "\"")
@@ -200,8 +212,9 @@ async fn fetch_page(http: &Http, url: &str, cookie: &mut Option<String>) -> Resu
             .collect(),
         _ => Vec::new(),
     };
-    let token =
-        crate::sites::unescape(crate::sites::extr(form, "name=\"auth_token\" value=\"", "\"").unwrap_or_default());
+    let token = crate::sites::unescape(
+        crate::sites::extr(form, "name=\"auth_token\" value=\"", "\"").unwrap_or_default(),
+    );
     let mut tried = std::collections::BTreeSet::new();
     for password in passwords.iter().filter(|p| !p.is_empty()) {
         if !tried.insert(password.clone()) {
@@ -249,7 +262,8 @@ fn pagination<'a>(
             let (urls, next) = parse_listing(category, &page);
             let next = next.filter(|n| {
                 Url::parse(n).is_ok_and(|n| {
-                    crate::sites::plain(&n) && n.host_str().is_some_and(|h| host_matches(category, h))
+                    crate::sites::plain(&n)
+                        && n.host_str().is_some_and(|h| host_matches(category, h))
                 })
             });
             Ok(Some(((urls, page), (next, cookie, count + 1))))
@@ -285,8 +299,8 @@ fn album_metadata(page: &str) -> Map<String, Value> {
     let mut data = Map::new();
     let (url, pos) =
         super::extract(page, "property=\"og:url\" content=\"", "\"", 0).unwrap_or(("", 0));
-    let (title, pos) = super::extract(page, "property=\"og:title\" content=\"", "\"", pos)
-        .unwrap_or(("", pos));
+    let (title, pos) =
+        super::extract(page, "property=\"og:title\" content=\"", "\"", pos).unwrap_or(("", pos));
     let last = super::rpartition(url, "/").2;
     let (slug, _, id) = super::rpartition(last, ".");
     data.insert("album_slug".into(), slug.into());
@@ -326,7 +340,8 @@ fn album_images<'a>(http: &'a Http, category: &'static str, url: String) -> Even
 
 fn parse_file(page: &str, path: &str) -> Result<Item> {
     let mut extr = Extr::new(page);
-    let kind = crate::sites::extr(page, "property=\"og:type\" content=\"", "\"").unwrap_or_default();
+    let kind =
+        crate::sites::extr(page, "property=\"og:type\" content=\"", "\"").unwrap_or_default();
     let title = extr.next("property=\"og:title\" content=\"", "\"");
     let mut file = Map::new();
     let album_url;
@@ -371,7 +386,9 @@ fn parse_file(page: &str, path: &str) -> Result<Item> {
             },
         );
     } else {
-        let mut url = extr.next("<meta property=\"og:image\" content=\"", "\"").to_owned();
+        let mut url = extr
+            .next("<meta property=\"og:image\" content=\"", "\"")
+            .to_owned();
         if url.is_empty() {
             url = extr.next("url: \"", "\"").to_owned();
         }
@@ -399,7 +416,11 @@ fn parse_file(page: &str, path: &str) -> Result<Item> {
     let (slug, _, album_id) = super::rpartition(super::rextr(album_url, "/", "\"", None), ".");
     file.insert("album_slug".into(), slug.into());
     file.insert("album_id".into(), album_id.into());
-    let raw = file.get("url").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let raw = file
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     super::nameext_from_url(&raw, &mut file);
     let url = super::web_url(&raw).ok_or_else(|| error("Chevereto page has no valid file URL"))?;
     let id = file.get("id").map(crate::sites::scalar).unwrap_or_default();
@@ -582,5 +603,13 @@ Added to <a href=\"https://jpg7.cr/album/My-Album.AbC\">My Album</a>\
         assert_eq!(data["album_id"], "A1");
         assert_eq!(data["album"], "My & Trip");
         assert_eq!(data["count"], 12);
+    }
+
+    #[test]
+    fn page_without_file_url_is_an_error() {
+        let err = parse_file("<html>nothing</html>", "/img/x.AbC")
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("no valid file URL"));
     }
 }

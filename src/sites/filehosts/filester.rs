@@ -130,7 +130,10 @@ fn folder_metadata(page: &str, slug: &str) -> Map<String, Value> {
     kw.insert("folder_uuid".into(), extr.next("/t/", "\"").into());
     kw.insert(
         "folder_date".into(),
-        super::date_value(super::strptime(extr.next("<span>Created ", "<"), "%b %d, %Y")),
+        super::date_value(super::strptime(
+            extr.next("<span>Created ", "<"),
+            "%b %d, %Y",
+        )),
     );
     kw.insert(
         "count".into(),
@@ -215,7 +218,10 @@ fn folder(http: &Http, slug: String) -> Events<'_> {
                     for (key, value) in &kw {
                         file.insert(key.clone(), value.clone());
                     }
-                    let folder = kw.get("folder_id").map(crate::sites::scalar).unwrap_or_default();
+                    let folder = kw
+                        .get("folder_id")
+                        .map(crate::sites::scalar)
+                        .unwrap_or_default();
                     Ok(Some(
                         Item::new(url, file)
                             .ids(folder, id)
@@ -240,8 +246,14 @@ mod tests {
     #[test]
     fn classifies_urls() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
-        assert_eq!(t("https://filester.me/d/AbC-1"), Some(Target::File("AbC-1".into())));
-        assert_eq!(t("https://www.filester.me/f/xyz"), Some(Target::Folder("xyz".into())));
+        assert_eq!(
+            t("https://filester.me/d/AbC-1"),
+            Some(Target::File("AbC-1".into()))
+        );
+        assert_eq!(
+            t("https://www.filester.me/f/xyz"),
+            Some(Target::Folder("xyz".into()))
+        );
         for raw in [
             "https://filester.me/x/abc",
             "https://filester.me.evil.test/d/abc",
@@ -255,17 +267,28 @@ mod tests {
     #[tokio::test]
     async fn extracts_file() {
         let (root, server) = serve(vec![
-            html("<meta property=\"og:title\" content=\"My%20Doc.PDF\">\
+            html(
+                "<meta property=\"og:title\" content=\"My%20Doc.PDF\">\
 <span>UUID</span><span>u-1</span><span>Type</span><span>application/pdf</span>\
 <span>Uploaded</span><span>2024-06-05T00:00:00Z</span><span>Size</span><span>1.2 MB</span>\
-<span>SHA-256</span><span>abc</span>"),
+<span>SHA-256</span><span>abc</span>",
+            ),
             json(serde_json::json!({"download_url": "/dl/token/My%20Doc.PDF"})),
         ]);
         let http = http("Filester", root);
-        let files = media(extract(&http, Url::parse("https://filester.me/d/S1").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://filester.me/d/S1").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 1);
         assert!(files[0].url.as_str().starts_with("https://cache"));
-        assert!(files[0].url.as_str().ends_with(".filester.me/dl/token/My%20Doc.PDF?download=true"));
+        assert!(
+            files[0]
+                .url
+                .as_str()
+                .ends_with(".filester.me/dl/token/My%20Doc.PDF?download=true")
+        );
         let k = keywords(&files[0]);
         assert_eq!(k["uuid"], "u-1");
         assert_eq!(k["mime"], "application/pdf");
@@ -276,8 +299,14 @@ mod tests {
         assert_eq!(k["extension"], "pdf");
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(file.render(&files[0]).unwrap(), "S1 My Doc.pdf");
-        assert_eq!(dir.render(&files[0]).unwrap().unwrap(), std::path::PathBuf::from("filester"));
-        assert_eq!(crate::sites::archive_key(&files[0]).unwrap().1, r#"["{id}",["S1"]]"#);
+        assert_eq!(
+            dir.render(&files[0]).unwrap().unwrap(),
+            std::path::PathBuf::from("filester")
+        );
+        assert_eq!(
+            crate::sites::archive_key(&files[0]).unwrap().1,
+            r#"["{id}",["S1"]]"#
+        );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /d/S1 "));
         assert!(requests[1].starts_with("POST /api/public/download "));
@@ -305,7 +334,11 @@ mod tests {
             json(serde_json::json!({"download_url": "/b"})),
         ]);
         let http = http("Filester", root);
-        let files = media(extract(&http, Url::parse("https://filester.me/f/FID").unwrap())).await;
+        let files = media(extract(
+            &http,
+            Url::parse("https://filester.me/f/FID").unwrap(),
+        ))
+        .await;
         assert_eq!(files.len(), 2);
         let k = keywords(&files[0]);
         assert_eq!(k["folder_name"], "Stuff & things");
@@ -326,5 +359,27 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /f/FID?page=1 "));
         assert!(requests[2].starts_with("GET /f/FID?page=2 "));
+    }
+
+    #[tokio::test]
+    async fn reports_missing_download_url() {
+        let (root, _server) = serve(vec![
+            html("<meta property=\"og:title\" content=\"x.txt\">"),
+            json(serde_json::json!({"detail": "gone"})),
+        ]);
+        let http = http("Filester", root);
+        let events: Vec<_> = futures_util::StreamExt::collect(extract(
+            &http,
+            Url::parse("https://filester.me/d/S1").unwrap(),
+        ))
+        .await;
+        assert!(
+            events[0]
+                .as_ref()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("no download URL")
+        );
     }
 }
