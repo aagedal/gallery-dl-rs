@@ -2406,6 +2406,28 @@ available from upstream.
   temporary downloads (or retains checkpoints with `--resume`), and stops the directly owned compatibility process. Files
   already published are kept. Cancellation exits with status 130.
 
+### Social platforms
+
+Native coverage of the largest social platforms (`--extractor native`;
+`telegram` and `ytdl` are always native):
+
+| Platform | Extractor | Anonymous access (checked live) |
+|---|---|---|
+| Instagram, Facebook, X/Twitter | native (experimental) | needs `--cookies` |
+| Reddit | native REST listings, submissions, users | blocked for some networks; use cookies |
+| Pinterest, Tumblr, Bluesky | native | yes (Tumblr's shared API key is rate limited) |
+| TikTok | native posts and user listings | yes |
+| Telegram | public channels and posts via `t.me/s/` | yes |
+| Weibo | native statuses, albums, videos | statuses and albums; timelines need cookies |
+| VK | native photos, albums, walls, tags | yes |
+| Bilibili | native opus articles and user/favorite lists | yes, via the dynamic API under risk control |
+| Discord | native channels and servers | needs the `token` site option |
+| YouTube, Twitch, Douyin, LinkedIn, Snapchat Spotlight, Xiaohongshu, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
+
+WhatsApp, WeChat, Messenger and QQ have no public media pages. Kuaishou and
+Threads have no extractor here or upstream (Threads serves post data only
+through an undocumented GraphQL API).
+
 ## Limitations
 
 Native Instagram, Facebook, and Twitter/X remain experimental, and live
