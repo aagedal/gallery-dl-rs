@@ -2437,7 +2437,6 @@ Native coverage of the largest social platforms (`--extractor native`;
 | Bilibili | native opus articles and user/favorite lists | yes, via the dynamic API under risk control |
 | Discord | native channels and servers | needs the `token` site option |
 | YouTube, Twitch, Douyin, LinkedIn, Snapchat Spotlight, Xiaohongshu, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
-
 | Kuaishou | native short videos (`visionVideoDetail` GraphQL) | no: anonymous clients get a captcha; pass a browser session's cookies |
 
 WhatsApp, WeChat, Messenger and QQ have no public media pages. Threads has no
