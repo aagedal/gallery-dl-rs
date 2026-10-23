@@ -193,7 +193,11 @@ const CP1251: [u16; 128] = [
 
 async fn page(http: &Http, path: &str) -> Result<String> {
     let url = http.api(&format!("{ROOT}/{path}"))?;
-    Ok(decode(&http.get(&url, &[("Referer", REFERER)]).await?))
+    Ok(decode(
+        &http
+            .get(&url, &http.browser_headers(&[("Referer", REFERER)]))
+            .await?,
+    ))
 }
 
 /// Upstream `VkPhotosExtractor.metadata`: the profile data and the user ID
@@ -325,11 +329,11 @@ fn photo_pages<'a>(
                 .post(
                     &url,
                     Body::Form(&form),
-                    &[
+                    &http.browser_headers(&[
                         ("X-Requested-With", "XMLHttpRequest"),
                         ("Origin", ROOT),
                         ("Referer", &referer),
-                    ],
+                    ]),
                 )
                 .await?;
             let response: Value = serde_json::from_str(&decode(&body))
@@ -739,6 +743,8 @@ mod tests {
         );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /someone "));
+        // VK redirects non-browser clients to m.vk.com.
+        assert!(requests.iter().all(|r| r.contains("user-agent: Mozilla/5.0")));
         assert!(requests[1].ends_with("list=photos42&offset=4"));
     }
 

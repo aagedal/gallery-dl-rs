@@ -17,6 +17,11 @@ use url::Url;
 
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
+/// Desktop browser User-Agent (upstream gallery-dl's default) for sites that
+/// refuse unknown clients.
+pub const BROWSER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0";
+
 /// Per-site HTTP settings, created once per CLI invocation.
 pub struct Http {
     name: &'static str,
@@ -97,6 +102,27 @@ impl Http {
 
     pub fn ytdl(&self) -> &std::path::Path {
         &self.ytdl
+    }
+
+    /// The configured User-Agent, else [`BROWSER_AGENT`]; sites that refuse
+    /// unknown clients send it as an explicit header.
+    pub fn browser_agent(&self) -> &str {
+        self.network.user_agent().unwrap_or(BROWSER_AGENT)
+    }
+
+    /// `headers` plus a browser `User-Agent` unless one is already present.
+    pub fn browser_headers<'h>(
+        &'h self,
+        headers: &[(&'h str, &'h str)],
+    ) -> Vec<(&'h str, &'h str)> {
+        let mut all = headers.to_vec();
+        if !all
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+        {
+            all.push(("User-Agent", self.browser_agent()));
+        }
+        all
     }
 
     /// The deadline for one complete extraction call.

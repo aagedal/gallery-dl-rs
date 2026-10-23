@@ -5,7 +5,10 @@
 //! `livephoto`, `movies`, `gifs` (also `"video"`), `subalbums` and `include`
 //! (user dispatch, with the `subalbums` alias). Without `SUB` session cookies
 //! the Sina Visitor System issues guest cookies, which are kept in memory for
-//! the invocation. Not mirrored: resolving extension-less
+//! the invocation. API requests carry a browser User-Agent (Weibo answers
+//! unknown clients with HTTP 403). Guest sessions can read statuses, albums
+//! and video listings; the `feed` (default user dispatch), `article` and
+//! `home` timelines need login cookies, as upstream. Not mirrored: resolving extension-less
 //! `wblive-out.api.weibo.com` stream redirects (those files are skipped).
 use crate::sites::http::Body;
 use crate::sites::{Events, Http, Item, Route, Site};
@@ -65,6 +68,8 @@ const PASSPORT: &str = "https://passport.weibo.com/visitor";
 const EXPAND: &str = "class=\"expand\">展开</span>";
 const MAX_PAGES: usize = 100_000;
 const MAX_RETRIES: usize = 3;
+const NEEDS_LOGIN: &str = "Weibo requires login cookies (SUB, SUBP) for this listing; \
+                           pass them with --cookies or --cookies-from-browser";
 
 /// `SUB` values issued by the visitor system; such sessions are not logged in.
 static VISITOR_SUBS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -333,7 +338,11 @@ async fn visitor(http: &Http) -> Result<()> {
         ("return_url", "https://weibo.com/"),
     ];
     let page = http
-        .post(&url, Body::Form(&form), &[("Referer", referer.as_str())])
+        .post(
+            &url,
+            Body::Form(&form),
+            &http.browser_headers(&[("Referer", referer.as_str())]),
+        )
         .await?;
     let page = String::from_utf8_lossy(&page);
     let data: Value = crate::sites::extr(&page, "(", ");")
@@ -367,7 +376,7 @@ async fn visitor(http: &Http) -> Result<()> {
     let before = http.cookie(&root, "SUB");
     // The crossdomain response sets `.weibo.com` cookies and redirects to
     // weibo.com, which the shared HTTP layer refuses after storing them.
-    let _ = http.get(&cross, &[]).await;
+    let _ = http.get(&cross, &http.browser_headers(&[])).await;
     let after = http.cookie(&root, "SUB");
     if after.is_none() || after == before {
         let domain = match root.host() {
@@ -443,6 +452,17 @@ impl<'a> Ctx<'a> {
         if interval {
             self.wait().await;
         }
+        // Weibo answers unknown clients, and API calls without a weibo.com
+        // Referer (upstream's session default), with HTTP 403.
+        let mut headers = self.http.browser_headers(headers);
+        let referer = format!("{ROOT}/");
+        if !headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("referer"))
+        {
+            headers.push(("Referer", referer.as_str()));
+        }
+        let headers = headers.as_slice();
         match self.http.get(url, headers).await {
             Err(e) if is_redirect(&e) => {
                 visitor(self.http).await?;
@@ -530,7 +550,14 @@ impl<'a> Ctx<'a> {
             if let Some(token) = &p.xsrf {
                 headers.push(("X-XSRF-TOKEN", token.as_str()));
             }
-            let data = self.json(&url, &headers, true).await?;
+            let data = match self.json(&url, &headers, true).await {
+                // Guest sessions get HTTP 403 for `mymblog` timelines
+                // (feed, article): upstream needs login cookies there too.
+                Err(e) if !self.logged_in && crate::sites::http::refused_status(&e).is_some() => {
+                    return Err(error(NEEDS_LOGIN));
+                }
+                result => result?,
+            };
             p.xsrf = self
                 .http
                 .cookie(&url, "XSRF-TOKEN")
@@ -543,6 +570,10 @@ impl<'a> Ctx<'a> {
             };
             if ok == 0.0 {
                 if !has_param(&p.params, "since_id") {
+                    // Guests get an empty `{}` for `myhot` (home).
+                    if !self.logged_in && data.as_object().is_some_and(Map::is_empty) {
+                        return Err(error(NEEDS_LOGIN));
+                    }
                     let msg = data
                         .get("msg")
                         .filter(|m| truthy(Some(m)))
@@ -1765,6 +1796,9 @@ mod tests {
         // A missing `tid` is omitted like requests' `None` parameters.
         assert!(line(&requests[1]).starts_with("GET /visitor/visitor?a=crossdomain&sp=GenSubp&s="));
         assert!(requests[2].contains("SUB=_2AkCrossSub; SUBP=CrossSubp"));
+        // API calls carry a browser User-Agent and a weibo.com Referer.
+        assert!(requests[2].contains("referer: https://weibo.com/\r\n"));
+        assert!(requests[2].contains("user-agent: Mozilla/5.0"));
     }
 
     #[tokio::test]

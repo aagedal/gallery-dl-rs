@@ -1,6 +1,7 @@
 //! Bilibili, mirroring gallery_dl/extractor/bilibili.py.
 //!
-//! Articles ("opus") are read from the page's `window.__INITIAL_STATE__`;
+//! Articles ("opus") are read from the page's `window.__INITIAL_STATE__`,
+//! or from the web-dynamic `detail` API when the page is risk-controlled;
 //! user and favorite article lists come from the web-dynamic API and are
 //! queued as article jobs. The `livephoto` option (default true) also emits
 //! live-photo videos. Favorites need the `SESSDATA` cookie.
@@ -42,8 +43,6 @@ static USER_ARTICLES_FAVORITE: Route = Route::new(
 const ROOT: &str = "https://www.bilibili.com";
 const REFERER: &str = "https://www.bilibili.com/";
 const API: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1";
-/// Page loads retried after a risk-control page; upstream retries forever.
-const RISK_ATTEMPTS: usize = 3;
 
 #[derive(Debug, PartialEq)]
 enum Target {
@@ -105,30 +104,75 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 }
 
 /// Upstream `BilibiliAPI.article`: the page's `__INITIAL_STATE__` object.
+/// Risk-control (captcha) pages and refused page loads fall back to the
+/// web-dynamic `detail` API instead of upstream's five-minute retry loop.
 async fn initial_state(http: &Http, id: &str) -> Result<Map<String, Value>> {
     let url = http.api(&format!("{ROOT}/opus/{id}"))?;
-    for attempt in 0..RISK_ATTEMPTS {
-        if attempt > 0 {
-            // Upstream waits five minutes after a risk-control page.
-            #[cfg(not(test))]
-            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-        }
-        let page = http.text_with(&url, &[("Referer", REFERER)]).await?;
-        let state = extr(&page, "window.__INITIAL_STATE__=", "};");
-        if !state.is_empty()
-            && let Ok(Value::Object(state)) = serde_json::from_str(&format!("{state}}}"))
-        {
-            return Ok(state);
-        }
-        if !page.contains("window._riskdata_") {
-            return Err(error(format!(
-                "{id}: Unable to extract Bilibili INITIAL_STATE data"
-            )));
-        }
+    let page = match http
+        .text_with(&url, &http.browser_headers(&[("Referer", REFERER)]))
+        .await
+    {
+        Ok(page) => page,
+        Err(page_error) => return dynamic_state(http, id).await.map_err(|_| page_error),
+    };
+    let state = extr(&page, "window.__INITIAL_STATE__=", "};");
+    if !state.is_empty()
+        && let Ok(Value::Object(state)) = serde_json::from_str(&format!("{state}}}"))
+    {
+        return Ok(state);
     }
-    Err(error(format!(
-        "{id}: Bilibili risk control blocked the article page"
-    )))
+    let fallback = dynamic_state(http, id).await;
+    if page.contains("window._riskdata_") {
+        return fallback.map_err(|_| {
+            error(format!(
+                "{id}: Bilibili risk control blocked the article page"
+            ))
+        });
+    }
+    fallback.map_err(|_| {
+        error(format!(
+            "{id}: Unable to extract Bilibili INITIAL_STATE data"
+        ))
+    })
+}
+
+/// The web-dynamic `detail` API response shaped like the page state: the
+/// author module plus the dynamic's pictures as a top album.
+async fn dynamic_state(http: &Http, id: &str) -> Result<Map<String, Value>> {
+    let data = call(http, "/detail", &[("id", id.to_owned())]).await?;
+    let modules = data
+        .pointer("/data/item/modules")
+        .and_then(Value::as_object)
+        .ok_or_else(|| error("Bilibili dynamic data has no modules"))?;
+    let major = modules.get("module_dynamic").and_then(|m| m.get("major"));
+    let pics: Vec<Value> =
+        if let Some(pics) = major.and_then(|m| m.get("opus")?.get("pics")?.as_array()) {
+            pics.clone()
+        } else {
+            major
+                .and_then(|m| m.get("draw")?.get("items")?.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_object)
+                .map(|item| {
+                    let mut pic = item.clone();
+                    if let Some(src) = pic.remove("src") {
+                        pic.insert("url".into(), src);
+                    }
+                    Value::Object(pic)
+                })
+                .collect()
+        };
+    let mut list = vec![serde_json::json!({
+        "module_top": {"display": {"album": {"pics": pics}}}
+    })];
+    if let Some(author) = modules.get("module_author") {
+        list.push(serde_json::json!({ "module_author": author }));
+    }
+    let mut state = Map::new();
+    state.insert("id".into(), id.into());
+    state.insert("detail".into(), serde_json::json!({ "modules": list }));
+    Ok(state)
 }
 
 /// Upstream `BilibiliArticleExtractor.items`.
@@ -239,7 +283,9 @@ enum Page {
 async fn call(http: &Http, endpoint: &str, params: &[(&str, String)]) -> Result<Value> {
     let mut url = http.api(&format!("{API}{endpoint}"))?;
     url.query_pairs_mut().extend_pairs(params);
-    let data = http.json_with(&url, &[("Referer", REFERER)]).await?;
+    let data = http
+        .json_with(&url, &http.browser_headers(&[("Referer", REFERER)]))
+        .await?;
     if truthy(data.get("code")) {
         return Err(error("Bilibili API request failed"));
     }
@@ -440,10 +486,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn livephoto_option_and_risk_retry() {
+    async fn livephoto_option_and_risk_fallback() {
+        let detail = json!({"code": 0, "data": {"item": {"modules": {
+            "module_author": {"name": "Author", "mid": 7, "pub_ts": 1700000000},
+            "module_dynamic": {"major": {"draw": {"items": [
+                {"src": "https://i0.hdslb.com/bfs/new_dyn/a.jpg", "width": 1},
+                {"src": "https://i0.hdslb.com/bfs/new_dyn/b.png", "width": 2}]}}}}}}});
         let (root, server) = crate::sites::testing::serve(vec![
             html("<script>window._riskdata_={}</script>"),
-            article_page("5"),
+            json(detail),
         ]);
         let options = json!({"livephoto": false})
             .as_object()
@@ -456,7 +507,17 @@ mod tests {
         ))
         .await;
         assert_eq!(files.len(), 2);
-        assert_eq!(server.join().unwrap().len(), 2);
+        let k = keywords(&files[1]);
+        assert_eq!(
+            (k["username"].clone(), k["num"].clone()),
+            (json!("Author"), json!(2))
+        );
+        assert_eq!(
+            files[1].url.as_str(),
+            "https://i0.hdslb.com/bfs/new_dyn/b.png"
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("/detail?id=5 "), "{}", requests[1]);
     }
 
     #[tokio::test]
