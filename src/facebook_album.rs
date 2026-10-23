@@ -151,6 +151,54 @@ pub(crate) fn parse_seed(bytes: &[u8], set: &str) -> Result<String> {
 pub(crate) struct Grid {
     pub(crate) ids: Vec<String>,
     pub(crate) more: bool,
+    /// Continuation of an album grid through its pagination query: the
+    /// page's end cursor, the album's node ID and the page's LSD token.
+    pub(crate) cursor: Option<String>,
+    pub(crate) node: Option<String>,
+    pub(crate) lsd: Option<String>,
+}
+
+/// Photo IDs, `has_next_page` and `end_cursor` of a `grid_media` object.
+fn grid_media(media: &Value) -> (Vec<String>, bool, Option<String>) {
+    let mut ids: Vec<String> = Vec::new();
+    for edge in media
+        .get("edges")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(id) = edge.get("node").and_then(photo_identifier)
+            && !ids.iter().any(|seen| seen == id)
+        {
+            ids.push(id.to_owned());
+        }
+    }
+    let more = media
+        .pointer("/page_info/has_next_page")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let cursor = media
+        .pointer("/page_info/end_cursor")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty() && c.len() <= 1024)
+        .map(str::to_owned);
+    (ids, more, cursor)
+}
+
+/// The next grid page from `ProfileCometLegacyAlbumGridViewPaginationQuery`;
+/// `None` when the response is not one (for example a rotated query ID).
+pub(crate) fn parse_grid_page(bytes: &[u8]) -> Option<Grid> {
+    let data = serde_json::Deserializer::from_slice(bytes)
+        .into_iter::<Value>()
+        .next()?
+        .ok()?;
+    let (ids, more, cursor) = grid_media(data.pointer("/data/node/grid_media")?);
+    Some(Grid {
+        ids,
+        more,
+        cursor,
+        ..Grid::default()
+    })
 }
 
 /// Anonymous photo pages carry no `nextMediaAfterNodeId`; the album page's
@@ -169,28 +217,41 @@ pub(crate) fn parse_grid(bytes: &[u8], set: &str) -> Grid {
                 && value.get("path") == Some(&serde_json::json!(["mediaset"]))
                 && let Some(media) = value.pointer("/data/grid_media")
             {
-                let mut ids: Vec<String> = Vec::new();
-                for edge in media
-                    .get("edges")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    if let Some(id) = edge.get("node").and_then(photo_identifier)
-                        && !ids.iter().any(|seen| seen == id)
-                    {
-                        ids.push(id.to_owned());
-                    }
-                }
-                let more = media
-                    .pointer("/page_info/has_next_page")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                grid = Some(Grid { ids, more });
+                let (ids, more, cursor) = grid_media(media);
+                let node = value
+                    .pointer("/data/id")
+                    .and_then(Value::as_str)
+                    .filter(|id| validate_id(id).is_ok())
+                    .map(str::to_owned);
+                grid = Some(Grid {
+                    ids,
+                    more,
+                    cursor,
+                    node,
+                    lsd: None,
+                });
             }
         });
     }
-    grid.filter(|_| named).unwrap_or_default()
+    let Some(mut grid) = grid.filter(|_| named) else {
+        return Grid::default();
+    };
+    grid.lsd = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|page| {
+            let start = page.find(r#"["LSD",[],{"token":""#)? + r#"["LSD",[],{"token":""#.len();
+            let len = page[start..].find('"')?;
+            Some(&page[start..start + len])
+        })
+        .filter(|token| {
+            !token.is_empty()
+                && token.len() <= 128
+                && token
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        })
+        .map(str::to_owned);
+    grid
 }
 
 /// A missing navigation field is an incomplete response, not an empty album.

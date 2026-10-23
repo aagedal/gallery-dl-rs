@@ -74,6 +74,18 @@ impl Server {
                         _ => break,
                     }
                 }
+                // Consume any body so closing the socket cannot reset it.
+                let length = String::from_utf8_lossy(&request)
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0)
+                    .min(65536);
+                let mut body = vec![0; length];
+                let _ = socket.read_exact(&mut body);
                 captured
                     .lock()
                     .unwrap()
@@ -485,4 +497,77 @@ fn grid_requires_the_page_to_name_the_set() {
     assert_eq!(crate::facebook_album::parse_grid(&page, "a.99").ids, ["1"]);
     assert!(parse_seed(&page, "a.10").is_err());
     assert_eq!(parse_seed(&page, "a.99").unwrap(), "1");
+}
+
+#[tokio::test]
+async fn anonymous_grids_continue_through_the_pagination_query() {
+    let unnavigable = |id: &str| {
+        let mut page = photo(id, None);
+        page.as_object_mut().unwrap().remove("nextMediaAfterNodeId");
+        Response::json(page)
+    };
+    let first = json!([{"mediaSetToken":"a.10"}, ["LSD",[],{"token":"lsd1"}],
+        {"path":["mediaset"],"data":{"id":"77","grid_media":{
+            "edges":[{"node":{"__typename":"Photo","id":"1"}}],
+            "page_info":{"end_cursor":"c1","has_next_page":true}}}}]);
+    let page = |ids: &[&str], more: bool| {
+        json!({"data":{"node":{"__typename":"Album","id":"77","grid_media":{
+            "edges": ids.iter().map(|id| json!({"node":{"__typename":"Photo","id":id}})).collect::<Vec<_>>(),
+            "page_info":{"end_cursor":"c2","has_next_page":more}}}}})
+    };
+    let server = Server::new(vec![
+        Response::json(first),
+        unnavigable("1"),
+        Response::json(page(&["1", "2"], true)),
+        unnavigable("2"),
+        // A page without new photos ends a truncated album.
+        Response::json(page(&["2"], true)),
+    ]);
+    let facebook = extractor(Duration::from_secs(3)).await;
+    let results: Vec<_> = facebook
+        .album_stream(input(None), server.base.clone())
+        .collect()
+        .await;
+    assert_eq!(results.len(), 3, "{results:?}");
+    assert_eq!(
+        results[1]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .post_id,
+        "2"
+    );
+    assert!(
+        results[2]
+            .as_ref()
+            .unwrap_err()
+            .to_string()
+            .contains("--cookies")
+    );
+    let requests = server.requests.lock().unwrap();
+    assert!(
+        requests[2].starts_with("POST /api/graphql/ "),
+        "{}",
+        requests[2]
+    );
+    let lower = requests[2].to_ascii_lowercase();
+    assert!(lower.contains("x-fb-lsd: lsd1\r\n"));
+    assert!(
+        lower.contains("x-fb-friendly-name: profilecometlegacyalbumgridviewpaginationquery\r\n")
+    );
+}
+
+#[test]
+fn grid_pages_parse_their_cursor() {
+    let page = br#"{"data":{"node":{"grid_media":{"edges":[{"node":{"__typename":"Photo","id":"5"}}],"page_info":{"end_cursor":"next","has_next_page":true}}}}}
+{"label":"deferred"}"#;
+    let grid = crate::facebook_album::parse_grid_page(page).unwrap();
+    assert_eq!(
+        (grid.ids, grid.more, grid.cursor.as_deref()),
+        (vec!["5".to_owned()], true, Some("next"))
+    );
+    assert!(crate::facebook_album::parse_grid_page(b"<html>").is_none());
+    assert!(crate::facebook_album::parse_grid_page(br#"{"errors":[]}"#).is_none());
 }

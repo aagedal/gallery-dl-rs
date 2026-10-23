@@ -5,7 +5,9 @@ use crate::{
     cookies::CookieJar,
     error,
     extract::{Media, PostMetadata, http_url},
-    facebook_album::{AlbumInput, Grid, album_input, parse_grid, parse_navigation, parse_seed},
+    facebook_album::{
+        AlbumInput, Grid, album_input, parse_grid, parse_grid_page, parse_navigation, parse_seed,
+    },
     facebook_profile::{
         Tab, parse_albums, parse_avatar, parse_photos_grid, parse_photos_set, profile_input,
     },
@@ -26,6 +28,8 @@ use std::{
 };
 use url::Url;
 
+/// `ProfileCometLegacyAlbumGridViewPaginationQuery`, observed on 2026-10-23.
+const GRID_PAGINATION_DOC_ID: &str = "34407011978913359";
 pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
@@ -326,7 +330,10 @@ impl Facebook {
             // Without navigation (anonymous sessions), follow the grid.
             Err(e) => match state.grid.ids.iter().position(|grid| grid == id) {
                 Some(pos) => {
-                    let next = state.grid.ids.get(pos + 1).cloned();
+                    let mut next = state.grid.ids.get(pos + 1).cloned();
+                    if next.is_none() && state.grid.more {
+                        next = self.next_grid_page(state).await;
+                    }
                     state.truncated = next.is_none() && state.grid.more;
                     next
                 }
@@ -354,6 +361,67 @@ impl Facebook {
         }
         self.network.apply_media(&mut item);
         Ok(item)
+    }
+
+    /// Extend an exhausted album grid through the album's pagination query,
+    /// returning the first new photo. Without a usable page (for example
+    /// after Facebook rotated the query ID) the grid stays truncated.
+    async fn next_grid_page(&self, state: &mut AlbumState) -> Option<String> {
+        let grid = &state.grid;
+        let (cursor, node, lsd) = (grid.cursor.clone()?, grid.node.clone()?, grid.lsd.clone()?);
+        let variables =
+            serde_json::json!({"count": 8, "cursor": cursor, "scale": 2, "id": node}).to_string();
+        let endpoint = state.base.join("api/graphql/").ok()?;
+        let mut referer = state.base.join("media/set/").ok()?;
+        referer.query_pairs_mut().append_pair("set", &state.set);
+        let form = [
+            ("lsd", lsd.as_str()),
+            ("variables", variables.as_str()),
+            ("doc_id", GRID_PAGINATION_DOC_ID),
+            (
+                "fb_api_req_friendly_name",
+                "ProfileCometLegacyAlbumGridViewPaginationQuery",
+            ),
+            ("server_timestamps", "true"),
+        ];
+        self.rate_limits.wait(&endpoint, self.timeout).await.ok()?;
+        let mut request = self
+            .client
+            .post(endpoint.clone())
+            .timeout(self.request_timeout)
+            .header(header::REFERER, referer.as_str())
+            .header(header::ORIGIN, "https://www.facebook.com")
+            .header("X-FB-LSD", lsd.as_str())
+            .header(
+                "X-FB-Friendly-Name",
+                "ProfileCometLegacyAlbumGridViewPaginationQuery",
+            )
+            .header("Sec-Fetch-Site", "same-origin")
+            .form(&form);
+        if let Some(cookies) = self.cookies.lock().unwrap().header(&endpoint) {
+            request = request.header(header::COOKIE, cookies);
+        }
+        let response = request.send().await.ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let body = response.bytes().await.ok()?;
+        if body.len() > MAX_RESPONSE {
+            return None;
+        }
+        let page = parse_grid_page(&body)?;
+        let new: Vec<String> = page
+            .ids
+            .into_iter()
+            .filter(|id| !state.seen.contains(id) && !state.grid.ids.contains(id))
+            .collect();
+        state.grid.more = page.more && page.cursor.is_some();
+        state.grid.cursor = page.cursor;
+        // A page without new photos ends traversal; `more` then marks the
+        // album as truncated.
+        let first = new.first().cloned();
+        state.grid.ids.extend(new);
+        first
     }
 
     async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
