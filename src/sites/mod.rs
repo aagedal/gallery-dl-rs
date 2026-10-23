@@ -215,7 +215,7 @@ pub fn site(category: &str) -> Option<&'static Site> {
 /// Categories gallery-dl has no extractor for, which therefore use the
 /// native extractor in compatibility mode too.
 pub fn native_only(category: &str) -> bool {
-    matches!(category, "ytdl" | "telegram")
+    matches!(category, "ytdl" | "telegram" | "snapchat" | "kuaishou")
 }
 
 pub fn is_category(category: &str) -> bool {

@@ -523,6 +523,9 @@ mod routing_tests {
             ("https://weibo.com/1234567890", "weibo"),
             ("https://discord.com/channels/1/2", "discord"),
             ("https://t.me/durov/123", "telegram"),
+            ("https://www.snapchat.com/@nasa", "snapchat"),
+            ("https://www.snapchat.com/spotlight/W7_EDlXWTBi", "ytdl"),
+            ("https://www.kuaishou.com/short-video/3xabc", "kuaishou"),
         ] {
             let url = url::Url::parse(raw).unwrap();
             let site = crate::sites::find(&url).map(|s| s.category);
