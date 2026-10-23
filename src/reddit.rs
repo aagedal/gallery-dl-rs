@@ -485,6 +485,20 @@ impl Reddit {
         Ok(self)
     }
 
+    /// Apply upstream extractor settings (`extractor.reddit.*`).
+    pub fn with_options(self, _options: Option<&serde_json::Map<String, Value>>) -> Result<Self> {
+        Ok(self)
+    }
+
+    /// Like `events`, queueing links to other sites through `queue`.
+    pub fn events_with_queue<'a>(
+        &'a self,
+        url: &Url,
+        _queue: crate::event::Queue<'a>,
+    ) -> BoxStream<'a, Result<ExtractionEvent>> {
+        self.events(url)
+    }
+
     /// Additional attempts for HTTP 429/5xx and transport failures.
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;

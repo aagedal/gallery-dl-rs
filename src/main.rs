@@ -1064,6 +1064,22 @@ impl Extractors {
     }
 }
 
+/// Child jobs for URLs queued by a native extractor to another site, routed
+/// exactly like command-line inputs. Unroutable URLs are skipped.
+fn child_queue<'a>(
+    extractors: &'a Extractors,
+    backend: &'a Backend,
+    extractor: Extractor,
+    settings: &'a BTreeMap<&str, Settings>,
+) -> event::Queue<'a> {
+    Arc::new(move |url: url::Url| {
+        (routed_site(&url, extractor).is_some()
+            || extract::direct(&url).is_some()
+            || matches!(extractor, Extractor::Compatibility))
+        .then(|| extract_input(url.to_string(), extractors, backend, extractor, settings))
+    })
+}
+
 fn extract_input<'a>(
     source: String,
     extractors: &'a Extractors,
@@ -1244,6 +1260,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::reddit::Reddit::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_options(options.site_options.as_deref())?
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1252,7 +1269,10 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Reddit initialization failed: {e}")))?;
-                    native.events(&url)
+                    native.events_with_queue(
+                        &url,
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if category == "mastodon" => {
                     let host = url.host_str().expect("Mastodon input host");
@@ -1343,6 +1363,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::tumblr::Tumblr::new(backend.timeout).and_then(|native| {
                                 native
                                     .with_selection(options.tumblr_selection())
+                                    .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1352,7 +1373,10 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Tumblr initialization failed: {e}")))?;
-                    native.events(&url)
+                    native.events_with_queue(
+                        &url,
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if category == "flickr" => {
                     let native = extractors
@@ -1495,6 +1519,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::pinterest::Pinterest::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_options(options.site_options.as_deref())?
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)

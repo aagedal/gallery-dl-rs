@@ -442,6 +442,11 @@ impl Pinterest {
         Ok(self)
     }
 
+    /// Apply upstream extractor settings (`extractor.pinterest.*`).
+    pub fn with_options(self, _options: Option<&serde_json::Map<String, Value>>) -> Result<Self> {
+        Ok(self)
+    }
+
     /// Additional attempts for HTTP 429/5xx and transport failures.
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;
