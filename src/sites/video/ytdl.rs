@@ -480,3 +480,27 @@ mod tests {
         assert!(testing::fails(extract(&missing, url("https://youtu.be/x"))).await);
     }
 }
+
+#[cfg(test)]
+mod routing_tests {
+    #[test]
+    fn platform_urls_reach_the_intended_site() {
+        for (raw, category) in [
+            ("https://vk.com/video-1_2", "ytdl"),
+            ("https://vk.com/clip-1_2", "ytdl"),
+            ("https://vk.com/id1", "vk"),
+            ("https://vk.com/album1_2", "vk"),
+            ("https://www.bilibili.com/video/BV1xx411c7mD", "ytdl"),
+            ("https://www.bilibili.com/opus/123", "bilibili"),
+            ("https://www.youtube.com/watch?v=abcdefghijk", "ytdl"),
+            ("https://www.twitch.tv/videos/1", "ytdl"),
+            ("https://www.tiktok.com/@user/video/123", "tiktok"),
+            ("https://weibo.com/1234567890", "weibo"),
+            ("https://discord.com/channels/1/2", "discord"),
+        ] {
+            let url = url::Url::parse(raw).unwrap();
+            let site = crate::sites::find(&url).map(|s| s.category);
+            assert_eq!(site, Some(category), "{raw}");
+        }
+    }
+}

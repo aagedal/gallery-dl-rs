@@ -107,7 +107,11 @@ fn target(url: &Url) -> Option<Target> {
     let excluded = ["album", "tag", "wall"]
         .iter()
         .any(|p| rest.strip_prefix(p).and_then(signed).is_some());
-    if !excluded {
+    // Video and clip pages are left to the yt-dlp site.
+    let video = ["video", "clip"]
+        .iter()
+        .any(|p| rest.strip_prefix(p).and_then(signed).is_some());
+    if !excluded && !video {
         let name = rest.split('/').next().unwrap_or_default();
         return (!name.is_empty()).then(|| Target::Photos {
             id: None,
