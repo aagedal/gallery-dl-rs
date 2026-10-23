@@ -1409,9 +1409,12 @@ fn extract_input<'a>(
                 }
                 Extractor::Native if gallery_dl_rs::sites::is_category(category) => {
                     let site = gallery_dl_rs::sites::site(category).expect("registry site");
+                    // Cookies are read once, when the site's state is created.
                     let jar = match site.cookies {
-                        Some(domain) => Some(extractors.cookie_jar(configured, domain).await?),
-                        None => None,
+                        Some(domain) if !extractors.sites.initialized(site) => {
+                            Some(extractors.cookie_jar(configured, domain).await?)
+                        }
+                        _ => None,
                     };
                     let native = extractors
                         .sites

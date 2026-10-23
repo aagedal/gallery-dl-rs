@@ -174,6 +174,14 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    /// Whether the site's HTTP state was already created.
+    pub fn initialized(&self, site: &Site) -> bool {
+        sites()
+            .iter()
+            .position(|candidate| candidate.category == site.category)
+            .is_some_and(|index| self.cells[index].initialized())
+    }
+
     /// The site's HTTP state, created by `init` on first use. An
     /// initialization failure is retained for later inputs of the site.
     pub async fn get(&self, site: &Site, init: impl FnOnce() -> Result<Http>) -> Result<&Http> {

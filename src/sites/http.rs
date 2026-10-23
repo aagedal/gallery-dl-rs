@@ -399,3 +399,53 @@ impl From<crate::Error> for Failure {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sites::testing::{http, json, response, serve};
+
+    #[tokio::test]
+    async fn cookies_are_sent_and_updated_from_responses() {
+        let set = response(
+            "200 OK\r\nSet-Cookie: token=fresh; Path=/",
+            "application/json",
+            b"{}",
+        );
+        let (root, server) = serve(vec![set, json(serde_json::json!({"ok": true}))]);
+        let jar = CookieJar::parse(&format!(
+            "{}\tFALSE\t/\tFALSE\t0\tsession\tabc\n",
+            root.host_str().unwrap()
+        ))
+        .unwrap();
+        let http = http("Test", root.clone()).with_cookies(jar);
+        assert!(http.has_cookies());
+        http.json(&root.join("first").unwrap()).await.unwrap();
+        assert_eq!(http.cookie(&root, "token").as_deref(), Some("fresh"));
+        let form = [("a", "1 2"), ("b", "&")];
+        http.post_form(&root.join("second").unwrap(), &form, &[])
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("cookie: session=abc"));
+        assert!(!requests[0].contains("token="));
+        let second = requests[1].to_ascii_lowercase();
+        assert!(second.starts_with("post /second"));
+        assert!(second.contains("cookie: session=abc; token=fresh"));
+        assert!(second.contains("content-type: application/x-www-form-urlencoded"));
+        assert!(requests[1].ends_with("a=1+2&b=%26"));
+    }
+
+    #[tokio::test]
+    async fn explicit_cookie_header_replaces_the_jar() {
+        let (root, server) = serve(vec![json(serde_json::json!({}))]);
+        let http = http("Test", root.clone());
+        http.set_cookie(&root, "jar=1");
+        http.json_with(&root, &[("Cookie", "explicit=1")])
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("cookie: explicit=1"));
+        assert!(!requests[0].contains("jar=1"));
+    }
+}
