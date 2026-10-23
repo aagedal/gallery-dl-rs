@@ -217,7 +217,7 @@ pub fn site(category: &str) -> Option<&'static Site> {
 pub fn native_only(category: &str) -> bool {
     matches!(
         category,
-        "ytdl" | "telegram" | "snapchat" | "kuaishou" | "xiaohongshu" | "threads"
+        "ytdl" | "telegram" | "snapchat" | "kuaishou" | "xiaohongshu" | "threads" | "youtube"
     )
 }
 

@@ -530,6 +530,9 @@ mod routing_tests {
                 "https://www.xiaohongshu.com/explore/6411cf99",
                 "xiaohongshu",
             ),
+            ("https://www.youtube.com/@NASA/posts", "youtube"),
+            ("https://www.youtube.com/post/Ugkx1", "youtube"),
+            ("https://www.youtube.com/@NASA/videos", "ytdl"),
         ] {
             let url = url::Url::parse(raw).unwrap();
             let site = crate::sites::find(&url).map(|s| s.category);

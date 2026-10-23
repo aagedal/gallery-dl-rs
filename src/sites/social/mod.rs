@@ -11,6 +11,7 @@ mod tiktok;
 mod vk;
 mod weibo;
 mod xiaohongshu;
+mod youtube_posts;
 
 pub(super) static SITES: &[&Site] = &[
     &weibo::SITE,
@@ -23,4 +24,5 @@ pub(super) static SITES: &[&Site] = &[
     &snapchat::SITE,
     &xiaohongshu::SITE,
     &threads::SITE,
+    &youtube_posts::SITE,
 ];
