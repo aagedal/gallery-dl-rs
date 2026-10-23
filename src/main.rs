@@ -1289,8 +1289,10 @@ fn extract_input<'a>(
                     let native = extractors
                         .reddit
                         .get_or_init(|| async {
+                            let jar = extractors.cookie_jar(configured, "reddit.com").await?;
                             gallery_dl_rs::reddit::Reddit::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_cookies(jar)
                                     .with_options(options.site_options.as_deref())?
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())

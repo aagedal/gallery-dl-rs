@@ -46,6 +46,8 @@ const USER_AGENT: &str = concat!(
 );
 const API_ROOT: &str = "https://www.reddit.com/";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
+const LOGIN_REQUIRED: &str = "Reddit requires a logged-in session for its JSON API from this \
+                              network; pass reddit.com cookies with --cookies";
 /// Bound listings to 100 pages (Reddit itself stops near 1,000 items).
 const MAX_PAGES: usize = 100;
 /// Upstream `request_interval`.
@@ -1000,6 +1002,8 @@ pub struct Reddit {
     options: Options,
     interval: Duration,
     last_request: tokio::sync::Mutex<Option<Instant>>,
+    /// Session cookies, sent with API requests like upstream's REST mode.
+    cookies: std::sync::Mutex<crate::cookies::CookieJar>,
 }
 
 /// Pending work of one extraction.
@@ -1056,7 +1060,15 @@ impl Reddit {
             options: Options::default(),
             interval: REQUEST_INTERVAL,
             last_request: tokio::sync::Mutex::new(None),
+            cookies: std::sync::Mutex::new(crate::cookies::CookieJar::default()),
         })
+    }
+
+    /// Session cookies for API requests; Reddit serves its JSON listings only
+    /// to logged-in sessions on some networks.
+    pub fn with_cookies(self, cookies: crate::cookies::CookieJar) -> Self {
+        *self.cookies.lock().unwrap() = cookies;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -1594,14 +1606,33 @@ impl Reddit {
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             self.pace().await;
-            let response = self
+            let mut request = self
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout)
-                .header(header::ACCEPT, "application/json")
+                .header(header::ACCEPT, "application/json");
+            if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
+                request = request.header(header::COOKIE, cookies);
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Reddit request failed; check network access"))?;
+            self.cookies
+                .lock()
+                .unwrap()
+                .store_response(response.url(), response.headers());
+            // Reddit sends logged-out API clients on some networks to its
+            // login page (`reason=lor2`).
+            if response.status().is_redirection()
+                && response
+                    .headers()
+                    .get(header::LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|location| location.contains("/login"))
+            {
+                return Err(error(LOGIN_REQUIRED).into());
+            }
             if capture && response.status().is_redirection() {
                 let location = response
                     .headers()
@@ -1662,6 +1693,21 @@ impl Reddit {
             return Err(terminal("Reddit submission, subreddit or user not found"));
         }
         if matches!(status.as_u16(), 401 | 403) {
+            let root = Url::parse("https://www.reddit.com/").unwrap();
+            if self
+                .cookies
+                .lock()
+                .unwrap()
+                .value(&root, "reddit_session")
+                .is_none()
+                && response
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|v| v.starts_with("text/html"))
+            {
+                return Err(terminal(LOGIN_REQUIRED));
+            }
             return Err(terminal(
                 "Reddit refused access (private, quarantined or banned content, or blocked client)",
             ));
@@ -2384,6 +2430,45 @@ mod tests {
             requests[0]
         );
         assert!(requests[1].contains("&after=t3_a1&raw_json=1 "));
+    }
+
+    #[tokio::test]
+    async fn session_cookies_are_sent_and_login_walls_ask_for_them() {
+        let (root, server) = serve(vec![
+            ok(&listing(vec![image_post("h1")], None)),
+            response(
+                "302 Found",
+                "Location: https://old.reddit.com/login/?reason=lor2\r\n",
+                b"",
+            ),
+            response(
+                "403 Forbidden",
+                "Content-Type: text/html\r\n",
+                b"<html></html>",
+            ),
+        ]);
+        let host = root.host_str().unwrap().to_owned();
+        let jar = crate::cookies::CookieJar::parse(&format!(
+            "{host}\tFALSE\t/\tFALSE\t0\ttoken_v2\tsecret\n"
+        ))
+        .unwrap();
+        let native = reddit(root).with_cookies(jar);
+        let events: Vec<_> = native
+            .events(&Url::parse("https://www.reddit.com/").unwrap())
+            .collect()
+            .await;
+        assert_eq!(files(&events).len(), 1);
+        for _ in 0..2 {
+            let events: Vec<_> = native
+                .events(&Url::parse("https://www.reddit.com/").unwrap())
+                .collect()
+                .await;
+            let message = events[0].as_ref().err().unwrap().to_string();
+            assert!(message.contains("--cookies"), "{message}");
+            assert!(!message.contains("lor2"), "{message}");
+        }
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("token_v2=secret"), "{}", requests[0]);
     }
 
     #[tokio::test]
