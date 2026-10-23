@@ -25,6 +25,41 @@ use tokio::io::AsyncReadExt;
 /// Maximum encoded JSON size, including whitespace.
 pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
+/// Upstream extractor settings of dedicated native extractors that are not
+/// typed options; they reach the extractor through `site_options`.
+const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
+    (
+        "reddit",
+        &[
+            "comments",
+            "morecomments",
+            "recursion",
+            "videos",
+            "previews",
+            "embeds",
+            "selftext",
+            "only",
+            "id-min",
+            "id-max",
+            "limit",
+            "parent-directory",
+        ],
+    ),
+    ("pinterest", &["sections", "stories", "videos", "domain"]),
+    (
+        "tumblr",
+        &[
+            "external",
+            "avatar",
+            "offset",
+            "pagination",
+            "fallback-delay",
+            "fallback-retries",
+            "ratelimit",
+        ],
+    ),
+];
+
 /// Sparse settings: absent fields leave the caller's defaults unchanged.
 #[derive(Clone, Default, PartialEq)]
 pub struct Options {
@@ -1189,6 +1224,19 @@ impl Config {
                         error("invalid native configuration JSON or unsupported option")
                     })?;
                     site_scopes.push((category, Box::new(raw)));
+                }
+            }
+            // Dedicated native extractors keep their typed scope; their
+            // upstream-specific settings are forwarded as site options.
+            for (category, keys) in NATIVE_SITE_OPTIONS {
+                if let Some(fields) = extractor.get_mut(*category).and_then(Value::as_object_mut) {
+                    let extra: serde_json::Map<String, Value> = keys
+                        .iter()
+                        .filter_map(|key| fields.remove_entry(*key))
+                        .collect();
+                    if !extra.is_empty() {
+                        site_options.insert(*category, std::sync::Arc::new(extra));
+                    }
                 }
             }
         }
@@ -2792,6 +2840,28 @@ mod site_scope_tests {
         assert_eq!(options["notes"], serde_json::json!(true));
         assert_eq!(options["lang"], serde_json::json!("en"));
         assert!(super::Config::parse_with_options(br#"{"a":1,"a":2}"#, &dir, &cli).is_err());
+        let config = super::Config::parse_with_options(
+            br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3},
+                "pinterest":{"sections":false},
+                "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
+            &dir,
+            &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
+        )
+        .unwrap();
+        let reddit = config.resolve("reddit").unwrap();
+        assert_eq!(reddit.retries, Some(3));
+        let options = reddit.site_options.unwrap();
+        assert_eq!(options["comments"], serde_json::json!(500));
+        assert_eq!(options["videos"], serde_json::json!("ytdl"));
+        assert_eq!(options["recursion"], serde_json::json!(2));
+        let options = config.resolve("pinterest").unwrap().site_options.unwrap();
+        assert_eq!(options["sections"], serde_json::json!(false));
+        let tumblr = config.resolve("tumblr").unwrap();
+        assert_eq!(tumblr.api_key.as_deref(), Some("k"));
+        assert_eq!(tumblr.posts.as_deref(), Some(&["photo".to_owned()][..]));
+        let options = tumblr.site_options.unwrap();
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert!(!options.contains_key("posts"));
         for bad in [
             &br#"{"extractor":{"4chan":{"retries":1},"4chan":{"retries":2}}}"#[..],
             br#"{"extractor":{"4chan":{"retries":1,"retries":2}}}"#,
