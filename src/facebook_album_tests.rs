@@ -161,6 +161,9 @@ async fn seeded_album_preserves_order_indices_query_and_archive_identity() {
     }
     let requests = server.requests.lock().unwrap();
     assert!(requests[0].starts_with("GET /media/set/?set=a.10 "));
+    // Album pages answer HTTP 400 to requests that are not navigations.
+    assert!(requests[0].contains("sec-fetch-mode: navigate\r\n"));
+    assert!(requests[0].contains("accept-language: en-US,en;q=0.5\r\n"));
     assert!(requests[1].starts_with("GET /photo/?fbid=1&set=a.10 "));
     assert!(requests[2].starts_with("GET /photo/?fbid=2&set=a.10 "));
 }
@@ -415,4 +418,71 @@ async fn stopping_after_album_post_boundary_does_not_fetch_next_photo() {
         tokio::time::sleep(Duration::from_millis(15)).await;
         assert_eq!(server.count(), 1);
     }
+}
+
+#[tokio::test]
+async fn anonymous_albums_follow_the_deferred_grid_and_report_truncation() {
+    let unnavigable = |id: &str| {
+        let mut page = photo(id, None);
+        page.as_object_mut().unwrap().remove("nextMediaAfterNodeId");
+        Response::json(page)
+    };
+    let grid = |more: bool| {
+        json!([{"mediaSetToken":"a.10"},
+            {"label":"Query$defer$Grid_mediaset","path":["mediaset"],"data":{"grid_media":{
+                "edges":[{"node":{"__typename":"Photo","id":"1"}},
+                         {"node":{"__typename":"Photo","id":"2"}}],
+                "page_info":{"has_next_page":more}}}}])
+    };
+    let server = Server::new(vec![
+        Response::json(grid(true)),
+        unnavigable("1"),
+        unnavigable("2"),
+        Response::json(grid(false)),
+        unnavigable("1"),
+        unnavigable("2"),
+    ]);
+    let facebook = extractor(Duration::from_secs(3)).await;
+    let results: Vec<_> = facebook
+        .album_stream(input(None), server.base.clone())
+        .collect()
+        .await;
+    assert_eq!(results.len(), 3);
+    assert_eq!(
+        results[1]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .index,
+        2
+    );
+    let message = results[2].as_ref().unwrap_err().to_string();
+    assert!(message.contains("--cookies"), "{message}");
+    // A complete grid ends without an error.
+    let items = facebook
+        .album_stream(input(None), server.base.clone())
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 2);
+    let requests = server.requests.lock().unwrap();
+    assert!(requests[2].starts_with("GET /photo/?fbid=2&set=a.10 "));
+}
+
+#[test]
+fn grid_requires_the_page_to_name_the_set() {
+    let page = serde_json::to_vec(&json!([{"mediaSetToken":"a.99"},
+        {"path":["mediaset"],"data":{"grid_media":{"edges":[
+            {"node":{"__typename":"Photo","id":"1"}}]}}}]))
+    .unwrap();
+    assert!(
+        crate::facebook_album::parse_grid(&page, "a.10")
+            .ids
+            .is_empty()
+    );
+    assert_eq!(crate::facebook_album::parse_grid(&page, "a.99").ids, ["1"]);
+    assert!(parse_seed(&page, "a.10").is_err());
+    assert_eq!(parse_seed(&page, "a.99").unwrap(), "1");
 }

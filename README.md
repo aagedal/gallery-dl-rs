@@ -177,10 +177,21 @@ own `image.uri`, never a global image or Open Graph preview. It selects the larg
 identity-bound image and emits available metadata plus stable archive identities.
 Cookies remain scoped to Facebook page requests; media receives user-agent and
 referer only. Requests have bounded redirects, retries, cooldowns, response size,
-and deadlines. Profile album listings are not implemented. An anonymous public page
-check on 2026-10-18 returned no identity-bound photo; successful live extraction
-and sanitized real response fixtures remain required. See the
+and deadlines. Page requests send upstream's navigation headers
+(`Sec-Fetch-Mode: navigate`); album pages answer HTTP 400 without them. See the
 [Facebook fixture notes](tests/fixtures/facebook/README.md).
+
+Profile routes mirror upstream: `facebook.com/NAME` and `NAME/photos[_by]`
+read the profile's photos, `NAME/avatar` its profile picture, and
+`NAME/photos_albums[/TITLE]` each album (or the one titled `TITLE`) on the
+profile's first album page. `profile.php?id=ID` (with `sk=photos` or
+`sk=photos_albums`) and `people/NAME/ID/...` are accepted too. Profile pages
+only name the set, albums or avatar photo; photos are then read like album and
+photo URLs. Anonymous photo pages carry no next-photo navigation, so without
+cookies an album or profile follows the first grid page listed on its album or
+`photos_by` page; when the album continues beyond it, extraction ends with an
+error asking for `--cookies` after the visible photos. Anonymous profile photos,
+albums and avatars were checked live on 2026-10-23.
 
 Experimental Facebook album traversal uses `Facebook::stream` and the native CLI.
 It resolves the first photo only from an ordered collection tied to the requested
@@ -2413,7 +2424,8 @@ Native coverage of the largest social platforms (`--extractor native`;
 
 | Platform | Extractor | Anonymous access (checked live) |
 |---|---|---|
-| Instagram, Facebook, X/Twitter | native (experimental) | needs `--cookies` |
+| Instagram, X/Twitter | native (experimental) | needs `--cookies` |
+| Facebook | native photos, albums, videos and profiles | first grid page of public albums and profiles; the rest needs `--cookies` |
 | Reddit | native REST listings, submissions, users | blocked for some networks; use cookies |
 | Pinterest, Tumblr, Bluesky | native | yes (Tumblr's shared API key is rate limited) |
 | TikTok | native posts and user listings | yes |

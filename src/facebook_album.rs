@@ -103,9 +103,23 @@ pub(crate) fn parse_seed(bytes: &[u8], set: &str) -> Result<String> {
     validate_set(set)?;
     let payloads = crate::facebook::embedded_payloads(bytes)?;
     let mut seeds = Vec::new();
+    // Album pages now stream the grid as a deferred `mediaset` fragment
+    // without its own token; it counts only when the page names this set.
+    let mut grid = Vec::new();
+    let mut named = false;
     for payload in &payloads {
         visit(payload, &mut |value| {
+            if value.get("path") == Some(&serde_json::json!(["mediaset"]))
+                && let Some(edges) = value
+                    .pointer("/data/grid_media/edges")
+                    .and_then(Value::as_array)
+                && let Some(node) = edges.first().and_then(|edge| edge.get("node"))
+                && let Some(id) = photo_identifier(node)
+            {
+                grid.push(id.to_owned());
+            }
             if bound_set(value, set) {
+                named = true;
                 for pointer in ["/photos/edges", "/pageItems/edges"] {
                     if let Some(edges) = value.pointer(pointer).and_then(Value::as_array)
                         && let Some(node) = edges.first().and_then(|edge| edge.get("node"))
@@ -117,6 +131,9 @@ pub(crate) fn parse_seed(bytes: &[u8], set: &str) -> Result<String> {
             }
         });
     }
+    if seeds.is_empty() && named {
+        seeds = grid;
+    }
     seeds.sort();
     seeds.dedup();
     match seeds.as_slice() {
@@ -126,6 +143,54 @@ pub(crate) fn parse_seed(bytes: &[u8], set: &str) -> Result<String> {
         )),
         _ => Err(error("Facebook album first photo is ambiguous")),
     }
+}
+
+/// The first page of an album's photo grid, in album order, and whether the
+/// album continues beyond it.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Grid {
+    pub(crate) ids: Vec<String>,
+    pub(crate) more: bool,
+}
+
+/// Anonymous photo pages carry no `nextMediaAfterNodeId`; the album page's
+/// deferred `mediaset` grid still lists its first photos. Empty unless the
+/// page names `set`.
+pub(crate) fn parse_grid(bytes: &[u8], set: &str) -> Grid {
+    let Ok(payloads) = crate::facebook::embedded_payloads(bytes) else {
+        return Grid::default();
+    };
+    let mut named = false;
+    let mut grid: Option<Grid> = None;
+    for payload in &payloads {
+        visit(payload, &mut |value| {
+            named |= bound_set(value, set);
+            if grid.is_none()
+                && value.get("path") == Some(&serde_json::json!(["mediaset"]))
+                && let Some(media) = value.pointer("/data/grid_media")
+            {
+                let mut ids: Vec<String> = Vec::new();
+                for edge in media
+                    .get("edges")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(id) = edge.get("node").and_then(photo_identifier)
+                        && !ids.iter().any(|seen| seen == id)
+                    {
+                        ids.push(id.to_owned());
+                    }
+                }
+                let more = media
+                    .pointer("/page_info/has_next_page")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                grid = Some(Grid { ids, more });
+            }
+        });
+    }
+    grid.filter(|_| named).unwrap_or_default()
 }
 
 /// A missing navigation field is an incomplete response, not an empty album.
