@@ -7,8 +7,8 @@
 //! documents, voice notes and polls are not exposed by it (nor to yt-dlp)
 //! and are skipped. Private channels and
 //! channels without a public preview fail with an explicit error.
-use crate::sites::{Events, Http, Item, Route, Site};
 use crate::error;
+use crate::sites::{Events, Http, Item, Route, Site};
 use serde_json::{Map, Value, json};
 use url::Url;
 
@@ -190,11 +190,7 @@ enum File {
 /// Every widget message on a page, in page order.
 fn messages(html: &str) -> Vec<Message> {
     let mut out = Vec::new();
-    let mut chunks = html
-        .split("class=\"tgme_widget_message ")
-        .skip(1)
-        .peekable();
-    while let Some(chunk) = chunks.next() {
+    for chunk in html.split("class=\"tgme_widget_message ").skip(1) {
         if let Some(message) = message(chunk) {
             out.push(message);
         }
