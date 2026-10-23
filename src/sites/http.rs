@@ -32,6 +32,7 @@ pub struct Http {
     /// Session cookies sent with API requests; responses update them in
     /// memory. They are never attached to emitted media.
     cookies: std::sync::Mutex<CookieJar>,
+    ytdl: std::path::PathBuf,
 }
 
 /// A request body.
@@ -59,6 +60,7 @@ impl Http {
             options: None,
             root: None,
             cookies: std::sync::Mutex::new(CookieJar::default()),
+            ytdl: "yt-dlp".into(),
         })
     }
 
@@ -85,6 +87,21 @@ impl Http {
     pub fn with_api_key(mut self, key: Option<&str>) -> Self {
         self.api_key = key.map(Into::into);
         self
+    }
+
+    /// The yt-dlp executable for sites extracted through it.
+    pub fn with_ytdl(mut self, command: &std::path::Path) -> Self {
+        self.ytdl = command.to_owned();
+        self
+    }
+
+    pub fn ytdl(&self) -> &std::path::Path {
+        &self.ytdl
+    }
+
+    /// The deadline for one complete extraction call.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
     }
 
     /// Session cookies for API requests.

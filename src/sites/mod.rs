@@ -15,6 +15,7 @@ mod imageboards;
 mod manga;
 mod media;
 mod social;
+mod video;
 
 pub use http::Http;
 
@@ -152,6 +153,7 @@ pub fn sites() -> &'static [&'static Site] {
             manga::SITES,
             art::SITES,
             social::SITES,
+            video::SITES,
         ]
         .concat()
     })
@@ -288,6 +290,8 @@ pub(crate) struct Item {
     pub caption: Option<String>,
     pub timestamp: Option<i64>,
     pub headers: BTreeMap<String, String>,
+    /// How the file is fetched; direct HTTP unless set.
+    pub job: MediaJob,
 }
 
 impl Item {
@@ -301,6 +305,7 @@ impl Item {
             caption: None,
             timestamp: None,
             headers: BTreeMap::new(),
+            job: MediaJob::DirectHttp,
         }
     }
     pub fn ids(mut self, post_id: impl Into<String>, media_id: impl Into<String>) -> Self {
@@ -322,6 +327,10 @@ impl Item {
     }
     pub fn header(mut self, name: &str, value: &str) -> Self {
         self.headers.insert(name.into(), value.into());
+        self
+    }
+    pub fn job(mut self, job: MediaJob) -> Self {
+        self.job = job;
         self
     }
 }
@@ -366,7 +375,7 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
     };
     let mut media = Media {
         url: item.url,
-        job: MediaJob::DirectHttp,
+        job: item.job,
         category: site.category.into(),
         filename,
         metadata: Some(PostMetadata {

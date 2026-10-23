@@ -443,7 +443,10 @@ async fn run(args: Args) -> Result<()> {
     }
     let settings = resolved_settings(&args).await?;
     let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
-    let extractors = Extractors::default();
+    let extractors = Extractors {
+        ytdl: args.ytdl_command.clone(),
+        ..Extractors::default()
+    };
     let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
         .values()
         .filter_map(|settings| settings.options.archive.clone())
@@ -1057,6 +1060,8 @@ struct Extractors {
     weasyl: OnceCell<Result<gallery_dl_rs::weasyl::Weasyl>>,
     vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
     sites: gallery_dl_rs::sites::Runtime,
+    /// yt-dlp executable for sites extracted through it.
+    ytdl: PathBuf,
 }
 
 impl Extractors {
@@ -1414,7 +1419,11 @@ fn extract_input<'a>(
                         .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
                     native.events(&url)
                 }
-                Extractor::Native if gallery_dl_rs::sites::is_category(category) => {
+                // gallery-dl only reaches yt-dlp sites through its own ytdl
+                // module, so they always use the native extractor.
+                _ if gallery_dl_rs::sites::is_category(category)
+                    && (matches!(extractor, Extractor::Native) || category == "ytdl") =>
+                {
                     let site = gallery_dl_rs::sites::site(category).expect("registry site");
                     // Cookies are read once, when the site's state is created.
                     let jar = match site.cookies {
@@ -1430,6 +1439,7 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_cookies(jar.unwrap_or_default())
+                                        .with_ytdl(&extractors.ytdl)
                                         .with_api_key(options.api_key.as_deref())
                                         .with_options(options.site_options.clone())
                                         .with_retries(options.retries.unwrap())
