@@ -422,7 +422,9 @@ async fn failed_handoff_does_not_suppress_a_later_direct_representation() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("archive.sqlite3");
     let archive = Archive::open(&path).await.unwrap();
-    let client = download::client(Duration::from_secs(2)).unwrap();
+    let client = download::client(Duration::from_secs(2))
+        .unwrap()
+        .with_ytdl(None);
     let mut manifest = item("http://127.0.0.1:1/thumbnail.jpg");
     manifest.job = extract::MediaJob::VideoPage {
         page_url: manifest.url.clone(),
@@ -463,6 +465,7 @@ fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
         .arg(&path)
         .arg("--extractor-command")
         .arg(&script)
+        .arg("--no-ytdl")
         .arg("-d")
         .arg(root.path())
         .args(["--jobs", "2", "https://x.com/user/status/123"])

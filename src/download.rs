@@ -1,5 +1,7 @@
 #[path = "download_postprocess.rs"]
 pub(crate) mod processing;
+#[path = "download_ytdl.rs"]
+mod ytdl;
 use crate::{
     Result, error,
     extract::{Media, MediaJob},
@@ -36,6 +38,8 @@ pub struct DownloadClient {
     sleep: Option<crate::sleep::SleepRange>,
     /// Maximum body bytes per second for each download.
     rate: Option<u64>,
+    /// yt-dlp executable for video-page and HLS/DASH jobs.
+    ytdl: Option<std::sync::Arc<Path>>,
 }
 
 /// Per-attempt state shared between the attempt and its deadline. Throttling
@@ -182,6 +186,13 @@ impl DownloadClient {
         self
     }
 
+    /// The yt-dlp executable for video-page and HLS/DASH jobs; `None`
+    /// disables them.
+    pub fn with_ytdl(mut self, command: Option<&Path>) -> Self {
+        self.ytdl = command.map(Into::into);
+        self
+    }
+
     /// Wait before each network download, after archive and existing-file checks.
     pub fn with_sleep(mut self, sleep: Option<crate::sleep::SleepRange>) -> Self {
         self.sleep = sleep;
@@ -232,6 +243,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         response_mtime: None,
         sleep: None,
         rate: None,
+        ytdl: Some(Path::new("yt-dlp").into()),
     })
 }
 
@@ -768,7 +780,7 @@ async fn download_media(
         limits,
         ..
     } = options;
-    let primary_validation = validate_job(media);
+    let primary_validation = validate_job(client, media);
     if let Err(failure) = &primary_validation
         && (!failure.fallback || !client.fallback || !media.handoff.contains_key("_fallback"))
     {
@@ -812,8 +824,21 @@ async fn download_media(
                 Err(e) => return Err(e.into()),
             }
         }
-        let result = match validate_job(&candidate) {
+        let result = match validate_job(client, &candidate) {
             Err(failure) => Err(failure),
+            Ok(()) if ytdl::source(&candidate).is_some() => {
+                ytdl::download(ytdl::Request {
+                    command: client.ytdl.as_deref().expect("validated yt-dlp job"),
+                    media: &candidate,
+                    path: &path,
+                    network: &client.network,
+                    retries,
+                    rate: client.rate,
+                    limits,
+                    mtime: mtime.fixed,
+                })
+                .await
+            }
             Ok(()) => {
                 tokio::fs::create_dir_all(parent).await?;
                 let mut headers = HeaderMap::new();
@@ -884,7 +909,10 @@ async fn download_media(
     }
 }
 
-fn validate_job(media: &Media) -> std::result::Result<(), Failure> {
+fn validate_job(client: &DownloadClient, media: &Media) -> std::result::Result<(), Failure> {
+    if client.ytdl.is_some() && ytdl::source(media).is_some() {
+        return Ok(());
+    }
     match &media.job {
         MediaJob::InlineText { data } if data.len() > crate::extract::MAX_INLINE_TEXT => {
             Err(Failure {
@@ -902,15 +930,13 @@ fn validate_job(media: &Media) -> std::result::Result<(), Failure> {
                 fallback: false,
             }),
         MediaJob::VideoPage { .. } => Err(Failure {
-            error: error(
-                "video-page downloads require the companion yt-dlp-rs adapter, which is not implemented",
-            ),
+            error: error("video-page downloads need yt-dlp, which is disabled"),
             retry: false,
             fallback: true,
         }),
         MediaJob::Manifest { .. } => Err(Failure {
             error: error(
-                "HLS/DASH downloads require the companion yt-dlp-rs adapter, which is not implemented",
+                "HLS/DASH downloads need yt-dlp, which is disabled or cannot read inline manifests",
             ),
             retry: false,
             fallback: true,

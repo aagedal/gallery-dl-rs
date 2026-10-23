@@ -228,6 +228,12 @@ struct Args {
     write_tags: bool,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
+    /// yt-dlp executable for video-page and HLS/DASH downloads
+    #[arg(long, default_value = "yt-dlp", value_name = "PATH")]
+    ytdl_command: PathBuf,
+    /// Never run yt-dlp; video-page and HLS/DASH jobs then fail or use fallbacks
+    #[arg(long)]
+    no_ytdl: bool,
     /// Seconds for native extraction or active compatibility reading (excludes backpressure)
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
@@ -733,7 +739,8 @@ async fn run(args: Args) -> Result<()> {
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep)
-            .with_rate_limit(args.limit_rate);
+            .with_rate_limit(args.limit_rate)
+            .with_ytdl((!args.no_ytdl).then_some(args.ytdl_command.as_path()));
         let aborted = &aborted;
         let terminated = &terminated;
         let results = media

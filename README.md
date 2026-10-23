@@ -1310,9 +1310,8 @@ expanded threads; explicit values forward to compatibility mode for X. Changing
 this selection can change file/archive positions.
 
 `"videos": "ytdl"` emits a typed video-page job targeting the validated first-party
-post, optionally followed by its preview. Inspection output supports these jobs;
-downloading them still fails explicitly because the companion video adapter is
-not implemented. Direct MP4 downloads do not need that adapter. Library callers
+post, optionally followed by its preview. Downloads run it through yt-dlp (see
+"Video pages and HLS/DASH" below). Direct MP4 downloads do not need yt-dlp. Library callers
 can use `Twitter::with_media_options` and `parse_response_with_media_options`.
 
 Scoped X `"cards": true` extracts summary-card images and unified-card media.
@@ -1328,8 +1327,8 @@ Repost mode uses the repost's card; original mode uses the original post's card.
 card names, vanity domains, or `name:domain` pairs. An empty list clears inherited
 entries. Both options support normal configuration scopes and forward only for X
 when explicit. `"cards": "ytdl"` handles recognized summary/unified cards directly,
-then emits a typed first-party video-page job for an unhandled card. Delegated
-or manifest jobs without a direct HTTP fallback require the companion adapter.
+then emits a typed first-party video-page job for an unhandled card, which is
+downloaded with yt-dlp.
 
 Enabled malformed cards fail the current post atomically with private diagnostics;
 this is stricter than upstream's warning and partial-output behavior. Repeated
@@ -2428,15 +2427,27 @@ inline manifests and manifest-specific headers. `_fallback` URL arrays are used
 by the shared Rust downloader for direct HTTP fallbacks. Handoffs
 require an HTTP(S) target/base URL, including synthetic `ytdl:https://…` URLs;
 synthetic non-HTTP identifiers and unknown manifest types fail extraction.
-Without a direct HTTP fallback, video-page and manifest downloads fail explicitly
-before any request or file creation, even if a destination file exists. A stable
-archive hit can skip an already completed logical media item before download-type
-validation.
-No companion dependency or video
-adapter is enabled yet. The parser follows the
+The parser follows the
 [upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
 
-HLS/DASH downloads, video merging, broader native browser cookie import,
+### Video pages and HLS/DASH
+
+Video-page jobs and HLS/DASH manifest URLs are downloaded by running an external
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) (`yt-dlp` on `PATH`, or
+`--ytdl-command PATH`), like gallery-dl's `ytdl` downloader. It is invoked
+directly, without a shell, with `--ignore-config`; request headers, `--proxy`,
+`--retries` and `--limit-rate` are forwarded, and destinations with a video or
+audio container extension are merged/remuxed into that container. Output is
+written to a private temporary directory beside the destination and published
+without replacing an existing file; size limits apply to the finished file.
+Diagnostics never include URLs or yt-dlp output. If yt-dlp is missing or fails,
+direct HTTP `_fallback` URLs are tried. `--no-ytdl` disables yt-dlp; video-page
+and manifest jobs then fail before any request or file creation unless a direct
+fallback exists. Inline manifest data (`_ytdl_manifest_data`) has no fetchable
+location for relative segments and is not passed to yt-dlp. A stable archive hit
+can skip an already completed logical media item before download-type validation.
+
+Broader native browser cookie import,
 broader native collection pagination, and full gallery-dl filename/config compatibility are
 not implemented.
 
@@ -2447,7 +2458,7 @@ configured retries, the downloader tries the next distinct valid HTTP(S) URL in
 `_fallback` order. Lists are limited to 128 entries and URLs to 16 KiB; invalid,
 repeated, credentialed,
 and manifest targets are skipped. A delegated/manifest job can also use a direct
-fallback without enabling the companion adapter. Local filesystem errors and
+fallback when yt-dlp is unavailable or fails. Local filesystem errors and
 size-filtered results do not advance the fallback chain.
 
 All attempts publish to the original job's destination and retain its metadata
