@@ -9,6 +9,7 @@ mod telegram;
 mod tiktok;
 mod vk;
 mod weibo;
+mod xiaohongshu;
 
 pub(super) static SITES: &[&Site] = &[
     &weibo::SITE,
@@ -19,4 +20,5 @@ pub(super) static SITES: &[&Site] = &[
     &telegram::SITE,
     &kuaishou::SITE,
     &snapchat::SITE,
+    &xiaohongshu::SITE,
 ];

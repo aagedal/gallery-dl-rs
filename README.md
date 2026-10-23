@@ -2420,7 +2420,8 @@ available from upstream.
 ### Social platforms
 
 Native coverage of the largest social platforms (`--extractor native`;
-`telegram`, `snapchat`, `kuaishou` and `ytdl` have no upstream extractor and
+`telegram`, `snapchat`, `kuaishou`, `xiaohongshu` and `ytdl` have no upstream
+extractor and
 are always native):
 
 | Platform | Extractor | Anonymous access (checked live) |
@@ -2437,8 +2438,9 @@ are always native):
 | VK | native photos, albums, walls, tags | yes |
 | Bilibili | native opus articles and user/favorite lists | yes, via the dynamic API under risk control |
 | Discord | native channels and servers | needs the `token` site option |
-| YouTube, Twitch, Douyin, LinkedIn, Snapchat Spotlight posts, Xiaohongshu, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
+| YouTube, Twitch, Douyin (yt-dlp needs fresh browser cookies), LinkedIn, Snapchat Spotlight posts, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
 | Snapchat | native public profiles (`@USER`, `add/USER`): story, highlights and Spotlight; single Spotlight URLs through yt-dlp | yes |
+| Xiaohongshu | native image and video notes (`explore/ID`, `discovery/item/ID`) | only through shared links carrying their `xsec_token`, else cookies; fixture-tested only, as this network is sent to login |
 | Kuaishou | native short videos (`visionVideoDetail` GraphQL) | no: anonymous clients get a captcha; pass a browser session's cookies |
 
 WhatsApp, WeChat, Messenger and QQ have no public media pages. Threads has no

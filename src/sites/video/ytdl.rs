@@ -526,6 +526,10 @@ mod routing_tests {
             ("https://www.snapchat.com/@nasa", "snapchat"),
             ("https://www.snapchat.com/spotlight/W7_EDlXWTBi", "ytdl"),
             ("https://www.kuaishou.com/short-video/3xabc", "kuaishou"),
+            (
+                "https://www.xiaohongshu.com/explore/6411cf99",
+                "xiaohongshu",
+            ),
         ] {
             let url = url::Url::parse(raw).unwrap();
             let site = crate::sites::find(&url).map(|s| s.category);
