@@ -33,6 +33,9 @@ pub fn video_id(url: &Url) -> Result<String> {
             return Err(error("Facebook watch URL requires exactly one v parameter"));
         }
         ids[0].clone()
+    } else if let Some(id) = path.strip_prefix("/reel/") {
+        // Reels are videos; their ID is the video ID.
+        id.to_owned()
     } else {
         let parts: Vec<_> = path.split('/').collect();
         if parts.len() != 4 || parts[1].is_empty() || parts[2] != "videos" {
