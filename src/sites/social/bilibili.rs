@@ -183,13 +183,15 @@ fn article_items(mut article: Map<String, Value>, livephoto: bool) -> Result<Vec
         .and_then(Value::as_array)
         .ok_or_else(|| error("Bilibili article data has no modules"))?;
     // Flatten the modules list; upstream warns about blocked articles.
+    // Every module now lists all module keys, null except its own, so
+    // nulls must not replace earlier modules.
     let mut modules = Map::new();
     for module in list {
         if let Some(module) = module.as_object() {
             modules.extend(
                 module
                     .iter()
-                    .filter(|(key, _)| *key != "module_type")
+                    .filter(|(key, value)| *key != "module_type" && !value.is_null())
                     .map(|(k, v)| (k.clone(), v.clone())),
             );
         }
@@ -428,8 +430,8 @@ mod tests {
             {"module_type": "MODULE_TYPE_TOP", "module_top": {"display": {"album": {"pics": [
                 {"url": "https://i0.hdslb.com/bfs/new_dyn/a.jpg", "width": 10, "height": 20,
                  "live_url": "https://i0.hdslb.com/bfs/live/a.mov"}]}}}},
-            {"module_type": "MODULE_TYPE_AUTHOR", "module_author": {"name": "Author", "mid": 7,
-                "pub_ts": 1700000000}},
+            {"module_type": "MODULE_TYPE_AUTHOR", "module_top": null, "module_content": null,
+                "module_author": {"name": "Author", "mid": 7, "pub_ts": 1700000000}},
             {"module_type": "MODULE_TYPE_CONTENT", "module_content": {"paragraphs": [
                 {"text": {}},
                 {"pic": {"pics": [{"url": "https://i0.hdslb.com/bfs/new_dyn/b.png", "width": 3}]}},
