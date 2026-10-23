@@ -321,8 +321,11 @@ pub(super) fn parse_profile_posts_with_pin(
     let user = data
         .pointer("/data/user/result")
         .ok_or_else(|| error("Twitter media timeline user missing"))?;
+    // Guest responses omit the user's `rest_id`; a present one must match.
     if user.get("__typename").and_then(Value::as_str) != Some("User")
-        || user.get("rest_id").and_then(Value::as_str) != Some(owner_id)
+        || user
+            .get("rest_id")
+            .is_some_and(|id| id.as_str() != Some(owner_id))
     {
         return Err(error("Twitter timeline does not match the requested user"));
     }
@@ -431,7 +434,7 @@ pub(super) fn parse_instructions(
             }
             Some("TimelineTerminateTimeline") => {
                 match instruction.get("direction").and_then(Value::as_str) {
-                    Some("Bottom") => page.done = true,
+                    Some("Bottom" | "TopAndBottom") => page.done = true,
                     Some("Top") => {}
                     _ => {
                         return Err(error(
@@ -440,11 +443,9 @@ pub(super) fn parse_instructions(
                     }
                 }
             }
-            Some("TimelineClearCache") => {
-                return Err(error(
-                    "Twitter media timeline requested a cache reset; retry extraction",
-                ));
-            }
+            // A client-cache hint (sent to guests on the first page); upstream
+            // ignores it too, and posts are deduplicated across pages anyway.
+            Some("TimelineClearCache") => {}
             _ => return Err(error("unsupported Twitter media timeline instruction")),
         }
     }

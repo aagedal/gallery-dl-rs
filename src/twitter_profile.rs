@@ -40,6 +40,8 @@ struct State {
     thread_cache: BTreeMap<String, Value>,
     done: bool,
     budget: Duration,
+    /// A guest read only the profile's best posts; the rest needs a session.
+    guest_partial: bool,
 }
 
 impl Twitter {
@@ -493,6 +495,7 @@ impl Twitter {
             thread_cache: BTreeMap::new(),
             done: false,
             budget: self.timeout,
+            guest_partial: false,
         };
         stream::unfold(state, move |mut state| async move {
             loop {
@@ -505,6 +508,15 @@ impl Twitter {
                     && state.expansion.is_none()
                     && state.thread.is_none()
                 {
+                    if std::mem::take(&mut state.guest_partial) {
+                        return Some((
+                            Err(error(
+                                "X shows guests only a profile's top posts; pass x.com \
+                                 auth_token and ct0 cookies with --cookies for the full timeline",
+                            )),
+                            state,
+                        ));
+                    }
                     return None;
                 }
                 let started = tokio::time::Instant::now();
@@ -688,6 +700,15 @@ impl Twitter {
         let page = match &mut state.source {
             Source::RestId(_) => unreachable!(),
             Source::Profile(tab) => {
+                // Guests are refused UserMedia but may read UserTweets, which
+                // returns the profile's top posts in one page; text-only posts
+                // yield no files there.
+                let guest = self.is_guest();
+                let tab = &mut if guest && *tab == ProfileTab::Media {
+                    ProfileTab::Tweets
+                } else {
+                    *tab
+                };
                 let target = profile_endpoint(
                     &state.base,
                     *tab,
@@ -705,7 +726,7 @@ impl Twitter {
                     state.pinned_hint.as_deref(),
                 )?;
                 state.pinned_pending = false;
-                if !page.done && page.cursor.is_none() {
+                if !page.done && page.cursor.is_none() && !guest {
                     return Err(error("Twitter profile timeline pagination is incomplete"));
                 }
                 state.done = page.done
@@ -723,6 +744,12 @@ impl Twitter {
                     }
                 }
                 state.cursor = cursor;
+                // A guest's single page is never the whole timeline.
+                if guest && matches!(*tab, ProfileTab::Tweets) {
+                    state.done = true;
+                    state.cursor = None;
+                    state.guest_partial = true;
+                }
                 if let Some(RootStage::Initial { last }) = &mut state.root
                     && let Some((id, _)) = page.posts.last()
                 {
@@ -913,6 +940,10 @@ impl Twitter {
     }
 
     fn advance_root(&self, state: &mut State) -> Result<()> {
+        // Guests cannot search; their timeline ends with its top posts.
+        if state.guest_partial {
+            state.root = None;
+        }
         let next = match state.root.take() {
             Some(RootStage::Initial { last: Some(id) }) => {
                 let name = state

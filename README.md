@@ -2431,7 +2431,7 @@ are always native):
 | Platform | Extractor | Anonymous access (checked live) |
 |---|---|---|
 | Instagram | native (experimental) | public posts, reels and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
-| X/Twitter | native (experimental) | single posts as a guest; timelines and searches need `--cookies` |
+| X/Twitter | native (experimental) | single posts and a profile's top posts as a guest; full timelines and searches need `--cookies` |
 | Facebook | native photos, albums, videos and profiles | public albums, album lists and profile photos in full, paged through the logged-out grid and collection queries |
 | Reddit | native REST listings, submissions, users | Reddit sends logged-out JSON clients on some networks to its login page; pass `--cookies` |
 | Pinterest, Bluesky | native | yes |
@@ -2459,7 +2459,9 @@ authenticated social downloads have not been verified in this repository.
 Without session cookies they fall back to logged-out access, checked live on
 2026-10-23: Instagram posts are read from the public post page's embedded
 post object; X posts use a guest token with `TweetResultByRestId` (upstream's
-`tweet-endpoint: auto` choice for guests), and other X queries report that a
+`tweet-endpoint: auto` choice for guests); guest profiles read the one page
+of top posts X returns from `UserTweets` (it refuses `UserMedia`) and end with
+a notice that the full timeline needs a session; other X queries report that a
 session is required; Facebook profiles, albums and avatars are read as
 described above. A partial X session (only one of `auth_token` and `ct0`) is
 an error rather than a guest.

@@ -313,6 +313,11 @@ impl Twitter {
             })
     }
 
+    /// Whether requests run as a guest (no session cookies).
+    pub(crate) fn is_guest(&self) -> bool {
+        self.guest.lock().unwrap().is_some() && !self.has_session()
+    }
+
     /// Activate a guest token once per extractor.
     async fn ensure_guest(&self) -> Result<()> {
         if self.guest.lock().unwrap().is_some() {

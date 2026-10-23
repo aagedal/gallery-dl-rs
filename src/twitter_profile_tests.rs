@@ -6364,3 +6364,52 @@ async fn new_routes_dispatch_natively_and_images_emit_size_fallbacks_without_req
         json!(["https://pbs.twimg.com/media/ABC?format=png&name=small"])
     );
 }
+
+#[tokio::test]
+async fn guests_read_a_profiles_top_posts_through_user_tweets() {
+    let mut timeline = page(vec![tweet("100")], None);
+    let result = &mut timeline["data"]["user"]["result"];
+    // Guest responses omit the user's rest_id and bracket the entries.
+    result.as_object_mut().unwrap().remove("rest_id");
+    result["timeline"]["timeline"]["instructions"] = json!([
+        {"type": "TimelineClearCache"},
+        result["timeline"]["timeline"]["instructions"][0].clone(),
+        {"type": "TimelineTerminateTimeline", "direction": "TopAndBottom"},
+    ]);
+    let server = Server::new(vec![
+        Response::json(json!({"guest_token": "9"})),
+        Response::json(user()),
+        Response::json(timeline),
+    ]);
+    let native = Twitter::new(None, Duration::from_secs(3))
+        .await
+        .unwrap()
+        .with_guest_endpoint(server.base.join("/1.1/guest/activate.json").unwrap());
+    let results: Vec<_> = native
+        .media_stream(input("fixture"), server.base.clone())
+        .collect()
+        .await;
+    assert_eq!(results.len(), 2, "{results:?}");
+    assert_eq!(
+        results[0]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .post_id,
+        "100"
+    );
+    let notice = results[1].as_ref().unwrap_err().to_string();
+    assert!(notice.contains("top posts"), "{notice}");
+    let urls = server.urls();
+    assert!(urls[1].path().ends_with("/UserByScreenName"));
+    // UserMedia is refused to guests; UserTweets is used instead.
+    assert!(urls[2].path().ends_with("/UserTweets"), "{}", urls[2]);
+    let requests = server.requests.lock().unwrap();
+    assert!(
+        requests[2]
+            .to_ascii_lowercase()
+            .contains("x-guest-token: 9\r\n")
+    );
+}
