@@ -51,6 +51,15 @@ impl Twitter {
 
     /// Explicit post boundaries from accepted native expansion batches.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        if let Some((id, format)) = images::image_input(url) {
+            return match images::image_media(&id, &format, &self.image_options) {
+                Ok(mut media) => {
+                    self.network.apply_media(&mut media);
+                    stream::iter(event::group(vec![media], "twitter").into_iter().map(Ok)).boxed()
+                }
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            };
+        }
         if let Ok(id) = post_id(url) {
             return self.status_events(id);
         }
@@ -65,6 +74,14 @@ impl Twitter {
         match collections::input(url) {
             Ok(Some(kind)) => {
                 return self.feed_events(kind, Url::parse("https://x.com/i/api/graphql/").unwrap());
+            }
+            Err(e) => return stream::once(async move { Err(e) }).boxed(),
+            Ok(None) => {}
+        }
+        match users::input(url) {
+            Ok(Some(target)) => {
+                return self
+                    .queue_events(target, Url::parse("https://x.com/i/api/graphql/").unwrap());
             }
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
             Ok(None) => {}
@@ -1133,7 +1150,7 @@ pub(super) fn profile_view(
     Ok(event::group(vec![media], "twitter"))
 }
 
-fn user_endpoint(base: &Url, input: &ProfileInput) -> Result<Url> {
+pub(super) fn user_endpoint(base: &Url, input: &ProfileInput) -> Result<Url> {
     let (operation, variables, toggles) = match input {
         ProfileInput::Name(name) => (
             "ck5KkZ8t5cOmoLssopN99Q/UserByScreenName",
@@ -1343,7 +1360,13 @@ fn queue_unique(
     true
 }
 
-fn query(base: &Url, path: &str, variables: Value, features: Value, toggles: Value) -> Result<Url> {
+pub(super) fn query(
+    base: &Url,
+    path: &str,
+    variables: Value,
+    features: Value,
+    toggles: Value,
+) -> Result<Url> {
     let mut endpoint = base.join(path)?;
     endpoint
         .query_pairs_mut()

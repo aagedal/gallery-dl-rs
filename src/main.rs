@@ -529,9 +529,14 @@ async fn run(args: Args) -> Result<()> {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
                         gallery_dl_rs::instagram::is_story_url(&url)
                             || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
+                            || gallery_dl_rs::instagram::is_unordered_user_url(
+                                &url,
+                                settings["instagram"].options.include.as_ref(),
+                            )
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || gallery_dl_rs::twitter::is_search_url(&url)
                             || gallery_dl_rs::twitter::is_collection_url(&url)
+                            || gallery_dl_rs::twitter::is_queue_url(&url)
                             || matches!(
                                 extract::social_site(&url),
                                 Some("bluesky" | "kemono" | "coomer")
@@ -1117,6 +1122,7 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_include(options.include.clone())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)

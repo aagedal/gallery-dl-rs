@@ -109,6 +109,10 @@ impl ChildMetadata {
             "channel_type",
             "parent_id",
             "post_count",
+            "did",
+            "handle",
+            "displayName",
+            "description",
         ] {
             let Some(value) = data.get(key) else { continue };
             let value = if matches!(key, "server" | "channel") {

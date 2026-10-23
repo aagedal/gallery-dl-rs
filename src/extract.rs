@@ -518,18 +518,23 @@ impl Media {
                     serde_json::json!([post.post_id, post.media_id, extension?]).to_string(),
                 )
             }
-            "twitter"
+            category @ ("twitter" | "instagram")
                 if self
                     .metadata
                     .as_ref()
                     .is_some_and(|post| post.profile_asset.is_some()) =>
             {
                 let asset = self.metadata.as_ref()?.profile_asset.as_ref()?;
-                if !crate::twitter::valid_id(&asset.owner_id) || !asset.valid_version() {
+                let valid_owner = if category == "twitter" {
+                    crate::twitter::valid_id(&asset.owner_id)
+                } else {
+                    decimal_id(&asset.owner_id)
+                };
+                if !valid_owner || !asset.valid_version() {
                     return None;
                 }
                 (
-                    "twitter",
+                    category,
                     serde_json::json!(["profile", asset.kind, asset.owner_id, asset.version])
                         .to_string(),
                 )
@@ -851,8 +856,14 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     if crate::tumblr::is_blog_url(url) {
         return Some("tumblr");
     }
+    if crate::twitter::is_image_url(url) {
+        return Some("twitter");
+    }
     if let Some(site) = crate::imagehosts::Site::from_host(host) {
         return Some(site.category());
+    }
+    if crate::bluesky::is_host(host) {
+        return Some("bluesky");
     }
     for (domain, category) in [
         ("instagram.com", "instagram"),

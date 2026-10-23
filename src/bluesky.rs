@@ -1,4 +1,4 @@
-//! Experimental native Bluesky post, author-feed, custom-feed and list extraction.
+//! Experimental native Bluesky post, author-feed, custom-feed, list, search and follows extraction.
 //!
 //! Mirrors gallery_dl/extractor/bluesky.py: posts are read from the public,
 //! unauthenticated AppView, and files are downloaded as full-size blobs via
@@ -67,6 +67,11 @@ pub enum Feed {
     ActorLikes,
     Custom(String),
     List(String),
+    /// `app.bsky.feed.searchPosts`; hashtags are searches for `#NAME`.
+    Search {
+        query: String,
+        sort: Option<String>,
+    },
 }
 
 impl Feed {
@@ -76,7 +81,7 @@ impl Feed {
             Self::Posts => Some("posts_and_author_threads"),
             Self::Replies => Some("posts_with_replies"),
             Self::Video => Some("posts_with_video"),
-            Self::Custom(_) | Self::List(_) | Self::ActorLikes => None,
+            Self::Custom(_) | Self::List(_) | Self::ActorLikes | Self::Search { .. } => None,
         }
     }
 }
@@ -84,9 +89,51 @@ impl Feed {
 /// A supported Bluesky input; `actor` is a validated handle or DID.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Post { actor: String, rkey: String },
-    Feed { actor: String, feed: Feed },
-    Profile { actor: String, view: ProfileView },
+    Post {
+        actor: String,
+        rkey: String,
+    },
+    Feed {
+        actor: String,
+        feed: Feed,
+    },
+    Profile {
+        actor: String,
+        view: ProfileView,
+    },
+    /// Accounts followed by `actor`, each queued as a user dispatcher child.
+    Following {
+        actor: String,
+    },
+    /// Post search (`/search?q=`) or hashtag (`/hashtag/NAME[/top|/latest]`).
+    Search {
+        query: String,
+        sort: Option<String>,
+    },
+}
+
+const MAX_QUERY: usize = 4096;
+
+/// Upstream also accepts the bsky.app embed proxies (`fxbsky.app`, `vxbsky.app`,
+/// `cbsky.app`, `bskye.app`, `bskyx.app`, ...) and `main.bsky.dev`.
+pub fn is_host(host: &str) -> bool {
+    if host == "main.bsky.dev" {
+        return true;
+    }
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    let Some(name) = host.strip_suffix(".app") else {
+        return false;
+    };
+    let name = ["fx", "vx", "c"]
+        .iter()
+        .find_map(|prefix| name.strip_prefix(prefix))
+        .unwrap_or(name);
+    let name = name
+        .strip_suffix('e')
+        .or_else(|| name.strip_suffix('x'))
+        .filter(|base| matches!(*base, "bsky" | "bsyy"))
+        .unwrap_or(name);
+    matches!(name, "bsky" | "bsyy")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,7 +194,7 @@ pub fn valid_cid(cid: &str) -> bool {
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Bluesky URL; expected a post, profile, custom feed (/profile/NAME/feed/ID) or list (/profile/NAME/lists/ID) link",
+            "unsupported Bluesky URL; expected a post, profile, custom feed (/profile/NAME/feed/ID), list (/profile/NAME/lists/ID), follows, search or hashtag link",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -155,7 +202,7 @@ pub fn target(url: &Url) -> Result<Target> {
         || url.port().is_some()
         || !url.username().is_empty()
         || url.password().is_some()
-        || !matches!(host, "bsky.app" | "www.bsky.app" | "main.bsky.dev")
+        || !is_host(host)
     {
         return Err(unsupported());
     }
@@ -210,8 +257,71 @@ pub fn target(url: &Url) -> Result<Target> {
             actor: actor(name)?,
             feed: Feed::List((*rkey).into()),
         }),
+        ["profile", name, "follows"] => Ok(Target::Following {
+            actor: actor(name)?,
+        }),
+        ["search"] => {
+            let queries: Vec<_> = url
+                .query_pairs()
+                .filter(|(key, _)| key == "q")
+                .map(|(_, value)| value.into_owned())
+                .collect();
+            match <[String; 1]>::try_from(queries) {
+                Ok([query]) => search_target(query, None),
+                Err(_) => Err(error("Bluesky search requires one non-empty q parameter")),
+            }
+        }
+        ["search", query] => search_target(decode_segment(query)?, None),
+        ["hashtag", tag] | ["hashtag", tag, "top" | "latest"] => {
+            let tag = decode_segment(tag)?;
+            let sort = segments.get(2).map(|sort| (*sort).to_owned());
+            if tag.starts_with('#') || tag.chars().any(char::is_whitespace) {
+                return Err(error("invalid Bluesky hashtag"));
+            }
+            search_target(format!("#{tag}"), sort)
+        }
+        ["saved"] => Err(error(
+            "native Bluesky bookmarks require an authenticated session; use --extractor compatibility",
+        )),
         _ => Err(unsupported()),
     }
+}
+
+fn decode_segment(segment: &str) -> Result<String> {
+    // Path '+' is a space in upstream's `replace("+", " ")` before unquoting.
+    let invalid = || error("Bluesky search query is not valid percent-encoded UTF-8");
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' => {
+                let hex = bytes
+                    .get(index + 1..index + 3)
+                    .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit))
+                    .ok_or_else(invalid)?;
+                let hex = std::str::from_utf8(hex).map_err(|_| invalid())?;
+                decoded.push(u8::from_str_radix(hex, 16).map_err(|_| invalid())?);
+                index += 3;
+            }
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| invalid())
+}
+
+fn search_target(query: String, sort: Option<String>) -> Result<Target> {
+    if query.trim().is_empty() || query.len() > MAX_QUERY || query.contains('\0') {
+        return Err(error("Bluesky search query is empty or exceeds 4096 bytes"));
+    }
+    Ok(Target::Search { query, sort })
 }
 
 fn string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -785,6 +895,8 @@ impl Bluesky {
     async fn next_page(&self, state: &mut FeedState) -> Result<()> {
         let did = match &state.did {
             Some(did) => did.clone(),
+            // Searches are not owned by an actor; nothing to resolve.
+            None if matches!(state.feed, Feed::Search { .. }) => String::new(),
             None => {
                 let did = self.resolve(&state.actor).await?;
                 state.did = Some(did.clone());
@@ -806,10 +918,17 @@ impl Bluesky {
                 "list",
                 format!("at://{did}/app.bsky.graph.list/{rkey}"),
             ),
+            Feed::Search { query, .. } => ("app.bsky.feed.searchPosts", "q", query.clone()),
         };
         let mut query = vec![(parameter, resource.as_str())];
         if let Some(filter) = state.feed.filter() {
             query.push(("filter", filter));
+        }
+        if let Feed::Search {
+            sort: Some(sort), ..
+        } = &state.feed
+        {
+            query.push(("sort", sort));
         }
         query.push(("limit", PAGE_LIMIT));
         if let Some(cursor) = &state.cursor {
@@ -818,8 +937,9 @@ impl Bluesky {
         let body = self.call(method, &query).await?;
         let body: Value =
             serde_json::from_slice(&body).map_err(|_| error("Bluesky returned invalid JSON"))?;
+        let search = matches!(state.feed, Feed::Search { .. });
         let items = body
-            .get("feed")
+            .get(if search { "posts" } else { "feed" })
             .and_then(Value::as_array)
             .ok_or_else(|| error("Bluesky response is missing its feed"))?;
         let cursor = page_cursor(&body)?;
@@ -833,8 +953,15 @@ impl Bluesky {
         // Collection owners identify the feed/list record, not the returned post
         // authors. Upstream's reposts author restriction applies only to author feeds.
         let author = state.feed.filter().map(|_| did.as_str());
-        for post in feed_posts(items, author, self.selection) {
-            state.posts.push_back(post.clone());
+        if search {
+            // Search results are bare post views rather than feed items.
+            state
+                .posts
+                .extend(items.iter().filter(|post| post.is_object()).cloned());
+        } else {
+            for post in feed_posts(items, author, self.selection) {
+                state.posts.push_back(post.clone());
+            }
         }
         Ok(())
     }
@@ -909,7 +1036,99 @@ impl Bluesky {
                 self.feed_events(actor, feed)
             }
             Target::Profile { actor, view } => self.profile_events(actor, view),
+            Target::Following { actor } => self.following_events(actor),
+            Target::Search { query, sort } => {
+                self.feed_events(String::new(), Feed::Search { query, sort })
+            }
         }
+    }
+
+    /// Lazily page `app.bsky.graph.getFollows`, queueing each followed account
+    /// as an independent user dispatcher child like upstream's Message.Queue.
+    fn following_events(&self, actor: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        struct State {
+            actor: String,
+            did: Option<String>,
+            cursor: Option<String>,
+            seen_cursors: BTreeSet<String>,
+            pages: usize,
+            done: bool,
+            users: VecDeque<serde_json::Map<String, Value>>,
+        }
+        let state = State {
+            actor,
+            did: None,
+            cursor: None,
+            seen_cursors: BTreeSet::new(),
+            pages: 0,
+            done: false,
+            users: VecDeque::new(),
+        };
+        stream::unfold(Some(state), move |state| async move {
+            let mut state = state?;
+            loop {
+                if let Some(user) = state.users.pop_front() {
+                    return Some((Ok(user), Some(state)));
+                }
+                if state.done {
+                    return None;
+                }
+                let page = async {
+                    let did = match &state.did {
+                        Some(did) => did.clone(),
+                        None => {
+                            let did = self.resolve(&state.actor).await?;
+                            state.did = Some(did.clone());
+                            did
+                        }
+                    };
+                    let mut query = vec![("actor", did.as_str()), ("limit", PAGE_LIMIT)];
+                    if let Some(cursor) = &state.cursor {
+                        query.push(("cursor", cursor));
+                    }
+                    let body = self.call("app.bsky.graph.getFollows", &query).await?;
+                    let body: Value = serde_json::from_slice(&body)
+                        .map_err(|_| error("Bluesky returned invalid JSON"))?;
+                    let follows = body
+                        .get("follows")
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| error("Bluesky response is missing its follows"))?;
+                    let cursor = page_cursor(&body)?;
+                    state.pages += 1;
+                    state.done = cursor
+                        .as_ref()
+                        .is_none_or(|cursor| !state.seen_cursors.insert(cursor.clone()))
+                        || state.pages >= MAX_PAGES;
+                    state.cursor = cursor;
+                    for user in follows {
+                        state.users.push_back(follow_fields(user)?);
+                    }
+                    Ok::<_, crate::Error>(())
+                };
+                if let Err(e) = page.await {
+                    return Some((Err(e), None));
+                }
+            }
+        })
+        .flat_map(move |result| match result {
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+            Ok(user) => {
+                let did = user
+                    .get("did")
+                    .and_then(Value::as_str)
+                    .expect("validated follow DID")
+                    .to_owned();
+                child_job(
+                    ChildMetadata::from_raw("bluesky", "following", &user),
+                    move || {
+                        let url = Url::parse(&format!("https://bsky.app/profile/{did}"))
+                            .expect("validated DID");
+                        self.events(&url)
+                    },
+                )
+            }
+        })
+        .boxed()
     }
 
     fn view_events(&self, actor: String, view: &str) -> BoxStream<'_, Result<ExtractionEvent>> {
@@ -1098,6 +1317,22 @@ impl Bluesky {
         }
         Ok(body)
     }
+}
+
+/// Bounded public queue fields of a followed profile view; the DID is validated
+/// before it can become a child URL.
+fn follow_fields(user: &Value) -> Result<serde_json::Map<String, Value>> {
+    let did = string(user, "did")
+        .filter(|did| valid_did(did))
+        .ok_or_else(|| error("Bluesky follow has an invalid DID"))?;
+    let mut fields = serde_json::Map::new();
+    fields.insert("did".into(), did.into());
+    for key in ["handle", "displayName", "description"] {
+        if let Some(value) = string(user, key) {
+            fields.insert(key.into(), value.into());
+        }
+    }
+    Ok(fields)
 }
 
 fn backoff(attempt: u8) -> Duration {
@@ -1327,7 +1562,7 @@ mod tests {
         for raw in [
             "https://bsky.app/profile/alice/post/3kabc",
             "https://bsky.app/profile/alice.bsky.social/post/a%2Fb",
-            "https://bsky.app/search?q=x",
+            "https://bsky.app/search",
             "https://bsky.app.evil.test/profile/alice.bsky.social",
             "https://bsky.app:444/profile/alice.bsky.social",
             "https://bsky.app/",
@@ -3146,5 +3381,280 @@ mod tests {
         assert!(error.to_string().contains("not found"));
         assert!(!error.to_string().contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    const DID2: &str = "did:plc:bcdefghijklmnopqrstuvwxy";
+
+    #[test]
+    fn classifies_follows_search_hashtag_and_mirror_hosts() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap());
+        assert_eq!(
+            t("https://bsky.app/profile/Alice.bsky.social/follows").unwrap(),
+            Target::Following {
+                actor: "alice.bsky.social".into()
+            }
+        );
+        for (raw, query, sort) in [
+            ("https://bsky.app/search?q=cats+dogs", "cats dogs", None),
+            ("https://bsky.app/search?q=a%26b&x=1", "a&b", None),
+            ("https://bsky.app/search/cats+%23dogs", "cats #dogs", None),
+            ("https://bsky.app/hashtag/art", "#art", None),
+            ("https://bsky.app/hashtag/art/top", "#art", Some("top")),
+            (
+                "https://bsky.app/hashtag/%E7%8C%AB/latest/",
+                "#\u{732b}",
+                Some("latest"),
+            ),
+        ] {
+            assert_eq!(
+                t(raw).unwrap(),
+                Target::Search {
+                    query: query.into(),
+                    sort: sort.map(str::to_owned)
+                },
+                "{raw}"
+            );
+        }
+        for raw in [
+            "https://bsky.app/search?q=",
+            "https://bsky.app/search?q=a&q=b",
+            "https://bsky.app/search/%ZZ",
+            "https://bsky.app/search/%FF",
+            "https://bsky.app/hashtag/art/oldest",
+            "https://bsky.app/hashtag/%23art",
+            "https://bsky.app/hashtag/a+b",
+            "https://bsky.app/profile/alice/follows",
+        ] {
+            assert!(t(raw).is_err(), "{raw}");
+        }
+        let long = format!("https://bsky.app/search?q={}", "a".repeat(MAX_QUERY + 1));
+        assert!(t(&long).is_err());
+        let saved = t("https://bsky.app/saved").unwrap_err().to_string();
+        assert!(saved.contains("authenticated"), "{saved}");
+        for host in [
+            "bsky.app",
+            "www.bsky.app",
+            "main.bsky.dev",
+            "fxbsky.app",
+            "vxbsky.app",
+            "cbsky.app",
+            "bskye.app",
+            "bskyx.app",
+            "www.fxbskye.app",
+            "bsyy.app",
+        ] {
+            assert!(is_host(host), "{host}");
+            let url = Url::parse(&format!("https://{host}/profile/{DID}/post/3kabc")).unwrap();
+            assert!(target(&url).is_ok(), "{host}");
+            assert_eq!(crate::extract::social_site(&url), Some("bluesky"), "{host}");
+        }
+        for host in [
+            "bsky.social",
+            "xbsky.app",
+            "fxbsky.app.evil.test",
+            "bskyee.app",
+            "c.app",
+            "evilbsky.app",
+            "api.bsky.dev",
+        ] {
+            assert!(!is_host(host), "{host}");
+        }
+    }
+
+    fn search_body(posts: Vec<Value>, cursor: Option<&str>) -> Vec<u8> {
+        response(
+            "200 OK",
+            "",
+            json!({"posts": posts, "cursor": cursor})
+                .to_string()
+                .as_bytes(),
+        )
+    }
+
+    fn foreign_post(rkey: &str, cid: &str) -> Value {
+        let mut value = post(
+            rkey,
+            json!({"$type": "app.bsky.embed.images", "images": [image(cid, "")]}),
+        );
+        value["uri"] = json!(format!("at://{DID2}/app.bsky.feed.post/{rkey}"));
+        value["author"] = json!({"did": DID2, "handle": "bob.bsky.social"});
+        value
+    }
+
+    #[tokio::test]
+    async fn search_pages_bare_post_views_without_resolving_or_author_filtering() {
+        let embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]});
+        let (root, server) = serve(vec![
+            search_body(
+                vec![
+                    post("3ka", embed),
+                    json!("not a post"),
+                    foreign_post("3kb", CID2),
+                ],
+                Some("c2"),
+            ),
+            search_body(vec![post("3kc", json!(null))], Some("c2")),
+        ]);
+        let url = Url::parse("https://bsky.app/hashtag/art/latest").unwrap();
+        let media = bluesky(root)
+            .stream(&url)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            media
+                .iter()
+                .map(|m| m.metadata.as_ref().unwrap().post_id.as_str())
+                .collect::<Vec<_>>(),
+            ["3ka", "3kb"]
+        );
+        assert_eq!(
+            media[1].metadata.as_ref().unwrap().username.as_deref(),
+            Some("bob.bsky.social")
+        );
+        let requests = server.join().unwrap();
+        // A repeated cursor ends pagination after the second page.
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with(
+            "GET /xrpc/app.bsky.feed.searchPosts?q=%23art&sort=latest&limit=100 HTTP/1.1"
+        ));
+        assert!(requests[1].contains("&cursor=c2"));
+    }
+
+    #[tokio::test]
+    async fn plain_search_omits_sort_and_rejects_malformed_responses() {
+        let (root, server) = serve(vec![search_body(vec![], None)]);
+        let url = Url::parse("https://bsky.app/search?q=cats+dogs").unwrap();
+        assert!(bluesky(root).events(&url).next().await.is_none());
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0]
+                .starts_with("GET /xrpc/app.bsky.feed.searchPosts?q=cats+dogs&limit=100 HTTP/1.1")
+        );
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            "",
+            json!({"feed": []}).to_string().as_bytes(),
+        )]);
+        let error = bluesky(root)
+            .events(&url)
+            .next()
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("missing its feed"));
+        server.join().unwrap();
+    }
+
+    fn follows_body(users: Vec<Value>, cursor: Option<&str>) -> Vec<u8> {
+        response(
+            "200 OK",
+            "",
+            json!({"subject": {"did": DID}, "follows": users, "cursor": cursor})
+                .to_string()
+                .as_bytes(),
+        )
+    }
+
+    #[tokio::test]
+    async fn following_queues_each_account_as_a_lazy_user_dispatcher_child() {
+        let resolved = json!({"did": DID}).to_string();
+        let (root, server) = serve(vec![
+            response("200 OK", "", resolved.as_bytes()),
+            follows_body(
+                vec![
+                    json!({"did": DID2, "handle": "bob.bsky.social", "displayName": "Bob",
+                    "avatar": "https://cdn.bsky.app/secret", "viewer": {"x": 1}}),
+                ],
+                Some("next"),
+            ),
+            // First child: Bob's default media feed, fetched before the next page.
+            response(
+                "200 OK",
+                "",
+                json!({"feed": [{"post": foreign_post("3kb", CID2)}]})
+                    .to_string()
+                    .as_bytes(),
+            ),
+            follows_body(
+                vec![json!({"did": DID, "handle": "alice.bsky.social"})],
+                None,
+            ),
+            response("200 OK", "", feed_body("3ka", CID1).as_bytes()),
+        ]);
+        let url = Url::parse("https://bsky.app/profile/alice.bsky.social/follows").unwrap();
+        let events = bluesky(root)
+            .events(&url)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let children: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                ExtractionEvent::BeginChild(scope) => Some(&scope.metadata),
+                _ => None,
+            })
+            .collect();
+        // Each follow is a 'following' child that re-enters the 'user' dispatcher.
+        assert_eq!(
+            children
+                .iter()
+                .map(|m| (
+                    m.subcategory(),
+                    m.fields().get("did").and_then(Value::as_str)
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("following", Some(DID2)),
+                ("user", None),
+                ("following", Some(DID)),
+                ("user", None),
+            ]
+        );
+        let bob = children[0].fields();
+        assert_eq!(bob["handle"], "bob.bsky.social");
+        assert_eq!(bob["displayName"], "Bob");
+        assert!(!bob.contains_key("avatar") && !bob.contains_key("viewer"));
+        let posts: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                ExtractionEvent::Media(media) => {
+                    Some(media.metadata.as_ref().unwrap().post_id.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(posts, ["3kb", "3ka"]);
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("resolveHandle?handle=alice.bsky.social"));
+        assert!(requests[1].starts_with(&format!(
+            "GET /xrpc/app.bsky.graph.getFollows?actor={}&limit=100 HTTP/1.1",
+            DID.replace(':', "%3A")
+        )));
+        assert!(requests[2].contains(&format!("actor={}", DID2.replace(':', "%3A"))));
+        assert!(requests[2].contains("filter=posts_with_media"));
+        assert!(requests[3].contains("getFollows") && requests[3].contains("cursor=next"));
+    }
+
+    #[tokio::test]
+    async fn following_rejects_invalid_dids_and_missing_lists_before_queueing() {
+        for body in [
+            follows_body(
+                vec![json!({"did": "did:plc:../../x", "handle": "x.test"})],
+                None,
+            ),
+            response("200 OK", "", json!({"cursor": null}).to_string().as_bytes()),
+        ] {
+            let (root, server) = serve(vec![body]);
+            let url = Url::parse(&format!("https://bsky.app/profile/{DID}/follows")).unwrap();
+            let events = bluesky(root).events(&url).collect::<Vec<_>>().await;
+            assert_eq!(events.len(), 1);
+            assert!(events[0].is_err());
+            server.join().unwrap();
+        }
     }
 }

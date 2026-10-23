@@ -6125,3 +6125,242 @@ async fn native_profile_assets_match_compatibility_identity_and_keep_owner_versi
     }
     assert_eq!(server.count(), 2);
 }
+
+fn user_entry(id: &str) -> Value {
+    json!({"entryId":format!("user-{id}"),"content":{"entryType":"TimelineTimelineItem",
+        "itemContent":{"itemType":"TimelineUser","user_results":{"result":{"__typename":"User",
+            "id":format!("VXNlcjo{id}"),"rest_id":id,"legacy":{"screen_name":format!("user{id}")}}}}}})
+}
+fn users_page(list: bool, ids: &[&str], cursor: Option<&str>) -> Value {
+    let mut entries: Vec<_> = ids.iter().map(|id| user_entry(id)).collect();
+    if let Some(cursor) = cursor {
+        entries.push(json!({"entryId":"cursor-bottom-0","content":{"entryType":"TimelineTimelineCursor","cursorType":"Bottom","value":cursor}}));
+    }
+    let instructions = json!([{"type":"TimelineAddEntries","entries":entries}]);
+    if list {
+        json!({"data":{"list":{"members_timeline":{"timeline":{"instructions":instructions}}}}})
+    } else {
+        json!({"data":{"user":{"result":{"__typename":"User","timeline":{"timeline":{"instructions":instructions}}}}}})
+    }
+}
+
+#[tokio::test]
+async fn following_and_followers_resolve_owner_and_queue_each_user_lazily() {
+    use crate::event::ExtractionEvent;
+    for (kind, operation) in [
+        ("following", "/SaWqzw0TFAWMx1nXWjXoaQ/Following"),
+        ("followers", "/i6PPdIMm1MO7CpAqjau7sw/Followers"),
+    ] {
+        let server = Server::new(vec![
+            Response::json(user()),
+            Response::json(users_page(false, &["7", "8"], Some("next+/="))),
+            Response::json(users_page(false, &["9"], Some("0|end"))),
+        ]);
+        let native = extractor(Duration::from_secs(3)).await;
+        let target = users::input(&Url::parse(&format!("https://x.com/fixture/{kind}")).unwrap())
+            .unwrap()
+            .unwrap();
+        let mut events = native.queue_events(target, server.base.clone());
+        assert_eq!(server.count(), 0);
+        let mut seen = Vec::new();
+        let mut ended = 0;
+        while let Some(event) = events.next().await {
+            match event.unwrap() {
+                ExtractionEvent::BeginChild(scope) => {
+                    assert_eq!(scope.metadata.category(), "twitter");
+                    assert_eq!(scope.metadata.subcategory(), kind);
+                    // Raw user results keep only public queue fields.
+                    assert_eq!(scope.metadata.fields().len(), 1);
+                    seen.push(scope.metadata.fields()["id"].as_str().unwrap().to_owned());
+                    if seen.len() == 1 {
+                        assert_eq!(server.count(), 2, "next page waits for the consumer");
+                    }
+                    scope.control.cancel();
+                }
+                ExtractionEvent::EndChild(_) => ended += 1,
+                _ => panic!("user lists only queue child jobs"),
+            }
+        }
+        assert_eq!(seen, ["VXNlcjo7", "VXNlcjo8", "VXNlcjo9"]);
+        assert_eq!(ended, 3);
+        let urls = server.urls();
+        assert_eq!(urls.len(), 3);
+        assert!(urls[0].path().ends_with("/UserByScreenName"));
+        assert!(urls[1..].iter().all(|url| url.path().ends_with(operation)));
+        let mut expected = json!({"userId":"42","count":100,"includePromotedContent":false,"withGrokTranslatedBio":false});
+        assert_eq!(variables(&urls[1]), expected);
+        expected["cursor"] = "next+/=".into();
+        assert_eq!(variables(&urls[2]), expected);
+        assert_scoped_expansion_requests(&server, &native);
+    }
+}
+
+#[tokio::test]
+async fn list_member_children_dispatch_to_rest_id_user_and_repeated_cursor_ends_privately() {
+    use crate::{dispatch::Include, event::ExtractionEvent};
+    let server = Server::new(vec![
+        Response::json(users_page(true, &["7"], Some("again"))),
+        Response::json(
+            json!({"data":{"user":{"result":{"__typename":"User","rest_id":"7","legacy":{"screen_name":"seven"}}}}}),
+        ),
+        Response::json(users_page(true, &["8"], Some("again"))),
+    ]);
+    let native = extractor(Duration::from_secs(3))
+        .await
+        .with_include(Some(Include::Views(vec!["info".into()])));
+    let events: Vec<_> = native
+        .queue_events(users::Target::ListMembers("55".into()), server.base.clone())
+        .collect()
+        .await;
+    let ExtractionEvent::BeginChild(member) = events[0].as_ref().unwrap() else {
+        panic!("missing member child");
+    };
+    assert_eq!(member.metadata.subcategory(), "list-members");
+    assert_eq!(member.metadata.fields()["id"], "VXNlcjo7");
+    let ExtractionEvent::BeginChild(dispatch) = events[1].as_ref().unwrap() else {
+        panic!("member child must run the user dispatcher");
+    };
+    assert_eq!(dispatch.metadata.subcategory(), "user");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, Ok(ExtractionEvent::EndChild(_))))
+            .count(),
+        2
+    );
+    let error = events.last().unwrap().as_ref().err().unwrap().to_string();
+    assert!(error.contains("cursor repeated"), "{error}");
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Ok(ExtractionEvent::BeginChild(scope)) if scope.metadata.fields().get("id") == Some(&json!("VXNlcjo8"))))
+    );
+    let urls = server.urls();
+    assert_eq!(urls.len(), 3);
+    assert!(
+        urls[0]
+            .path()
+            .ends_with("/naea_MSad4pOb-D6_oVv_g/ListMembers")
+    );
+    assert_eq!(variables(&urls[0]), json!({"listId":"55","count":100}));
+    assert!(
+        urls[1]
+            .path()
+            .ends_with("/8r5oa_2vD0WkhIAOkY4TTA/UserByRestId")
+    );
+    assert_eq!(variables(&urls[1]), json!({"userId":"7"}));
+    assert_eq!(
+        variables(&urls[2]),
+        json!({"listId":"55","count":100,"cursor":"again"})
+    );
+}
+
+#[tokio::test]
+async fn quotes_queue_a_quoted_tweet_search_child() {
+    use crate::event::ExtractionEvent;
+    let server = Server::new(vec![Response::json(search_page(vec![tweet("100")], None))]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let target = users::input(&Url::parse("https://x.com/fixture/status/123/quotes").unwrap())
+        .unwrap()
+        .unwrap();
+    let mut events = native.queue_events(target, server.base.clone());
+    let ExtractionEvent::BeginChild(scope) = events.next().await.unwrap().unwrap() else {
+        panic!("quotes must queue a child job");
+    };
+    assert_eq!(scope.metadata.category(), "twitter");
+    assert_eq!(scope.metadata.subcategory(), "quotes");
+    assert!(scope.metadata.fields().is_empty());
+    assert_eq!(server.count(), 0);
+    assert!(matches!(
+        events.next().await.unwrap().unwrap(),
+        ExtractionEvent::Post(_)
+    ));
+    let ExtractionEvent::Media(media) = events.next().await.unwrap().unwrap() else {
+        panic!("missing quote media");
+    };
+    assert_eq!(media.metadata.as_ref().unwrap().post_id, "100");
+    assert!(matches!(
+        events.next().await.unwrap().unwrap(),
+        ExtractionEvent::EndPost
+    ));
+    drop(events);
+    let urls = server.urls();
+    assert!(
+        urls[0]
+            .path()
+            .ends_with("/4fpceYZ6-YQCx_JSl_Cn_A/SearchTimeline")
+    );
+    assert_eq!(variables(&urls[0])["rawQuery"], "quoted_tweet_id:123");
+}
+
+#[tokio::test]
+async fn new_routes_dispatch_natively_and_images_emit_size_fallbacks_without_requests() {
+    use crate::event::ExtractionEvent;
+    let native = Twitter::new(None, Duration::from_secs(3)).await.unwrap();
+    for path in ["/fixture/status/123/quotes", "/i/web/status/123/quotes/"] {
+        let mut events = native.events(&Url::parse(&format!("https://x.com{path}")).unwrap());
+        let ExtractionEvent::BeginChild(scope) = events.next().await.unwrap().unwrap() else {
+            panic!("quotes must not be treated as a single post: {path}");
+        };
+        assert_eq!(scope.metadata.subcategory(), "quotes");
+        scope.control.cancel();
+        assert!(matches!(
+            events.next().await.unwrap().unwrap(),
+            ExtractionEvent::EndChild(_)
+        ));
+        assert!(events.next().await.is_none());
+    }
+    for path in [
+        "/fixture/following",
+        "/id:42/followers",
+        "/i/lists/55/members",
+    ] {
+        let events: Vec<_> = native
+            .events(&Url::parse(&format!("https://x.com{path}")).unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 1);
+        let error = events[0].as_ref().err().unwrap().to_string();
+        assert!(error.contains("authentication"), "{path}: {error}");
+    }
+    let image = Url::parse("https://pbs.twimg.com/media/ABC-d_1?format=jpg&name=small").unwrap();
+    assert_eq!(crate::extract::social_site(&image), Some("twitter"));
+    assert_eq!(
+        crate::extract::social_site(
+            &Url::parse("https://pbs.twimg.com/profile_images/1/a.jpg").unwrap()
+        ),
+        None
+    );
+    let events: Vec<_> = native.events(&image).collect().await;
+    assert_eq!(events.len(), 3);
+    assert!(matches!(events[0], Ok(ExtractionEvent::Post(_))));
+    assert!(matches!(events[2], Ok(ExtractionEvent::EndPost)));
+    let Ok(ExtractionEvent::Media(media)) = &events[1] else {
+        panic!("missing image");
+    };
+    assert_eq!(
+        media.url.as_str(),
+        "https://pbs.twimg.com/media/ABC-d_1?format=jpg&name=orig"
+    );
+    assert_eq!(media.filename, "ABC-d_1.jpg");
+    assert_eq!(media.handoff["_fallback"].as_array().unwrap().len(), 4);
+    let sized = Twitter::new(None, Duration::from_secs(3))
+        .await
+        .unwrap()
+        .with_image_options(ImageOptions::new(vec!["large".into(), "small".into()]).unwrap());
+    let events: Vec<_> = sized
+        .events(&Url::parse("https://pbs.twimg.com/media/ABC.png").unwrap())
+        .collect()
+        .await;
+    let Ok(ExtractionEvent::Media(media)) = &events[1] else {
+        panic!("missing image");
+    };
+    assert_eq!(
+        media.url.as_str(),
+        "https://pbs.twimg.com/media/ABC?format=png&name=large"
+    );
+    assert_eq!(
+        media.handoff["_fallback"],
+        json!(["https://pbs.twimg.com/media/ABC?format=png&name=small"])
+    );
+}

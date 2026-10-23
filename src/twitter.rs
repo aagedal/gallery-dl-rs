@@ -18,7 +18,7 @@ pub use expansion::{
 };
 #[path = "twitter_images.rs"]
 mod images;
-pub use images::ImageOptions;
+pub use images::{ImageOptions, is_image_url};
 #[path = "twitter_media.rs"]
 mod media;
 pub use media::{MediaOptions, VideoMode};
@@ -52,6 +52,8 @@ mod profile;
 pub(crate) use profile::profile_asset_identity;
 #[path = "twitter_timeline.rs"]
 mod timeline;
+#[path = "twitter_users.rs"]
+mod users;
 use base64::{
     Engine,
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
@@ -70,6 +72,7 @@ use std::{
 };
 pub use timeline::{is_media_timeline_url, is_profile_timeline_url};
 use url::Url;
+pub use users::is_queue_url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
