@@ -145,6 +145,15 @@ impl Facebook {
     /// Emit an explicit post boundary before each photo or video and its files.
     /// Album navigation preserves one photo group per page without prefetching.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        if is_share_link(url) {
+            let url = url.clone();
+            return stream::once(async move {
+                let target = self.resolve_share(&url).await?;
+                Ok::<_, crate::Error>(self.events(&target))
+            })
+            .try_flatten()
+            .boxed();
+        }
         if let Ok(id) = video_id(url) {
             let mut endpoint = Url::parse("https://www.facebook.com/watch/").unwrap();
             endpoint.query_pairs_mut().append_pair("v", &id);
@@ -165,6 +174,53 @@ impl Facebook {
             Ok(input) => self.album_events(input, Url::parse("https://www.facebook.com/").unwrap()),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
+    }
+
+    /// The post, reel or video a mobile share link (`/share/p|r|v/TOKEN`)
+    /// stands for: its redirect target, else the page's canonical URL.
+    async fn resolve_share(&self, url: &Url) -> Result<Url> {
+        let mut request = self
+            .client
+            .get(url.clone())
+            .timeout(self.request_timeout)
+            .header(header::ACCEPT, "text/html,application/xhtml+xml")
+            .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.5")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "none");
+        if let Some(cookies) = self.cookies.lock().unwrap().header(url) {
+            request = request.header(header::COOKIE, cookies);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error("native Facebook extraction timed out"))?
+            .map_err(|_| error("Facebook request failed; check network access"))?;
+        self.cookies
+            .lock()
+            .unwrap()
+            .store_response(response.url(), response.headers());
+        let unresolved = || {
+            error("Facebook share link did not resolve to a supported post; login may be required")
+        };
+        let target = if response.status().is_redirection() {
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| url.join(v).ok())
+        } else if response.status().is_success() {
+            let body = response.bytes().await.map_err(|_| unresolved())?;
+            if body.len() > MAX_RESPONSE {
+                return Err(unresolved());
+            }
+            let page = String::from_utf8_lossy(&body);
+            crate::sites::extr(&page, r#"<link rel="canonical" href=""#, "\"")
+                .or_else(|| crate::sites::extr(&page, r#"<meta property="og:url" content=""#, "\""))
+                .map(|raw| raw.replace("&amp;", "&"))
+                .and_then(|raw| Url::parse(&raw).ok())
+        } else {
+            None
+        };
+        target.filter(share_target).ok_or_else(unresolved)
     }
 
     /// Profile routes: the profile page names the photos set, the albums or
@@ -619,6 +675,29 @@ struct AlbumState {
     grid: Grid,
     /// The grid ended before the album did.
     truncated: bool,
+}
+
+/// `facebook.com/share/p|r|v/TOKEN` (and `/share/TOKEN`) mobile share links.
+pub(crate) fn is_share_link(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && matches!(
+            url.host_str(),
+            Some("facebook.com" | "www.facebook.com" | "m.facebook.com" | "web.facebook.com")
+        )
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.path().starts_with("/share/")
+}
+
+/// A share link may only resolve to a URL this extractor reads, never to
+/// another share link (or a login page).
+fn share_target(url: &Url) -> bool {
+    !is_share_link(url)
+        && (video_id(url).is_ok()
+            || photo_id(url).is_ok()
+            || album_input(url).is_ok()
+            || profile_input(url).is_some())
 }
 
 fn backoff(attempt: u8) -> Duration {
@@ -1147,6 +1226,43 @@ mod transport_tests {
         assert!(!media.is_empty());
         let request = server.join().unwrap();
         assert!(request.starts_with(&format!("GET {endpoint} HTTP/1.1\r\n")));
+    }
+
+    #[tokio::test]
+    async fn share_links_resolve_to_supported_targets_only() {
+        let (endpoint, server) =
+            serve_sequence(vec![
+            response(
+                "302 Found",
+                "Location: https://www.facebook.com/reel/1195289147628387/?mibextid=x\r\n",
+                b"",
+            ),
+            response(
+                "200 OK",
+                "Content-Type: text/html\r\n",
+                br#"<link rel="canonical" href="https://www.facebook.com/watch/?v=42&amp;x=1">"#,
+            ),
+            response("302 Found", "Location: https://www.facebook.com/login/\r\n", b""),
+        ]);
+        let native = Facebook::new(None, Duration::from_secs(3)).await.unwrap();
+        let share = endpoint.join("/share/r/AbC/").unwrap();
+        let reel = native.resolve_share(&share).await.unwrap();
+        assert_eq!(video_id(&reel).unwrap(), "1195289147628387");
+        let canonical = native.resolve_share(&share).await.unwrap();
+        assert_eq!(video_id(&canonical).unwrap(), "42");
+        let login = native.resolve_share(&share).await.unwrap_err().to_string();
+        assert!(login.contains("did not resolve"), "{login}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].2.starts_with("GET /share/r/AbC/ "));
+        assert!(is_share_link(
+            &Url::parse("https://www.facebook.com/share/v/1x/").unwrap()
+        ));
+        assert!(!is_share_link(
+            &Url::parse("https://www.facebook.com/reel/1").unwrap()
+        ));
+        assert!(!share_target(
+            &Url::parse("https://www.facebook.com/share/r/x/").unwrap()
+        ));
     }
 
     fn serve_once(
