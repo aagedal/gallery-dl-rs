@@ -851,6 +851,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     if crate::tumblr::is_blog_url(url) {
         return Some("tumblr");
     }
+    if crate::twitter::is_image_url(url) {
+        return Some("twitter");
+    }
     if let Some(site) = crate::imagehosts::Site::from_host(host) {
         return Some(site.category());
     }

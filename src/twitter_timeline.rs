@@ -110,17 +110,16 @@ pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
         ),
         _ => return Err(invalid()),
     };
-    let user = if let Some(id) = user.strip_prefix("id:") {
-        if !valid_id(id) {
-            return Err(invalid());
-        }
-        ProfileInput::Id(id.into())
-    } else if valid_name(user) && !reserved_name(user) {
-        ProfileInput::Name(user.into())
+    Ok((user_input(user).ok_or_else(invalid)?, tab))
+}
+
+/// Parse one `USER` path segment: a valid screen name or `id:<decimal>`.
+pub(super) fn user_input(user: &str) -> Option<ProfileInput> {
+    if let Some(id) = user.strip_prefix("id:") {
+        valid_id(id).then(|| ProfileInput::Id(id.into()))
     } else {
-        return Err(invalid());
-    };
-    Ok((user, tab))
+        (valid_name(user) && !reserved_name(user)).then(|| ProfileInput::Name(user.into()))
+    }
 }
 
 fn valid_name(name: &str) -> bool {

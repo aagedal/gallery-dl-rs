@@ -523,6 +523,7 @@ async fn run(args: Args) -> Result<()> {
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || gallery_dl_rs::twitter::is_search_url(&url)
                             || gallery_dl_rs::twitter::is_collection_url(&url)
+                            || gallery_dl_rs::twitter::is_queue_url(&url)
                             || matches!(
                                 extract::social_site(&url),
                                 Some("bluesky" | "kemono" | "coomer")
