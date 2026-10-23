@@ -2420,8 +2420,8 @@ available from upstream.
 ### Social platforms
 
 Native coverage of the largest social platforms (`--extractor native`;
-`telegram`, `snapchat`, `kuaishou`, `xiaohongshu` and `ytdl` have no upstream
-extractor and
+`telegram`, `snapchat`, `kuaishou`, `xiaohongshu`, `threads` and `ytdl` have no
+upstream extractor and
 are always native):
 
 | Platform | Extractor | Anonymous access (checked live) |
@@ -2441,12 +2441,12 @@ are always native):
 | YouTube, Twitch, Douyin (yt-dlp needs fresh browser cookies), LinkedIn, Snapchat Spotlight posts, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
 | Snapchat | native public profiles (`@USER`, `add/USER`): story, highlights and Spotlight; single Spotlight URLs through yt-dlp | yes |
 | Xiaohongshu | native image and video notes (`explore/ID`, `discovery/item/ID`) | only through shared links carrying their `xsec_token`, else cookies; fixture-tested only, as this network is sent to login |
+| Threads | native posts (`@USER/post/CODE`) through the logged-out `BarcelonaPostPageTargetQuery`; its rotating query ID is rediscovered from the page's bundles when stale | yes |
 | Kuaishou | native short videos (`visionVideoDetail` GraphQL) | no: anonymous clients get a captcha; pass a browser session's cookies |
 
-WhatsApp, WeChat, Messenger and QQ have no public media pages. Threads has no
-extractor here or upstream: it serves post data only through a GraphQL query
-whose ID lives in its JavaScript bundles. The Kuaishou extractor is tested
-against fixtures only; this network gets a captcha.
+WhatsApp, WeChat, Messenger and QQ have no public media pages. The Kuaishou
+and Xiaohongshu extractors are tested against fixtures only; this network gets
+a captcha or a login page from them.
 
 ## Limitations
 

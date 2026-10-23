@@ -6,6 +6,7 @@ mod discord;
 mod kuaishou;
 mod snapchat;
 mod telegram;
+mod threads;
 mod tiktok;
 mod vk;
 mod weibo;
@@ -21,4 +22,5 @@ pub(super) static SITES: &[&Site] = &[
     &kuaishou::SITE,
     &snapchat::SITE,
     &xiaohongshu::SITE,
+    &threads::SITE,
 ];
