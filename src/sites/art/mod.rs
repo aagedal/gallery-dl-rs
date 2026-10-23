@@ -2,16 +2,57 @@
 //!
 //! Shared helpers mirror the gallery_dl `text` and `dt` functions that the
 //! upstream modules in this group rely on.
-#![allow(dead_code)]
 
 use crate::sites::Site;
 use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod arena;
 mod behance;
+mod booth;
+mod civitai;
+mod fivehundredpx;
+mod hatenablog;
+mod issuu;
+mod itaku;
+mod lightroom;
+mod livedoor;
+mod lofter;
+mod myportfolio;
+mod naverblog;
+mod picarto;
+mod piczel;
+mod slideshare;
+mod speakerdeck;
+mod steamgriddb;
+mod thirtyfivephoto;
+mod wikiart;
+mod xfolio;
 
-pub(super) static SITES: &[&Site] = &[&behance::SITE];
+pub(super) static SITES: &[&Site] = &[
+    &behance::SITE,
+    &hatenablog::SITE,
+    &livedoor::SITE,
+    &lofter::SITE,
+    &myportfolio::SITE,
+    &naverblog::SITE,
+    &steamgriddb::SITE,
+    &thirtyfivephoto::SITE,
+    &xfolio::SITE,
+    &arena::SITE,
+    &booth::SITE,
+    &civitai::SITE,
+    &fivehundredpx::SITE,
+    &issuu::SITE,
+    &itaku::SITE,
+    &lightroom::SITE,
+    &picarto::SITE,
+    &piczel::SITE,
+    &slideshare::SITE,
+    &speakerdeck::SITE,
+    &wikiart::SITE,
+];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
 /// cursor; a miss returns `""` and leaves the cursor in place.
@@ -23,17 +64,6 @@ pub(crate) struct Scan<'t> {
 impl<'t> Scan<'t> {
     pub fn new(text: &'t str) -> Self {
         Self { text, pos: 0 }
-    }
-
-    pub fn at(text: &'t str, pos: usize) -> Self {
-        Self {
-            text,
-            pos: pos.min(text.len()),
-        }
-    }
-
-    pub fn pos(&self) -> usize {
-        self.pos
     }
 
     pub fn extr(&mut self, begin: &str, end: &str) -> &'t str {
@@ -55,13 +85,6 @@ impl<'t> Scan<'t> {
 pub(crate) fn extract_iter<'t>(text: &'t str, begin: &str, end: &str) -> Vec<&'t str> {
     let mut scan = Scan::new(text);
     std::iter::from_fn(|| scan.find(begin, end)).collect()
-}
-
-/// gallery-dl `text.rextr`: search `begin` backwards, then `end` forwards.
-pub(crate) fn rextr<'t>(text: &'t str, begin: &str, end: &str) -> Option<&'t str> {
-    let first = text.rfind(begin)? + begin.len();
-    let last = text[first..].find(end)? + first;
-    Some(&text[first..last])
 }
 
 /// gallery-dl `text.extr` with the `""` default.
@@ -143,11 +166,6 @@ pub(crate) fn parse_iso(text: &str) -> Option<i64> {
 /// gallery-dl `dt.parse_ts` for JSON values (ints and numeric strings).
 pub(crate) fn parse_ts(value: &Value) -> Option<i64> {
     crate::source_date::parse_timestamp(value)
-}
-
-/// gallery-dl `dt.convert`: ISO strings first, then integer timestamps.
-pub(crate) fn convert(value: &Value) -> Option<i64> {
-    crate::source_date::convert(value)
 }
 
 const MONTHS: [&str; 12] = [
@@ -299,13 +317,6 @@ pub(crate) fn on_host(url: &Url, hosts: &[&str]) -> bool {
     crate::sites::plain(url) && crate::sites::host_is(url, hosts)
 }
 
-/// The first value of query parameter `key`.
-pub(crate) fn query(url: &Url, key: &str) -> Option<String> {
-    url.query_pairs()
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| v.into_owned())
-}
-
 /// ASCII digits only, 1..=20 characters.
 pub(crate) fn digits(text: &str) -> bool {
     (1..=20).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_digit())
@@ -363,7 +374,6 @@ mod tests {
         assert_eq!(scan.extr("<a>", "</a>"), "2");
         assert_eq!(scan.extr("<a>", "</a>"), "");
         assert_eq!(extract_iter("[1][2][3", "[", "]"), ["1", "2"]);
-        assert_eq!(rextr("a=1 a=2;", "a=", ";"), Some("2"));
         assert_eq!(parse_int(" 12 ", 0), 12);
         assert_eq!(parse_int("x", 7), 7);
         assert_eq!(ext_from_url("https://x/a/b.JPG?x=1"), "jpg");

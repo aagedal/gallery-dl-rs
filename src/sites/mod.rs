@@ -402,10 +402,12 @@ pub(crate) fn nameext(url: &Url) -> (String, String) {
 }
 
 pub(crate) fn percent_decode(text: &str) -> String {
-    url::form_urlencoded::parse(format!("x={}", text.replace('+', "%2B")).as_bytes())
-        .next()
-        .map(|(_, value)| value.into_owned())
-        .unwrap_or_default()
+    url::form_urlencoded::parse(
+        format!("x={}", text.replace('+', "%2B").replace('&', "%26")).as_bytes(),
+    )
+    .next()
+    .map(|(_, value)| value.into_owned())
+    .unwrap_or_default()
 }
 
 /// Python `html.unescape`.
@@ -618,6 +620,13 @@ pub(crate) mod testing {
             .await
     }
 
+    /// Whether extraction ends in an error.
+    pub async fn fails(events: Events<'_>) -> bool {
+        crate::event::media_only(events)
+            .any(|m| async move { m.is_err() })
+            .await
+    }
+
     pub fn keywords(media: &Media) -> &Map<String, Value> {
         media
             .metadata
@@ -646,6 +655,7 @@ mod tests {
         let url = Url::parse("https://x.test/a/noext").unwrap();
         assert_eq!(nameext(&url), ("noext".into(), String::new()));
         assert_eq!(scalar(&Value::Bool(true)), "True");
+        assert_eq!(percent_decode("a&b=c+d%20e"), "a&b=c+d e");
     }
 
     #[test]

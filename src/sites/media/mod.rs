@@ -9,6 +9,7 @@ use url::Url;
 
 mod misskey;
 mod redgifs;
+mod wikimedia;
 
 pub(super) static SITES: &[&Site] = &[
     &redgifs::SITE,
@@ -17,6 +18,23 @@ pub(super) static SITES: &[&Site] = &[
     &misskey::MISSKEY_ART,
     &misskey::LESBIAN_ENERGY,
     &misskey::SUSHI_SKI,
+    &wikimedia::WIKIPEDIA,
+    &wikimedia::WIKTIONARY,
+    &wikimedia::WIKIQUOTE,
+    &wikimedia::WIKIBOOKS,
+    &wikimedia::WIKISOURCE,
+    &wikimedia::WIKINEWS,
+    &wikimedia::WIKIVERSITY,
+    &wikimedia::WIKIDATA,
+    &wikimedia::WIKIVOYAGE,
+    &wikimedia::WIKISPECIES,
+    &wikimedia::WIKIMEDIACOMMONS,
+    &wikimedia::MEDIAWIKI,
+    &wikimedia::MARIOWIKI,
+    &wikimedia::BULBAPEDIA,
+    &wikimedia::PIDGIWIKI,
+    &wikimedia::AZURLANEWIKI,
+    &wikimedia::MGEWIKI,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
