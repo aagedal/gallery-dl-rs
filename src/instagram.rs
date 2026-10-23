@@ -112,11 +112,114 @@ impl Instagram {
 
     pub async fn extract(&self, post: &Url) -> Result<Vec<Media>> {
         let code = shortcode(post)?;
+        // The media-info API needs a session. Like yt-dlp's logged-out path,
+        // read the post object that the public post page embeds instead.
+        if !self.has_session() {
+            let page = self.api_base.join(&format!("/p/{code}/"))?;
+            return self.extract_logged_out(&page, &code).await;
+        }
         let id = media_id(&code)?;
         let endpoint = http_url(&format!(
             "https://www.instagram.com/api/v1/media/{id}/info/"
         ))?;
         self.extract_endpoint(&endpoint, &code).await
+    }
+
+    fn has_session(&self) -> bool {
+        let root = self
+            .api_base
+            .join("/")
+            .unwrap_or_else(|_| self.api_base.clone());
+        self.cookies
+            .lock()
+            .unwrap()
+            .value(&root, "sessionid")
+            .is_some_and(|value| !value.is_empty())
+    }
+
+    async fn extract_logged_out(&self, page: &Url, code: &str) -> Result<Vec<Media>> {
+        let body = tokio::time::timeout(self.timeout, self.request_page(page))
+            .await
+            .map_err(|_| error("native Instagram extraction timed out"))??;
+        let mut media = parse_logged_out_page(&body, code)?;
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        Ok(media)
+    }
+
+    /// A logged-out post page. Redirects may only normalize the post path;
+    /// Instagram sends rate-limited and private posts to its login page.
+    async fn request_page(&self, endpoint: &Url) -> Result<Vec<u8>> {
+        let mut target = endpoint.clone();
+        let mut redirects = Redirects::new(endpoint);
+        let mut response = loop {
+            self.rate_limits.wait(&target, self.timeout).await?;
+            let mut request = self
+                .client
+                .get(target.clone())
+                .timeout(self.request_timeout)
+                .header(
+                    header::ACCEPT,
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                )
+                .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.5")
+                .header("Sec-Fetch-Dest", "document")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Site", "none");
+            if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
+                request = request.header(header::COOKIE, cookies);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|_| error("Instagram request failed; check network access"))?;
+            self.cookies
+                .lock()
+                .unwrap()
+                .store_response(response.url(), response.headers());
+            match redirects.next(response.url(), response.status(), response.headers())? {
+                Some(next)
+                    if next.path().starts_with("/p/") || next.path().starts_with("/reel/") =>
+                {
+                    target = next;
+                }
+                Some(_) => {
+                    return Err(error(
+                        "Instagram sent the logged-out post page to its login page; the post \
+                         may be private or anonymous access is rate limited; pass --cookies",
+                    ));
+                }
+                None => break response,
+            }
+        };
+        let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            if let Some(delay) = retry_after(response.headers(), SystemTime::now()) {
+                self.rate_limits.defer(endpoint, delay);
+            }
+            return Err(error("Instagram rate limit; retry later or pass --cookies"));
+        }
+        if matches!(status.as_u16(), 404 | 410) {
+            return Err(error(
+                "Instagram post unavailable or inaccessible to this session",
+            ));
+        }
+        if !status.is_success() {
+            return Err(error(format!("Instagram returned HTTP {status}")));
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| error("could not read Instagram response"))?
+        {
+            if body.len() + chunk.len() > MAX_RESPONSE {
+                return Err(error("Instagram response exceeded 16 MiB"));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
@@ -566,6 +669,40 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
     parse_value(&data, code)
 }
 
+/// The post object a logged-out post page embeds as
+/// `xig_polaris_media.if_not_gated_logged_out`, which has the media-info
+/// item's shape.
+pub fn parse_logged_out_page(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
+    std::str::from_utf8(bytes).map_err(|_| error("Instagram returned invalid UTF-8"))?;
+    fn find<'a>(value: &'a Value, code: &str, depth: usize) -> Option<&'a Value> {
+        if depth > 64 {
+            return None;
+        }
+        if let Some(media) = value.get("xig_polaris_media")
+            && media.get("code").and_then(Value::as_str) == Some(code)
+        {
+            return Some(media);
+        }
+        match value {
+            Value::Object(map) => map.values().find_map(|v| find(v, code, depth + 1)),
+            Value::Array(list) => list.iter().find_map(|v| find(v, code, depth + 1)),
+            _ => None,
+        }
+    }
+    let payloads = crate::facebook::embedded_payloads(bytes)?;
+    let media = payloads
+        .iter()
+        .find_map(|payload| find(payload, code, 0))
+        .ok_or_else(|| error("Instagram post page has no logged-out post data; pass --cookies"))?;
+    let post = media
+        .get("if_not_gated_logged_out")
+        .filter(|post| post.is_object())
+        .ok_or_else(|| {
+            error("Instagram only shows this post to logged-in users; pass --cookies")
+        })?;
+    parse_post(post, code)
+}
+
 fn validate_response(data: &Value) -> Result<()> {
     let message = data.get("message").and_then(Value::as_str).unwrap_or("");
     if data.get("challenge").is_some()
@@ -799,6 +936,74 @@ mod transport_tests {
     };
 
     const PHOTO: &[u8] = include_bytes!("../tests/fixtures/instagram/photo.json");
+
+    fn logged_out_page(product: Option<Value>) -> Vec<u8> {
+        let media = match product {
+            Some(product) => {
+                serde_json::json!({"code": "BA", "if_not_gated_logged_out": product})
+            }
+            None => serde_json::json!({"code": "BA", "if_not_gated_logged_out": null}),
+        };
+        let data = serde_json::json!({"require": [["RelayPrefetchedStreamCache", "next", [],
+            ["adp", {"__bbox": {"result": {"data": {"xig_polaris_media": media}}}}]]]});
+        format!("<html><script type=\"application/json\" data-sjs>{data}</script></html>")
+            .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn logged_out_posts_read_the_embedded_post_object() {
+        let photo: Value = serde_json::from_slice(PHOTO).unwrap();
+        let product = photo["items"][0].clone();
+        let page = logged_out_page(Some(product.clone()));
+        let (endpoint, server) = serve_once("200 OK", "", &page, Duration::ZERO);
+        let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+        assert!(!native.has_session());
+        let media = native
+            .extract_logged_out(&endpoint.join("/p/BA/").unwrap(), "BA")
+            .await
+            .unwrap();
+        let from_api = parse_response(PHOTO, "BA").unwrap();
+        assert_eq!(media.len(), from_api.len());
+        assert_eq!(media[0].url, from_api[0].url);
+        assert_eq!(media[0].archive_key(), from_api[0].archive_key());
+        let request = server.join().unwrap().to_ascii_lowercase();
+        assert!(request.starts_with("get /p/ba/ "), "{request}");
+        assert!(request.contains("sec-fetch-mode: navigate\r\n"));
+        assert!(!request.contains("x-ig-app-id"));
+
+        let gated = parse_logged_out_page(&logged_out_page(None), "BA").unwrap_err();
+        assert!(gated.to_string().contains("logged-in users"), "{gated}");
+        let other = parse_logged_out_page(&logged_out_page(Some(product)), "BC").unwrap_err();
+        assert!(
+            other.to_string().contains("no logged-out post data"),
+            "{other}"
+        );
+    }
+
+    #[tokio::test]
+    async fn logged_out_login_redirects_ask_for_cookies() {
+        let (endpoint, server) = serve_once(
+            "302 Found",
+            "Location: /accounts/login/?next=%2Fp%2FBA%2F\r\n",
+            b"",
+            Duration::ZERO,
+        );
+        let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+        let message = native
+            .extract_logged_out(&endpoint.join("/p/BA/").unwrap(), "BA")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("--cookies"), "{message}");
+        assert!(!message.contains("/accounts/login"));
+        server.join().unwrap();
+        let session = Instagram::from_cookie_jar(
+            CookieJar::parse(".instagram.com\tTRUE\t/\tTRUE\t0\tsessionid\tsecret\n").unwrap(),
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        assert!(session.has_session());
+    }
 
     #[tokio::test]
     async fn request_timeout_is_separate_from_the_overall_extraction_deadline() {
