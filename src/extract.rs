@@ -854,6 +854,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     if let Some(site) = crate::imagehosts::Site::from_host(host) {
         return Some(site.category());
     }
+    if crate::bluesky::is_host(host) {
+        return Some("bluesky");
+    }
     for (domain, category) in [
         ("instagram.com", "instagram"),
         ("facebook.com", "facebook"),
