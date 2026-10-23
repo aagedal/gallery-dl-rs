@@ -3,7 +3,7 @@
 //! Upstream only takes `ytdl:`-prefixed URLs unless `extractor.ytdl.enabled`
 //! is set; here the hosts of large video and social platforms without a
 //! gallery-dl extractor of their own (YouTube, Twitch, Douyin, LinkedIn,
-//! Snapchat Spotlight, Telegram posts, Xiaohongshu, Bilibili and VK videos)
+//! Snapchat Spotlight, Xiaohongshu, Bilibili and VK videos)
 //! are routed to it directly. `yt-dlp -J --flat-playlist` lists a URL once;
 //! each video becomes one post whose file is a video-page job that the
 //! downloader hands back to yt-dlp. Playlist entries keep the flat metadata
@@ -146,12 +146,6 @@ fn matches(url: &Url) -> bool {
     }
     if under(host, "snapchat.com") {
         return first == "spotlight";
-    }
-    if host == "t.me" || host == "telegram.me" {
-        // `t.me/CHANNEL/POST` with a numeric post ID.
-        return segments.len() == 2
-            && !segments[1].is_empty()
-            && segments[1].bytes().all(|b| b.is_ascii_digit());
     }
     if under(host, "xiaohongshu.com") {
         return matches!(first, "explore" | "discovery");
@@ -338,7 +332,6 @@ mod tests {
             "https://www.douyin.com/video/123",
             "https://www.linkedin.com/posts/someone_activity-1-abc",
             "https://www.snapchat.com/spotlight/W7_EDlXWTBi",
-            "https://t.me/durov/123",
             "https://www.xiaohongshu.com/explore/abc",
             "https://www.bilibili.com/video/BV1xx411c7mD",
             "https://space.bilibili.com/123",
@@ -497,6 +490,7 @@ mod routing_tests {
             ("https://www.tiktok.com/@user/video/123", "tiktok"),
             ("https://weibo.com/1234567890", "weibo"),
             ("https://discord.com/channels/1/2", "discord"),
+            ("https://t.me/durov/123", "telegram"),
         ] {
             let url = url::Url::parse(raw).unwrap();
             let site = crate::sites::find(&url).map(|s| s.category);

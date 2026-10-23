@@ -1419,10 +1419,9 @@ fn extract_input<'a>(
                         .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
                     native.events(&url)
                 }
-                // gallery-dl only reaches yt-dlp sites through its own ytdl
-                // module, so they always use the native extractor.
                 _ if gallery_dl_rs::sites::is_category(category)
-                    && (matches!(extractor, Extractor::Native) || category == "ytdl") =>
+                    && (matches!(extractor, Extractor::Native)
+                        || gallery_dl_rs::sites::native_only(category)) =>
                 {
                     let site = gallery_dl_rs::sites::site(category).expect("registry site");
                     // Cookies are read once, when the site's state is created.
