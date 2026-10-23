@@ -343,10 +343,9 @@ impl Twitter {
         if !response.status().is_success() {
             return Err(failed());
         }
-        let body = response.bytes().await.map_err(|_| failed())?;
-        if body.len() > 64 * 1024 {
-            return Err(failed());
-        }
+        let body = crate::transport::read_capped(response, 64 * 1024)
+            .await
+            .ok_or_else(failed)?;
         let data: Value = serde_json::from_slice(&body).map_err(|_| failed())?;
         let token = data
             .get("guest_token")
@@ -443,9 +442,10 @@ impl Twitter {
                     .header("x-twitter-client-language", "en");
                 let guest = self.guest.lock().unwrap().clone();
                 let scoped = self.cookies.lock().unwrap().header(&target);
-                let session = scoped
-                    .as_deref()
-                    .is_some_and(|c| c.split("; ").any(|p| p.starts_with("auth_token=")));
+                let session = scoped.as_deref().is_some_and(|c| {
+                    c.split("; ")
+                        .any(|p| p.strip_prefix("auth_token=").is_some_and(|v| !v.is_empty()))
+                });
                 if let Some(guest) = guest.filter(|_| !session) {
                     request = request.header("x-guest-token", guest);
                     if let Some(transaction) = self.transaction.lock().unwrap().as_ref() {
@@ -526,11 +526,24 @@ impl Twitter {
                 },
             ));
         }
+        // Guest tokens expire after a few hours and are rate limited; a
+        // refused one is dropped so the next request activates a new one.
+        let guest = api && self.guest.lock().unwrap().is_some() && !self.has_session();
+        if guest && matches!(status.as_u16(), 401 | 403) {
+            *self.guest.lock().unwrap() = None;
+            if endpoint.path().ends_with("/TweetResultByRestId") {
+                return Err(error(
+                    "X refused the guest session for this post (expired token, rate limit or \
+                     protected post); retry, or pass x.com auth_token and ct0 cookies",
+                )
+                .into());
+            }
+        }
         // Guests may read single posts only; X answers other queries with
         // 401/403/404.
         if api
             && matches!(status.as_u16(), 401 | 403 | 404)
-            && self.guest.lock().unwrap().is_some()
+            && guest
             && !endpoint.path().ends_with("/TweetResultByRestId")
         {
             return Err(error(
@@ -1219,6 +1232,47 @@ mod tests {
         assert!(!requests[1].contains("cookie:"));
         // The token is activated once per extractor.
         assert!(requests[2].starts_with("get /i/api/graphql/q/usermedia"));
+    }
+
+    #[tokio::test]
+    async fn refused_guest_tokens_are_replaced() {
+        let (endpoint, server) = serve(vec![
+            (
+                response("200 OK", "", br#"{"guest_token":"1"}"#),
+                Duration::ZERO,
+            ),
+            (response("403 Forbidden", "", b""), Duration::ZERO),
+            (
+                response("200 OK", "", br#"{"guest_token":"2"}"#),
+                Duration::ZERO,
+            ),
+            (response("200 OK", "", PHOTO), Duration::ZERO),
+        ]);
+        let native = Twitter::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_guest_endpoint(endpoint.join("/1.1/guest/activate.json").unwrap());
+        let message = native
+            .extract_endpoint(&endpoint, ID)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("refused the guest session"), "{message}");
+        assert!(
+            !native
+                .extract_endpoint(&endpoint, ID)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let requests: Vec<String> = server
+            .join()
+            .unwrap()
+            .iter()
+            .map(|r| r.to_ascii_lowercase())
+            .collect();
+        assert!(requests[2].starts_with("post /1.1/guest/activate.json "));
+        assert!(requests[3].contains("x-guest-token: 2\r\n"));
     }
 
     #[tokio::test]

@@ -229,6 +229,15 @@ pub fn native_only(category: &str) -> bool {
     )
 }
 
+/// Cookie domains a site needs besides its own: short links are extracted
+/// by their target sites with the short-link site's session.
+pub fn extra_cookie_domains(site: &Site) -> &'static [&'static str] {
+    match site.category {
+        "shortlink" => social::SHORTLINK_COOKIE_DOMAINS,
+        _ => &[],
+    }
+}
+
 pub fn is_category(category: &str) -> bool {
     site(category).is_some()
 }

@@ -30,3 +30,5 @@ pub(super) static SITES: &[&Site] = &[
     &shortlink::SITE,
     &linkedin::SITE,
 ];
+
+pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;

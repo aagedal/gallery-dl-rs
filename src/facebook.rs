@@ -237,10 +237,9 @@ impl Facebook {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| url.join(v).ok())
         } else if response.status().is_success() {
-            let body = response.bytes().await.map_err(|_| unresolved())?;
-            if body.len() > MAX_RESPONSE {
-                return Err(unresolved());
-            }
+            let body = crate::transport::read_capped(response, MAX_RESPONSE)
+                .await
+                .ok_or_else(unresolved)?;
             let page = String::from_utf8_lossy(&body);
             crate::sites::extr(&page, r#"<link rel="canonical" href=""#, "\"")
                 .or_else(|| crate::sites::extr(&page, r#"<meta property="og:url" content=""#, "\""))
@@ -282,7 +281,7 @@ impl Facebook {
                 Tab::Albums(name) => {
                     let list = parse_albums(&body, name.as_deref())?;
                     let referer = input.page()?;
-                    self.album_list_events(list, name.clone(), base, referer)
+                    self.album_list_events(list, name.clone(), base, referer, HashSet::new())
                 }
             };
             Ok::<_, crate::Error>(events)
@@ -449,6 +448,7 @@ impl Facebook {
         name: Option<String>,
         base: Url,
         referer: Url,
+        mut cursors: HashSet<String>,
     ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
         let crate::facebook_profile::AlbumList {
             albums,
@@ -468,7 +468,8 @@ impl Facebook {
             let (Some(cursor), Some(collection), Some(lsd)) = (cursor, collection, lsd) else {
                 return stream::empty().boxed();
             };
-            if !more {
+            // Each cursor is followed once, and the list at most 500 pages.
+            if !more || !cursors.insert(cursor.clone()) || cursors.len() > 500 {
                 return stream::empty().boxed();
             }
             let variables = serde_json::json!({
@@ -492,7 +493,7 @@ impl Facebook {
                 Some(mut next) if next.cursor.as_ref().is_some_and(|c| c != &cursor) => {
                     next.collection = Some(collection);
                     next.lsd = Some(lsd);
-                    self.album_list_events(next, name, base, referer)
+                    self.album_list_events(next, name, base, referer, cursors)
                 }
                 Some(next) => self.album_list_events(
                     crate::facebook_profile::AlbumList {
@@ -502,6 +503,7 @@ impl Facebook {
                     name,
                     base,
                     referer,
+                    cursors,
                 ),
                 None => stream::once(async {
                     Err(error(
@@ -554,8 +556,7 @@ impl Facebook {
         if !response.status().is_success() {
             return None;
         }
-        let body = response.bytes().await.ok()?;
-        (body.len() <= MAX_RESPONSE).then(|| body.to_vec())
+        crate::transport::read_capped(response, MAX_RESPONSE).await
     }
 
     /// Extend an exhausted album grid through the album's pagination query,

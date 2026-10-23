@@ -29,7 +29,15 @@ static POSTS: Route = Route::new("posts", FILENAME, DIRECTORY, "{post_id}_{num}"
 
 const ROOT: &str = "https://www.youtube.com";
 /// Skips the EU consent interstitial, like yt-dlp.
-const CONSENT: &str = "SOCS=CAI";
+const CONSENT: &str = "SOCS=CAI; Path=/";
+
+/// Add the consent cookie to the session unless it has one; an explicit
+/// `Cookie` header would replace the user's own YouTube cookies.
+fn consent(http: &Http, url: &Url) {
+    if http.cookie(url, "SOCS").is_none() {
+        http.set_cookie(url, CONSENT);
+    }
+}
 /// Posts-tab continuation pages followed at most.
 const MAX_PAGES: usize = 1000;
 
@@ -103,8 +111,8 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                             }},
                             "continuation": token,
                         });
+                        consent(http, &endpoint);
                         let headers = http.browser_headers(&[
-                            ("Cookie", CONSENT),
                             ("Origin", ROOT),
                             ("Content-Type", "application/json"),
                         ]);
@@ -152,7 +160,8 @@ struct Page {
 
 async fn page(http: &Http, url: &str) -> crate::Result<Page> {
     let url = http.api(url)?;
-    let headers = http.browser_headers(&[("Cookie", CONSENT), ("Accept-Language", "en-US,en")]);
+    consent(http, &url);
+    let headers = http.browser_headers(&[("Accept-Language", "en-US,en")]);
     let html = http.text_with(&url, &headers).await?;
     let data = crate::sites::extr(&html, "var ytInitialData = ", ";</script>")
         .and_then(|json| serde_json::from_str(json).ok())
@@ -421,7 +430,9 @@ mod tests {
             response("206 Partial Content", "image/png", b"\x89PNG\r\n\x1a\n"),
             response("206 Partial Content", "image/jpeg", b"\xff\xd8\xff\xe0"),
         ]);
-        let http = http("youtube", root);
+        let http = http("youtube", root.clone());
+        // A user's session cookie is sent together with the consent cookie.
+        http.set_cookie(&root, "LOGIN_INFO=secret; Path=/");
         let files = media(extract(
             &http,
             Url::parse("https://www.youtube.com/post/Ugkx1").unwrap(),
@@ -447,6 +458,7 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /post/Ugkx1 "));
         assert!(requests[0].contains("SOCS=CAI"));
+        assert!(requests[0].contains("LOGIN_INFO=secret"));
         assert!(
             requests[1]
                 .to_ascii_lowercase()

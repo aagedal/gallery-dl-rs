@@ -267,6 +267,19 @@ impl RateLimits {
     }
 }
 
+/// A response body read in chunks, or `None` once it exceeds `cap` bytes
+/// (nothing beyond the cap is buffered) or the connection fails.
+pub(crate) async fn read_capped(mut response: reqwest::Response, cap: usize) -> Option<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len() + chunk.len() > cap {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Some(body)
+}
+
 pub(crate) fn retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Duration> {
     let value = headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
     if !value.is_empty() && value.bytes().all(|c| c.is_ascii_digit()) {

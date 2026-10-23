@@ -171,6 +171,14 @@ async fn query(
              logged-out access, so retry later or pass --cookies",
         ));
     };
+    // An answered query whose media is null is a deleted or private post,
+    // not a rotated operation.
+    if data.get("errors").is_none()
+        && data.get("data").is_some_and(Value::is_object)
+        && data.pointer("/data/media").is_some_and(Value::is_null)
+    {
+        return Err(error("Threads post not found or not public"));
+    }
     Ok(data
         .pointer("/data/media")
         .filter(|media| media.is_object())
@@ -503,6 +511,23 @@ mod tests {
         assert!(requests[3].contains("doc_id=777"), "{}", requests[3]);
         assert!(requests[3].contains("NewFlagrelayprovider"));
         assert!(!requests[3].contains("BarcelonaIsCrawler"));
+    }
+
+    #[tokio::test]
+    async fn missing_posts_do_not_trigger_rediscovery() {
+        let (root, server) = serve(vec![
+            page("https://static.cdninstagram.com/rsrc.php/a.js"),
+            reply(json!({"data": {"media": null}})),
+        ]);
+        let http = http("threads", root);
+        let events: Vec<_> = futures_util::StreamExt::collect(extract(
+            &http,
+            Url::parse("https://www.threads.com/@zuck/post/BA").unwrap(),
+        ))
+        .await;
+        let error = events[0].as_ref().err().unwrap().to_string();
+        assert!(error.contains("not found or not public"), "{error}");
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     #[tokio::test]

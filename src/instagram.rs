@@ -271,13 +271,9 @@ impl Instagram {
         if !response.status().is_success() {
             return Err(truncated_profile());
         }
-        let body = response
-            .bytes()
+        let body = crate::transport::read_capped(response, MAX_RESPONSE)
             .await
-            .map_err(|_| error("could not read Instagram response"))?;
-        if body.len() > MAX_RESPONSE {
-            return Err(error("Instagram response exceeded 16 MiB"));
-        }
+            .ok_or_else(|| error("Instagram response was unreadable or exceeded 16 MiB"))?;
         serde_json::Deserializer::from_slice(&body)
             .into_iter::<Value>()
             .next()

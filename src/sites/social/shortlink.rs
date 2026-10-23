@@ -16,7 +16,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&LINK],
     api_key: false,
-    cookies: None,
+    cookies: Some("xhslink.com"),
 };
 
 static LINK: Route = Route::new("link", "{filename}.{extension}", &["{category}"], "");
@@ -28,6 +28,14 @@ const HOSTS: &[(&str, &str)] = &[
     ("xhslink.com", "xiaohongshu.com"),
     ("www.xhslink.com", "xiaohongshu.com"),
     ("v.douyin.com", "douyin.com"),
+];
+
+/// The target sites' cookie domains, loaded into this site's session.
+pub(super) static COOKIE_DOMAINS: &[&str] = &[
+    "snapchat.com",
+    "kuaishou.com",
+    "xiaohongshu.com",
+    "douyin.com",
 ];
 
 fn short(url: &Url) -> Option<&'static str> {
@@ -55,6 +63,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     .host_str()
                     .is_some_and(|host| host == domain || host.ends_with(&format!(".{domain}")))
                     && short(target).is_none()
+                    // Only targets an extractor reads, e.g. not the bare
+                    // xiaohongshu.com host or a Douyin profile.
+                    && crate::sites::find(target).is_some_and(|site| site.category != "shortlink")
             })
             .ok_or_else(|| error("short link did not redirect to its site"))?;
         Ok(crate::sites::queue(

@@ -1472,7 +1472,11 @@ fn extract_input<'a>(
                     // Cookies are read once, when the site's state is created.
                     let jar = match site.cookies {
                         Some(domain) if !extractors.sites.initialized(site) => {
-                            Some(extractors.cookie_jar(configured, domain).await?)
+                            let mut jar = extractors.cookie_jar(configured, domain).await?;
+                            for extra in gallery_dl_rs::sites::extra_cookie_domains(site) {
+                                jar.extend(extractors.cookie_jar(configured, extra).await?);
+                            }
+                            Some(jar)
                         }
                         _ => None,
                     };

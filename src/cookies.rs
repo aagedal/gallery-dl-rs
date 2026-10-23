@@ -284,6 +284,11 @@ impl CookieJar {
         })
     }
 
+    /// Add another jar's cookies, for sites that hand URLs to other sites.
+    pub fn extend(&mut self, other: CookieJar) {
+        self.cookies.extend(other.cookies);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.cookies.is_empty()
     }
