@@ -2429,7 +2429,7 @@ are always native):
 
 | Platform | Extractor | Anonymous access (checked live) |
 |---|---|---|
-| Instagram | native (experimental) | public posts and reels, and the 12 posts a public profile page lists; the rest of a profile needs `--cookies` |
+| Instagram | native (experimental) | public posts, reels and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
 | X/Twitter | native (experimental) | single posts as a guest; timelines and searches need `--cookies` |
 | Facebook | native photos, albums, videos and profiles | public albums in full (grid pages through the album pagination query); profile photos' first grid page, the rest needs `--cookies` |
 | Reddit | native REST listings, submissions, users | Reddit sends logged-out JSON clients on some networks to its login page; pass `--cookies` |
