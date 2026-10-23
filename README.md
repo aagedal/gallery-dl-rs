@@ -2424,7 +2424,7 @@ Native coverage of the largest social platforms (`--extractor native`;
 
 | Platform | Extractor | Anonymous access (checked live) |
 |---|---|---|
-| Instagram | native (experimental) | single public posts and reels; profiles need `--cookies` |
+| Instagram | native (experimental) | public posts and reels, and the 12 posts a public profile page lists; the rest of a profile needs `--cookies` |
 | X/Twitter | native (experimental) | single posts as a guest; timelines and searches need `--cookies` |
 | Facebook | native photos, albums, videos and profiles | first grid page of public albums and profiles; the rest needs `--cookies` |
 | Reddit | native REST listings, submissions, users | Reddit sends logged-out JSON clients on some networks to its login page; pass `--cookies` |

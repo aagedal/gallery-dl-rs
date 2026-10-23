@@ -222,7 +222,7 @@ impl Instagram {
         let key = user.key();
         let path = match (view, user) {
             // Preserve the established bare-profile feed for named profiles.
-            ("posts", User::Name(name)) => return self.profile_events(name, base),
+            ("posts", User::Name(name)) => return self.profile_or_logged_out(name, base),
             ("info", user) => return self.profile_view_events(user, false, base),
             ("avatar", user) => return self.profile_view_events(user, true, base),
             ("stories", _) => format!("stories/{key}/"),

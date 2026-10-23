@@ -47,6 +47,9 @@ pub struct Instagram {
     rate_limits: RateLimits,
     include: Option<crate::dispatch::Include>,
     api_base: Url,
+    /// Read a profile's first posts from its public page when the API
+    /// refuses a session-less client; off in unit tests unless enabled.
+    logged_out_profiles: bool,
 }
 
 impl Instagram {
@@ -74,6 +77,7 @@ impl Instagram {
             rate_limits: RateLimits::default(),
             include: None,
             api_base: Url::parse("https://www.instagram.com/api/v1/").unwrap(),
+            logged_out_profiles: !cfg!(test),
         })
     }
 
@@ -123,6 +127,66 @@ impl Instagram {
             "https://www.instagram.com/api/v1/media/{id}/info/"
         ))?;
         self.extract_endpoint(&endpoint, &code).await
+    }
+
+    #[cfg(test)]
+    fn with_logged_out_profiles(mut self) -> Self {
+        self.logged_out_profiles = true;
+        self
+    }
+
+    /// Named-profile posts; without a session, an API refusal falls back to
+    /// the posts listed on the public profile page.
+    pub(crate) fn profile_or_logged_out(
+        &self,
+        username: String,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let mut primary = self.profile_events(username.clone(), base);
+        if !self.logged_out_profiles || self.has_session() {
+            return primary;
+        }
+        stream::once(async move {
+            match primary.next().await {
+                Some(Err(e)) => {
+                    let page = self.api_base.join(&format!("/{username}/"))?;
+                    let body = tokio::time::timeout(self.timeout, self.request_page(&page))
+                        .await
+                        .map_err(|_| error("native Instagram extraction timed out"))?
+                        .map_err(|_| e)?;
+                    let (codes, more) = parse_logged_out_profile(&body)?;
+                    Ok::<_, crate::Error>(self.logged_out_posts(codes, more))
+                }
+                first => Ok(stream::iter(first).chain(primary).boxed()),
+            }
+        })
+        .try_flatten()
+        .boxed()
+    }
+
+    fn logged_out_posts(
+        &self,
+        codes: Vec<String>,
+        more: bool,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let posts = stream::iter(codes)
+            .then(move |code| async move {
+                let page = self.api_base.join(&format!("/p/{code}/"))?;
+                let items = self.extract_logged_out(&page, &code).await?;
+                Ok::<_, crate::Error>(stream::iter(
+                    event::group_with_keywords(items, "instagram", instagram_keywords())
+                        .into_iter()
+                        .map(Ok),
+                ))
+            })
+            .try_flatten();
+        let rest = more.then(|| {
+            Err(error(
+                "Instagram profile continues beyond the posts visible without login; \
+                 pass --cookies for the rest",
+            ))
+        });
+        posts.chain(stream::iter(rest)).boxed()
     }
 
     fn has_session(&self) -> bool {
@@ -180,7 +244,10 @@ impl Instagram {
                 .store_response(response.url(), response.headers());
             match redirects.next(response.url(), response.status(), response.headers())? {
                 Some(next)
-                    if next.path().starts_with("/p/") || next.path().starts_with("/reel/") =>
+                    if next.path().starts_with("/p/")
+                        || next.path().starts_with("/reel/")
+                        || next.path().trim_end_matches('/')
+                            == endpoint.path().trim_end_matches('/') =>
                 {
                     target = next;
                 }
@@ -298,7 +365,7 @@ impl Instagram {
             return self.user_events(input);
         }
         match profile_username(url) {
-            Ok(username) => self.profile_events(username, self.api_base.clone()),
+            Ok(username) => self.profile_or_logged_out(username, self.api_base.clone()),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
     }
@@ -669,6 +736,55 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
     parse_value(&data, code)
 }
 
+/// The shortcodes of the posts a logged-out profile page lists, in order
+/// (`xig_user_by_username.polaris_ordered_timeline_connection`), and whether
+/// more follow.
+pub fn parse_logged_out_profile(bytes: &[u8]) -> Result<(Vec<String>, bool)> {
+    fn find(value: &Value, depth: usize) -> Option<&Value> {
+        if depth > 64 {
+            return None;
+        }
+        if let Some(connection) = value
+            .get("xig_user_by_username")
+            .and_then(|user| user.get("polaris_ordered_timeline_connection"))
+        {
+            return Some(connection);
+        }
+        match value {
+            Value::Object(map) => map.values().find_map(|v| find(v, depth + 1)),
+            Value::Array(list) => list.iter().find_map(|v| find(v, depth + 1)),
+            _ => None,
+        }
+    }
+    std::str::from_utf8(bytes).map_err(|_| error("Instagram returned invalid UTF-8"))?;
+    let payloads = crate::facebook::embedded_payloads(bytes)?;
+    let connection = payloads
+        .iter()
+        .find_map(|payload| find(payload, 0))
+        .ok_or_else(|| {
+            error("Instagram profile page lists no posts without login; pass --cookies")
+        })?;
+    let mut codes: Vec<String> = Vec::new();
+    for edge in connection
+        .get("edges")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(code) = edge.pointer("/node/code").and_then(Value::as_str)
+            && media_id(code).is_ok()
+            && !codes.iter().any(|seen| seen == code)
+        {
+            codes.push(code.to_owned());
+        }
+    }
+    let more = connection
+        .pointer("/page_info/has_next_page")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok((codes, more))
+}
+
 /// The post object a logged-out post page embeds as
 /// `xig_polaris_media.if_not_gated_logged_out`, which has the media-info
 /// item's shape.
@@ -978,6 +1094,45 @@ mod transport_tests {
             other.to_string().contains("no logged-out post data"),
             "{other}"
         );
+    }
+
+    #[tokio::test]
+    async fn refused_profiles_fall_back_to_the_public_profile_page() {
+        let photo: Value = serde_json::from_slice(PHOTO).unwrap();
+        let profile = serde_json::json!({"require": [{"data": {"xig_user_by_username": {
+            "polaris_ordered_timeline_connection": {
+                "edges": [{"node": {"code": "BA"}}, {"node": {"code": "BA"}},
+                          {"node": {"code": "not a code!"}}],
+                "page_info": {"has_next_page": true}}}}}]});
+        let profile = format!("<script type=\"application/json\">{profile}</script>");
+        let (endpoint, server) = serve_sequence(vec![
+            response(
+                "401 Unauthorized",
+                "",
+                br#"{"message":"Please wait a few minutes before you try again.","require_login":true,"status":"fail"}"#,
+            ),
+            response("200 OK", "", profile.as_bytes()),
+            response("200 OK", "", &logged_out_page(Some(photo["items"][0].clone()))),
+        ]);
+        let native = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_api_base(endpoint.join("/api/v1/").unwrap())
+            .with_logged_out_profiles();
+        let results: Vec<_> = native
+            .stream(&Url::parse("https://www.instagram.com/alice/").unwrap())
+            .collect()
+            .await;
+        assert_eq!(results.len(), 2, "{results:?}");
+        assert_eq!(
+            results[0].as_ref().unwrap().url,
+            parse_response(PHOTO, "BA").unwrap()[0].url
+        );
+        let message = results[1].as_ref().unwrap_err().to_string();
+        assert!(message.contains("--cookies"), "{message}");
+        let requests: Vec<String> = server.join().unwrap().into_iter().map(|r| r.2).collect();
+        assert!(requests[1].starts_with("GET /alice/ "), "{}", requests[1]);
+        assert!(requests[2].starts_with("GET /p/BA/ "), "{}", requests[2]);
     }
 
     #[tokio::test]
