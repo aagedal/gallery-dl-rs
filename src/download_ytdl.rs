@@ -307,7 +307,8 @@ mod tests {
         assert!(!joined.contains("Range"));
         assert!(joined.contains("--cookies /tmp/c.txt --output "));
         assert_eq!(&args[args.len() - 2..], ["--", page.as_str()]);
-        assert!(args.contains(&"/out/a/.ytdl-x/media.%(ext)s".to_owned()));
+        let template = Path::new("/out/a/.ytdl-x").join("media.%(ext)s");
+        assert!(args.contains(&template.display().to_string()));
     }
 
     #[test]
