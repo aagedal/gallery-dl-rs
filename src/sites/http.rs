@@ -344,10 +344,11 @@ impl Http {
             return Err(error(format!("{name} resource not found")).into());
         }
         if matches!(status.as_u16(), 401 | 403) {
-            return Err(error(format!(
-                "{name} refused access; the resource may need authentication"
-            ))
-            .into());
+            let refused: crate::Error = Box::new(Refused {
+                status: status.as_u16(),
+                message: format!("{name} refused access; the resource may need authentication"),
+            });
+            return Err(refused.into());
         }
         if !status.is_success() {
             return Err(error(format!("{name} returned HTTP {status}")).into());
@@ -367,6 +368,29 @@ impl Http {
         }
         Ok(crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?)
     }
+}
+
+/// An HTTP 401/403 response. Displays like any other site error (no URL or
+/// credentials); [`refused_status`] lets a site tell the two apart.
+#[derive(Debug)]
+pub struct Refused {
+    status: u16,
+    message: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// The HTTP status (401 or 403) of a refused request, if `error` is one.
+pub fn refused_status(error: &crate::Error) -> Option<u16> {
+    error
+        .downcast_ref::<Refused>()
+        .map(|refused| refused.status)
 }
 
 fn user_agent() -> String {
