@@ -41,6 +41,7 @@ pub mod profile_asset;
 mod python_unicode;
 mod range;
 pub mod reddit;
+mod reddit_rss;
 mod resume;
 pub mod selection;
 pub mod sites;

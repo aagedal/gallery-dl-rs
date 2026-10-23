@@ -1124,9 +1124,16 @@ impl Reddit {
             .query_pairs_mut()
             .extend_pairs(query)
             .append_pair("raw_json", "1");
-        let body = tokio::time::timeout(self.timeout, self.request(&endpoint, false))
+        let body = match tokio::time::timeout(self.timeout, self.request(&endpoint, false))
             .await
-            .map_err(|_| Failure::from(error("native Reddit extraction timed out")))??;
+            .map_err(|_| Failure::from(error("native Reddit extraction timed out")))?
+        {
+            Ok(body) => body,
+            Err(failure) if failure.error.to_string() == LOGIN_REQUIRED && !self.has_session() => {
+                return self.feed_fallback(path, query, failure).await;
+            }
+            Err(failure) => return Err(failure),
+        };
         let value: Value = serde_json::from_slice(&body)
             .map_err(|_| Failure::from(error("Reddit returned invalid JSON")))?;
         if let Some(code) = value.get("error") {
@@ -1144,6 +1151,60 @@ impl Reddit {
             });
         }
         Ok(value)
+    }
+
+    fn has_session(&self) -> bool {
+        let root = Url::parse("https://www.reddit.com/").unwrap();
+        self.cookies
+            .lock()
+            .unwrap()
+            .value(&root, "reddit_session")
+            .is_some()
+    }
+
+    /// When the JSON API is closed to logged-out clients, read the same
+    /// listing or submission from its public Atom feed instead.
+    async fn feed_fallback(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+        refused: Failure,
+    ) -> std::result::Result<Value, Failure> {
+        if let Some(name) = path
+            .strip_prefix("user/")
+            .and_then(|rest| rest.strip_suffix("/about.json"))
+        {
+            // Feeds carry no account IDs; a user's feed holds only their posts.
+            return Ok(serde_json::json!({"data": {"name": name, "from_feed": true}}));
+        }
+        if path.starts_with("api/morechildren") {
+            return Ok(serde_json::json!({"json": {"data": {"things": []}}}));
+        }
+        let Some(feed) = crate::reddit_rss::feed_path(path) else {
+            return Err(refused);
+        };
+        let Ok(mut endpoint) = self.api_root.join(&feed) else {
+            return Err(refused);
+        };
+        endpoint.query_pairs_mut().extend_pairs(query);
+        let body = match tokio::time::timeout(self.timeout, self.request(&endpoint, false)).await {
+            Ok(Ok(body)) => body,
+            // Logged-out feeds allow about one request per minute; report
+            // that rather than the login wall.
+            Ok(Err(failure)) if failure.error.to_string().contains("rate limit") => {
+                return Err(failure);
+            }
+            _ => return Err(refused),
+        };
+        let xml = String::from_utf8_lossy(&body);
+        let value = match path
+            .strip_prefix("comments/")
+            .and_then(|rest| rest.split('/').next())
+        {
+            Some(id) => crate::reddit_rss::submission(&xml, id),
+            None => crate::reddit_rss::listing(&xml),
+        };
+        value.ok_or(refused)
     }
 
     /// Upstream `RedditAPI.submission`, including `morecomments`.
@@ -1341,6 +1402,7 @@ impl Reddit {
         if self.options.only.unwrap_or(only_default) {
             match string(&user, "id") {
                 Some(id) => walk.only = Some(format!("t2_{id}")),
+                None if truthy(user.get("from_feed")) => {}
                 None if truthy(user.get("is_suspended")) => {
                     return Err(error("Reddit user is suspended"));
                 }
@@ -2433,6 +2495,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn login_walls_fall_back_to_the_public_feed() {
+        let feed = r#"<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><author><name>/u/alice</name></author><category term="pics"/><content type="html">&lt;a href=&quot;https://i.redd.it/abc.jpeg&quot;&gt;[link]&lt;/a&gt;</content><id>t3_a1</id><link href="https://www.reddit.com/r/pics/comments/a1/x/"/><published>2026-10-20T10:00:00+00:00</published><title>A</title></entry></feed>"#;
+        let empty = r#"<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>"#;
+        let wall = || {
+            response(
+                "302 Found",
+                "Location: https://old.reddit.com/login/?reason=lor2\r\n",
+                b"",
+            )
+        };
+        let (root, server) = serve(vec![
+            wall(),
+            response(
+                "200 OK",
+                "Content-Type: application/atom+xml\r\n",
+                feed.as_bytes(),
+            ),
+            wall(),
+            response(
+                "200 OK",
+                "Content-Type: application/atom+xml\r\n",
+                empty.as_bytes(),
+            ),
+        ]);
+        let native = reddit(root);
+        let events: Vec<_> = native
+            .events(&Url::parse("https://www.reddit.com/r/pics/top/").unwrap())
+            .collect()
+            .await;
+        let files = files(&events);
+        assert_eq!(files.len(), 1, "{events:?}");
+        assert_eq!(files[0].url.as_str(), "https://i.redd.it/abc.jpeg");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[1].starts_with("GET /r/pics/top/.rss?"),
+            "{}",
+            requests[1]
+        );
+        assert!(requests[3].contains("after=t3_a1"), "{}", requests[3]);
+    }
+
+    #[tokio::test]
     async fn session_cookies_are_sent_and_login_walls_ask_for_them() {
         let (root, server) = serve(vec![
             ok(&listing(vec![image_post("h1")], None)),
@@ -2441,11 +2545,14 @@ mod tests {
                 "Location: https://old.reddit.com/login/?reason=lor2\r\n",
                 b"",
             ),
+            // The feed fallback is refused as well, so the wall is reported.
+            response("404 Not Found", "", b""),
             response(
                 "403 Forbidden",
                 "Content-Type: text/html\r\n",
                 b"<html></html>",
             ),
+            response("404 Not Found", "", b""),
         ]);
         let host = root.host_str().unwrap().to_owned();
         let jar = crate::cookies::CookieJar::parse(&format!(
