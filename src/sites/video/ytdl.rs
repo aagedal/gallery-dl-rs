@@ -533,6 +533,10 @@ mod routing_tests {
             ("https://www.youtube.com/@NASA/posts", "youtube"),
             ("https://www.youtube.com/post/Ugkx1", "youtube"),
             ("https://www.youtube.com/@NASA/videos", "ytdl"),
+            (
+                "https://www.linkedin.com/posts/a_b-activity-7501212373572050945-8YjQ",
+                "linkedin",
+            ),
         ] {
             let url = url::Url::parse(raw).unwrap();
             let site = crate::sites::find(&url).map(|s| s.category);

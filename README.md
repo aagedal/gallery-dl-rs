@@ -2424,8 +2424,8 @@ available from upstream.
 ### Social platforms
 
 Native coverage of the largest social platforms (`--extractor native`;
-`telegram`, `snapchat`, `kuaishou`, `xiaohongshu`, `threads`, `youtube` and
-`ytdl` have no upstream extractor and
+`telegram`, `snapchat`, `kuaishou`, `xiaohongshu`, `threads`, `youtube`,
+`linkedin`, `shortlink` and `ytdl` have no upstream extractor and
 are always native):
 
 | Platform | Extractor | Anonymous access (checked live) |
@@ -2443,7 +2443,8 @@ are always native):
 | Bilibili | native opus articles and user/favorite lists | yes, via the dynamic API under risk control |
 | Discord | native channels and servers | needs the `token` site option |
 | YouTube community posts | native (`post/ID`, `@HANDLE/posts`, `channel/ID/posts`): images at original size, attached videos queued to yt-dlp, the posts tab paged through `browse` | yes |
-| YouTube, Twitch, Douyin (yt-dlp needs fresh browser cookies), LinkedIn, Snapchat Spotlight posts, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
+| LinkedIn | native public posts (`posts/SLUG`, `feed/update/urn:li:…`): images in order at the size offered to visitors, videos from the post's JSON-LD | yes |
+| YouTube, Twitch, Douyin (yt-dlp needs fresh browser cookies), LinkedIn events, Snapchat Spotlight posts, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
 | Snapchat | native public profiles (`@USER`, `add/USER`): story, highlights and Spotlight; single Spotlight URLs through yt-dlp | yes |
 | Xiaohongshu | native image and video notes (`explore/ID`, `discovery/item/ID`) | only through shared links carrying their `xsec_token`, else cookies; fixture-tested only, as this network is sent to login |
 | Threads | native posts (`@USER/post/CODE`) through the logged-out `BarcelonaPostPageTargetQuery`; its rotating query ID is rediscovered from the page's bundles when stale | yes |

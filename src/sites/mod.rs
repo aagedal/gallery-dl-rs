@@ -225,6 +225,7 @@ pub fn native_only(category: &str) -> bool {
             | "threads"
             | "youtube"
             | "shortlink"
+            | "linkedin"
     )
 }
 
