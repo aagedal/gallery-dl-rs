@@ -2438,9 +2438,12 @@ Native coverage of the largest social platforms (`--extractor native`;
 | Discord | native channels and servers | needs the `token` site option |
 | YouTube, Twitch, Douyin, LinkedIn, Snapchat Spotlight, Xiaohongshu, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
 
-WhatsApp, WeChat, Messenger and QQ have no public media pages. Kuaishou and
-Threads have no extractor here or upstream (Threads serves post data only
-through an undocumented GraphQL API).
+| Kuaishou | native short videos (`visionVideoDetail` GraphQL) | no: anonymous clients get a captcha; pass a browser session's cookies |
+
+WhatsApp, WeChat, Messenger and QQ have no public media pages. Threads has no
+extractor here or upstream: it serves post data only through a GraphQL query
+whose ID lives in its JavaScript bundles. The Kuaishou extractor is tested
+against fixtures only; this network gets a captcha.
 
 ## Limitations
 

@@ -3,6 +3,7 @@ use crate::sites::Site;
 
 mod bilibili;
 mod discord;
+mod kuaishou;
 mod telegram;
 mod tiktok;
 mod vk;
@@ -15,4 +16,5 @@ pub(super) static SITES: &[&Site] = &[
     &vk::SITE,
     &bilibili::SITE,
     &telegram::SITE,
+    &kuaishou::SITE,
 ];
