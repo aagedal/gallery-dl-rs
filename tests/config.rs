@@ -172,7 +172,7 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"secret-key":"secret-value"}}"#,
         r#"{"extractor":{"instagram":{"secret-key":"secret-value"}}}"#,
         r#"{"extractor":{"instagram":{"post":{"cookies":"secret-value"}}}}"#,
-        r#"{"extractor":{"weibo":{"cookies":"secret-value"}}}"#,
+        r#"{"extractor":{"unsupported-site":{"cookies":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
