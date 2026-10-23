@@ -286,6 +286,34 @@ impl Instagram {
             .ok_or_else(truncated_profile)
     }
 
+    /// The post or reel an app share link (`/share/p|reel/TOKEN`) redirects to.
+    async fn resolve_share(&self, url: &Url) -> Result<Url> {
+        let mut request = self
+            .client
+            .get(url.clone())
+            .timeout(self.request_timeout)
+            .header(header::ACCEPT, "text/html,application/xhtml+xml")
+            .header("Sec-Fetch-Mode", "navigate");
+        if let Some(cookies) = self.cookies.lock().unwrap().header(url) {
+            request = request.header(header::COOKIE, cookies);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error("native Instagram extraction timed out"))?
+            .map_err(|_| error("Instagram request failed; check network access"))?;
+        response
+            .status()
+            .is_redirection()
+            .then(|| response.headers().get(header::LOCATION))
+            .flatten()
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| url.join(v).ok())
+            .filter(|target| !is_share_link(target) && shortcode(target).is_ok())
+            .ok_or_else(|| {
+                error("Instagram share link did not resolve to a post; login may be required")
+            })
+    }
+
     fn has_session(&self) -> bool {
         let root = self
             .api_base
@@ -439,6 +467,15 @@ impl Instagram {
 
     /// Post boundaries are explicit even when a reel contains no available files.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        if is_share_link(url) {
+            let url = url.clone();
+            return stream::once(async move {
+                let target = self.resolve_share(&url).await?;
+                Ok::<_, crate::Error>(self.events(&target))
+            })
+            .try_flatten()
+            .boxed();
+        }
         if shortcode(url).is_ok() {
             let url = url.clone();
             return stream::once(async move { self.extract(&url).await })
@@ -836,6 +873,16 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
 /// The shortcodes of the posts a logged-out profile page lists, in order
 /// (`xig_user_by_username.polaris_ordered_timeline_connection`), and whether
 /// more follow.
+/// `instagram.com/share/…` app share links.
+pub fn is_share_link(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && matches!(url.host_str(), Some("instagram.com" | "www.instagram.com"))
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.path().starts_with("/share/")
+}
+
 pub fn parse_logged_out_profile(bytes: &[u8]) -> Result<ProfilePage> {
     let page = std::str::from_utf8(bytes).map_err(|_| error("Instagram returned invalid UTF-8"))?;
     let payloads = crate::facebook::embedded_payloads(bytes)?;
@@ -1320,6 +1367,36 @@ mod transport_tests {
         assert!(requests[3].contains(&format!("doc_id={PROFILE_POSTS_DOC_ID}")));
         assert!(requests[3].contains("c1"));
         assert!(requests[4].starts_with("GET /p/BC/ "), "{}", requests[4]);
+    }
+
+    #[tokio::test]
+    async fn share_links_resolve_to_their_post() {
+        let (endpoint, server) = serve_sequence(vec![
+            response(
+                "302 Found",
+                "Location: https://www.instagram.com/reel/CDUMkliABpa/?igsh=x\r\n",
+                b"",
+            ),
+            response(
+                "302 Found",
+                "Location: https://www.instagram.com/accounts/login/\r\n",
+                b"",
+            ),
+        ]);
+        let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+        let share = endpoint.join("/share/reel/BAb1/").unwrap();
+        let target = native.resolve_share(&share).await.unwrap();
+        assert_eq!(shortcode(&target).unwrap(), "CDUMkliABpa");
+        let login = native.resolve_share(&share).await.unwrap_err().to_string();
+        assert!(login.contains("did not resolve"), "{login}");
+        let requests: Vec<String> = server.join().unwrap().into_iter().map(|r| r.2).collect();
+        assert!(requests[0].starts_with("GET /share/reel/BAb1/ "));
+        assert!(is_share_link(
+            &Url::parse("https://www.instagram.com/share/p/BAb1/").unwrap()
+        ));
+        assert!(!is_share_link(
+            &Url::parse("https://www.instagram.com/p/BAb1/").unwrap()
+        ));
     }
 
     #[tokio::test]
