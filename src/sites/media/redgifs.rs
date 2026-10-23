@@ -13,6 +13,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&IMAGE, &USER, &COLLECTION, &COLLECTIONS, &NICHES, &SEARCH],
     api_key: false,
+    cookies: None,
 };
 
 /// Upstream `{gallery:?//[:11]}`; the template engine has no `[:N]` format

@@ -14,6 +14,7 @@ mod filehosts;
 mod imageboards;
 mod manga;
 mod media;
+mod social;
 
 pub use http::Http;
 
@@ -134,6 +135,9 @@ pub struct Site {
     pub routes: &'static [&'static Route],
     /// Whether the `api-key` setting applies.
     pub api_key: bool,
+    /// Domain whose `--cookies`/`--cookies-from-browser` entries are loaded
+    /// into the site's HTTP state; `None` for sites that never use cookies.
+    pub cookies: Option<&'static str>,
 }
 
 /// Every registry site, in matching order.
@@ -147,6 +151,7 @@ pub fn sites() -> &'static [&'static Site] {
             filehosts::SITES,
             manga::SITES,
             art::SITES,
+            social::SITES,
         ]
         .concat()
     })

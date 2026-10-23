@@ -15,6 +15,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&POST, &BLOG],
     api_key: false,
+    cookies: None,
 };
 
 static POST: Route = Route::new(

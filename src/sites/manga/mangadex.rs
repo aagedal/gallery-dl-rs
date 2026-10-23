@@ -15,6 +15,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&CHAPTER, &MANGA, &COVERS, &LIST, &LIST_FEED, &AUTHOR],
     api_key: false,
+    cookies: None,
 };
 
 const ROOT: &str = "https://mangadex.org";

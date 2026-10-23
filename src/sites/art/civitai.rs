@@ -44,6 +44,7 @@ pub static SITE: Site = Site {
         &USER_COLLECTIONS,
     ],
     api_key: true,
+    cookies: None,
 };
 
 const FILENAME: &str = "{file[id]}.{extension}";

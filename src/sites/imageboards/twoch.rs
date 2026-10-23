@@ -21,6 +21,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&THREAD, &BOARD],
     api_key: false,
+    cookies: None,
 };
 
 #[derive(Debug, PartialEq)]

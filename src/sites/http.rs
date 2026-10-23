@@ -4,7 +4,9 @@
 //! transport failures with backoff and `Retry-After` cooldowns, and cap
 //! responses at 16 MiB. Diagnostics never include URLs or credentials.
 use crate::{
-    Result, error,
+    Result,
+    cookies::CookieJar,
+    error,
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
@@ -27,6 +29,19 @@ pub struct Http {
     api_key: Option<String>,
     options: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     root: Option<Url>,
+    /// Session cookies sent with API requests; responses update them in
+    /// memory. They are never attached to emitted media.
+    cookies: std::sync::Mutex<CookieJar>,
+}
+
+/// A request body.
+#[derive(Clone, Copy)]
+pub enum Body<'b> {
+    Json(&'b Value),
+    /// `application/x-www-form-urlencoded` pairs.
+    Form(&'b [(&'b str, &'b str)]),
+    /// Raw bytes with the given content type.
+    Raw(&'b str, &'b [u8]),
 }
 
 impl Http {
@@ -43,6 +58,7 @@ impl Http {
             api_key: None,
             options: None,
             root: None,
+            cookies: std::sync::Mutex::new(CookieJar::default()),
         })
     }
 
@@ -69,6 +85,37 @@ impl Http {
     pub fn with_api_key(mut self, key: Option<&str>) -> Self {
         self.api_key = key.map(Into::into);
         self
+    }
+
+    /// Session cookies for API requests.
+    pub fn with_cookies(self, cookies: CookieJar) -> Self {
+        *self.cookies.lock().unwrap_or_else(|e| e.into_inner()) = cookies;
+        self
+    }
+
+    /// The value of a session cookie that would be sent to `url`.
+    pub fn cookie(&self, url: &Url, name: &str) -> Option<String> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .value(url, name)
+    }
+
+    /// Store a cookie as if `url` had set it with this `Set-Cookie` value.
+    pub fn set_cookie(&self, url: &Url, set_cookie: &str) {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store(url, set_cookie);
+    }
+
+    /// Whether any session cookies are loaded.
+    pub fn has_cookies(&self) -> bool {
+        !self
+            .cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Site-specific configuration values, by upstream option name.
@@ -154,6 +201,28 @@ impl Http {
         self.send(url, headers, None).await
     }
 
+    /// POST a body and return the raw response; redirects are refused.
+    pub async fn post(
+        &self,
+        url: &Url,
+        body: Body<'_>,
+        headers: &[(&str, &str)],
+    ) -> Result<Vec<u8>> {
+        self.send(url, headers, Some(body)).await
+    }
+
+    /// POST a form and parse the JSON response; redirects are refused.
+    pub async fn post_form(
+        &self,
+        url: &Url,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<Value> {
+        let bytes = self.send(url, headers, Some(Body::Form(form))).await?;
+        serde_json::from_slice(&bytes)
+            .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
+    }
+
     /// POST a JSON body; redirects are refused.
     pub async fn post_json(
         &self,
@@ -161,7 +230,7 @@ impl Http {
         body: &Value,
         headers: &[(&str, &str)],
     ) -> Result<Value> {
-        let bytes = self.send(url, headers, Some(body)).await?;
+        let bytes = self.send(url, headers, Some(Body::Json(body))).await?;
         serde_json::from_slice(&bytes)
             .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
     }
@@ -170,7 +239,7 @@ impl Http {
         &self,
         url: &Url,
         headers: &[(&str, &str)],
-        body: Option<&Value>,
+        body: Option<Body<'_>>,
     ) -> Result<Vec<u8>> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
@@ -192,7 +261,7 @@ impl Http {
         &self,
         endpoint: &Url,
         headers: &[(&str, &str)],
-        body: Option<&Value>,
+        body: Option<Body<'_>>,
         attempt: u8,
     ) -> std::result::Result<Vec<u8>, Failure> {
         let name = self.name;
@@ -201,20 +270,50 @@ impl Http {
         let response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = match body {
-                Some(body) => self
+                Some(Body::Json(body)) => self
                     .client
                     .post(target.clone())
                     .header("Content-Type", "application/json")
                     .body(body.to_string()),
+                Some(Body::Form(form)) => self
+                    .client
+                    .post(target.clone())
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .body(
+                        url::form_urlencoded::Serializer::new(String::new())
+                            .extend_pairs(form)
+                            .finish(),
+                    ),
+                Some(Body::Raw(content_type, bytes)) => self
+                    .client
+                    .post(target.clone())
+                    .header("Content-Type", content_type)
+                    .body(bytes.to_vec()),
                 None => self.client.get(target.clone()),
             }
             .timeout(self.request_timeout);
+            let explicit_cookie = headers
+                .iter()
+                .any(|(key, _)| key.eq_ignore_ascii_case("cookie"));
+            if !explicit_cookie
+                && let Some(cookie) = self
+                    .cookies
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .header(&target)
+            {
+                request = request.header("Cookie", cookie);
+            }
             for (key, value) in headers {
                 request = request.header(*key, *value);
             }
             let response = request.send().await.map_err(|_| {
                 Failure::transient(format!("{name} request failed; check network access"))
             })?;
+            self.cookies
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .store_response(&target, response.headers());
             if body.is_some() && response.status().is_redirection() {
                 return Err(error(format!("{name} redirected a POST request")).into());
             }

@@ -20,6 +20,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&GALLERY],
     api_key: false,
+    cookies: None,
 };
 
 /// `picarto\.tv/([^/?#]+)/gallery`, unanchored after `gallery`.

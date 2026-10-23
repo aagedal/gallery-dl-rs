@@ -33,6 +33,7 @@ pub static ZEROCHAN: Site = Site {
     extract,
     routes: &[&TAG, &IMAGE],
     api_key: false,
+    cookies: None,
 };
 
 #[derive(Debug, PartialEq)]

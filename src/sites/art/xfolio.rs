@@ -16,6 +16,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&WORK, &USER, &SERIES],
     api_key: false,
+    cookies: None,
 };
 
 const ROOT: &str = "https://xfolio.jp";

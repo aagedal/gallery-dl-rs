@@ -34,6 +34,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&USER, &FOLDER, &IMAGE],
     api_key: false,
+    cookies: None,
 };
 
 #[derive(Debug, PartialEq)]

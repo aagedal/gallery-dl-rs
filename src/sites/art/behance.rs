@@ -14,6 +14,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&GALLERY, &USER, &COLLECTION],
     api_key: false,
+    cookies: None,
 };
 
 static GALLERY: Route = Route::new(

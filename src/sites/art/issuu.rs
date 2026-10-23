@@ -27,6 +27,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&PUBLICATION, &USER],
     api_key: false,
+    cookies: None,
 };
 
 #[derive(Debug, PartialEq)]

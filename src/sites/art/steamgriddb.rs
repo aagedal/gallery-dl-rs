@@ -14,6 +14,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&ASSET, &GRIDS, &HEROES, &LOGOS, &ICONS],
     api_key: false,
+    cookies: None,
 };
 
 const ROOT: &str = "https://www.steamgriddb.com";

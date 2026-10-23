@@ -21,6 +21,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&GALLERY],
     api_key: false,
+    cookies: None,
 };
 
 /// `lightroom\.adobe\.com/shares/([0-9a-f]+)`, unanchored after the id.

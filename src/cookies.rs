@@ -246,6 +246,24 @@ impl CookieJar {
         }
     }
 
+    /// Apply one `Set-Cookie` value as if `url` had returned it.
+    pub fn store(&mut self, url: &Url, set_cookie: &str) {
+        self.store_at(url, set_cookie, unix_time());
+    }
+
+    /// The value of the named cookie that would be sent to this URL.
+    pub fn value(&self, url: &Url, name: &str) -> Option<String> {
+        self.header(url)?.split("; ").find_map(|pair| {
+            pair.split_once('=')
+                .filter(|(key, _)| *key == name)
+                .map(|(_, value)| value.to_owned())
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cookies.is_empty()
+    }
+
     /// Select cookies for this URL. Do not reuse this header for other URLs.
     pub fn header(&self, url: &Url) -> Option<String> {
         self.header_at(url, unix_time())

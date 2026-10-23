@@ -1409,12 +1409,17 @@ fn extract_input<'a>(
                 }
                 Extractor::Native if gallery_dl_rs::sites::is_category(category) => {
                     let site = gallery_dl_rs::sites::site(category).expect("registry site");
+                    let jar = match site.cookies {
+                        Some(domain) => Some(extractors.cookie_jar(configured, domain).await?),
+                        None => None,
+                    };
                     let native = extractors
                         .sites
                         .get(site, || {
                             gallery_dl_rs::sites::Http::new(site.name, backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_cookies(jar.unwrap_or_default())
                                         .with_api_key(options.api_key.as_deref())
                                         .with_options(options.site_options.clone())
                                         .with_retries(options.retries.unwrap())

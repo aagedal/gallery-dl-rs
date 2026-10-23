@@ -26,6 +26,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&TAG, &POST],
     api_key: false,
+    cookies: None,
 };
 
 static TAG: Route = Route::new("tag", FILENAME, &["{category}", "{search_tags}"], "{id}");

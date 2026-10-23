@@ -13,6 +13,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&FILE, &FOLDER],
     api_key: false,
+    cookies: None,
 };
 
 static FILE: Route = Route::new(
