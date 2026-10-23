@@ -167,6 +167,35 @@ impl Facebook {
                 .append_pair("set", "");
             return self.post_events_endpoint(endpoint, id, false);
         }
+        if crate::facebook_profile::is_post_url(url) {
+            let url = url.clone();
+            return stream::once(async move {
+                let mut page = url.clone();
+                page.set_host(Some("www.facebook.com")).ok();
+                let body = self.request_body(&page, self.timeout).await?;
+                let (photos, video) = crate::facebook_profile::parse_post(&body)?;
+                if photos.is_empty()
+                    && let Some(id) = video
+                {
+                    let mut endpoint = Url::parse("https://www.facebook.com/watch/").unwrap();
+                    endpoint.query_pairs_mut().append_pair("v", &id);
+                    return Ok::<_, crate::Error>(self.post_events_endpoint(endpoint, id, true));
+                }
+                Ok(stream::iter(photos)
+                    .map(move |id| {
+                        let mut endpoint = Url::parse("https://www.facebook.com/photo/").unwrap();
+                        endpoint
+                            .query_pairs_mut()
+                            .append_pair("fbid", &id)
+                            .append_pair("set", "");
+                        self.post_events_endpoint(endpoint, id, false)
+                    })
+                    .flatten()
+                    .boxed())
+            })
+            .try_flatten()
+            .boxed();
+        }
         if let Some(profile) = profile_input(url) {
             return self.profile_events(profile);
         }
@@ -603,6 +632,7 @@ impl Facebook {
                         "/photo" | "/photo.php" | "/media/set" | "/watch"
                     ) && video_id(&next).is_err()
                         && profile_input(&next).is_none()
+                        && !crate::facebook_profile::is_post_url(&next)
                     {
                         return Err(error(
                             "Facebook redirected outside supported media endpoints; login may be required",
@@ -697,7 +727,8 @@ fn share_target(url: &Url) -> bool {
         && (video_id(url).is_ok()
             || photo_id(url).is_ok()
             || album_input(url).is_ok()
-            || profile_input(url).is_some())
+            || profile_input(url).is_some()
+            || crate::facebook_profile::is_post_url(url))
 }
 
 fn backoff(attempt: u8) -> Duration {

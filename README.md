@@ -2432,7 +2432,7 @@ are always native):
 |---|---|---|
 | Instagram | native (experimental) | public posts, reels and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
 | X/Twitter | native (experimental) | single posts and a profile's top posts as a guest; full timelines and searches need `--cookies` |
-| Facebook | native photos, albums, videos, reels, share links and profiles | public albums, album lists and profile photos in full, paged through the logged-out grid and collection queries |
+| Facebook | native photos, posts, albums, videos, reels, share links and profiles | public albums, album lists and profile photos in full, paged through the logged-out grid and collection queries |
 | Reddit | native REST listings, submissions, users | Reddit sends logged-out JSON clients on some networks to its login page; pass `--cookies` |
 | Pinterest, Bluesky | native | yes |
 | Tumblr | native | yes; when the shared default API key hits its daily limit, the web client's public token is used (its NPF posts are converted) |

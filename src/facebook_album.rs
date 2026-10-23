@@ -389,7 +389,7 @@ fn own_url_matches(value: &Value, id: &str, set: &str) -> bool {
     ids == [id] && sets == [set]
 }
 
-fn visit(value: &Value, f: &mut impl FnMut(&Value)) {
+pub(crate) fn visit(value: &Value, f: &mut impl FnMut(&Value)) {
     f(value);
     match value {
         Value::Object(object) => {

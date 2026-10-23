@@ -151,7 +151,7 @@ fn page_text(bytes: &[u8]) -> Result<&str> {
     let page = std::str::from_utf8(bytes).map_err(|_| error("Facebook returned invalid UTF-8"))?;
     if page.contains(r#""props":{"title":"This content isn't available right now""#) {
         return Err(error(
-            "Facebook profile unavailable to this session; login may be required",
+            "Facebook content unavailable to this session; login may be required",
         ));
     }
     Ok(page)
@@ -215,6 +215,67 @@ pub(crate) fn parse_photos_grid(bytes: &[u8]) -> crate::facebook_album::Grid {
     grid.lsd = crate::facebook_album::lsd_token(bytes);
     grid.query = crate::facebook_album::GridQuery::Collection;
     grid
+}
+
+/// Post permalinks: `NAME/posts/ID`, `groups/GROUP/posts|permalink/ID`,
+/// `permalink.php?story_fbid=ID` and `story.php?story_fbid=ID`.
+pub(crate) fn is_post_url(url: &Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https")
+        || !matches!(
+            url.host_str(),
+            Some("facebook.com" | "www.facebook.com" | "m.facebook.com" | "web.facebook.com")
+        )
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return false;
+    }
+    let segments: Vec<&str> = url.path().split('/').filter(|s| !s.is_empty()).collect();
+    let id =
+        |s: &str| !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric());
+    match segments.as_slice() {
+        ["permalink.php" | "story.php"] => {
+            url.query_pairs().any(|(k, v)| k == "story_fbid" && id(&v))
+        }
+        ["groups", group, "posts" | "permalink", post] => {
+            (id(group) || valid_profile(group)) && id(post)
+        }
+        [name, "posts", post] => valid_profile(name) && id(post),
+        _ => false,
+    }
+}
+
+/// The distinct photos and the first video a post page shows, in order.
+pub(crate) fn parse_post(bytes: &[u8]) -> Result<(Vec<String>, Option<String>)> {
+    page_text(bytes)?;
+    let payloads = crate::facebook::embedded_payloads(bytes)?;
+    let mut photos: Vec<String> = Vec::new();
+    let mut video = None;
+    for payload in &payloads {
+        crate::facebook_album::visit(payload, &mut |value| {
+            let kind = value.get("__typename").and_then(Value::as_str);
+            let is_media = value.get("__isMedia").and_then(Value::as_str);
+            let Some(id) = value.get("id").and_then(Value::as_str).filter(|id| {
+                !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_digit())
+            }) else {
+                return;
+            };
+            if kind == Some("Photo") && is_media == Some("Photo") {
+                if !photos.iter().any(|seen| seen == id) {
+                    photos.push(id.to_owned());
+                }
+            } else if kind == Some("Video") && is_media == Some("Video") && video.is_none() {
+                video = Some(id.to_owned());
+            }
+        });
+    }
+    if photos.is_empty() && video.is_none() {
+        return Err(error(
+            "Facebook post shows no photos or videos without login; pass --cookies",
+        ));
+    }
+    Ok((photos, video))
 }
 
 /// Upstream `_extract_profile_user`: the embedded profile object.
@@ -407,6 +468,38 @@ mod tests {
                 .as_str(),
             "https://www.facebook.com/NASA/photos_albums"
         );
+    }
+
+    #[test]
+    fn recognizes_posts_and_their_media() {
+        let post = |raw: &str| is_post_url(&Url::parse(raw).unwrap());
+        assert!(post("https://www.facebook.com/NASA/posts/pfbid02abc"));
+        assert!(post(
+            "https://www.facebook.com/100077921513450/posts/1162826406324732/"
+        ));
+        assert!(post(
+            "https://www.facebook.com/groups/256772258373648/permalink/2061916421192547/"
+        ));
+        assert!(post(
+            "https://m.facebook.com/permalink.php?story_fbid=12&id=3"
+        ));
+        assert!(!post("https://www.facebook.com/NASA/photos"));
+        assert!(!post("https://www.facebook.com/groups/1/members"));
+        assert!(!post("https://www.facebook.com/permalink.php?id=3"));
+        assert!(
+            profile_input(&Url::parse("https://www.facebook.com/NASA/posts/1").unwrap()).is_none()
+        );
+
+        let page =
+            br#"<script>{"a":[{"media":{"__typename":"Photo","__isMedia":"Photo","id":"11"}},
+            {"media":{"__typename":"Photo","__isMedia":"Photo","id":"12"}},
+            {"media":{"__typename":"Photo","__isMedia":"Photo","id":"11"}},
+            {"media":{"__typename":"Video","__isMedia":"Video","id":"99"}}]}</script>"#;
+        let (photos, video) = parse_post(page).unwrap();
+        assert_eq!(photos, ["11", "12"]);
+        assert_eq!(video.as_deref(), Some("99"));
+        let empty = parse_post(b"<html></html>").unwrap_err().to_string();
+        assert!(empty.contains("--cookies"), "{empty}");
     }
 
     #[test]
