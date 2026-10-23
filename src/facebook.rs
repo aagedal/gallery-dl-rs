@@ -195,14 +195,9 @@ impl Facebook {
                     self.post_events_endpoint(endpoint, id, false)
                 }
                 Tab::Albums(name) => {
-                    let albums = parse_albums(&body, name.as_deref())?;
-                    stream::iter(albums)
-                        .map(move |url| match album_input(&url) {
-                            Ok(input) => self.album_events(input, base.clone()),
-                            Err(e) => stream::once(async move { Err(e) }).boxed(),
-                        })
-                        .flatten()
-                        .boxed()
+                    let list = parse_albums(&body, name.as_deref())?;
+                    let referer = input.page()?;
+                    self.album_list_events(list, name.clone(), base, referer)
                 }
             };
             Ok::<_, crate::Error>(events)
@@ -361,21 +356,95 @@ impl Facebook {
         Ok(item)
     }
 
-    /// Extend an exhausted album grid through the album's pagination query,
-    /// returning the first new photo. Without a usable page (for example
-    /// after Facebook rotated the query ID) the grid stays truncated.
-    async fn next_grid_page(&self, state: &mut AlbumState) -> Option<String> {
-        let grid = &state.grid;
-        let (cursor, node, lsd) = (grid.cursor.clone()?, grid.node.clone()?, grid.lsd.clone()?);
-        let variables =
-            serde_json::json!({"count": 8, "cursor": cursor, "scale": 2, "id": node}).to_string();
-        let endpoint = state.base.join("api/graphql/").ok()?;
-        let mut referer = state.base.join("media/set/").ok()?;
-        referer.query_pairs_mut().append_pair("set", &state.set);
-        let query = grid.query;
-        let (name, doc_id) = query.operation();
+    /// A profile's albums, continuing the album list through
+    /// `ProfileCometAppCollectionAlbumsRendererPaginationQuery`.
+    fn album_list_events(
+        &self,
+        list: crate::facebook_profile::AlbumList,
+        name: Option<String>,
+        base: Url,
+        referer: Url,
+    ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        let crate::facebook_profile::AlbumList {
+            albums,
+            more,
+            cursor,
+            collection,
+            lsd,
+        } = list;
+        let base2 = base.clone();
+        let current = stream::iter(albums)
+            .map(move |url| match album_input(&url) {
+                Ok(input) => self.album_events(input, base2.clone()),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            })
+            .flatten();
+        let rest = stream::once(async move {
+            let (Some(cursor), Some(collection), Some(lsd)) = (cursor, collection, lsd) else {
+                return stream::empty().boxed();
+            };
+            if !more {
+                return stream::empty().boxed();
+            }
+            let variables = serde_json::json!({
+                "count": 8, "cursor": cursor, "scale": 2, "id": collection,
+            });
+            let next = self
+                .graphql(
+                    &base,
+                    &referer,
+                    &lsd,
+                    (
+                        "ProfileCometAppCollectionAlbumsRendererPaginationQuery",
+                        "27733032642961647",
+                    ),
+                    &variables,
+                )
+                .await
+                .and_then(|body| crate::facebook_profile::parse_album_page(&body, name.as_deref()));
+            match next {
+                // Each page continues only with a new cursor.
+                Some(mut next) if next.cursor.as_ref().is_some_and(|c| c != &cursor) => {
+                    next.collection = Some(collection);
+                    next.lsd = Some(lsd);
+                    self.album_list_events(next, name, base, referer)
+                }
+                Some(next) => self.album_list_events(
+                    crate::facebook_profile::AlbumList {
+                        more: false,
+                        ..next
+                    },
+                    name,
+                    base,
+                    referer,
+                ),
+                None => stream::once(async {
+                    Err(error(
+                        "Facebook profile has more albums than are visible without login; \
+                         pass --cookies for the rest",
+                    ))
+                })
+                .boxed(),
+            }
+        })
+        .flatten();
+        current.chain(rest).boxed()
+    }
+
+    /// A logged-out GraphQL request with the page's LSD token; `None` when
+    /// Facebook refuses it.
+    async fn graphql(
+        &self,
+        base: &Url,
+        referer: &Url,
+        lsd: &str,
+        (name, doc_id): (&str, &str),
+        variables: &Value,
+    ) -> Option<Vec<u8>> {
+        let endpoint = base.join("api/graphql/").ok()?;
+        let variables = variables.to_string();
         let form = [
-            ("lsd", lsd.as_str()),
+            ("lsd", lsd),
             ("variables", variables.as_str()),
             ("doc_id", doc_id),
             ("fb_api_req_friendly_name", name),
@@ -388,7 +457,8 @@ impl Facebook {
             .timeout(self.request_timeout)
             .header(header::REFERER, referer.as_str())
             .header(header::ORIGIN, "https://www.facebook.com")
-            .header("X-FB-LSD", lsd.as_str())
+            .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.5")
+            .header("X-FB-LSD", lsd)
             .header("X-FB-Friendly-Name", name)
             .header("Sec-Fetch-Site", "same-origin")
             .form(&form);
@@ -400,9 +470,22 @@ impl Facebook {
             return None;
         }
         let body = response.bytes().await.ok()?;
-        if body.len() > MAX_RESPONSE {
-            return None;
-        }
+        (body.len() <= MAX_RESPONSE).then(|| body.to_vec())
+    }
+
+    /// Extend an exhausted album grid through the album's pagination query,
+    /// returning the first new photo. Without a usable page (for example
+    /// after Facebook rotated the query ID) the grid stays truncated.
+    async fn next_grid_page(&self, state: &mut AlbumState) -> Option<String> {
+        let grid = &state.grid;
+        let (cursor, node, lsd) = (grid.cursor.clone()?, grid.node.clone()?, grid.lsd.clone()?);
+        let variables = serde_json::json!({"count": 8, "cursor": cursor, "scale": 2, "id": node});
+        let mut referer = state.base.join("media/set/").ok()?;
+        referer.query_pairs_mut().append_pair("set", &state.set);
+        let query = grid.query;
+        let body = self
+            .graphql(&state.base, &referer, &lsd, query.operation(), &variables)
+            .await?;
         let page = parse_grid_page(&body, query)?;
         let new: Vec<String> = page
             .ids

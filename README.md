@@ -183,8 +183,8 @@ and deadlines. Page requests send upstream's navigation headers
 
 Profile routes mirror upstream: `facebook.com/NAME` and `NAME/photos[_by]`
 read the profile's photos, `NAME/avatar` its profile picture, and
-`NAME/photos_albums[/TITLE]` each album (or the one titled `TITLE`) on the
-profile's first album page. `profile.php?id=ID` (with `sk=photos` or
+`NAME/photos_albums[/TITLE]` each album (or the one titled `TITLE`), paging the
+album list through `ProfileCometAppCollectionAlbumsRendererPaginationQuery`. `profile.php?id=ID` (with `sk=photos` or
 `sk=photos_albums`) and `people/NAME/ID/...` are accepted too. Profile pages
 only name the set, albums or avatar photo; photos are then read like album and
 photo URLs. Anonymous photo pages carry no next-photo navigation, so without
@@ -2432,7 +2432,7 @@ are always native):
 |---|---|---|
 | Instagram | native (experimental) | public posts, reels and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
 | X/Twitter | native (experimental) | single posts as a guest; timelines and searches need `--cookies` |
-| Facebook | native photos, albums, videos and profiles | public albums and profile photos in full, paged through the logged-out grid queries |
+| Facebook | native photos, albums, videos and profiles | public albums, album lists and profile photos in full, paged through the logged-out grid and collection queries |
 | Reddit | native REST listings, submissions, users | Reddit sends logged-out JSON clients on some networks to its login page; pass `--cookies` |
 | Pinterest, Bluesky | native | yes |
 | Tumblr | native | yes; when the shared default API key hits its daily limit, the web client's public token is used (its NPF posts are converted) |

@@ -554,6 +554,8 @@ async fn anonymous_grids_continue_through_the_pagination_query() {
     );
     let lower = requests[2].to_ascii_lowercase();
     assert!(lower.contains("x-fb-lsd: lsd1\r\n"));
+    // Later pages must not be localized differently from the first.
+    assert!(lower.contains("accept-language: en-us,en;q=0.5\r\n"));
     assert!(
         lower.contains("x-fb-friendly-name: profilecometlegacyalbumgridviewpaginationquery\r\n")
     );

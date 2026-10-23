@@ -236,16 +236,54 @@ pub(crate) fn parse_avatar(bytes: &[u8]) -> Result<Url> {
 
 /// Upstream `FacebookAlbumsExtractor.items`: album URLs in page order,
 /// optionally only those titled `name` (lowercase).
-pub(crate) fn parse_albums(bytes: &[u8], name: Option<&str>) -> Result<Vec<Url>> {
+pub(crate) fn parse_albums(bytes: &[u8], name: Option<&str>) -> Result<AlbumList> {
     let page = page_text(bytes)?;
     let marker = r#""TimelineAppCollectionAlbumsRenderer","collection":{"id":""#;
     let Some(pos) = page.find(marker) else {
-        return Ok(Vec::new());
+        return Ok(AlbumList::default());
     };
+    let collection = extr(&page[pos..], marker, "\"")
+        .filter(|id| valid_node(id))
+        .map(str::to_owned);
     let items = extr(&page[pos..], r#"},"pageItems":"#, "}}},")
         .ok_or_else(|| error("Facebook album list is incomplete"))?;
     let data: Value = serde_json::from_str(&format!("{items}}}}}"))
         .map_err(|_| error("Facebook album list is invalid"))?;
+    let mut list = album_edges(&data, name);
+    list.collection = collection;
+    list.lsd = crate::facebook_album::lsd_token(bytes);
+    Ok(list)
+}
+
+/// The next album page of `ProfileCometAppCollectionAlbumsRendererPaginationQuery`.
+pub(crate) fn parse_album_page(bytes: &[u8], name: Option<&str>) -> Option<AlbumList> {
+    let data = serde_json::Deserializer::from_slice(bytes)
+        .into_iter::<Value>()
+        .next()?
+        .ok()?;
+    Some(album_edges(data.pointer("/data/node/pageItems")?, name))
+}
+
+/// One page of a profile's albums and how to continue it.
+#[derive(Debug, Default)]
+pub(crate) struct AlbumList {
+    pub(crate) albums: Vec<Url>,
+    pub(crate) more: bool,
+    pub(crate) cursor: Option<String>,
+    pub(crate) collection: Option<String>,
+    pub(crate) lsd: Option<String>,
+}
+
+fn valid_node(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 512
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'=' | b'_' | b'-'))
+}
+
+/// Album URLs of a `pageItems` object, optionally only those titled `name`.
+fn album_edges(data: &Value, name: Option<&str>) -> AlbumList {
     let mut albums = Vec::new();
     for edge in data
         .get("edges")
@@ -271,7 +309,19 @@ pub(crate) fn parse_albums(bytes: &[u8], name: Option<&str>) -> Result<Vec<Url>>
             albums.push(url);
         }
     }
-    Ok(albums)
+    AlbumList {
+        albums,
+        more: data
+            .pointer("/page_info/has_next_page")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        cursor: data
+            .pointer("/page_info/end_cursor")
+            .and_then(Value::as_str)
+            .filter(|c| !c.is_empty() && c.len() <= 1024)
+            .map(str::to_owned),
+        ..AlbumList::default()
+    }
 }
 
 #[cfg(test)]
@@ -399,14 +449,28 @@ mod tests {
         );
 
         let albums = br#"{"__typename":"TimelineAppCollectionAlbumsRenderer","collection":{"id":"c"},"pageItems":{"edges":[{"node":{"node":{"__typename":"Album","url":"https:\/\/www.facebook.com\/media\/set\/?set=a.1&type=3"},"title":{"text":"Cover Photos"}},"cursor":"x"},{"node":{"node":{"__typename":"Album","url":"https:\/\/www.facebook.com\/media\/set\/?set=a.2&type=3"},"title":{"text":"Other"}},"cursor":"y"}],"page_info":{"end_cursor":"z","has_next_page":true}}},"can_viewer_create_album":false}"#;
-        let all = parse_albums(albums, None).unwrap();
+        let list = parse_albums(albums, None).unwrap();
+        assert_eq!((list.more, list.cursor.as_deref()), (true, Some("z")));
+        assert_eq!(list.collection.as_deref(), Some("c"));
+        let all = list.albums;
         assert_eq!(all.len(), 2);
         assert_eq!(
             all[1].as_str(),
             "https://www.facebook.com/media/set/?set=a.2&type=3"
         );
         let named = parse_albums(albums, Some("cover photos")).unwrap();
-        assert_eq!(named.len(), 1);
-        assert!(parse_albums(b"<html></html>", None).unwrap().is_empty());
+        assert_eq!(named.albums.len(), 1);
+        assert!(
+            parse_albums(b"<html></html>", None)
+                .unwrap()
+                .albums
+                .is_empty()
+        );
+        let next = parse_album_page(
+            br#"{"data":{"node":{"pageItems":{"edges":[{"node":{"title":{"text":"Later"},"node":{"url":"https:\/\/www.facebook.com\/media\/set\/?set=a.3&type=3"}}}],"page_info":{"end_cursor":"z2","has_next_page":false}}}}}"#,
+            None,
+        )
+        .unwrap();
+        assert_eq!((next.albums.len(), next.more), (1, false));
     }
 }
