@@ -49,6 +49,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         let target = http
             .location(&request, &http.browser_headers(&[]))
             .await?
+            .map(canonical)
             .filter(|target| {
                 target
                     .host_str()
@@ -66,6 +67,26 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     })
 }
 
+/// Mobile share hosts that stand for the main site: Kuaishou's
+/// `chenzhongtech.com/fw/photo/ID` and Douyin's `iesdouyin.com/share/video/ID`.
+fn canonical(target: Url) -> Url {
+    let host = target.host_str().unwrap_or_default();
+    let segments: Vec<&str> = target.path().split('/').filter(|s| !s.is_empty()).collect();
+    let id_ok = |id: &str| {
+        !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+    };
+    let rewritten = match (host, segments.as_slice()) {
+        (h, ["fw", "photo", id]) if h.ends_with("chenzhongtech.com") && id_ok(id) => {
+            Url::parse(&format!("https://www.kuaishou.com/short-video/{id}")).ok()
+        }
+        (h, ["share", "video" | "note", id]) if h.ends_with("iesdouyin.com") && id_ok(id) => {
+            Url::parse(&format!("https://www.douyin.com/video/{id}")).ok()
+        }
+        _ => None,
+    };
+    rewritten.unwrap_or(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +98,20 @@ mod tests {
         assert_eq!(s("https://v.kuaishou.com/Kx1"), Some("kuaishou.com"));
         assert_eq!(s("https://go.bsky.app/Q1"), None);
         assert_eq!(s("https://xhslink.com/"), None);
+        let c = |raw: &str| canonical(Url::parse(raw).unwrap()).to_string();
+        assert_eq!(
+            c("https://v.m.chenzhongtech.com/fw/photo/3xhzxsiidvfijsc?cc=share"),
+            "https://www.kuaishou.com/short-video/3xhzxsiidvfijsc"
+        );
+        assert_eq!(
+            c("https://www.iesdouyin.com/share/video/7301?did=1"),
+            "https://www.douyin.com/video/7301"
+        );
+        // Unknown targets stay as they are (and are then refused off-site).
+        assert_eq!(
+            c("https://www.iesdouyin.com/share/user/MS4"),
+            "https://www.iesdouyin.com/share/user/MS4"
+        );
         assert_eq!(s("https://evil.test/a"), None);
     }
 
