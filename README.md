@@ -2428,7 +2428,8 @@ Native coverage of the largest social platforms (`--extractor native`;
 | X/Twitter | native (experimental) | single posts as a guest; timelines and searches need `--cookies` |
 | Facebook | native photos, albums, videos and profiles | first grid page of public albums and profiles; the rest needs `--cookies` |
 | Reddit | native REST listings, submissions, users | Reddit sends logged-out JSON clients on some networks to its login page; pass `--cookies` |
-| Pinterest, Tumblr, Bluesky | native | yes (Tumblr's shared API key is rate limited) |
+| Pinterest, Bluesky | native | yes |
+| Tumblr | native | yes; when the shared default API key hits its daily limit, the web client's public token is used (its NPF posts are converted) |
 | TikTok | native posts and user listings | yes |
 | Telegram | public channels and posts via `t.me/s/` | yes |
 | Weibo | native statuses, albums, videos | statuses and albums; timelines need cookies |

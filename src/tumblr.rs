@@ -1105,6 +1105,12 @@ pub struct Tumblr {
     rate_limits: RateLimits,
     selection: Selection,
     options: Options,
+    /// Tumblr's own web-client token, used once the shared default key has
+    /// hit its daily limit. Its responses are NPF and are converted.
+    web_token: std::sync::Mutex<Option<String>>,
+    /// The page that embeds the token; unit tests leave it unset so they
+    /// never reach Tumblr.
+    web_root: Option<Url>,
 }
 
 /// How a listing advances between pages.
@@ -1185,7 +1191,47 @@ impl Tumblr {
             rate_limits: RateLimits::default(),
             selection: Selection::default(),
             options: Options::default(),
+            web_token: std::sync::Mutex::new(None),
+            web_root: if cfg!(test) {
+                None
+            } else {
+                Url::parse("https://www.tumblr.com/").ok()
+            },
         })
+    }
+
+    #[cfg(test)]
+    fn with_web_root(mut self, root: Url) -> Self {
+        self.web_root = Some(root);
+        self
+    }
+
+    fn web_token(&self) -> Option<String> {
+        self.web_token.lock().unwrap().clone()
+    }
+
+    /// The public `API_TOKEN` the www.tumblr.com web client embeds.
+    async fn activate_web_token(&self) -> Result<String> {
+        let failed = || error("Tumblr web client token unavailable");
+        let root = self.web_root.clone().ok_or_else(failed)?;
+        let reply = tokio::time::timeout(self.timeout, self.fetch(&root, Some("text/html"), true))
+            .await
+            .map_err(|_| error("native Tumblr extraction timed out"))?
+            .map_err(|_| failed())?;
+        let Reply::Body(body) = reply else {
+            return Err(failed());
+        };
+        let page = String::from_utf8_lossy(&body);
+        let token = crate::sites::extr(&page, r#""API_TOKEN":""#, "\"")
+            .filter(|token| {
+                !token.is_empty()
+                    && token.len() <= 256
+                    && token.bytes().all(|b| b.is_ascii_alphanumeric())
+            })
+            .ok_or_else(failed)?
+            .to_owned();
+        *self.web_token.lock().unwrap() = Some(token.clone());
+        Ok(token)
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -1245,18 +1291,43 @@ impl Tumblr {
 
     /// One API call, returning the JSON `response` object.
     async fn api(&self, url: &Url) -> Result<Value> {
-        let reply = tokio::time::timeout(self.timeout, self.fetch(url, None, true))
-            .await
-            .map_err(|_| error("native Tumblr extraction timed out"))??;
+        let call = || async {
+            tokio::time::timeout(self.timeout, self.fetch(url, None, true))
+                .await
+                .map_err(|_| error("native Tumblr extraction timed out"))?
+        };
+        let reply = match call().await {
+            // The shared default key is often exhausted; fall back to the
+            // web client's token rather than fail (or wait) for a day.
+            Err(e)
+                if self.api_key == DEFAULT_API_KEY
+                    && self.web_token().is_none()
+                    && e.to_string().starts_with("Tumblr daily API rate limit") =>
+            {
+                if self.activate_web_token().await.is_err() {
+                    return Err(e);
+                }
+                call().await?
+            }
+            result => result?,
+        };
         let Reply::Body(body) = reply else {
             return Err(error("Tumblr returned an unexpected redirect"));
         };
         let mut body: Value =
             serde_json::from_slice(&body).map_err(|_| error("Tumblr returned invalid JSON"))?;
-        Ok(match body.get_mut("response") {
+        let mut response = match body.get_mut("response") {
             Some(response) => response.take(),
             None => body,
-        })
+        };
+        if self.web_token().is_some() {
+            for key in ["posts", "liked_posts"] {
+                if let Some(posts) = response.get_mut(key).and_then(Value::as_array_mut) {
+                    posts.iter_mut().for_each(npf_to_legacy);
+                }
+            }
+        }
+        Ok(response)
     }
 
     /// Blog info (`/v2/blog/BLOG/info`), as upstream `TumblrAPI.info`.
@@ -1904,10 +1975,30 @@ impl Tumblr {
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
+            // With the web token, API calls authenticate by header instead.
+            let token = self
+                .web_token()
+                .filter(|_| target.host_str() == self.api_root.host_str());
+            if token.is_some() {
+                let pairs: Vec<(String, String)> = target
+                    .query_pairs()
+                    .filter(|(key, _)| key != "api_key")
+                    .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                    .collect();
+                target.set_query(None);
+                if !pairs.is_empty() {
+                    target.query_pairs_mut().extend_pairs(pairs);
+                }
+            }
             let mut request = self
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout);
+            if let Some(token) = &token {
+                request = request
+                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(reqwest::header::ORIGIN, "https://www.tumblr.com");
+            }
             if let Some(accept) = accept {
                 request = request.header(reqwest::header::ACCEPT, accept);
             }
@@ -1973,6 +2064,126 @@ impl Tumblr {
             body.extend_from_slice(&chunk);
         }
         Ok(Reply::Body(body))
+    }
+}
+
+/// Fill a Neue Post Format post's legacy fields (`photos`, `video_url`,
+/// `audio_url`, `body`, `type`) from its own and its reblog trail's content
+/// blocks, in display order. Legacy posts are left unchanged.
+fn npf_to_legacy(post: &mut Value) {
+    let Some(post) = post.as_object_mut() else {
+        return;
+    };
+    if post.contains_key("photos") || !post.get("content").is_some_and(Value::is_array) {
+        return;
+    }
+    let mut blocks: Vec<Value> = Vec::new();
+    for item in post
+        .get("trail")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        blocks.extend(
+            item.get("content")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .cloned(),
+        );
+    }
+    blocks.extend(post["content"].as_array().into_iter().flatten().cloned());
+    let mut photos = Vec::new();
+    let (mut video, mut audio) = (None, None);
+    let mut body = String::new();
+    for block in &blocks {
+        match block.get("type").and_then(Value::as_str) {
+            Some("image") => {
+                let mut media: Vec<Value> = block
+                    .get("media")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|m| m.get("url").and_then(Value::as_str).is_some())
+                    .cloned()
+                    .map(|mut m| {
+                        // NPF names PNGs `.pnj` and GIFs `.gifv`; both serve
+                        // the image itself under its real extension too.
+                        let url = m["url"].as_str().unwrap_or_default();
+                        let real = if let Some(base) = url.strip_suffix(".pnj") {
+                            Some(format!("{base}.png"))
+                        } else {
+                            url.strip_suffix(".gifv").map(|base| format!("{base}.gif"))
+                        };
+                        if let Some(real) = real {
+                            m["url"] = real.into();
+                        }
+                        m
+                    })
+                    .collect();
+                let width = |m: &Value| m.get("width").and_then(Value::as_u64).unwrap_or(0);
+                let original = media
+                    .iter()
+                    .position(|m| m.get("has_original_dimensions") == Some(&Value::Bool(true)))
+                    .or_else(|| (0..media.len()).max_by_key(|&i| width(&media[i])));
+                if let Some(index) = original {
+                    let original = media.remove(index);
+                    photos.push(serde_json::json!({
+                        "original_size": original,
+                        "alt_sizes": media,
+                    }));
+                }
+            }
+            Some("video") => {
+                video = video.or_else(|| block.pointer("/media/url").cloned());
+            }
+            Some("audio") => {
+                audio = audio.or_else(|| {
+                    block
+                        .pointer("/media/url")
+                        .or_else(|| block.get("url"))
+                        .cloned()
+                });
+            }
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    let text = text
+                        .replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;");
+                    body.push_str(&format!("<p>{text}</p>"));
+                }
+            }
+            _ => {}
+        }
+    }
+    let kind = match post.get("original_type").and_then(Value::as_str) {
+        Some("regular") | None => {
+            if !photos.is_empty() {
+                "photo"
+            } else if video.is_some() {
+                "video"
+            } else if audio.is_some() {
+                "audio"
+            } else {
+                "text"
+            }
+        }
+        Some("note") => "answer",
+        Some(kind) => kind,
+    };
+    post.insert("type".into(), kind.into());
+    if !photos.is_empty() {
+        post.insert("photos".into(), photos.into());
+    }
+    if let Some(video) = video {
+        post.insert("video_url".into(), video);
+    }
+    if let Some(audio) = audio {
+        post.insert("audio_url".into(), audio);
+    }
+    if !body.is_empty() {
+        post.insert("body".into(), body.into());
     }
 }
 
@@ -2530,6 +2741,94 @@ mod tests {
         assert_eq!(first.url.path(), "/abc/def/s2048x3072/one.jpg");
         assert!(!first.handoff.contains_key("_tumblr_original"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn npf_posts_gain_legacy_media_fields() {
+        let mut post = json!({"id": 5, "original_type": "regular", "content": [
+            {"type": "text", "text": "a <b>"},
+            {"type": "image", "media": [
+                {"url": "https://64.media.tumblr.com/k/s640x960/small.pnj", "width": 640},
+                {"url": "https://64.media.tumblr.com/k/s1280x1920/big.pnj", "width": 1080,
+                 "has_original_dimensions": true}]},
+            {"type": "image", "media": [
+                {"url": "https://64.media.tumblr.com/g/s540x810/anim.gifv", "width": 540}]},
+            {"type": "video", "media": {"url": "https://va.media.tumblr.com/tumblr_v.mp4"}}],
+            "trail": [{"content": [{"type": "image", "media": [
+                {"url": "https://64.media.tumblr.com/t/s1280x1920/first.jpg", "width": 9}]}]}]});
+        npf_to_legacy(&mut post);
+        assert_eq!(post["type"], "photo");
+        let photos = post["photos"].as_array().unwrap();
+        assert_eq!(photos.len(), 3);
+        assert!(
+            photos[0]["original_size"]["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("first.jpg")
+        );
+        assert!(
+            photos[1]["original_size"]["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("/big.png")
+        );
+        assert!(
+            photos[1]["alt_sizes"][0]["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("/small.png")
+        );
+        assert!(
+            photos[2]["original_size"]["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("/anim.gif")
+        );
+        assert_eq!(
+            post["video_url"],
+            "https://va.media.tumblr.com/tumblr_v.mp4"
+        );
+        assert_eq!(post["body"], "<p>a &lt;b&gt;</p>");
+        // Legacy posts are left alone.
+        let mut legacy = json!({"id": 1, "type": "photo", "photos": [], "content": []});
+        let before = legacy.clone();
+        npf_to_legacy(&mut legacy);
+        assert_eq!(legacy, before);
+    }
+
+    #[tokio::test]
+    async fn exhausted_default_key_falls_back_to_the_web_token() {
+        let limited = b"HTTP/1.1 429 Too Many Requests\r\nX-Ratelimit-Perday-Remaining: 0\r\n\
+            X-Ratelimit-Perday-Reset: 100\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        let npf = json!({"response": {"posts": [{"id": 7, "id_string": "7", "blog_name": "alice",
+            "original_type": "photo", "timestamp": 1, "content": [{"type": "image", "media": [
+                {"url": "https://64.media.tumblr.com/k/s1280x1920/a.pnj", "width": 10,
+                 "has_original_dimensions": true}]}]}]}})
+        .to_string();
+        let (root, server) = serve(vec![
+            limited.to_vec(),
+            response("200 OK", br#"<script>{"API_TOKEN":"webToken123"}</script>"#),
+            response("200 OK", npf.as_bytes()),
+        ]);
+        let media: Vec<_> = tumblr(root.clone())
+            .with_web_root(root.join("/web/").unwrap())
+            .stream(&Url::parse("https://www.tumblr.com/alice/7").unwrap())
+            .collect()
+            .await;
+        let urls: Vec<String> = media
+            .iter()
+            .map(|m| m.as_ref().unwrap().url.to_string())
+            .collect();
+        assert_eq!(urls, ["https://64.media.tumblr.com/k/s1280x1920/a.png"]);
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains(&format!("api_key={DEFAULT_API_KEY}")));
+        assert!(requests[1].starts_with("GET /web/ "));
+        assert!(!requests[2].contains("api_key"), "{}", requests[2]);
+        assert!(
+            requests[2]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer webtoken123\r\n")
+        );
     }
 
     #[tokio::test]
