@@ -518,18 +518,23 @@ impl Media {
                     serde_json::json!([post.post_id, post.media_id, extension?]).to_string(),
                 )
             }
-            "twitter"
+            category @ ("twitter" | "instagram")
                 if self
                     .metadata
                     .as_ref()
                     .is_some_and(|post| post.profile_asset.is_some()) =>
             {
                 let asset = self.metadata.as_ref()?.profile_asset.as_ref()?;
-                if !crate::twitter::valid_id(&asset.owner_id) || !asset.valid_version() {
+                let valid_owner = if category == "twitter" {
+                    crate::twitter::valid_id(&asset.owner_id)
+                } else {
+                    decimal_id(&asset.owner_id)
+                };
+                if !valid_owner || !asset.valid_version() {
                     return None;
                 }
                 (
-                    "twitter",
+                    category,
                     serde_json::json!(["profile", asset.kind, asset.owner_id, asset.version])
                         .to_string(),
                 )

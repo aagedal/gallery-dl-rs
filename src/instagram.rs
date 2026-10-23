@@ -3,6 +3,8 @@
 mod collections;
 #[path = "instagram_stories.rs"]
 mod stories;
+#[path = "instagram_users.rs"]
+mod users;
 use crate::{
     Result,
     cookies::CookieJar,
@@ -28,9 +30,12 @@ use std::{
 };
 pub use stories::is_story_url;
 use url::Url;
+pub use users::is_unordered_user_url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
+const SHORTCODE_ALPHABET: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 pub struct Instagram {
     client: Client,
@@ -40,6 +45,8 @@ pub struct Instagram {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    include: Option<crate::dispatch::Include>,
+    api_base: Url,
 }
 
 impl Instagram {
@@ -65,6 +72,8 @@ impl Instagram {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            include: None,
+            api_base: Url::parse("https://www.instagram.com/api/v1/").unwrap(),
         })
     }
 
@@ -79,6 +88,19 @@ impl Instagram {
     /// The extraction timeout covers all attempts and waits. Defaults to zero.
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;
+        self
+    }
+
+    /// Select bare-profile views like upstream's `include` option; absent
+    /// selects only `posts`.
+    pub fn with_include(mut self, include: Option<crate::dispatch::Include>) -> Self {
+        self.include = include;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_api_base(mut self, base: Url) -> Self {
+        self.api_base = base;
         self
     }
 
@@ -164,22 +186,16 @@ impl Instagram {
                 .boxed();
         }
         if let Ok(input) = stories::input(url) {
-            return self.story_events(
-                input,
-                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
-            );
+            return self.story_events(input, self.api_base.clone());
         }
         if let Ok(input) = collections::input(url) {
-            return self.collection_events(
-                input,
-                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
-            );
+            return self.collection_events(input, self.api_base.clone());
+        }
+        if let Ok(input) = users::input(url) {
+            return self.user_events(input);
         }
         match profile_username(url) {
-            Ok(username) => self.profile_events(
-                username,
-                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
-            ),
+            Ok(username) => self.profile_events(username, self.api_base.clone()),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
     }
@@ -528,7 +544,7 @@ pub fn shortcode(url: &Url) -> Result<String> {
 }
 
 fn media_id(code: &str) -> Result<u64> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8] = SHORTCODE_ALPHABET;
     let invalid = || error("invalid Instagram post shortcode");
     if code.is_empty() || code.len() > 11 {
         return Err(invalid());
@@ -1699,6 +1715,10 @@ mod story_tests;
 #[cfg(test)]
 #[path = "instagram_collections_tests.rs"]
 mod collection_tests;
+
+#[cfg(test)]
+#[path = "instagram_users_tests.rs"]
+mod user_tests;
 
 fn instagram_keywords() -> event::KeywordPolicy {
     event::KeywordPolicy::copied_after_post(&[
