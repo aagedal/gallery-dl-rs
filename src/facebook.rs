@@ -28,8 +28,6 @@ use std::{
 };
 use url::Url;
 
-/// `ProfileCometLegacyAlbumGridViewPaginationQuery`, observed on 2026-10-23.
-const GRID_PAGINATION_DOC_ID: &str = "34407011978913359";
 pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
@@ -374,14 +372,13 @@ impl Facebook {
         let endpoint = state.base.join("api/graphql/").ok()?;
         let mut referer = state.base.join("media/set/").ok()?;
         referer.query_pairs_mut().append_pair("set", &state.set);
+        let query = grid.query;
+        let (name, doc_id) = query.operation();
         let form = [
             ("lsd", lsd.as_str()),
             ("variables", variables.as_str()),
-            ("doc_id", GRID_PAGINATION_DOC_ID),
-            (
-                "fb_api_req_friendly_name",
-                "ProfileCometLegacyAlbumGridViewPaginationQuery",
-            ),
+            ("doc_id", doc_id),
+            ("fb_api_req_friendly_name", name),
             ("server_timestamps", "true"),
         ];
         self.rate_limits.wait(&endpoint, self.timeout).await.ok()?;
@@ -392,10 +389,7 @@ impl Facebook {
             .header(header::REFERER, referer.as_str())
             .header(header::ORIGIN, "https://www.facebook.com")
             .header("X-FB-LSD", lsd.as_str())
-            .header(
-                "X-FB-Friendly-Name",
-                "ProfileCometLegacyAlbumGridViewPaginationQuery",
-            )
+            .header("X-FB-Friendly-Name", name)
             .header("Sec-Fetch-Site", "same-origin")
             .form(&form);
         if let Some(cookies) = self.cookies.lock().unwrap().header(&endpoint) {
@@ -409,7 +403,7 @@ impl Facebook {
         if body.len() > MAX_RESPONSE {
             return None;
         }
-        let page = parse_grid_page(&body)?;
+        let page = parse_grid_page(&body, query)?;
         let new: Vec<String> = page
             .ids
             .into_iter()

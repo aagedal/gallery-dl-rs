@@ -560,14 +560,34 @@ async fn anonymous_grids_continue_through_the_pagination_query() {
 }
 
 #[test]
+fn collection_pages_unwrap_their_photo_nodes() {
+    let page = br#"{"data":{"node":{"pageItems":{"edges":[{"node":{"id":"item","node":{"__typename":"Photo","id":"9"}}}],"page_info":{"end_cursor":"n2","has_next_page":false}}}}}"#;
+    let grid =
+        crate::facebook_album::parse_grid_page(page, crate::facebook_album::GridQuery::Collection)
+            .unwrap();
+    assert_eq!((grid.ids, grid.more), (vec!["9".to_owned()], false));
+}
+
+#[test]
 fn grid_pages_parse_their_cursor() {
     let page = br#"{"data":{"node":{"grid_media":{"edges":[{"node":{"__typename":"Photo","id":"5"}}],"page_info":{"end_cursor":"next","has_next_page":true}}}}}
 {"label":"deferred"}"#;
-    let grid = crate::facebook_album::parse_grid_page(page).unwrap();
+    let grid =
+        crate::facebook_album::parse_grid_page(page, crate::facebook_album::GridQuery::Album)
+            .unwrap();
     assert_eq!(
         (grid.ids, grid.more, grid.cursor.as_deref()),
         (vec!["5".to_owned()], true, Some("next"))
     );
-    assert!(crate::facebook_album::parse_grid_page(b"<html>").is_none());
-    assert!(crate::facebook_album::parse_grid_page(br#"{"errors":[]}"#).is_none());
+    assert!(
+        crate::facebook_album::parse_grid_page(b"<html>", crate::facebook_album::GridQuery::Album)
+            .is_none()
+    );
+    assert!(
+        crate::facebook_album::parse_grid_page(
+            br#"{"errors":[]}"#,
+            crate::facebook_album::GridQuery::Album
+        )
+        .is_none()
+    );
 }

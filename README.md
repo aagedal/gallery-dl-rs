@@ -190,10 +190,11 @@ only name the set, albums or avatar photo; photos are then read like album and
 photo URLs. Anonymous photo pages carry no next-photo navigation, so without
 cookies an album or profile follows the grid listed on its album or
 `photos_by` page. Album grids continue through
-`ProfileCometLegacyAlbumGridViewPaginationQuery` with the page's LSD token
-(its persisted ID was observed on 2026-10-23); profile `photos_by` grids and
-albums whose pagination is refused end with an error asking for `--cookies`
-after the visible photos. Anonymous profile photos,
+`ProfileCometLegacyAlbumGridViewPaginationQuery` and profile `photos_by`
+grids through `ProfileCometAppCollectionPhotosRendererPaginationQuery`, both
+with the page's LSD token (persisted IDs observed on 2026-10-23); grids whose
+pagination is refused end with an error asking for `--cookies` after the
+visible photos. Anonymous profile photos,
 albums and avatars were checked live on 2026-10-23.
 
 Experimental Facebook album traversal uses `Facebook::stream` and the native CLI.
@@ -2431,7 +2432,7 @@ are always native):
 |---|---|---|
 | Instagram | native (experimental) | public posts, reels and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
 | X/Twitter | native (experimental) | single posts as a guest; timelines and searches need `--cookies` |
-| Facebook | native photos, albums, videos and profiles | public albums in full (grid pages through the album pagination query); profile photos' first grid page, the rest needs `--cookies` |
+| Facebook | native photos, albums, videos and profiles | public albums and profile photos in full, paged through the logged-out grid queries |
 | Reddit | native REST listings, submissions, users | Reddit sends logged-out JSON clients on some networks to its login page; pass `--cookies` |
 | Pinterest, Bluesky | native | yes |
 | Tumblr | native | yes; when the shared default API key hits its daily limit, the web client's public token is used (its NPF posts are converted) |

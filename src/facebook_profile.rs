@@ -197,7 +197,23 @@ pub(crate) fn parse_photos_grid(bytes: &[u8]) -> crate::facebook_album::Grid {
             grid.ids.push(id.to_owned());
         }
     }
-    grid.more = extr(&rest[end..], r#""has_next_page":"#, "}") == Some("true");
+    let info = &rest[end..];
+    grid.more = extr(info, r#""has_next_page":"#, "}") == Some("true");
+    grid.cursor = extr(info, r#""end_cursor":""#, "\"")
+        .filter(|c| !c.is_empty() && c.len() <= 1024)
+        .map(str::to_owned);
+    // The collection's own ID follows its `pageItems`.
+    grid.node = extr(info, r#"},"id":""#, "\"")
+        .filter(|id| {
+            !id.is_empty()
+                && id.len() <= 512
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'=' | b'_' | b'-'))
+        })
+        .map(str::to_owned);
+    grid.lsd = crate::facebook_album::lsd_token(bytes);
+    grid.query = crate::facebook_album::GridQuery::Collection;
     grid
 }
 
@@ -354,12 +370,17 @@ mod tests {
         assert_eq!(parse_photos_set(legacy).unwrap().as_deref(), Some("a.5"));
         assert_eq!(parse_photos_set(b"<html></html>").unwrap(), None);
         let grid = parse_photos_grid(
-            br#"{"pageItems":{"edges":[{"node":{"node":{"__typename":"Photo","id":"11"}}},{"node":{"node":{"__typename":"Photo","id":"12"}}},{"node":{"node":{"__typename":"Photo","id":"11"}}}]},"page_info":{"end_cursor":"c","has_next_page":true}}"#,
+            br#"{"pageItems":{"edges":[{"node":{"node":{"__typename":"Photo","id":"11"}}},{"node":{"node":{"__typename":"Photo","id":"12"}}},{"node":{"node":{"__typename":"Photo","id":"11"}}}]},"page_info":{"end_cursor":"c","has_next_page":true},"id":"Y29sbA=="}["LSD",[],{"token":"lsd1"}]"#,
         );
         assert_eq!(
             (grid.ids, grid.more),
             (vec!["11".to_owned(), "12".to_owned()], true)
         );
+        // Enough to continue through the collection's pagination query.
+        assert_eq!(grid.cursor.as_deref(), Some("c"));
+        assert_eq!(grid.node.as_deref(), Some("Y29sbA=="));
+        assert_eq!(grid.lsd.as_deref(), Some("lsd1"));
+        assert_eq!(grid.query, crate::facebook_album::GridQuery::Collection);
         assert_eq!(parse_photos_grid(b"<html></html>").ids.len(), 0);
 
         let profile = br#"x","user":{"__isProfile":"User","name":"NASA","profilePhoto":{"url":"https:\/\/www.facebook.com\/photo\/?fbid=423033359192046&set=a.416661003162615","id":"423033359192046"},"id":"100044561550831"},"viewer":{"x":1}"#;

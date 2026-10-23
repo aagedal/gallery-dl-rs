@@ -156,6 +156,40 @@ pub(crate) struct Grid {
     pub(crate) cursor: Option<String>,
     pub(crate) node: Option<String>,
     pub(crate) lsd: Option<String>,
+    pub(crate) query: GridQuery,
+}
+
+/// The pagination query that continues a grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum GridQuery {
+    /// An album's `grid_media`.
+    #[default]
+    Album,
+    /// A profile photo collection's `pageItems` (the `photos_by` tab).
+    Collection,
+}
+
+impl GridQuery {
+    /// Friendly name and persisted ID, observed on 2026-10-23.
+    pub(crate) fn operation(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Album => (
+                "ProfileCometLegacyAlbumGridViewPaginationQuery",
+                "34407011978913359",
+            ),
+            Self::Collection => (
+                "ProfileCometAppCollectionPhotosRendererPaginationQuery",
+                "27028962643386672",
+            ),
+        }
+    }
+
+    fn items(self) -> &'static str {
+        match self {
+            Self::Album => "/data/node/grid_media",
+            Self::Collection => "/data/node/pageItems",
+        }
+    }
 }
 
 /// Photo IDs, `has_next_page` and `end_cursor` of a `grid_media` object.
@@ -167,7 +201,11 @@ fn grid_media(media: &Value) -> (Vec<String>, bool, Option<String>) {
         .into_iter()
         .flatten()
     {
-        if let Some(id) = edge.get("node").and_then(photo_identifier)
+        // Collection items wrap their photo in a second `node`.
+        let node = edge.get("node");
+        if let Some(id) = node
+            .and_then(photo_identifier)
+            .or_else(|| node.and_then(|n| n.get("node")).and_then(photo_identifier))
             && !ids.iter().any(|seen| seen == id)
         {
             ids.push(id.to_owned());
@@ -187,12 +225,12 @@ fn grid_media(media: &Value) -> (Vec<String>, bool, Option<String>) {
 
 /// The next grid page from `ProfileCometLegacyAlbumGridViewPaginationQuery`;
 /// `None` when the response is not one (for example a rotated query ID).
-pub(crate) fn parse_grid_page(bytes: &[u8]) -> Option<Grid> {
+pub(crate) fn parse_grid_page(bytes: &[u8], query: GridQuery) -> Option<Grid> {
     let data = serde_json::Deserializer::from_slice(bytes)
         .into_iter::<Value>()
         .next()?
         .ok()?;
-    let (ids, more, cursor) = grid_media(data.pointer("/data/node/grid_media")?);
+    let (ids, more, cursor) = grid_media(data.pointer(query.items())?);
     Some(Grid {
         ids,
         more,
@@ -229,6 +267,7 @@ pub(crate) fn parse_grid(bytes: &[u8], set: &str) -> Grid {
                     cursor,
                     node,
                     lsd: None,
+                    query: GridQuery::Album,
                 });
             }
         });
@@ -236,13 +275,16 @@ pub(crate) fn parse_grid(bytes: &[u8], set: &str) -> Grid {
     let Some(mut grid) = grid.filter(|_| named) else {
         return Grid::default();
     };
-    grid.lsd = std::str::from_utf8(bytes)
-        .ok()
-        .and_then(|page| {
-            let start = page.find(r#"["LSD",[],{"token":""#)? + r#"["LSD",[],{"token":""#.len();
-            let len = page[start..].find('"')?;
-            Some(&page[start..start + len])
-        })
+    grid.lsd = lsd_token(bytes);
+    grid
+}
+
+/// The page's `LSD` token, which authorizes logged-out GraphQL requests.
+pub(crate) fn lsd_token(bytes: &[u8]) -> Option<String> {
+    let page = std::str::from_utf8(bytes).ok()?;
+    let start = page.find(r#"["LSD",[],{"token":""#)? + r#"["LSD",[],{"token":""#.len();
+    let len = page[start..].find('"')?;
+    Some(&page[start..start + len])
         .filter(|token| {
             !token.is_empty()
                 && token.len() <= 128
@@ -250,8 +292,7 @@ pub(crate) fn parse_grid(bytes: &[u8], set: &str) -> Grid {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
         })
-        .map(str::to_owned);
-    grid
+        .map(str::to_owned)
 }
 
 /// A missing navigation field is an incomplete response, not an empty album.
