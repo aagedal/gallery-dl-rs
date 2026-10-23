@@ -2447,6 +2447,11 @@ fallback exists. Inline manifest data (`_ytdl_manifest_data`) has no fetchable
 location for relative segments and is not passed to yt-dlp. A stable archive hit
 can skip an already completed logical media item before download-type validation.
 
+`--cookies FILE` and `--cookies-from-browser SPEC` are also forwarded to yt-dlp,
+both when extracting `ytdl` sites and when downloading. A cookie file is passed
+as a private temporary copy, because yt-dlp rewrites its cookie file on exit; a
+browser specification is passed through unchanged for yt-dlp to read itself.
+
 Broader native browser cookie import,
 broader native collection pagination, and full gallery-dl filename/config compatibility are
 not implemented.

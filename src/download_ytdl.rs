@@ -54,10 +54,16 @@ pub(super) struct Request<'a> {
     pub rate: Option<u64>,
     pub limits: SizeLimits,
     pub mtime: Option<SystemTime>,
+    pub cookies: Option<&'a crate::cookies::YtdlCookies>,
 }
 
 /// Command-line arguments, excluding the executable.
-pub(super) fn arguments(request: &Request<'_>, output: &Path, url: &url::Url) -> Vec<String> {
+pub(super) fn arguments(
+    request: &Request<'_>,
+    cookies: &[String],
+    output: &Path,
+    url: &url::Url,
+) -> Vec<String> {
     let mut args: Vec<String> = [
         "--ignore-config",
         "--no-playlist",
@@ -107,6 +113,7 @@ pub(super) fn arguments(request: &Request<'_>, output: &Path, url: &url::Url) ->
         args.push("--add-header".into());
         args.push(format!("{name}:{value}"));
     }
+    args.extend_from_slice(cookies);
     args.push("--output".into());
     args.push(output.join(format!("{STEM}.%(ext)s")).display().to_string());
     // URLs never start with '-', but keep them out of option parsing anyway.
@@ -138,9 +145,19 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
     let work = tempfile::Builder::new()
         .prefix(".ytdl-")
         .tempdir_in(parent)?;
+    // Cookie copies live outside the destination directory.
+    let scratch = tempfile::tempdir()?;
+    let cookies = match request.cookies {
+        Some(cookies) => cookies.arguments(scratch.path()).map_err(|error| Failure {
+            error,
+            retry: false,
+            fallback: true,
+        })?,
+        None => Vec::new(),
+    };
     let mut command = tokio::process::Command::new(command);
     command
-        .args(arguments(&request, work.path(), url))
+        .args(arguments(&request, &cookies, work.path(), url))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -278,14 +295,17 @@ mod tests {
             rate: Some(1000),
             limits: SizeLimits::default(),
             mtime: None,
+            cookies: None,
         };
-        let args = arguments(&request, Path::new("/out/a/.ytdl-x"), &page);
+        let cookies = ["--cookies".to_owned(), "/tmp/c.txt".to_owned()];
+        let args = arguments(&request, &cookies, Path::new("/out/a/.ytdl-x"), &page);
         let joined = args.join(" ");
         assert!(joined.starts_with("--ignore-config --no-playlist"));
         assert!(joined.contains("--retries 3 --limit-rate 1000 --proxy http://proxy:8080"));
         assert!(joined.contains("--merge-output-format mkv --remux-video mkv"));
         assert!(joined.contains("--add-header Referer:https://site.example/"));
         assert!(!joined.contains("Range"));
+        assert!(joined.contains("--cookies /tmp/c.txt --output "));
         assert_eq!(&args[args.len() - 2..], ["--", page.as_str()]);
         assert!(args.contains(&"/out/a/.ytdl-x/media.%(ext)s".to_owned()));
     }
@@ -330,8 +350,10 @@ mod tests {
         // Writes the output template's file, as yt-dlp would.
         std::fs::write(
             &script,
-            "#!/bin/sh\nfor a; do case \"$prev\" in --output) out=\"$a\";; esac; prev=\"$a\"; done\n\
-             printf video > \"$(echo \"$out\" | sed 's/%(ext)s/mp4/')\"\n",
+            "#!/bin/sh\nfor a; do case \"$prev\" in --output) out=\"$a\";; \
+             --cookies) jar=\"$a\";; esac; prev=\"$a\"; done\n\
+             dest=\"$(echo \"$out\" | sed 's/%(ext)s/mp4/')\"\n\
+             if [ -n \"$jar\" ]; then cat \"$jar\" > \"$dest\"; else printf video > \"$dest\"; fi\n",
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -350,6 +372,7 @@ mod tests {
             rate: None,
             limits: SizeLimits::default(),
             mtime: None,
+            cookies: None,
         };
         let outcome = download(request()).await.unwrap();
         assert!(matches!(outcome, Outcome::Downloaded(_)));
@@ -367,5 +390,20 @@ mod tests {
         };
         let failure = download(missing).await.unwrap_err();
         assert!(failure.error.to_string().contains("--ytdl-command"));
+        // Cookie files reach yt-dlp as a copy outside the destination.
+        let jar = scripts.path().join("jar.txt");
+        std::fs::write(&jar, "jar").unwrap();
+        let cookies = crate::cookies::YtdlCookies::File(jar);
+        let with_cookies = Request {
+            path: &out.path().join("c.mp4"),
+            cookies: Some(&cookies),
+            ..request()
+        };
+        assert!(matches!(
+            download(with_cookies).await.unwrap(),
+            Outcome::Downloaded(_)
+        ));
+        assert_eq!(std::fs::read(out.path().join("c.mp4")).unwrap(), b"jar");
+        assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 2);
     }
 }

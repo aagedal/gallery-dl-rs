@@ -268,6 +268,11 @@ async fn run(http: &Http, url: &Url) -> Result<Value> {
     if let Some(agent) = http.network.user_agent() {
         command.args(["--user-agent", agent]);
     }
+    // Cookie copies are removed when the command finishes.
+    let scratch = tempfile::tempdir()?;
+    if let Some(cookies) = http.ytdl_cookies() {
+        command.args(cookies.arguments(scratch.path())?);
+    }
     command
         .args(["--", url.as_str()])
         .stdin(Stdio::null())
@@ -425,6 +430,33 @@ mod tests {
         assert_eq!(route("SomethingNew").subcategory, "SomethingNew");
         assert!(std::ptr::eq(route("SomethingNew"), route("SomethingNew")));
         assert_eq!(route("bad key/../").subcategory, "Generic");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn forwards_session_cookies() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("yt-dlp");
+        let json = serde_json::json!({"extractor_key": "Youtube", "id": "v1",
+            "title": "One", "ext": "mp4"});
+        // Succeeds only when the browser specification is forwarded.
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in *'--cookies-from-browser firefox:/p '*) ;; \
+                 *) exit 1;; esac\ncat <<'EOF'\n{json}\nEOF\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let http = testing::http("yt-dlp", url("http://127.0.0.1:1/"))
+            .with_ytdl(&script)
+            .with_ytdl_cookies(Some(crate::cookies::YtdlCookies::Browser(
+                "firefox:/p".into(),
+            )));
+        let media = testing::media(extract(&http, url("https://www.youtube.com/watch?v=v1"))).await;
+        assert_eq!(media.len(), 1);
     }
 
     #[cfg(unix)]

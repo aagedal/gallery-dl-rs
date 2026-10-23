@@ -40,6 +40,8 @@ pub struct DownloadClient {
     rate: Option<u64>,
     /// yt-dlp executable for video-page and HLS/DASH jobs.
     ytdl: Option<std::sync::Arc<Path>>,
+    /// Session cookies forwarded to yt-dlp.
+    ytdl_cookies: Option<std::sync::Arc<crate::cookies::YtdlCookies>>,
 }
 
 /// Per-attempt state shared between the attempt and its deadline. Throttling
@@ -193,6 +195,12 @@ impl DownloadClient {
         self
     }
 
+    /// Session cookies forwarded to yt-dlp downloads.
+    pub fn with_ytdl_cookies(mut self, cookies: Option<crate::cookies::YtdlCookies>) -> Self {
+        self.ytdl_cookies = cookies.map(Into::into);
+        self
+    }
+
     /// Wait before each network download, after archive and existing-file checks.
     pub fn with_sleep(mut self, sleep: Option<crate::sleep::SleepRange>) -> Self {
         self.sleep = sleep;
@@ -244,6 +252,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         sleep: None,
         rate: None,
         ytdl: Some(Path::new("yt-dlp").into()),
+        ytdl_cookies: None,
     })
 }
 
@@ -836,6 +845,7 @@ async fn download_media(
                     rate: client.rate,
                     limits,
                     mtime: mtime.fixed,
+                    cookies: client.ytdl_cookies.as_deref(),
                 })
                 .await
             }

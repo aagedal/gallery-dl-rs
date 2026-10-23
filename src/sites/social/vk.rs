@@ -744,7 +744,11 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /someone "));
         // VK redirects non-browser clients to m.vk.com.
-        assert!(requests.iter().all(|r| r.contains("user-agent: Mozilla/5.0")));
+        assert!(
+            requests
+                .iter()
+                .all(|r| r.contains("user-agent: Mozilla/5.0"))
+        );
         assert!(requests[1].ends_with("list=photos42&offset=4"));
     }
 

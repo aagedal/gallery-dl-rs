@@ -445,6 +445,7 @@ async fn run(args: Args) -> Result<()> {
     let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
     let extractors = Extractors {
         ytdl: args.ytdl_command.clone(),
+        ytdl_cookies: ytdl_cookies(&args),
         ..Extractors::default()
     };
     let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
@@ -748,7 +749,8 @@ async fn run(args: Args) -> Result<()> {
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep)
             .with_rate_limit(args.limit_rate)
-            .with_ytdl((!args.no_ytdl).then_some(args.ytdl_command.as_path()));
+            .with_ytdl((!args.no_ytdl).then_some(args.ytdl_command.as_path()))
+            .with_ytdl_cookies(ytdl_cookies(&args));
         let aborted = &aborted;
         let terminated = &terminated;
         let results = media
@@ -1067,6 +1069,17 @@ struct Extractors {
     sites: gallery_dl_rs::sites::Runtime,
     /// yt-dlp executable for sites extracted through it.
     ytdl: PathBuf,
+    /// Session cookies forwarded to yt-dlp.
+    ytdl_cookies: Option<gallery_dl_rs::cookies::YtdlCookies>,
+}
+
+/// The command-line session cookies, forwarded to yt-dlp as given.
+fn ytdl_cookies(args: &Args) -> Option<gallery_dl_rs::cookies::YtdlCookies> {
+    use gallery_dl_rs::cookies::YtdlCookies;
+    args.cookies
+        .clone()
+        .map(YtdlCookies::File)
+        .or_else(|| args.cookies_from_browser.clone().map(YtdlCookies::Browser))
 }
 
 impl Extractors {
@@ -1469,6 +1482,7 @@ fn extract_input<'a>(
                                     native
                                         .with_cookies(jar.unwrap_or_default())
                                         .with_ytdl(&extractors.ytdl)
+                                        .with_ytdl_cookies(extractors.ytdl_cookies.clone())
                                         .with_api_key(options.api_key.as_deref())
                                         .with_options(options.site_options.clone())
                                         .with_retries(options.retries.unwrap())

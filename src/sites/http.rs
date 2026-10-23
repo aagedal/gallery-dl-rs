@@ -38,6 +38,7 @@ pub struct Http {
     /// memory. They are never attached to emitted media.
     cookies: std::sync::Mutex<CookieJar>,
     ytdl: std::path::PathBuf,
+    ytdl_cookies: Option<crate::cookies::YtdlCookies>,
 }
 
 /// A request body.
@@ -66,6 +67,7 @@ impl Http {
             root: None,
             cookies: std::sync::Mutex::new(CookieJar::default()),
             ytdl: "yt-dlp".into(),
+            ytdl_cookies: None,
         })
     }
 
@@ -102,6 +104,16 @@ impl Http {
 
     pub fn ytdl(&self) -> &std::path::Path {
         &self.ytdl
+    }
+
+    /// Session cookies forwarded to yt-dlp.
+    pub fn with_ytdl_cookies(mut self, cookies: Option<crate::cookies::YtdlCookies>) -> Self {
+        self.ytdl_cookies = cookies;
+        self
+    }
+
+    pub fn ytdl_cookies(&self) -> Option<&crate::cookies::YtdlCookies> {
+        self.ytdl_cookies.as_ref()
     }
 
     /// The configured User-Agent, else [`BROWSER_AGENT`]; sites that refuse
