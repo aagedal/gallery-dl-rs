@@ -2447,6 +2447,7 @@ are always native):
 | Snapchat | native public profiles (`@USER`, `add/USER`): story, highlights and Spotlight; single Spotlight URLs through yt-dlp | yes |
 | Xiaohongshu | native image and video notes (`explore/ID`, `discovery/item/ID`) | only through shared links carrying their `xsec_token`, else cookies; fixture-tested only, as this network is sent to login |
 | Threads | native posts (`@USER/post/CODE`) through the logged-out `BarcelonaPostPageTargetQuery`; its rotating query ID is rediscovered from the page's bundles when stale | yes |
+| App short links | `t.snapchat.com`, `v.kuaishou.com`, `xhslink.com`, `v.douyin.com` resolve one redirect and are queued for their site (Xiaohongshu share links keep their `xsec_token`) | yes; Xiaohongshu's note pages still answer this network with a security page |
 | Kuaishou | native short videos (`visionVideoDetail` GraphQL) | no: anonymous clients get a captcha; pass a browser session's cookies |
 
 WhatsApp, WeChat, Messenger and QQ have no public media pages. The Kuaishou

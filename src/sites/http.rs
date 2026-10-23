@@ -256,6 +256,39 @@ impl Http {
         self.send(url, headers, None).await
     }
 
+    /// The `Location` of one GET without following it, for short links that
+    /// redirect to another site; `None` unless the response is a redirect.
+    pub async fn location(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Option<Url>> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        if !response.status().is_redirection() {
+            return Ok(None);
+        }
+        Ok(response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| value.len() <= 8192)
+            .and_then(|value| url.join(value).ok())
+            .filter(|target| {
+                matches!(target.scheme(), "http" | "https")
+                    && target.username().is_empty()
+                    && target.password().is_none()
+            }))
+    }
+
     /// POST a body and return the raw response; redirects are refused.
     pub async fn post(
         &self,

@@ -4,6 +4,7 @@ use crate::sites::Site;
 mod bilibili;
 mod discord;
 mod kuaishou;
+mod shortlink;
 mod snapchat;
 mod telegram;
 mod threads;
@@ -25,4 +26,5 @@ pub(super) static SITES: &[&Site] = &[
     &xiaohongshu::SITE,
     &threads::SITE,
     &youtube_posts::SITE,
+    &shortlink::SITE,
 ];
