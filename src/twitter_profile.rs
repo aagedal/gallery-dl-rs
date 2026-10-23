@@ -150,8 +150,11 @@ impl Twitter {
     }
 
     pub(super) fn status_events(&self, id: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        // Upstream `tweet-endpoint: auto` reads TweetDetail only when logged
+        // in; guests are refused it and use TweetResultByRestId.
         if self.status_options.conversations != ConversationMode::Off
-            || self.status_options.endpoint != TweetEndpoint::RestId
+            || self.status_options.endpoint == TweetEndpoint::Detail
+            || (self.status_options.endpoint == TweetEndpoint::Auto && self.has_session())
         {
             self.detail_events_at(Url::parse("https://x.com/i/api/graphql/").unwrap(), id)
         } else {

@@ -787,12 +787,16 @@ fn native_twitter_reports_authentication_without_launching_backend_and_continues
         "https://x.com/id:42/with_replies",
         "https://x.com/id:42/highlights",
     ] {
+        // Without cookies X is read as a guest; a closed proxy keeps guest
+        // activation offline, and its failure asks for a session.
         let output = binary()
             .args([
                 "--extractor",
                 "native",
                 "--extractor-command",
                 "/missing/backend",
+                "--proxy",
+                "http://127.0.0.1:9",
                 "-g",
                 source,
                 "https://example.com/image.jpg",

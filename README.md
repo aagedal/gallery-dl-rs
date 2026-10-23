@@ -2424,7 +2424,8 @@ Native coverage of the largest social platforms (`--extractor native`;
 
 | Platform | Extractor | Anonymous access (checked live) |
 |---|---|---|
-| Instagram, X/Twitter | native (experimental) | needs `--cookies` |
+| Instagram | native (experimental) | single public posts and reels; profiles need `--cookies` |
+| X/Twitter | native (experimental) | single posts as a guest; timelines and searches need `--cookies` |
 | Facebook | native photos, albums, videos and profiles | first grid page of public albums and profiles; the rest needs `--cookies` |
 | Reddit | native REST listings, submissions, users | blocked for some networks; use cookies |
 | Pinterest, Tumblr, Bluesky | native | yes (Tumblr's shared API key is rate limited) |
@@ -2444,6 +2445,13 @@ through an undocumented GraphQL API).
 
 Native Instagram, Facebook, and Twitter/X remain experimental, and live
 authenticated social downloads have not been verified in this repository.
+Without session cookies they fall back to logged-out access, checked live on
+2026-10-23: Instagram posts are read from the public post page's embedded
+post object; X posts use a guest token with `TweetResultByRestId` (upstream's
+`tweet-endpoint: auto` choice for guests), and other X queries report that a
+session is required; Facebook profiles, albums and avatars are read as
+described above. A partial X session (only one of `auth_token` and `ct0`) is
+an error rather than a guest.
 Their undocumented endpoints may change; fixture tests establish parser and
 transport behavior. Anonymous Facebook video extraction has been checked, but
 complete live downloads and authenticated coverage remain unverified.
