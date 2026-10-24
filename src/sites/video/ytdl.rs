@@ -317,7 +317,9 @@ async fn run(http: &Http, url: &Url) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::sites::testing;
+    #[cfg(unix)]
     use futures_util::StreamExt;
 
     fn url(raw: &str) -> Url {
