@@ -16,6 +16,7 @@ mod okporn;
 mod pornhub;
 mod pornstarstube;
 mod scatbooru;
+mod sexcom;
 mod xasiat;
 mod xhamster;
 mod xvideos;
@@ -26,6 +27,7 @@ pub(super) static SITES: &[&Site] = &[
     &xvideos::SITE,
     &xhamster::SITE,
     &motherless::SITE,
+    &sexcom::SITE,
     &okporn::SITE,
     &pornstarstube::SITE,
     &eporner::SITE,
