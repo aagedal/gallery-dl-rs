@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod ao3;
+mod architizer;
 mod arena;
 mod behance;
 mod boosty;
@@ -79,6 +80,7 @@ pub(super) static SITES: &[&Site] = &[
     &subscribestar::SITE,
     &toyhouse::SITE,
     &wikiart::SITE,
+    &architizer::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
