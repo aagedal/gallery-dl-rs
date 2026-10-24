@@ -759,7 +759,7 @@ fn parse_author(author: Option<&Value>, data: &mut Map<String, Value>) {
 }
 
 /// `Extractor._extract_jsonld`.
-fn jsonld(page: &str) -> Option<Value> {
+pub(crate) fn jsonld(page: &str) -> Option<Value> {
     let data = match extr(page, "<script type=\"application/ld+json\">", "</script>") {
         "" => extr(page, "<script type='application/ld+json'>", "</script>"),
         data => data,
@@ -900,7 +900,7 @@ fn parse_profile(page: &str) -> Option<Value> {
 }
 
 /// `_remove_quotes`: drop `<blockquote>` blocks, nested ones included.
-fn remove_quotes(content: &str) -> String {
+pub(crate) fn remove_quotes(content: &str) -> String {
     let mut content = content.to_owned();
     while let Some(beg) = content.find("<blockquote") {
         let Some(mut end) = content[beg..].find("</blockquote").map(|i| i + beg) else {

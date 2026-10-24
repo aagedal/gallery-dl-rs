@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod adultempire;
+mod bellazon;
 mod eporner;
 mod fikfap;
 mod girlswithmuscle;
@@ -30,6 +31,7 @@ pub(super) static SITES: &[&Site] = &[
     &motherless::SITE,
     &sexcom::SITE,
     &vipergirls::SITE,
+    &bellazon::SITE,
     &okporn::SITE,
     &pornstarstube::SITE,
     &eporner::SITE,

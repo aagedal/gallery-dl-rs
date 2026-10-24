@@ -24,7 +24,7 @@ mod threads;
 mod tiktok;
 mod vk;
 mod weibo;
-mod xenforo;
+pub(super) mod xenforo;
 mod xiaohongshu;
 mod youtube_posts;
 
