@@ -19,7 +19,7 @@ mod mangahere;
 mod mangapark;
 mod naverwebtoon;
 mod tapas;
-mod text;
+pub(super) mod text;
 mod webtoons;
 mod weebcentral;
 
