@@ -7,15 +7,26 @@ use crate::sites::Site;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod audiochan;
+mod desktopography;
+mod imagebam;
 mod imagechest;
+mod imagefap;
+mod imageshack;
 mod imgbb;
+mod khinsider;
+mod lexica;
+mod listal;
 mod misskey;
 mod pexels;
+mod pixnet;
 mod redgifs;
 mod soundgasm;
 mod telegraph;
 mod tenor;
 mod unsplash;
+mod wallpapercave;
+mod whyp;
 mod wikimedia;
 
 pub(super) static SITES: &[&Site] = &[
@@ -49,6 +60,17 @@ pub(super) static SITES: &[&Site] = &[
     &imgbb::SITE,
     &imagechest::SITE,
     &telegraph::SITE,
+    &imagebam::SITE,
+    &imageshack::SITE,
+    &imagefap::SITE,
+    &wallpapercave::SITE,
+    &desktopography::SITE,
+    &lexica::SITE,
+    &pixnet::SITE,
+    &listal::SITE,
+    &khinsider::SITE,
+    &audiochan::SITE,
+    &whyp::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
