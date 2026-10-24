@@ -27,6 +27,7 @@ mod slickpic;
 mod soundgasm;
 mod telegraph;
 mod tenor;
+mod tumblrgallery;
 mod tungsten;
 mod unsplash;
 mod wallpapercave;
@@ -79,6 +80,7 @@ pub(super) static SITES: &[&Site] = &[
     &bbc::SITE,
     &tungsten::SITE,
     &slickpic::SITE,
+    &tumblrgallery::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12

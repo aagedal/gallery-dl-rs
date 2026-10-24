@@ -7,7 +7,9 @@ mod discord;
 mod kuaishou;
 mod linkedin;
 mod naverchzzk;
+mod pholder;
 mod plurk;
+mod scrolller;
 mod shortlink;
 mod snapchat;
 mod telegram;
@@ -35,6 +37,8 @@ pub(super) static SITES: &[&Site] = &[
     &blogger::SITE,
     &plurk::SITE,
     &naverchzzk::SITE,
+    &pholder::SITE,
+    &scrolller::SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;

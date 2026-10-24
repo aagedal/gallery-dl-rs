@@ -1,0 +1,15 @@
+query SubredditPostQuery(
+    $url: String!
+) {
+    getPost(
+        data: { url: $url }
+    ) {
+        __typename id url title subredditId subredditTitle subredditUrl
+        redditPath isNsfw hasAudio fullLengthSource gfycatSource redgifsSource
+        ownerAvatar username displayName favoriteCount isPaid tags
+        commentsCount commentsRepliesCount isFavorite
+        albumContent { mediaSources { url width height isOptimized } }
+        mediaSources { url width height isOptimized }
+        blurredMediaSources { url width height isOptimized }
+    }
+}
