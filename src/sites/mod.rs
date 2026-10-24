@@ -239,6 +239,7 @@ pub fn extra_cookie_domains(site: &Site) -> &'static [&'static str] {
         "shortlink" => social::SHORTLINK_COOKIE_DOMAINS,
         "cien" => &["ci-en.dlsite.com"],
         "subscribestar" => &["subscribestar.adult"],
+        "vipergirls" => adult_video::VIPERGIRLS_COOKIE_DOMAINS,
         _ => &[],
     }
 }

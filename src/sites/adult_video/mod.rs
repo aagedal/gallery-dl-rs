@@ -17,6 +17,7 @@ mod pornhub;
 mod pornstarstube;
 mod scatbooru;
 mod sexcom;
+mod vipergirls;
 mod xasiat;
 mod xhamster;
 mod xvideos;
@@ -28,6 +29,7 @@ pub(super) static SITES: &[&Site] = &[
     &xhamster::SITE,
     &motherless::SITE,
     &sexcom::SITE,
+    &vipergirls::SITE,
     &okporn::SITE,
     &pornstarstube::SITE,
     &eporner::SITE,
@@ -38,6 +40,8 @@ pub(super) static SITES: &[&Site] = &[
     &fikfap::SITE,
     &girlswithmuscle::SITE,
 ];
+
+pub(super) static VIPERGIRLS_COOKIE_DOMAINS: &[&str] = vipergirls::COOKIE_DOMAINS;
 
 /// An upstream `ytdl:` URL with `_ytdl_manifest`: yt-dlp reads the HLS or
 /// DASH manifest, and the file's URL keeps the `ytdl:` prefix.
