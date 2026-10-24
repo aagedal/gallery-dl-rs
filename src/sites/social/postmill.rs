@@ -325,7 +325,9 @@ pub(crate) fn parse_post(
         nameext_into(&url, &mut fields);
         if let Some(file) = file_url(&url, root) {
             if link {
-                queued = crate::sites::find(&file).is_some().then(|| (file, fields));
+                queued = crate::sites::find(&file)
+                    .is_some()
+                    .then_some((file, fields));
             } else {
                 items.push(Item::new(file, fields));
             }

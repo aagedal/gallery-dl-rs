@@ -20,6 +20,7 @@ mod rule34us;
 mod rule34vault;
 mod rule34xyz;
 mod sankaku;
+mod sankakucomplex;
 mod shimmie2;
 mod sizebooru;
 mod szurubooru;
@@ -70,6 +71,7 @@ pub(super) static SITES: &[&Site] = &[
     &nozomi::SITE,
     &sankaku::SANKAKU,
     &sankaku::IDOLCOMPLEX,
+    &sankakucomplex::SITE,
 ];
 
 // ---------------------------------------------------------------------------

@@ -25,7 +25,9 @@ static TAG: Route = Route::new(
 static SEARCH: Route = Route::new(
     "search",
     FILENAME,
-    &["{category}", "{search_tags:J }"],
+    // Upstream `{search_tags:J }`; the local parser needs the `/` terminator
+    // that Python's `partition` treats as optional. Renders identically.
+    &["{category}", "{search_tags:J /}"],
     "t_{search_tags}_{dataid}",
 );
 
@@ -125,8 +127,10 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 /// `decode_nozomi`: big-endian 32-bit post ids.
 pub(crate) fn decode(bytes: &[u8]) -> Vec<u32> {
     bytes
-        .chunks_exact(4)
-        .map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| u32::from_be_bytes(*chunk))
         .collect()
 }
 
@@ -494,7 +498,7 @@ mod tests {
             ids(&[1, 2, 3, 4]),
             ids(&[2, 3, 4, 5]),
             ids(&[3]),
-            response("404 Not Found", "text/plain", b""),
+            json(post()),
             response("404 Not Found", "text/plain", b""),
         ]);
         let http = http("nozomi.la", root);
@@ -503,7 +507,15 @@ mod tests {
             Url::parse("https://nozomi.la/search.html?q=a%20b/c%20-d").unwrap(),
         ))
         .await;
-        assert!(files.is_empty());
+        assert_eq!(files.len(), 3);
+        assert_eq!(
+            keywords(&files[0])["search_tags"],
+            json!(["a", "b/c", "-d"])
+        );
+        let (_, dir) = crate::sites::default_templates(&files[0]).unwrap();
+        let dir = dir.render(&files[0]).unwrap().unwrap();
+        assert_eq!(dir.components().count(), 2, "{dir:?}");
+        assert!(dir.to_string_lossy().ends_with(" -d"), "{dir:?}");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /nozomi/a.nozomi "));
         assert!(requests[1].starts_with("GET /nozomi/bc.nozomi "));
