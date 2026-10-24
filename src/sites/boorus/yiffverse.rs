@@ -30,6 +30,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&POST, &PLAYLIST, &TAG],
     api_key: false,
+    cookies: None,
 };
 
 static API: Api = Api {

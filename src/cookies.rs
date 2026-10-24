@@ -7,6 +7,30 @@ use url::{Host, Url};
 
 use crate::{Result, error};
 
+/// The session cookies forwarded to yt-dlp: a Netscape file or a
+/// `--cookies-from-browser` specification, which yt-dlp reads itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum YtdlCookies {
+    File(std::path::PathBuf),
+    Browser(String),
+}
+
+impl YtdlCookies {
+    /// yt-dlp arguments. yt-dlp rewrites a `--cookies` file on exit, so the
+    /// file is copied into `scratch` and the user's file stays untouched.
+    pub fn arguments(&self, scratch: &std::path::Path) -> Result<Vec<String>> {
+        match self {
+            Self::File(path) => {
+                let copy = scratch.join("cookies.txt");
+                std::fs::copy(path, &copy)
+                    .map_err(|_| error("could not read the cookie file for yt-dlp"))?;
+                Ok(vec!["--cookies".into(), copy.display().to_string()])
+            }
+            Self::Browser(spec) => Ok(vec!["--cookies-from-browser".into(), spec.clone()]),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct CookieJar {
     cookies: Vec<Cookie>,
@@ -246,6 +270,29 @@ impl CookieJar {
         }
     }
 
+    /// Apply one `Set-Cookie` value as if `url` had returned it.
+    pub fn store(&mut self, url: &Url, set_cookie: &str) {
+        self.store_at(url, set_cookie, unix_time());
+    }
+
+    /// The value of the named cookie that would be sent to this URL.
+    pub fn value(&self, url: &Url, name: &str) -> Option<String> {
+        self.header(url)?.split("; ").find_map(|pair| {
+            pair.split_once('=')
+                .filter(|(key, _)| *key == name)
+                .map(|(_, value)| value.to_owned())
+        })
+    }
+
+    /// Add another jar's cookies, for sites that hand URLs to other sites.
+    pub fn extend(&mut self, other: CookieJar) {
+        self.cookies.extend(other.cookies);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cookies.is_empty()
+    }
+
     /// Select cookies for this URL. Do not reuse this header for other URLs.
     pub fn header(&self, url: &Url) -> Option<String> {
         self.header_at(url, unix_time())
@@ -327,6 +374,38 @@ fn valid_cookie_value(value: &str) -> bool {
         .and_then(|value| value.strip_suffix('"'))
         .unwrap_or(value);
     contents.bytes().all(is_cookie_octet)
+}
+
+#[cfg(test)]
+mod ytdl_tests {
+    use super::YtdlCookies;
+
+    #[test]
+    fn ytdl_cookie_files_are_copied_and_browser_specs_forwarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("jar.txt");
+        std::fs::write(&original, "# Netscape HTTP Cookie File\n").unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let args = YtdlCookies::File(original.clone())
+            .arguments(scratch.path())
+            .unwrap();
+        let copy = scratch.path().join("cookies.txt");
+        assert_eq!(args, ["--cookies".to_owned(), copy.display().to_string()]);
+        assert_eq!(
+            std::fs::read(&copy).unwrap(),
+            std::fs::read(&original).unwrap()
+        );
+        let missing = YtdlCookies::File(dir.path().join("missing"))
+            .arguments(scratch.path())
+            .unwrap_err();
+        assert!(!missing.to_string().contains("missing"));
+        assert_eq!(
+            YtdlCookies::Browser("firefox:/p".into())
+                .arguments(scratch.path())
+                .unwrap(),
+            ["--cookies-from-browser", "firefox:/p"]
+        );
+    }
 }
 
 #[cfg(test)]

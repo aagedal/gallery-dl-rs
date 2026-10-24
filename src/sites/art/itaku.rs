@@ -21,6 +21,7 @@ pub static SITE: Site = Site {
         &GALLERY, &POSTS, &STARS, &FOLLOWING, &FOLLOWERS, &BOOKMARKS, &USER, &IMAGE, &POST, &SEARCH,
     ],
     api_key: false,
+    cookies: None,
 };
 
 const FILENAME: &str = "{id}{title:? //}.{extension}";

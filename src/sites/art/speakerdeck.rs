@@ -21,6 +21,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&PRESENTATION],
     api_key: false,
+    cookies: None,
 };
 
 /// `speakerdeck\.com/([^/?#]+)/([^/?#]+)`, raw as upstream sees them.

@@ -15,6 +15,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&FOLDER],
     api_key: false,
+    cookies: None,
 };
 
 /// Upstream renders `{name} ({code})` from the folder's Directory message;

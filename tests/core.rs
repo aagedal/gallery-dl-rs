@@ -232,7 +232,9 @@ async fn failed_downloads_and_unsupported_jobs_never_write_metadata() {
     let item =
         extract::direct(&extract::http_url("http://127.0.0.1:1/stream.m3u8").unwrap()).unwrap();
     let root = tempfile::tempdir().unwrap();
-    let client = download::client(Duration::from_secs(1)).unwrap();
+    let client = download::client(Duration::from_secs(1))
+        .unwrap()
+        .with_ytdl(None);
     assert!(
         download::download_with_options(&client, root.path(), &item, with_metadata())
             .await
@@ -639,7 +641,9 @@ fn job_identity_includes_manifest_and_request_context() {
 #[tokio::test]
 async fn unsupported_jobs_fail_before_requests_or_filesystem_changes() {
     let root = tempfile::tempdir().unwrap();
-    let client = download::client(Duration::from_secs(1)).unwrap();
+    let client = download::client(Duration::from_secs(1))
+        .unwrap()
+        .with_ytdl(None);
     let items = extract::parse_messages(br##"[
         [3,"ytdl:http://127.0.0.1:1/page",{}],
         [3,"ytdl:http://127.0.0.1:1/inline",{"_ytdl_manifest":"hls","_ytdl_manifest_data":"#EXTM3U"}]
@@ -648,7 +652,7 @@ async fn unsupported_jobs_fail_before_requests_or_filesystem_changes() {
         let error = download::download(&client, root.path(), &item, 0)
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("companion yt-dlp-rs adapter"));
+        assert!(error.to_string().contains("yt-dlp"), "{error}");
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
         let path = download::destination(root.path(), &item);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();

@@ -24,6 +24,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&ITEM, &SHOP, &CATEGORY],
     api_key: false,
+    cookies: None,
 };
 
 #[derive(Debug, PartialEq)]

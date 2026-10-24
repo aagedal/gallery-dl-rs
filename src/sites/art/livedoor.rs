@@ -12,6 +12,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&BLOG, &POST],
     api_key: false,
+    cookies: None,
 };
 
 const FILENAME: &str = "{post[id]}_{post[title]}_{num:>02}.{extension}";

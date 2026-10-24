@@ -17,6 +17,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&TAG, &FAVORITE, &POOL, &POST],
     api_key: false,
+    cookies: None,
 };
 
 static TAG: Route = Route::new(

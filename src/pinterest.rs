@@ -1,28 +1,37 @@
-//! Experimental native Pinterest pin, board and user-pin extraction.
+//! Experimental native Pinterest extraction mirroring
+//! gallery_dl/extractor/pinterest.py.
 //!
-//! Mirrors gallery_dl/extractor/pinterest.py using the web "resource" API
-//! (`resource/NAME/get/?source_url=..&data={"options":..,"context":{}}`) with
-//! upstream's XHR header set. Pins use `PinResource`, boards `BoardResource`
-//! then `BoardFeedResource`, and user pins `UserPinsResource`; feeds follow
-//! `resource_response.bookmark` until `-end-`, capped at 200 pages. `pin.it`
-//! short links are resolved through the `url_shortener` redirect. Media are
-//! story-pin image/video blocks, else the best MP4 of `videos.video_list`
-//! (HLS-only videos are skipped), else `images.orig`, HTTPS on `i.pinimg.com`
-//! or `v*.pinimg.com` only. Promoted pins are skipped.
+//! Every upstream class is supported: `pin`, `board` (queuing its sections),
+//! `section`, `user` (queuing its boards), `allpins`, `created`, `search`,
+//! `related-pin`, `related-board` and `pinit` short links. Requests use the
+//! web "resource" API (`resource/NAMEResource/get/?data={"options":..}&
+//! source_url=`) with upstream's header set and a random `csrftoken` cookie.
+//! Feeds follow `resource.options.bookmarks` until it is missing, empty,
+//! `-end-` or starts with `Y2JOb25lO`, capped at 200 pages.
+//!
+//! Files follow upstream `_extract_files`: story pins (image, video, audio
+//! and paragraph blocks; stickers skipped), carousels, videos (HLS preferred
+//! and emitted as an HLS manifest with an MP4 `_fallback`), else
+//! `images.orig`. Each file carries upstream's keyword dictionary and the
+//! default formats of the class that produced it. Only HTTPS media on
+//! `i.pinimg.com` or `v*.pinimg.com` are emitted.
 use crate::{
     Result, error,
-    event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
+    event::{
+        ChildMetadata, ExtractionEvent, KeywordPolicy, child_job, group_with_keywords, media_only,
+    },
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
     network::NetworkOptions,
+    sites::{Route, SiteKeywords},
     transport::{RateLimits, Redirects, retry_after},
 };
 use futures_util::{
-    StreamExt,
+    StreamExt, TryStreamExt,
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -30,21 +39,25 @@ use std::{
 };
 use url::Url;
 
+type Events<'a> = BoxStream<'a, Result<ExtractionEvent>>;
+
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0";
 /// Upstream's resource API headers. `X-APP-VERSION` is a pinned web build
 /// hash copied from upstream and may need updating if Pinterest enforces it.
-const API_HEADERS: [(&str, &str); 6] = [
+const API_HEADERS: [(&str, &str); 9] = [
     ("Accept", "application/json, text/javascript, */*, q=0.01"),
     ("X-Requested-With", "XMLHttpRequest"),
-    ("X-APP-VERSION", "0c4af40"),
+    ("X-APP-VERSION", "a89153f"),
     ("X-Pinterest-AppState", "active"),
-    ("Origin", "https://www.pinterest.com"),
-    ("Referer", "https://www.pinterest.com/"),
+    ("X-Pinterest-PWS-Handler", "www/[username].js"),
+    ("Alt-Used", "www.pinterest.com"),
+    ("Sec-Fetch-Dest", "empty"),
+    ("Sec-Fetch-Mode", "cors"),
+    ("Sec-Fetch-Site", "same-origin"),
 ];
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const MAX_PAGES: u64 = 200;
-const PAGE_SIZE: u64 = 25;
 /// Registrable Pinterest domains (with optional `www.` or a two-letter
 /// country subdomain such as `br.pinterest.com`).
 const DOMAINS: [&str; 30] = [
@@ -103,6 +116,53 @@ const RESERVED: [&str; 20] = [
     "password",
 ];
 
+const FILENAME: &str = "{category}_{id}{media_id|page_id:?_//}.{extension}";
+const ARCHIVE: &str = "{id}{media_id|page_id}";
+const BOARD_ARCHIVE: &str = "{board[id]}_{id}";
+static PIN: Route = Route::new("pin", FILENAME, &["{category}"], ARCHIVE);
+static BOARD: Route = Route::new(
+    "board",
+    FILENAME,
+    &["{category}", "{board[owner][username]}", "{board[name]}"],
+    BOARD_ARCHIVE,
+);
+static SECTION: Route = Route::new(
+    "section",
+    FILENAME,
+    &[
+        "{category}",
+        "{board[owner][username]}",
+        "{board[name]}",
+        "{section[title]}",
+    ],
+    BOARD_ARCHIVE,
+);
+static ALLPINS: Route = Route::new("allpins", FILENAME, &["{category}", "{user}"], ARCHIVE);
+static CREATED: Route = Route::new("created", FILENAME, &["{category}", "{user}"], ARCHIVE);
+static SEARCH: Route = Route::new(
+    "search",
+    FILENAME,
+    &["{category}", "Search", "{search}"],
+    ARCHIVE,
+);
+static RELATED_PIN: Route = Route::new(
+    "related-pin",
+    FILENAME,
+    &["{category}", "related {original_pin[id]}"],
+    ARCHIVE,
+);
+static RELATED_BOARD: Route = Route::new(
+    "related-board",
+    FILENAME,
+    &[
+        "{category}",
+        "{board[owner][username]}",
+        "{board[name]}",
+        "related",
+    ],
+    BOARD_ARCHIVE,
+);
+
 /// Pin IDs (numeric, or upstream's alphanumeric form).
 pub fn valid_id(id: &str) -> bool {
     (1..=64).contains(&id.len())
@@ -119,12 +179,81 @@ fn valid_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'%'))
 }
 
+fn valid_user(name: &str) -> bool {
+    valid_name(name) && !RESERVED.contains(&name)
+}
+
+/// One upstream extractor class and its URL arguments (percent-decoded).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Pin { id: String },
-    Board { user: String, board: String },
-    User { user: String },
-    Short { code: String },
+    Pin {
+        id: String,
+    },
+    RelatedPin {
+        id: String,
+    },
+    Board {
+        user: String,
+        board: String,
+    },
+    RelatedBoard {
+        user: String,
+        board: String,
+    },
+    /// `section` is a slug or `id:SECTION_ID`.
+    Section {
+        user: String,
+        board: String,
+        section: String,
+    },
+    /// A user's boards (`/USER/` or `/USER/_saved/`).
+    User {
+        user: String,
+    },
+    AllPins {
+        user: String,
+    },
+    Created {
+        user: String,
+    },
+    Search {
+        query: String,
+    },
+    Short {
+        code: String,
+    },
+}
+
+impl Target {
+    /// Upstream subcategory of the extractor class.
+    pub fn subcategory(&self) -> &'static str {
+        match self {
+            Self::Pin { .. } => "pin",
+            Self::RelatedPin { .. } => "related-pin",
+            Self::Board { .. } => "board",
+            Self::RelatedBoard { .. } => "related-board",
+            Self::Section { .. } => "section",
+            Self::User { .. } => "user",
+            Self::AllPins { .. } => "allpins",
+            Self::Created { .. } => "created",
+            Self::Search { .. } => "search",
+            Self::Short { .. } => "pinit",
+        }
+    }
+
+    /// Upstream `archive_fmt` of the extractor class.
+    pub fn archive_format(&self) -> &'static str {
+        match self {
+            Self::Board { .. } | Self::RelatedBoard { .. } | Self::Section { .. } => BOARD_ARCHIVE,
+            _ => ARCHIVE,
+        }
+    }
+
+    /// Upstream `NotFoundError` resource name (`subcategory` after `-`).
+    fn resource(&self) -> &'static str {
+        let sub = self.subcategory();
+        sub.rsplit('-').next().unwrap_or(sub)
+    }
 }
 
 fn plain(url: &Url) -> bool {
@@ -149,10 +278,26 @@ fn is_country(label: &str) -> bool {
     label.len() == 2 && label.bytes().all(|b| b.is_ascii_lowercase())
 }
 
+fn decode(segment: &str) -> String {
+    crate::sites::percent_decode(segment)
+}
+
+/// The raw `q` search parameter, percent-decoded like Python `unquote`
+/// (a `+` stays a plus sign).
+fn search_query(url: &Url) -> Option<String> {
+    let query = url
+        .query()?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("q="))?;
+    let query = decode(query);
+    (!query.is_empty() && query.len() <= 1024).then_some(query)
+}
+
+/// Classify a URL by the first matching upstream extractor pattern.
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Pinterest URL; expected https://www.pinterest.com/pin/ID/, https://www.pinterest.com/USER/BOARD/, https://www.pinterest.com/USER/pins/ or https://pin.it/CODE",
+            "unsupported Pinterest URL; expected a pin, board, section, user, search or https://pin.it/CODE URL",
         )
     };
     if !plain(url) {
@@ -165,22 +310,51 @@ pub fn target(url: &Url) -> Result<Target> {
         .unwrap_or_default();
     if host == "pin.it" {
         return match parts[..] {
-            [code] if valid_id(code) => Ok(Target::Short { code: code.into() }),
+            [code, ..] if valid_id(code) => Ok(Target::Short { code: code.into() }),
             _ => Err(unsupported()),
         };
     }
     if !pinterest_host(host) {
         return Err(unsupported());
     }
+    // Upstream `.*#related$` on the whole URL.
+    let related = url
+        .fragment()
+        .is_some_and(|f| f == "related" || f.ends_with("#related"));
+    let user = |user: &str| decode(user);
     match parts[..] {
-        ["pin", id] if valid_id(id) => Ok(Target::Pin { id: id.into() }),
-        [user, "pins"] if valid_name(user) && !RESERVED.contains(&user) => {
-            Ok(Target::User { user: user.into() })
+        ["pin", id, ..] if valid_id(id) => Ok(if related {
+            Target::RelatedPin { id: id.into() }
+        } else {
+            Target::Pin { id: id.into() }
+        }),
+        ["search", "pins"] => search_query(url)
+            .map(|query| Target::Search { query })
+            .ok_or_else(unsupported),
+        [name] | [name, "_saved"] if valid_user(name) && !related => {
+            Ok(Target::User { user: user(name) })
         }
-        [user, board] if valid_name(user) && valid_name(board) && !RESERVED.contains(&user) => {
-            Ok(Target::Board {
-                user: user.into(),
-                board: board.into(),
+        [name, "pins"] if valid_user(name) && !related => Ok(Target::AllPins { user: user(name) }),
+        [name, "_created"] if valid_user(name) && !related => {
+            Ok(Target::Created { user: user(name) })
+        }
+        [name, board, section, ..]
+            if valid_user(name)
+                && valid_name(board)
+                && (valid_name(section) || section.strip_prefix("id:").is_some_and(valid_id)) =>
+        {
+            Ok(Target::Section {
+                user: user(name),
+                board: decode(board),
+                section: decode(section),
+            })
+        }
+        [name, board] if valid_user(name) && valid_name(board) => {
+            let (user, board) = (user(name), decode(board));
+            Ok(if related {
+                Target::RelatedBoard { user, board }
+            } else {
+                Target::Board { user, board }
             })
         }
         _ => Err(unsupported()),
@@ -204,7 +378,11 @@ pub fn media_url(raw: &str) -> Option<Url> {
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
-    match value.get(key)? {
+    scalar_text(value.get(key)?)
+}
+
+fn scalar_text(value: &Value) -> Option<String> {
+    match value {
         Value::String(s) => Some(s.trim().to_owned()),
         Value::Number(n) => Some(n.to_string()),
         _ => None,
@@ -212,20 +390,37 @@ fn text(value: &Value, key: &str) -> Option<String> {
     .filter(|s| !s.is_empty())
 }
 
-fn number(value: &Value, key: &str) -> Option<u64> {
-    value.get(key)?.as_u64().filter(|v| *v > 0)
+/// Python truthiness of an optional JSON value.
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().is_some_and(|n| n != 0.0),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Array(a)) => !a.is_empty(),
+        Some(Value::Object(o)) => !o.is_empty(),
+    }
 }
 
-fn extension(url: &Url) -> String {
-    url.path_segments()
-        .and_then(|mut s| s.next_back())
-        .and_then(|name| name.rsplit_once('.'))
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .filter(|ext| {
-            (1..=5).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric())
-        })
-        .map(|ext| if ext == "jpeg" { "jpg".into() } else { ext })
-        .unwrap_or_else(|| "jpg".into())
+/// `value or ""`.
+fn or_empty(value: Option<&Value>) -> Value {
+    if truthy(value) {
+        value.cloned().unwrap_or_default()
+    } else {
+        Value::from("")
+    }
+}
+
+/// gallery-dl `text.nameext_from_url` on the raw URL string.
+fn nameext(url: &str) -> (String, String) {
+    let path = url.split('?').next().unwrap_or_default();
+    let filename = decode(path.rsplit('/').next().unwrap_or_default());
+    match filename.rsplit_once('.') {
+        Some((name, ext)) if !name.is_empty() && ext.chars().count() <= 16 => {
+            (name.to_owned(), ext.to_lowercase())
+        }
+        _ => (filename, String::new()),
+    }
 }
 
 /// Parse RFC 2822 dates such as `Mon, 01 Jan 2024 00:00:00 +0000`.
@@ -252,173 +447,534 @@ pub fn parse_rfc2822(input: &str) -> Option<i64> {
     crate::date::parse_date(&format!("{year}-{month:02}-{day:02}T{clock}{offset}")).ok()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Photo,
     Video,
+    Audio,
+    Text,
 }
 
-struct Found {
-    url: Url,
+/// One upstream file dict and how it is fetched.
+struct File {
+    fields: Map<String, Value>,
     kind: Kind,
-    width: Option<u64>,
-    height: Option<u64>,
 }
 
-fn image(images: &Value, key: &str) -> Option<Found> {
-    let entry = images.get(key)?;
-    Some(Found {
-        url: media_url(&text(entry, "url")?)?,
+/// A JSON object or an extraction failure (upstream's caught exceptions).
+fn object(value: Option<&Value>) -> Option<Map<String, Value>> {
+    value?.as_object().cloned()
+}
+
+/// Upstream `_extract_files`; `None` when upstream would raise.
+fn extract_files(pin: &Map<String, Value>, stories: bool, videos: bool) -> Option<Vec<File>> {
+    if stories && truthy(pin.get("story_pin_data")) {
+        return extract_story(pin, &pin["story_pin_data"]);
+    }
+    if truthy(pin.get("carousel_data")) {
+        return extract_carousel(&pin["carousel_data"]);
+    }
+    if videos && truthy(pin.get("videos")) {
+        return Some(vec![extract_video(&pin["videos"])?]);
+    }
+    Some(
+        object(pin.get("images").and_then(|i| i.get("orig")))
+            .map(|fields| File {
+                fields,
+                kind: Kind::Photo,
+            })
+            .into_iter()
+            .collect(),
+    )
+}
+
+fn extract_story(pin: &Map<String, Value>, story: &Value) -> Option<Vec<File>> {
+    let mut files = Vec::new();
+    let story_id = story.get("id").cloned().unwrap_or_default();
+    let pages = story.get("pages")?.as_array()?;
+    for page in pages {
+        let page_id = page.get("id").cloned().unwrap_or_default();
+        let blocks = page.get("blocks")?.as_array()?;
+        for block in blocks {
+            let kind = block
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let mut file = match kind {
+                "story_pin_image_block" => {
+                    let orig = (blocks.len() == 1 && pages.len() == 1)
+                        .then(|| object(pin.get("images").and_then(|i| i.get("orig"))))
+                        .flatten();
+                    match orig {
+                        Some(fields) => File {
+                            fields,
+                            kind: Kind::Photo,
+                        },
+                        None => extract_image(page, block)?,
+                    }
+                }
+                _ if kind == "story_pin_video_block" || block.get("video").is_some() => {
+                    let video = block.get("video")?;
+                    let mut file = extract_video(video)?;
+                    file.fields
+                        .insert("media_id".into(), or_empty(video.get("id")));
+                    file
+                }
+                _ if kind == "story_pin_music_block" || block.get("audio").is_some() => {
+                    let mut fields = object(block.get("audio"))?;
+                    let url = fields.get("audio_url")?.clone();
+                    fields.insert("url".into(), url);
+                    let id = or_empty(fields.get("id"));
+                    fields.insert("media_id".into(), id);
+                    File {
+                        fields,
+                        kind: Kind::Audio,
+                    }
+                }
+                "story_pin_paragraph_block" => {
+                    let text = block.get("text")?.as_str()?;
+                    let mut fields = Map::new();
+                    fields.insert("url".into(), format!("text:{text}").into());
+                    fields.insert("extension".into(), "txt".into());
+                    fields.insert(
+                        "media_id".into(),
+                        block.get("id").cloned().unwrap_or_default(),
+                    );
+                    File {
+                        fields,
+                        kind: Kind::Text,
+                    }
+                }
+                "story_pin_product_sticker_block" | "story_pin_static_sticker_block" => continue,
+                // Upstream warns about the unsupported block type.
+                _ => match extract_image(page, block) {
+                    Some(file) => file,
+                    None => continue,
+                },
+            };
+            file.fields.insert("story_id".into(), story_id.clone());
+            file.fields.insert("page_id".into(), page_id.clone());
+            files.push(file);
+        }
+    }
+    Some(files)
+}
+
+fn extract_carousel(carousel: &Value) -> Option<Vec<File>> {
+    let mut files = Vec::new();
+    for slot in carousel.get("carousel_slots")?.as_array()? {
+        let mut fields = object(Some(slot))?;
+        let (size, image) = fields.get("images")?.as_object()?.iter().next()?;
+        let url = image
+            .get("url")?
+            .as_str()?
+            .replacen(&format!("/{size}/"), "/originals/", 1);
+        let id = fields.remove("id")?;
+        fields.insert("media_id".into(), id);
+        fields.insert("url".into(), url.into());
+        files.push(File {
+            fields,
+            kind: Kind::Photo,
+        });
+    }
+    Some(files)
+}
+
+fn extract_image(page: &Value, block: &Value) -> Option<File> {
+    let signature = if truthy(block.get("image_signature")) {
+        block.get("image_signature")
+    } else {
+        page.get("image_signature")
+    };
+    let sig = signature?.as_str()?;
+    if sig.len() < 6 || sig.len() > 128 || !sig.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let base = format!(
+        "https://i.pinimg.com/originals/{}/{}/{}/{sig}.",
+        &sig[0..2],
+        &sig[2..4],
+        &sig[4..6]
+    );
+    let (jpg, png, webp) = (
+        format!("{base}jpg"),
+        format!("{base}png"),
+        format!("{base}webp"),
+    );
+    let mut fields = match object(
+        block
+            .get("image")
+            .and_then(|i| i.get("images"))
+            .and_then(|i| i.get("originals")),
+    ) {
+        Some(fields) => fields,
+        None => Map::from_iter([("url".to_owned(), Value::from(jpg.clone()))]),
+    };
+    let fallback = if fields.get("url")?.as_str()? == jpg {
+        json!([png, webp])
+    } else {
+        json!([jpg, png, webp])
+    };
+    fields.insert("_fallback".into(), fallback);
+    fields.insert("media_id".into(), sig.into());
+    Some(File {
+        fields,
         kind: Kind::Photo,
-        width: number(entry, "width"),
-        height: number(entry, "height"),
     })
 }
 
-/// Largest MP4 in a `video_list`; HLS (`.m3u8`) entries are ignored.
-fn best_video(list: &Value) -> Option<Found> {
-    list.as_object()?
-        .values()
-        .filter_map(|entry| {
-            let url = media_url(&text(entry, "url")?)?;
-            url.path().ends_with(".mp4").then(|| Found {
-                url,
-                kind: Kind::Video,
-                width: number(entry, "width"),
-                height: number(entry, "height"),
-            })
+/// Upstream `_extract_video`: HLS first, else the widest format, with the
+/// `V_720P` MP4 as fallback. An HLS file without `V_720P` falls back to the
+/// widest MP4 so that downloads without HLS support still succeed.
+fn extract_video(video: &Value) -> Option<File> {
+    let formats = video.get("video_list")?.as_object()?;
+    fn width(entry: &Value) -> f64 {
+        entry.get("width").and_then(Value::as_f64).unwrap_or(0.0)
+    }
+    // Python `max()` keeps the first of equally wide entries.
+    fn widest<'v>(entries: impl Iterator<Item = &'v Value>) -> Option<&'v Value> {
+        entries.fold(None, |best, entry| match best {
+            Some(best) if width(best) >= width(entry) => Some(best),
+            _ => Some(entry),
         })
-        .max_by_key(|f| f.width.unwrap_or(0) * f.height.unwrap_or(0))
+    }
+    let chosen = ["V_HLSV4", "V_HLSV3_WEB", "V_HLSV3_MOBILE"]
+        .iter()
+        .find_map(|key| formats.get(*key))
+        .or_else(|| widest(formats.values()))?;
+    let mut fields = chosen.as_object()?.clone();
+    let is_mp4 = |entry: &Value| {
+        entry
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|url| url.split('?').next().unwrap_or_default().ends_with(".mp4"))
+    };
+    let hls = fields
+        .get("url")
+        .and_then(Value::as_str)
+        .is_some_and(|url| nameext(url).1 == "m3u8");
+    let fallback = formats
+        .get("V_720P")
+        .or_else(|| {
+            hls.then(|| widest(formats.values().filter(|e| is_mp4(e))))
+                .flatten()
+        })
+        .and_then(|entry| entry.get("url"))
+        .cloned();
+    if let Some(url) = fallback {
+        fields.insert("_fallback".into(), json!([url]));
+    }
+    Some(File {
+        fields,
+        kind: Kind::Video,
+    })
 }
 
-fn story_media(pin: &Value) -> Vec<Found> {
-    let Some(pages) = pin
-        .pointer("/story_pin_data/pages")
-        .and_then(Value::as_array)
+/// Class metadata merged into every pin (`metadata()` upstream).
+struct Context {
+    route: &'static Route,
+    data: Map<String, Value>,
+}
+
+impl Context {
+    fn new(route: &'static Route, data: Map<String, Value>) -> Arc<Self> {
+        Arc::new(Self { route, data })
+    }
+}
+
+/// Convert one pin into media with upstream's keyword dictionary.
+fn build_media(pin: Value, context: &Context, stories: bool, videos: bool) -> Vec<Media> {
+    let Value::Object(pin) = pin else {
+        return Vec::new();
+    };
+    let Some(id) = pin
+        .get("id")
+        .and_then(scalar_text)
+        .filter(|id| valid_id(id))
     else {
         return Vec::new();
     };
-    pages
-        .iter()
-        .filter_map(|page| page.get("blocks").and_then(Value::as_array))
-        .flatten()
-        .filter_map(|block| {
-            if let Some(list) = block.pointer("/video/video_list") {
-                return best_video(list);
-            }
-            block
-                .pointer("/image/images")
-                .and_then(|images| image(images, "originals").or_else(|| image(images, "orig")))
-        })
-        .collect()
-}
-
-/// Convert one pin object into its media; promoted pins yield nothing.
-pub fn pin_media(pin: &Value) -> Vec<Media> {
-    let Some(id) = text(pin, "id").filter(|id| valid_id(id)) else {
+    let Some(files) = extract_files(&pin, stories, videos) else {
         return Vec::new();
     };
-    if pin.get("is_promoted").and_then(Value::as_bool) == Some(true)
-        || pin.get("promoter").is_some_and(|p| !p.is_null())
-        || text(pin, "type").is_some_and(|t| t != "pin")
-    {
-        return Vec::new();
-    }
-    let mut found = story_media(pin);
-    if found.is_empty() {
-        if let Some(video) = pin.pointer("/videos/video_list").and_then(best_video) {
-            found.push(video);
-        } else if let Some(img) = pin.get("images").and_then(|i| image(i, "orig")) {
-            found.push(img);
-        }
-    }
-    let username = pin
+    let files: Vec<(File, Url, MediaJob)> = files
+        .into_iter()
+        .filter_map(|mut file| {
+            let (url, job) = if file.kind == Kind::Text {
+                let raw = file.fields.get("url")?.as_str()?;
+                crate::extract::inline_text(raw.strip_prefix("text:")?.to_owned()).ok()?
+            } else {
+                let url = media_url(file.fields.get("url")?.as_str()?)?;
+                (url, MediaJob::DirectHttp)
+            };
+            if let Some(list) = file.fields.get("_fallback").and_then(Value::as_array) {
+                let safe: Vec<Value> = list
+                    .iter()
+                    .filter(|u| u.as_str().and_then(media_url).is_some())
+                    .cloned()
+                    .collect();
+                file.fields.insert("_fallback".into(), safe.into());
+            }
+            Some((file, url, job))
+        })
+        .collect();
+    let pin_value = Value::Object(pin);
+    let username = pin_value
         .get("pinner")
         .and_then(|p| text(p, "username"))
         .map(Arc::<str>::from);
     let caption = ["title", "grid_title", "description"]
         .iter()
-        .find_map(|key| text(pin, key))
+        .find_map(|key| text(&pin_value, key))
         .map(Arc::<str>::from);
-    let timestamp = text(pin, "created_at").and_then(|d| parse_rfc2822(&d));
-    let story = found.len() > 1;
-    found
+    let timestamp = text(&pin_value, "created_at").and_then(|d| parse_rfc2822(&d));
+    let Value::Object(mut keywords) = pin_value else {
+        unreachable!()
+    };
+    for (key, value) in &context.data {
+        keywords.insert(key.clone(), value.clone());
+    }
+    keywords.insert("count".into(), files.len().into());
+    for key in [
+        "description",
+        "closeup_description",
+        "closeup_unified_description",
+    ] {
+        if let Some(Value::String(value)) = keywords.get_mut(key) {
+            *value = value.trim().to_owned();
+        }
+    }
+    files
         .into_iter()
         .enumerate()
-        .map(|(i, f)| {
+        .map(|(i, (file, url, mut job))| {
             let index = i + 1;
+            let raw = file.fields.get("url").and_then(Value::as_str).unwrap_or("");
+            let (name, extension) = nameext(raw);
+            keywords.insert("num".into(), index.into());
+            keywords.insert("filename".into(), name.into());
+            keywords.insert("extension".into(), extension.into());
+            // Upstream reuses one dict; drop download hints of earlier files.
+            keywords.remove("_fallback");
+            keywords.remove("_ytdl_manifest");
+            for key in ["media_id", "page_id"] {
+                if !file.fields.contains_key(key) {
+                    keywords.insert(key.into(), "".into());
+                }
+            }
+            for (key, value) in &file.fields {
+                keywords.insert(key.clone(), value.clone());
+            }
+            if keywords.get("extension").and_then(Value::as_str) == Some("m3u8") {
+                keywords.insert("_ytdl_manifest".into(), "hls".into());
+                keywords.insert("extension".into(), "mp4".into());
+                job = MediaJob::Manifest {
+                    protocol: crate::extract::ManifestProtocol::Hls,
+                    base_url: url.clone(),
+                    inline_data: None,
+                };
+            }
+            keywords.insert("category".into(), "pinterest".into());
+            keywords.insert("subcategory".into(), context.route.subcategory.into());
+            let stem = keywords
+                .get("filename")
+                .map(crate::sites::scalar)
+                .unwrap_or_default();
+            let extension = keywords
+                .get("extension")
+                .map(crate::sites::scalar)
+                .unwrap_or_default();
+            let filename = if extension.is_empty() {
+                stem
+            } else {
+                format!("{stem}.{extension}")
+            };
+            let media_id = ["media_id", "page_id"]
+                .iter()
+                .find_map(|key| keywords.get(*key).and_then(scalar_text))
+                .unwrap_or_else(|| id.clone());
+            let mut handoff = BTreeMap::new();
+            if let Some(list) = file
+                .fields
+                .get("_fallback")
+                .filter(|list| truthy(Some(list)))
+            {
+                handoff.insert("_fallback".into(), list.clone());
+            }
             Media {
-                filename: format!("{id}_{index}.{}", extension(&f.url)),
-                job: MediaJob::DirectHttp,
+                filename,
+                job,
                 category: "pinterest".into(),
                 metadata: Some(PostMetadata {
                     file: Some(FileMetadata {
-                        width: f.width,
-                        height: f.height,
-                        media_type: Some(Arc::from(match f.kind {
-                            Kind::Photo => "photo",
-                            Kind::Video => "video",
-                        })),
+                        width: file
+                            .fields
+                            .get("width")
+                            .and_then(Value::as_u64)
+                            .filter(|v| *v > 0),
+                        height: file
+                            .fields
+                            .get("height")
+                            .and_then(Value::as_u64)
+                            .filter(|v| *v > 0),
+                        media_type: match file.kind {
+                            Kind::Photo => Some("photo"),
+                            Kind::Video => Some("video"),
+                            Kind::Audio => Some("audio"),
+                            Kind::Text => None,
+                        }
+                        .map(Arc::from),
                         ..FileMetadata::default()
                     }),
                     post_id: id.clone(),
-                    media_id: if story {
-                        format!("{id}_{index}")
-                    } else {
-                        id.clone()
-                    },
+                    media_id,
                     username: username.clone(),
                     caption: caption.clone(),
                     timestamp,
                     index,
+                    site_keywords: Some(Arc::new(SiteKeywords {
+                        route: context.route,
+                        fields: keywords.clone(),
+                    })),
                     ..PostMetadata::default()
                 }),
-                url: f.url,
+                url,
                 headers: BTreeMap::new(),
-                handoff: BTreeMap::new(),
+                handoff,
             }
         })
         .collect()
 }
 
-/// Parse a resource API body into `resource_response.data` and its bookmark.
-pub fn parse_resource(bytes: &[u8]) -> Result<(Value, Option<String>)> {
-    let mut body: Value =
-        serde_json::from_slice(bytes).map_err(|_| error("Pinterest returned invalid JSON"))?;
-    let response = body
-        .get_mut("resource_response")
-        .ok_or_else(|| error("Pinterest response contains no resource_response"))?;
-    let bookmark = text(response, "bookmark").filter(|b| b != "-end-" && b.len() <= 4096);
-    let data = response.get_mut("data").map(Value::take);
-    match data {
-        Some(data) if !data.is_null() => Ok((data, bookmark)),
-        _ => Err(error("Pinterest pin, board or user not found")),
+/// Convert one pin object into its media with the `pin` class keywords and
+/// default options (`stories` and `videos` enabled).
+pub fn pin_media(pin: &Value) -> Vec<Media> {
+    build_media(
+        pin.clone(),
+        &Context {
+            route: &PIN,
+            data: Map::new(),
+        },
+        true,
+        true,
+    )
+}
+
+/// `resource_response.data`, unwrapping `{"results": [...]}` pages.
+fn page_results(body: &Value) -> Result<Vec<Value>> {
+    let data = body.pointer("/resource_response/data");
+    let data = match data {
+        Some(Value::Object(map)) => map.get("results"),
+        other => other,
+    };
+    data.and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| error("Pinterest response contains no result list"))
+}
+
+/// The next `bookmarks` option, or `None` at the end of a feed.
+fn next_bookmarks(body: &Value) -> Option<Value> {
+    let bookmarks = body.pointer("/resource/options/bookmarks")?.as_array()?;
+    let first = bookmarks.first()?.as_str()?;
+    if first == "-end-" || first.starts_with("Y2JOb25lO") {
+        return None;
     }
+    (bookmarks.len() <= 16
+        && bookmarks
+            .iter()
+            .all(|b| b.as_str().is_some_and(|b| b.len() <= 4096)))
+    .then(|| Value::Array(bookmarks.clone()))
+}
+
+fn data_object(body: Value, what: &str) -> Result<Map<String, Value>> {
+    match body.pointer("/resource_response/data") {
+        Some(Value::Object(map)) => Ok(map.clone()),
+        _ => Err(error(format!("Pinterest {what} not found"))),
+    }
+}
+
+/// A 32-digit hexadecimal token (upstream `util.generate_token()`).
+fn generate_token() -> String {
+    use std::hash::BuildHasher;
+    let now = SystemTime::now();
+    let state = std::collections::hash_map::RandomState::new();
+    format!(
+        "{:016x}{:016x}",
+        state.hash_one((now, 0u8)),
+        state.hash_one((now, 1u8))
+    )
+}
+
+fn events(events: impl IntoIterator<Item = ExtractionEvent>) -> Events<'static> {
+    stream::iter(events.into_iter().map(Ok).collect::<Vec<_>>()).boxed()
+}
+
+fn fail<'a>(e: crate::Error) -> Events<'a> {
+    stream::once(async move { Err(e) }).boxed()
+}
+
+fn once<'a, F>(future: F) -> Events<'a>
+where
+    F: std::future::Future<Output = Result<Events<'a>>> + Send + 'a,
+{
+    stream::once(future)
+        .map(|result| result.unwrap_or_else(fail))
+        .flatten()
+        .boxed()
+}
+
+fn flag(options: &Map<String, Value>, key: &str, default: bool) -> Result<bool> {
+    match options.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(error(format!(
+            "extractor.pinterest.{key} must be true or false"
+        ))),
+    }
+}
+
+/// Upstream `text.ensure_http_scheme(domain)`, restricted to Pinterest hosts.
+fn domain_root(domain: &str) -> Result<Url> {
+    let invalid = || error("extractor.pinterest.domain must be \"auto\" or a Pinterest domain");
+    let raw = if domain.starts_with("https://") || domain.starts_with("http://") {
+        domain.to_owned()
+    } else {
+        format!("https://{}", domain.trim_start_matches(['/', ':']))
+    };
+    let mut url = Url::parse(&raw).map_err(|_| invalid())?;
+    if !plain(&url)
+        || !url.host_str().is_some_and(pinterest_host)
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !url.path().trim_end_matches('/').is_empty()
+    {
+        return Err(invalid());
+    }
+    url.set_path("/");
+    Ok(url)
 }
 
 pub struct Pinterest {
     client: Client,
     network: NetworkOptions,
-    api_root: Url,
+    /// Test override for resource requests; the site root still comes from
+    /// the input URL or the `domain` option.
+    api_root: Option<Url>,
     short_root: Url,
+    domain: Option<Url>,
+    sections: bool,
+    stories: bool,
+    videos: bool,
+    csrf_token: String,
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
 }
 
-enum Feed {
-    Board { id: String, source: String },
-    User { user: String },
-}
-
-struct FeedState {
-    feed: Option<Feed>,
-    board: Option<(String, String)>,
-    bookmark: Option<String>,
-    page: u64,
-    done: bool,
-    pending: VecDeque<ExtractionEvent>,
+enum Mode<'a> {
+    Api { root: &'a Url, what: &'a str },
+    Capture,
 }
 
 impl Pinterest {
@@ -426,8 +982,13 @@ impl Pinterest {
         Ok(Self {
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
-            api_root: Url::parse("https://www.pinterest.com/").expect("static URL"),
+            api_root: None,
             short_root: Url::parse("https://api.pinterest.com/").expect("static URL"),
+            domain: None,
+            sections: true,
+            stories: true,
+            videos: true,
+            csrf_token: generate_token(),
             timeout,
             request_timeout: timeout,
             retries: 0,
@@ -439,6 +1000,29 @@ impl Pinterest {
     pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
         self.client = network.client(USER_AGENT, self.timeout)?;
         self.network = network.clone();
+        Ok(self)
+    }
+
+    /// Apply upstream extractor settings (`extractor.pinterest.*`):
+    /// `sections`, `stories`, `videos` (booleans, default true) and `domain`
+    /// (`"auto"` or a Pinterest domain).
+    pub fn with_options(mut self, options: Option<&Map<String, Value>>) -> Result<Self> {
+        let Some(options) = options else {
+            return Ok(self);
+        };
+        self.sections = flag(options, "sections", true)?;
+        self.stories = flag(options, "stories", true)?;
+        self.videos = flag(options, "videos", true)?;
+        self.domain = match options.get("domain") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(domain)) if domain.is_empty() || domain == "auto" => None,
+            Some(Value::String(domain)) => Some(domain_root(domain)?),
+            Some(_) => {
+                return Err(error(
+                    "extractor.pinterest.domain must be \"auto\" or a Pinterest domain",
+                ));
+            }
+        };
         Ok(self)
     }
 
@@ -454,179 +1038,340 @@ impl Pinterest {
         self
     }
 
-    /// Override the site and short-link origins; intended for local tests.
+    /// Override the resource and short-link origins; intended for local tests.
     pub fn with_api_root(mut self, root: Url) -> Self {
         self.short_root = root.clone();
-        self.api_root = root;
+        self.api_root = Some(root);
         self
     }
 
-    async fn resource(
-        &self,
-        name: &str,
-        source: &str,
-        options: Value,
-    ) -> Result<(Value, Option<String>)> {
-        let mut endpoint = self
-            .api_root
-            .join(&format!("resource/{name}/get/"))
-            .expect("static Pinterest path");
-        endpoint
-            .query_pairs_mut()
-            .append_pair("source_url", source)
-            .append_pair(
-                "data",
-                &json!({"options": options, "context": {}}).to_string(),
-            );
-        let body = tokio::time::timeout(self.timeout, self.request(&endpoint, false))
-            .await
-            .map_err(|_| error("native Pinterest extraction timed out"))??;
-        parse_resource(&body)
+    /// Upstream `root`: the `domain` option, else the input URL's origin.
+    fn site_root(&self, url: &Url) -> Url {
+        self.domain.clone().unwrap_or_else(|| {
+            Url::parse(&format!("https://{}/", url.host_str().unwrap_or_default()))
+                .expect("validated Pinterest host")
+        })
     }
 
-    async fn resolve_short(&self, code: &str) -> Result<String> {
-        let endpoint = self
-            .short_root
-            .join(&format!("url_shortener/{code}/redirect/"))
-            .expect("validated Pinterest code");
-        let location = tokio::time::timeout(self.timeout, self.request(&endpoint, true))
-            .await
-            .map_err(|_| error("native Pinterest extraction timed out"))??;
-        let unresolved = || error("Pinterest short link did not resolve to a pin");
-        let location = String::from_utf8(location).map_err(|_| unresolved())?;
-        let url = endpoint.join(&location).map_err(|_| unresolved())?;
-        match target(&url) {
-            Ok(Target::Pin { id }) => Ok(id),
-            _ => Err(unresolved()),
+    pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
+        media_only(self.events(url))
+    }
+
+    /// Emit one post boundary per pin and one child job per queued URL;
+    /// feeds paginate lazily and children run in order when reached.
+    pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        match target(url) {
+            Ok(target) => self.extract(target, self.site_root(url)),
+            Err(e) => fail(e),
         }
     }
 
-    async fn pin(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
-        let (data, _) = self
-            .resource(
-                "PinResource",
-                &format!("/pin/{id}/"),
-                json!({"id": id, "field_set_key": "detailed"}),
-            )
-            .await?;
-        if text(&data, "id").as_deref() != Some(id) {
-            return Err(error("Pinterest pin not found"));
+    fn extract(&self, job: Target, root: Url) -> Events<'_> {
+        let what = job.resource();
+        let related = matches!(job, Target::RelatedBoard { .. });
+        match job {
+            Target::Pin { id } => once(async move {
+                let pin = self.pin(&root, what, &id).await?;
+                Ok(events(
+                    self.pin_events(pin, &Context::new(&PIN, Map::new())),
+                ))
+            }),
+            Target::RelatedPin { id } => once(async move {
+                let original = self.pin(&root, what, &id).await?;
+                let context = Context::new(
+                    &RELATED_PIN,
+                    Map::from_iter([("original_pin".to_owned(), original)]),
+                );
+                let options = json!({"pin": id, "add_vase": true, "pins_only": true});
+                Ok(self.pins(root, what, "RelatedPinFeedResource", options, context))
+            }),
+            Target::Board { user, board } | Target::RelatedBoard { user, board } => {
+                once(async move {
+                    let board = self.board(&root, what, &user, &board).await?;
+                    let id = board
+                        .get("id")
+                        .and_then(scalar_text)
+                        .filter(|id| valid_id(id))
+                        .ok_or_else(|| error("Pinterest board not found"))?;
+                    let sections =
+                        (!related && self.sections && truthy(board.get("section_count")))
+                            .then(|| board.get("url").and_then(Value::as_str).map(str::to_owned))
+                            .flatten();
+                    let board = Map::from_iter([("board".to_owned(), Value::Object(board))]);
+                    if related {
+                        let options = json!({"id": id, "type": "board", "add_vase": true});
+                        let context = Context::new(&RELATED_BOARD, board);
+                        return Ok(self.pins(
+                            root,
+                            what,
+                            "BoardContentRecommendationResource",
+                            options,
+                            context,
+                        ));
+                    }
+                    let options = json!({"board_id": id, "field_set_key": "react_grid_pin",
+                        "prepend": false, "bookmarks": null});
+                    let pins = self.pins(
+                        root.clone(),
+                        what,
+                        "BoardFeedResource",
+                        options,
+                        Context::new(&BOARD, board),
+                    );
+                    Ok(match sections {
+                        Some(url) => pins.chain(self.sections(root, what, id, url)).boxed(),
+                        None => pins,
+                    })
+                })
+            }
+            Target::Section {
+                user,
+                board,
+                section,
+            } => once(async move {
+                let options = match section.strip_prefix("id:") {
+                    Some(id) => json!({"section_id": id}),
+                    None => json!({"board_slug": board, "section_slug": section,
+                        "username": user}),
+                };
+                let body = self
+                    .call(&root, what, "BoardSectionResource", &options)
+                    .await?;
+                let mut section = data_object(body, what)?;
+                let id = section
+                    .get("id")
+                    .and_then(scalar_text)
+                    .filter(|id| valid_id(id))
+                    .ok_or_else(|| error("Pinterest section not found"))?;
+                section.remove("preview_pins");
+                let board = section
+                    .remove("board")
+                    .filter(Value::is_object)
+                    .ok_or_else(|| error("Pinterest section has no board"))?;
+                let context = Context::new(
+                    &SECTION,
+                    Map::from_iter([
+                        ("board".to_owned(), board),
+                        ("section".to_owned(), Value::Object(section)),
+                    ]),
+                );
+                let options = json!({"section_id": id});
+                Ok(self.pins(root, what, "BoardSectionPinsResource", options, context))
+            }),
+            Target::AllPins { user } => {
+                let options = json!({"is_own_profile_pins": false, "username": user,
+                    "field_set_key": "grid_item", "pin_filter": null});
+                let context =
+                    Context::new(&ALLPINS, Map::from_iter([("user".into(), user.into())]));
+                self.pins(root, what, "UserPinsResource", options, context)
+            }
+            Target::Created { user } => {
+                let options = json!({"exclude_add_pin_rep": true, "field_set_key": "grid_item",
+                    "is_own_profile_pins": false, "username": user});
+                let context =
+                    Context::new(&CREATED, Map::from_iter([("user".into(), user.into())]));
+                self.pins(root, what, "UserActivityPinsResource", options, context)
+            }
+            Target::Search { query } => {
+                let options = json!({"query": query, "scope": "pins", "rs": "typed"});
+                let context =
+                    Context::new(&SEARCH, Map::from_iter([("search".into(), query.into())]));
+                self.pins(root, what, "BaseSearchResource", options, context)
+            }
+            Target::User { user } => {
+                let options = json!({"sort": "last_pinned_to",
+                    "field_set_key": "profile_grid_item", "filter_stories": false,
+                    "username": user, "page_size": 25, "include_archived": true});
+                let base = root.as_str().trim_end_matches('/').to_owned();
+                self.feed(root, what, "BoardsResource", options)
+                    .map_ok(move |boards| {
+                        let children: Vec<Events<'_>> = boards
+                            .into_iter()
+                            .filter_map(|board| {
+                                let Value::Object(board) = board else {
+                                    return None;
+                                };
+                                let url = child_url(&base, board.get("url")?.as_str()?)?;
+                                let Ok(child @ Target::Board { .. }) = target(&url) else {
+                                    return None;
+                                };
+                                let root = self.site_root(&url);
+                                Some(child_job(
+                                    ChildMetadata::from_raw("pinterest", "user", &board),
+                                    move || self.extract(child, root),
+                                ))
+                            })
+                            .collect();
+                        stream::iter(children).flatten()
+                    })
+                    .try_flatten()
+                    .boxed()
+            }
+            Target::Short { code } => once(async move {
+                let location = self.resolve_short(&code).await?;
+                let child = match target(&location) {
+                    Ok(pin @ Target::Pin { .. }) => pin,
+                    Ok(Target::Board { user, board } | Target::Section { user, board, .. }) => {
+                        Target::Board { user, board }
+                    }
+                    _ => return Err(error("Pinterest short link did not resolve to a pin")),
+                };
+                let root = self.site_root(&location);
+                Ok(child_job(
+                    ChildMetadata::from_raw("pinterest", "pinit", &Map::new()),
+                    move || self.extract(child, root),
+                ))
+            }),
         }
-        Ok(self.events_for(&data))
     }
 
-    fn events_for(&self, pin: &Value) -> VecDeque<ExtractionEvent> {
-        let mut items = pin_media(pin);
+    /// Queue each board section as a `section` child after the board's pins.
+    fn sections(&self, root: Url, what: &'static str, board_id: String, url: String) -> Events<'_> {
+        let base = format!("{}{url}id:", root.as_str().trim_end_matches('/'));
+        let options = json!({"board_id": board_id});
+        self.feed(root, what, "BoardSectionsResource", options)
+            .map_ok(move |sections| {
+                let children: Vec<Events<'_>> = sections
+                    .iter()
+                    .filter_map(|section| {
+                        let id = text(section, "id").filter(|id| valid_id(id))?;
+                        let url = Url::parse(&format!("{base}{id}")).ok()?;
+                        let Ok(child @ Target::Section { .. }) = target(&url) else {
+                            return None;
+                        };
+                        let root = self.site_root(&url);
+                        Some(child_job(
+                            ChildMetadata::from_raw("pinterest", "board", &Map::new()),
+                            move || self.extract(child, root),
+                        ))
+                    })
+                    .collect();
+                stream::iter(children).flatten()
+            })
+            .try_flatten()
+            .boxed()
+    }
+
+    fn pin_events(&self, pin: Value, context: &Context) -> VecDeque<ExtractionEvent> {
+        let mut items = build_media(pin, context, self.stories, self.videos);
         if items.is_empty() {
             return VecDeque::new();
         }
         for item in &mut items {
             self.network.apply_media(item);
         }
-        group(items, "pinterest")
+        group_with_keywords(items, "pinterest", KeywordPolicy::default())
     }
 
-    async fn next_page(&self, state: &mut FeedState) -> Result<()> {
-        if let Some((user, board)) = state.board.take() {
-            let source = format!("/{user}/{board}/");
-            let (data, _) = self
-                .resource(
-                    "BoardResource",
-                    &source,
-                    json!({"username": user, "slug": board, "field_set_key": "detailed"}),
+    /// Files of every pin in a paginated feed.
+    fn pins(
+        &self,
+        root: Url,
+        what: &'static str,
+        resource: &'static str,
+        options: Value,
+        context: Arc<Context>,
+    ) -> Events<'_> {
+        self.feed(root, what, resource, options)
+            .map_ok(move |pins| {
+                events(
+                    pins.into_iter()
+                        .flat_map(|pin| self.pin_events(pin, &context))
+                        .collect::<Vec<_>>(),
                 )
-                .await?;
-            let id = text(&data, "id")
-                .filter(|id| valid_id(id))
-                .ok_or_else(|| error("Pinterest board not found"))?;
-            state.feed = Some(Feed::Board { id, source });
-        }
-        state.page += 1;
-        let bookmarks = state.bookmark.take().map(|b| vec![b]);
-        let (name, source, mut options) = match state.feed.as_ref().expect("feed") {
-            Feed::Board { id, source } => (
-                "BoardFeedResource",
-                source.clone(),
-                json!({"board_id": id, "board_url": source, "page_size": PAGE_SIZE,
-                    "field_set_key": "react_grid_pin", "prepend": false}),
-            ),
-            Feed::User { user } => (
-                "UserPinsResource",
-                format!("/{user}/pins/"),
-                json!({"username": user, "is_own_profile_pins": false,
-                    "field_set_key": "grid_item", "pin_filter": null}),
-            ),
-        };
-        if let Some(bookmarks) = bookmarks {
-            options["bookmarks"] = json!(bookmarks);
-        }
-        let (data, bookmark) = self.resource(name, &source, options).await?;
-        let pins = data
-            .as_array()
-            .ok_or_else(|| error("Pinterest response contains no pin list"))?;
-        for pin in pins {
-            state.pending.extend(self.events_for(pin));
-        }
-        state.done = pins.is_empty() || bookmark.is_none() || state.page >= MAX_PAGES;
-        state.bookmark = bookmark;
-        Ok(())
+            })
+            .try_flatten()
+            .boxed()
     }
 
-    pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
-        crate::event::media_only(self.events(url))
-    }
-
-    /// Emit one post boundary per pin; feeds paginate lazily.
-    pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
-        let (feed, board) = match target(url) {
-            Ok(Target::User { user }) => (Some(Feed::User { user }), None),
-            Ok(Target::Board { user, board }) => (None, Some((user, board))),
-            Ok(single) => {
-                return stream::once(async move {
-                    let id = match single {
-                        Target::Short { code } => self.resolve_short(&code).await?,
-                        Target::Pin { id } => id,
-                        _ => unreachable!(),
-                    };
-                    self.pin(&id).await
-                })
-                .map(|result| match result {
-                    Ok(events) => stream::iter(events.into_iter().map(Ok)).boxed(),
-                    Err(e) => stream::once(async move { Err(e) }).boxed(),
-                })
-                .flatten()
-                .boxed();
-            }
-            Err(e) => return stream::once(async move { Err(e) }).boxed(),
-        };
-        let state = FeedState {
-            feed,
-            board,
-            bookmark: None,
-            page: 0,
-            done: false,
-            pending: VecDeque::new(),
-        };
-        stream::unfold(Some(state), move |state| async move {
-            let mut state = state?;
-            loop {
-                if let Some(event) = state.pending.pop_front() {
-                    return Some((Ok(event), Some(state)));
-                }
-                if state.done {
-                    return None;
-                }
-                if let Err(e) = self.next_page(&mut state).await {
-                    return Some((Err(e), None));
-                }
+    /// Upstream `_pagination`: lazily yield each page's results.
+    fn feed(
+        &self,
+        root: Url,
+        what: &'static str,
+        resource: &'static str,
+        options: Value,
+    ) -> BoxStream<'_, Result<Vec<Value>>> {
+        stream::try_unfold(Some((options, 1u64)), move |state| {
+            let root = root.clone();
+            async move {
+                let Some((mut options, page)) = state else {
+                    return Ok(None);
+                };
+                let body = self.call(&root, what, resource, &options).await?;
+                let results = page_results(&body)?;
+                let next = next_bookmarks(&body)
+                    .filter(|_| page < MAX_PAGES)
+                    .map(|bookmarks| {
+                        options["bookmarks"] = bookmarks;
+                        (options, page + 1)
+                    });
+                Ok(Some((results, next)))
             }
         })
         .boxed()
     }
 
-    async fn request(&self, endpoint: &Url, capture: bool) -> Result<Vec<u8>> {
+    async fn pin(&self, root: &Url, what: &str, id: &str) -> Result<Value> {
+        let options = json!({"id": id, "field_set_key": "detailed"});
+        let body = self.call(root, what, "PinResource", &options).await?;
+        let pin = data_object(body, "pin")?;
+        if pin.get("id").and_then(scalar_text).as_deref() != Some(id) {
+            return Err(error("Pinterest pin not found"));
+        }
+        Ok(Value::Object(pin))
+    }
+
+    async fn board(
+        &self,
+        root: &Url,
+        what: &str,
+        user: &str,
+        board: &str,
+    ) -> Result<Map<String, Value>> {
+        let options = json!({"slug": board, "username": user, "field_set_key": "detailed"});
+        let body = self.call(root, what, "BoardResource", &options).await?;
+        data_object(body, "board")
+    }
+
+    /// One resource API call (upstream `PinterestAPI._call`).
+    async fn call(&self, root: &Url, what: &str, resource: &str, options: &Value) -> Result<Value> {
+        let mut endpoint = self
+            .api_root
+            .as_ref()
+            .unwrap_or(root)
+            .join(&format!("resource/{resource}/get/"))
+            .expect("static Pinterest path");
+        endpoint
+            .query_pairs_mut()
+            .append_pair("data", &json!({"options": options}).to_string())
+            .append_pair("source_url", "");
+        let body = tokio::time::timeout(
+            self.timeout,
+            self.request(&endpoint, Mode::Api { root, what }),
+        )
+        .await
+        .map_err(|_| error("native Pinterest extraction timed out"))??;
+        serde_json::from_slice(&body).map_err(|_| error("Pinterest returned invalid JSON"))
+    }
+
+    /// Upstream `request_location` on the `url_shortener` redirect.
+    async fn resolve_short(&self, code: &str) -> Result<Url> {
+        let endpoint = self
+            .short_root
+            .join(&format!("url_shortener/{code}/redirect/"))
+            .expect("validated Pinterest code");
+        let location = tokio::time::timeout(self.timeout, self.request(&endpoint, Mode::Capture))
+            .await
+            .map_err(|_| error("native Pinterest extraction timed out"))??;
+        let unresolved = || error("Pinterest short link did not resolve to a pin");
+        let location = String::from_utf8(location).map_err(|_| unresolved())?;
+        endpoint.join(&location).map_err(|_| unresolved())
+    }
+
+    async fn request(&self, endpoint: &Url, mode: Mode<'_>) -> Result<Vec<u8>> {
         for attempt in 0..=self.retries {
-            match self.attempt(endpoint, attempt, capture).await {
+            match self.attempt(endpoint, attempt, &mode).await {
                 Ok(body) => return Ok(body),
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
@@ -637,13 +1382,14 @@ impl Pinterest {
         unreachable!()
     }
 
-    /// With `capture`, a redirect's Location is returned instead of followed.
+    /// In capture mode a redirect's Location is returned instead of followed.
     async fn attempt(
         &self,
         endpoint: &Url,
         attempt: u8,
-        capture: bool,
+        mode: &Mode<'_>,
     ) -> std::result::Result<Vec<u8>, Failure> {
+        let capture = matches!(mode, Mode::Capture);
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
@@ -652,10 +1398,13 @@ impl Pinterest {
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout);
-            if !capture {
+            if let Mode::Api { root, .. } = mode {
                 for (name, value) in API_HEADERS {
                     request = request.header(name, value);
                 }
+                request = request
+                    .header("Referer", root.as_str())
+                    .header("Cookie", format!("csrftoken={}", self.csrf_token));
             }
             let response = request.send().await.map_err(|_| {
                 Failure::transient("Pinterest request failed; check network access")
@@ -693,11 +1442,14 @@ impl Pinterest {
                 },
             ));
         }
-        if capture {
-            return Err(error("Pinterest short link did not resolve to a pin").into());
-        }
+        let what = match mode {
+            Mode::Capture => {
+                return Err(error("Pinterest short link did not resolve to a pin").into());
+            }
+            Mode::Api { what, .. } => what,
+        };
         if matches!(status.as_u16(), 404 | 410) {
-            return Err(error("Pinterest pin, board or user not found").into());
+            return Err(error(format!("Pinterest {what} not found")).into());
         }
         if matches!(status.as_u16(), 401 | 403) {
             return Err(error("Pinterest refused access (private board or login required)").into());
@@ -718,6 +1470,13 @@ impl Pinterest {
         }
         Ok(body)
     }
+}
+
+/// `root + url` for a site-relative path from the API.
+fn child_url(base: &str, path: &str) -> Option<Url> {
+    (path.starts_with('/') && !path.starts_with("//") && path.len() <= 2048)
+        .then(|| Url::parse(&format!("{base}{path}")).ok())
+        .flatten()
 }
 
 fn backoff(attempt: u8) -> Duration {
@@ -747,83 +1506,237 @@ impl From<crate::Error> for Failure {
     }
 }
 
-// PinterestExtractor.items reuses pin and applies each prepared media map.
-// Include native file aliases without resetting unrelated post-level fields.
-fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
-    group_with_keywords(
-        media,
-        category,
-        KeywordPolicy::shared(&[
-            "num",
-            "index",
-            "media_id",
-            "filename",
-            "name",
-            "extension",
-            "url",
-            "_url",
-            "_filesize",
-            "width",
-            "height",
-            "duration",
-            "size",
-            "story_id",
-            "page_id",
-            "_fallback",
-            "_ytdl_manifest",
-            "file",
-        ]),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::ChildScope;
     use std::{
         io::{Read, Write},
         net::TcpListener,
+        path::PathBuf,
         thread::{self, JoinHandle},
     };
 
     fn pin(id: &str) -> Value {
         json!({"id": id, "type": "pin", "title": "", "grid_title": "Cat",
+            "description": "  A cat  ",
             "created_at": "Mon, 01 Jan 2024 00:00:00 +0000",
             "pinner": {"username": "alice"},
-            "images": {"orig": {"url": format!("https://i.pinimg.com/originals/aa/{id}.jpg"),
+            "images": {"orig": {"url": format!("https://i.pinimg.com/originals/aa/bb/{id}.jpg"),
                 "width": 800, "height": 600}}})
     }
 
-    #[test]
-    fn shared_keyword_policy_declares_source_file_assignments() {
-        let events = group(pin_media(&pin("123")), "pinterest");
-        let ExtractionEvent::Post(post) = &events[0] else {
-            panic!("missing post");
-        };
-        let KeywordPolicy::Shared { file_fields, .. } = &post.keywords else {
-            panic!("expected shared Pinterest keywords");
-        };
-        for field in [
-            "num",
-            "index",
-            "media_id",
-            "page_id",
-            "story_id",
-            "width",
-            "height",
-            "filename",
-            "extension",
-        ] {
-            assert!(file_fields.iter().any(|f| f == field));
+    fn keywords(media: &Media) -> &Map<String, Value> {
+        &media
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .as_ref()
+            .unwrap()
+            .fields
+    }
+
+    fn paths(media: &Media) -> (String, PathBuf) {
+        let (file, dir) = crate::sites::default_templates(media).unwrap();
+        (
+            file.render(media).unwrap(),
+            dir.render(media).unwrap().unwrap(),
+        )
+    }
+
+    fn context(route: &'static Route, data: Value) -> Context {
+        Context {
+            route,
+            data: data.as_object().cloned().unwrap_or_default(),
         }
-        assert!(!file_fields.iter().any(|f| f == "description"));
     }
 
     #[test]
-    fn parses_images_videos_and_story_pins() {
+    fn classifies_every_upstream_class() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap());
+        let pin = Target::Pin { id: "123".into() };
+        assert_eq!(t("https://www.pinterest.com/pin/123/").unwrap(), pin);
+        assert_eq!(t("https://www.pinterest.co.uk/pin/123").unwrap(), pin);
+        assert_eq!(
+            t("https://br.pinterest.com/pin/123/sent/?x=1").unwrap(),
+            pin
+        );
+        assert_eq!(t("https://pinterest.com.au/pin/123/").unwrap(), pin);
+        assert_eq!(
+            t("https://www.pinterest.com/pin/123/#related").unwrap(),
+            Target::RelatedPin { id: "123".into() }
+        );
+        let (alice, cats) = (String::from("alice"), String::from("cats"));
+        assert_eq!(
+            t("https://www.pinterest.de/alice/cats/").unwrap(),
+            Target::Board {
+                user: alice.clone(),
+                board: cats.clone()
+            }
+        );
+        assert_eq!(
+            t("https://www.pinterest.com/alice/cats/#related").unwrap(),
+            Target::RelatedBoard {
+                user: alice.clone(),
+                board: cats.clone()
+            }
+        );
+        assert_eq!(
+            t("https://www.pinterest.com/alice/cats/tabby").unwrap(),
+            Target::Section {
+                user: alice.clone(),
+                board: cats.clone(),
+                section: "tabby".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.pinterest.com/alice/cats/id:4567").unwrap(),
+            Target::Section {
+                user: alice.clone(),
+                board: cats.clone(),
+                section: "id:4567".into()
+            }
+        );
+        for raw in [
+            "https://www.pinterest.com/alice/",
+            "https://www.pinterest.com/alice",
+            "https://www.pinterest.com/alice/_saved/",
+        ] {
+            assert_eq!(
+                t(raw).unwrap(),
+                Target::User {
+                    user: alice.clone()
+                },
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            t("https://www.pinterest.com/alice/pins/").unwrap(),
+            Target::AllPins {
+                user: alice.clone()
+            }
+        );
+        assert_eq!(
+            t("https://www.pinterest.com/alice/_created/").unwrap(),
+            Target::Created {
+                user: alice.clone()
+            }
+        );
+        assert_eq!(
+            t("https://www.pinterest.com/search/pins/?q=red%20cat+x&rs=typed").unwrap(),
+            Target::Search {
+                query: "red cat+x".into()
+            }
+        );
+        assert_eq!(
+            t("https://pin.it/AbC12").unwrap(),
+            Target::Short {
+                code: "AbC12".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.pinterest.com/j%C3%BCrgen/pins/").unwrap(),
+            Target::AllPins {
+                user: "jürgen".into()
+            }
+        );
+        for raw in [
+            "https://www.pinterest.com/",
+            "https://www.pinterest.com/search/pins/",
+            "https://www.pinterest.com/search/pins/?rs=typed",
+            "https://www.pinterest.com/ideas/",
+            "https://www.pinterest.com/alice/#related",
+            "https://www.pinterest.com/alice/cats/id:bad:id",
+            "https://i.pinimg.com/originals/aa/a.jpg",
+            "https://www.pinterest.com.evil.example/pin/1/",
+            "https://evilpinterest.com/pin/1/",
+            "https://www.pinterest.com:444/pin/1/",
+            "https://pin.it/",
+        ] {
+            assert!(t(raw).is_err(), "{raw}");
+        }
+        let section = t("https://www.pinterest.com/a/b/c").unwrap();
+        assert_eq!(
+            (section.subcategory(), section.archive_format()),
+            ("section", "{board[id]}_{id}")
+        );
+        assert_eq!(pin.archive_format(), "{id}{media_id|page_id}");
+        assert_eq!(
+            t("https://www.pinterest.com/pin/1/#related")
+                .unwrap()
+                .resource(),
+            "pin"
+        );
+        assert!(media_url("https://v.pinimg.com/a.mp4").is_some());
+        assert!(media_url("https://v1.pinimg.com/a.mp4").is_some());
+        assert!(media_url("https://s.pinimg.com/a.jpg").is_none());
+        assert!(media_url("http://i.pinimg.com/a.jpg").is_none());
+        assert_eq!(
+            parse_rfc2822("Tue, 02 Jan 2024 01:00:00 +0100"),
+            Some(1704153600)
+        );
+        assert_eq!(parse_rfc2822("garbage"), None);
+    }
+
+    #[test]
+    fn validates_options() {
+        let options = |value: Value| {
+            Pinterest::new(Duration::from_secs(1))
+                .unwrap()
+                .with_options(Some(value.as_object().unwrap()))
+        };
+        let native = options(json!({"sections": false, "stories": false, "videos": false,
+            "domain": "auto"}))
+        .unwrap();
+        assert!(!native.sections && !native.stories && !native.videos);
+        assert!(native.domain.is_none());
+        let url = Url::parse("https://br.pinterest.com/pin/1/").unwrap();
+        assert_eq!(native.site_root(&url).as_str(), "https://br.pinterest.com/");
+        let defaults = Pinterest::new(Duration::from_secs(1))
+            .unwrap()
+            .with_options(None)
+            .unwrap();
+        assert!(defaults.sections && defaults.stories && defaults.videos);
+        assert_eq!(defaults.csrf_token.len(), 32);
+        assert!(defaults.csrf_token.bytes().all(|b| b.is_ascii_hexdigit()));
+        for domain in [
+            "pinterest.de",
+            "https://www.pinterest.de/",
+            "//www.pinterest.de",
+        ] {
+            let native = options(json!({ "domain": domain })).unwrap();
+            assert_eq!(
+                native.site_root(&url).as_str(),
+                if domain.contains("www") {
+                    "https://www.pinterest.de/"
+                } else {
+                    "https://pinterest.de/"
+                }
+            );
+        }
+        for bad in [
+            json!({"sections": "yes"}),
+            json!({"stories": 1}),
+            json!({"videos": []}),
+            json!({"domain": true}),
+            json!({"domain": "evil.example"}),
+            json!({"domain": "https://www.pinterest.com/path"}),
+            json!({"domain": "https://www.pinterest.com:8080"}),
+        ] {
+            let message = options(bad.clone()).err().unwrap().to_string();
+            assert!(message.contains("extractor.pinterest."), "{bad} {message}");
+        }
+    }
+
+    #[test]
+    fn single_image_pin_keywords_and_default_paths() {
         let items = pin_media(&pin("123"));
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].filename, "123_1.jpg");
-        let meta = items[0].metadata.as_ref().unwrap();
+        let media = &items[0];
+        assert_eq!(media.filename, "123.jpg");
+        assert!(matches!(media.job, MediaJob::DirectHttp));
+        let meta = media.metadata.as_ref().unwrap();
         assert_eq!(
             (meta.post_id.as_str(), meta.media_id.as_str()),
             ("123", "123")
@@ -833,90 +1746,339 @@ mod tests {
         assert_eq!((meta.timestamp, meta.index), (Some(1704067200), 1));
         let file = meta.file.as_ref().unwrap();
         assert_eq!((file.width, file.height), (Some(800), Some(600)));
-        assert!(items[0].archive_key().unwrap().starts_with("pinterest:"));
+        assert!(media.archive_key().unwrap().starts_with("pinterest:"));
+        let k = keywords(media);
+        assert_eq!(k["id"], "123");
+        assert_eq!(k["description"], "A cat");
+        assert_eq!((&k["count"], &k["num"]), (&json!(1), &json!(1)));
+        assert_eq!(
+            (&k["filename"], &k["extension"]),
+            (&json!("123"), &json!("jpg"))
+        );
+        assert_eq!((&k["media_id"], &k["page_id"]), (&json!(""), &json!("")));
+        assert_eq!(k["url"], "https://i.pinimg.com/originals/aa/bb/123.jpg");
+        assert_eq!((&k["width"], &k["height"]), (&json!(800), &json!(600)));
+        assert_eq!(
+            (&k["category"], &k["subcategory"]),
+            (&json!("pinterest"), &json!("pin"))
+        );
+        assert_eq!(k["created_at"], "Mon, 01 Jan 2024 00:00:00 +0000");
+        assert!(!k.contains_key("date"));
+        assert_eq!(
+            paths(media),
+            ("pinterest_123.jpg".into(), PathBuf::from("pinterest"))
+        );
 
-        let mut video = pin("124");
-        video["videos"] = json!({"video_list": {
-            "V_HLSV4": {"url": "https://v1.pinimg.com/videos/a.m3u8", "width": 1920, "height": 1080},
-            "V_720P": {"url": "https://v1.pinimg.com/videos/720.mp4", "width": 720, "height": 1280},
-            "V_EXP4": {"url": "https://v1.pinimg.com/videos/360.mp4", "width": 360, "height": 640}}});
-        let items = pin_media(&video);
-        assert_eq!(items.len(), 1);
-        assert!(items[0].url.as_str().ends_with("720.mp4"));
-        assert_eq!(items[0].filename, "124_1.mp4");
-
-        let mut story = pin("125");
-        story["story_pin_data"] = json!({"pages": [
-            {"blocks": [{"image": {"images": {"originals": {"url": "https://i.pinimg.com/originals/s1.png"}}}}]},
-            {"blocks": [{"video": {"video_list": {"V_EXP7": {"url": "https://v2.pinimg.com/s2.mp4"}}}},
-                {"image": {"images": {"originals": {"url": "http://i.pinimg.com/insecure.jpg"}}}},
-                {"text": "hello"}]}]});
-        let items = pin_media(&story);
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[1].filename, "125_2.mp4");
-        assert_eq!(items[1].metadata.as_ref().unwrap().media_id, "125_2");
-        assert_ne!(items[0].archive_key(), items[1].archive_key());
-
+        // Promoted pins are not skipped upstream; foreign hosts are.
         let mut promoted = pin("126");
         promoted["is_promoted"] = json!(true);
-        assert!(pin_media(&promoted).is_empty());
-        let mut hls = pin("127");
-        hls["images"] = json!({"orig": {"url": "https://evil.example/a.jpg"}});
-        assert!(pin_media(&hls).is_empty());
-        assert!(parse_resource(b"<html>").is_err());
-        assert!(parse_resource(br#"{"resource_response":{"data":null}}"#).is_err());
-        let (_, bookmark) =
-            parse_resource(br#"{"resource_response":{"data":[],"bookmark":"-end-"}}"#).unwrap();
-        assert_eq!(bookmark, None);
+        assert_eq!(pin_media(&promoted).len(), 1);
+        let mut foreign = pin("127");
+        foreign["images"] = json!({"orig": {"url": "https://evil.example/a.jpg"}});
+        assert!(pin_media(&foreign).is_empty());
+        assert!(pin_media(&json!({"id": "a/b", "images": pin("1")["images"]})).is_empty());
+        assert!(pin_media(&json!({"id": "5"})).is_empty());
     }
 
     #[test]
-    fn classifies_supported_urls() {
-        let t = |raw: &str| target(&Url::parse(raw).unwrap());
-        let p = Target::Pin { id: "123".into() };
-        assert_eq!(t("https://www.pinterest.com/pin/123/").unwrap(), p);
-        assert_eq!(t("https://www.pinterest.co.uk/pin/123").unwrap(), p);
-        assert_eq!(t("https://br.pinterest.com/pin/123/").unwrap(), p);
-        assert_eq!(t("https://pinterest.com.au/pin/123/").unwrap(), p);
+    fn story_pin_blocks_follow_upstream() {
+        let mut story = pin("125");
+        story["story_pin_data"] = json!({"id": "S1", "pages": [
+            {"id": "P1", "image_signature": "abcdef0123", "blocks": [
+                {"type": "story_pin_image_block",
+                    "image": {"images": {"originals": {
+                        "url": "https://i.pinimg.com/originals/ab/cd/ef/abcdef0123.png",
+                        "width": 10, "height": 20}}}},
+                {"type": "story_pin_image_block", "image_signature": "ffeedd9999"},
+                {"type": "story_pin_static_sticker_block"},
+                {"type": "story_pin_product_sticker_block"}]},
+            {"id": "P2", "blocks": [
+                {"type": "story_pin_video_block", "video": {"id": "V9", "video_list": {
+                    "V_EXP7": {"url": "https://v1.pinimg.com/videos/s2.mp4", "width": 720},
+                    "V_EXP3": {"url": "https://v1.pinimg.com/videos/s3.mp4", "width": 360}}}},
+                {"type": "story_pin_music_block", "audio": {"id": "A1",
+                    "audio_url": "https://v1.pinimg.com/audio/a.m4a"}},
+                {"type": "story_pin_paragraph_block", "id": "T1", "text": "Hello world. Bye"},
+                {"type": "story_pin_paragraph_block", "text": "No id"},
+                {"type": "story_pin_unknown_block", "image_signature": "123456abcd"},
+                {"type": "story_pin_unknown_block"}]}]});
+        let items = pin_media(&story);
+        let urls: Vec<&str> = items.iter().map(|m| m.url.as_str()).collect();
+        assert_eq!(urls.len(), 7, "{urls:?}");
         assert_eq!(
-            t("https://www.pinterest.de/alice/cats/").unwrap(),
-            Target::Board {
-                user: "alice".into(),
-                board: "cats".into()
-            }
+            urls[0],
+            "https://i.pinimg.com/originals/ab/cd/ef/abcdef0123.png"
         );
         assert_eq!(
-            t("https://www.pinterest.com/alice/pins/").unwrap(),
-            Target::User {
-                user: "alice".into()
-            }
+            urls[1],
+            "https://i.pinimg.com/originals/ff/ee/dd/ffeedd9999.jpg"
+        );
+        assert_eq!(urls[2], "https://v1.pinimg.com/videos/s2.mp4");
+        assert_eq!(urls[3], "https://v1.pinimg.com/audio/a.m4a");
+        assert_eq!(
+            urls[6],
+            "https://i.pinimg.com/originals/12/34/56/123456abcd.jpg"
         );
         assert_eq!(
-            t("https://pin.it/AbC12").unwrap(),
-            Target::Short {
-                code: "AbC12".into()
-            }
+            items[0].handoff["_fallback"],
+            json!([
+                "https://i.pinimg.com/originals/ab/cd/ef/abcdef0123.jpg",
+                "https://i.pinimg.com/originals/ab/cd/ef/abcdef0123.png",
+                "https://i.pinimg.com/originals/ab/cd/ef/abcdef0123.webp"
+            ])
         );
-        for raw in [
-            "https://www.pinterest.com/",
-            "https://www.pinterest.com/alice/",
-            "https://www.pinterest.com/search/pins/",
-            "https://www.pinterest.com/alice/_saved/",
-            "https://i.pinimg.com/originals/aa/a.jpg",
-            "https://www.pinterest.com.evil.example/pin/1/",
-            "https://evilpinterest.com/pin/1/",
-            "https://www.pinterest.com:444/pin/1/",
-        ] {
-            assert!(t(raw).is_err(), "{raw}");
+        assert_eq!(
+            items[1].handoff["_fallback"],
+            json!([
+                "https://i.pinimg.com/originals/ff/ee/dd/ffeedd9999.png",
+                "https://i.pinimg.com/originals/ff/ee/dd/ffeedd9999.webp"
+            ])
+        );
+        let k = keywords(&items[0]);
+        assert_eq!(
+            (&k["story_id"], &k["page_id"], &k["media_id"]),
+            (&json!("S1"), &json!("P1"), &json!("abcdef0123"))
+        );
+        assert_eq!((&k["count"], &k["width"]), (&json!(7), &json!(10)));
+        assert_eq!(paths(&items[0]).0, "pinterest_125_abcdef0123.png");
+        // The second image has no width; upstream's shared dict keeps it.
+        assert_eq!(keywords(&items[1])["width"], 10);
+        assert!(!keywords(&items[2]).contains_key("_fallback"));
+        assert_eq!(keywords(&items[2])["media_id"], "V9");
+        assert_eq!(keywords(&items[2])["page_id"], "P2");
+        assert_eq!(keywords(&items[3])["media_id"], "A1");
+        assert_eq!(
+            items[3]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .media_type
+                .as_deref(),
+            Some("audio")
+        );
+
+        let text = &items[4];
+        let MediaJob::InlineText { data } = &text.job else {
+            panic!("paragraph is not inline text");
+        };
+        assert_eq!(data, "Hello world. Bye");
+        let k = keywords(text);
+        assert_eq!(
+            (&k["extension"], &k["media_id"]),
+            (&json!("txt"), &json!("T1"))
+        );
+        assert_eq!(k["filename"], "text:Hello world");
+        assert_eq!(text.filename, "text:Hello world.txt");
+        // Upstream merges the audio dict into the shared pin dict, so its
+        // `id` replaces the pin ID for this and later files.
+        assert_eq!(k["id"], "A1");
+        assert_eq!(text.metadata.as_ref().unwrap().post_id, "125");
+        assert_eq!(paths(text).0, "pinterest_A1_T1.txt");
+        // A paragraph without an ID falls back to the page ID.
+        assert_eq!(keywords(&items[5])["media_id"], Value::Null);
+        assert_eq!(paths(&items[5]).0, "pinterest_A1_P2.txt");
+        assert_eq!(items[5].metadata.as_ref().unwrap().media_id, "P2");
+        let keys: Vec<_> = items.iter().map(|m| m.archive_key()).collect();
+        assert!(keys.iter().all(Option::is_some));
+        assert_eq!(
+            keys.iter().collect::<std::collections::BTreeSet<_>>().len(),
+            7
+        );
+
+        // A single image block on a single page uses `images.orig`.
+        let mut single = pin("130");
+        single["story_pin_data"] = json!({"pages": [{"blocks": [
+            {"type": "story_pin_image_block", "image_signature": "abcdef"}]}]});
+        let items = pin_media(&single);
+        assert_eq!(
+            items[0].url.as_str(),
+            "https://i.pinimg.com/originals/aa/bb/130.jpg"
+        );
+        assert_eq!(keywords(&items[0])["page_id"], Value::Null);
+        // A malformed story skips the pin, as upstream's caught exception.
+        let mut broken = pin("131");
+        broken["story_pin_data"] =
+            json!({"pages": [{"blocks": [{"type": "story_pin_video_block"}]}]});
+        assert!(pin_media(&broken).is_empty());
+        // `stories: false` ignores story data.
+        let items = build_media(story.clone(), &context(&PIN, json!({})), false, true);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].filename, "125.jpg");
+    }
+
+    #[test]
+    fn carousel_and_video_files() {
+        let mut carousel = pin("140");
+        carousel["carousel_data"] = json!({"carousel_slots": [
+            {"id": "C1", "title": "one", "images": {"736x": {
+                "url": "https://i.pinimg.com/736x/aa/bb/one.jpg"}}},
+            {"id": "C2", "images": {"236x": {
+                "url": "https://i.pinimg.com/236x/aa/bb/two.png"}, "736x": {}}}]});
+        let items = pin_media(&carousel);
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0].url.as_str(),
+            "https://i.pinimg.com/originals/aa/bb/one.jpg"
+        );
+        assert_eq!(
+            items[1].url.as_str(),
+            "https://i.pinimg.com/originals/aa/bb/two.png"
+        );
+        let k = keywords(&items[1]);
+        assert_eq!((&k["media_id"], &k["num"]), (&json!("C2"), &json!(2)));
+        assert_eq!(k["title"], "one", "the shared dict keeps earlier keys");
+        assert_eq!(paths(&items[1]).0, "pinterest_140_C2.png");
+
+        let mut video = pin("150");
+        video["videos"] = json!({"video_list": {
+            "V_HLSV3_MOBILE": {"url": "https://v1.pinimg.com/videos/hls/a.m3u8",
+                "width": 1920, "height": 1080, "duration": 5000},
+            "V_720P": {"url": "https://v1.pinimg.com/videos/720p/a.mp4", "width": 720},
+            "V_EXP4": {"url": "https://v1.pinimg.com/videos/360p/a.mp4", "width": 360}}});
+        let items = pin_media(&video);
+        assert_eq!(items.len(), 1);
+        let MediaJob::Manifest {
+            protocol, base_url, ..
+        } = &items[0].job
+        else {
+            panic!("HLS video is not a manifest job");
+        };
+        assert!(matches!(protocol, crate::extract::ManifestProtocol::Hls));
+        assert_eq!(base_url.as_str(), "https://v1.pinimg.com/videos/hls/a.m3u8");
+        assert_eq!(items[0].filename, "a.mp4");
+        assert_eq!(
+            items[0].handoff["_fallback"],
+            json!(["https://v1.pinimg.com/videos/720p/a.mp4"])
+        );
+        let k = keywords(&items[0]);
+        assert_eq!(
+            (&k["extension"], &k["_ytdl_manifest"], &k["duration"]),
+            (&json!("mp4"), &json!("hls"), &json!(5000))
+        );
+        assert_eq!(paths(&items[0]).0, "pinterest_150.mp4");
+        assert_eq!(
+            items[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .media_type
+                .as_deref(),
+            Some("video")
+        );
+
+        // Without V_720P an HLS video falls back to the widest MP4.
+        video["videos"]["video_list"]
+            .as_object_mut()
+            .unwrap()
+            .remove("V_720P");
+        let items = pin_media(&video);
+        assert_eq!(
+            items[0].handoff["_fallback"],
+            json!(["https://v1.pinimg.com/videos/360p/a.mp4"])
+        );
+        // Without HLS the widest format is chosen.
+        video["videos"] = json!({"video_list": {
+            "V_EXP4": {"url": "https://v1.pinimg.com/videos/360p/b.mp4", "width": 360},
+            "V_EXP7": {"url": "https://v1.pinimg.com/videos/720p/b.mp4", "width": 720}}});
+        let items = pin_media(&video);
+        assert_eq!(
+            items[0].url.as_str(),
+            "https://v1.pinimg.com/videos/720p/b.mp4"
+        );
+        assert!(matches!(items[0].job, MediaJob::DirectHttp));
+        assert!(items[0].handoff.is_empty());
+        assert!(!keywords(&items[0]).contains_key("_ytdl_manifest"));
+        // `videos: false` downloads the preview image.
+        let items = build_media(video, &context(&PIN, json!({})), true, false);
+        assert_eq!(items[0].filename, "150.jpg");
+    }
+
+    #[test]
+    fn class_metadata_and_directories() {
+        let board = json!({"id": "900", "name": "Cats", "url": "/alice/cats/",
+            "owner": {"username": "alice"}});
+        let cases = [
+            (
+                &BOARD,
+                json!({ "board": board }),
+                "pinterest/alice/Cats",
+                "{board[id]}_{id}",
+            ),
+            (
+                &SECTION,
+                json!({"board": board, "section": {"id": "77", "title": "Tabby"}}),
+                "pinterest/alice/Cats/Tabby",
+                "{board[id]}_{id}",
+            ),
+            (
+                &RELATED_BOARD,
+                json!({ "board": board }),
+                "pinterest/alice/Cats/related",
+                "{board[id]}_{id}",
+            ),
+            (
+                &ALLPINS,
+                json!({"user": "alice"}),
+                "pinterest/alice",
+                ARCHIVE,
+            ),
+            (
+                &CREATED,
+                json!({"user": "alice"}),
+                "pinterest/alice",
+                ARCHIVE,
+            ),
+            (
+                &SEARCH,
+                json!({"search": "red cat"}),
+                "pinterest/Search/red cat",
+                ARCHIVE,
+            ),
+            (
+                &RELATED_PIN,
+                json!({"original_pin": {"id": "55"}}),
+                "pinterest/related 55",
+                ARCHIVE,
+            ),
+        ];
+        for (route, data, directory, archive) in cases {
+            let items = build_media(pin("1"), &context(route, data.clone()), true, true);
+            let k = keywords(&items[0]);
+            for (key, value) in data.as_object().unwrap() {
+                assert_eq!(&k[key], value);
+            }
+            assert_eq!(k["subcategory"], route.subcategory);
+            assert_eq!(route.archive, archive);
+            assert_eq!(
+                paths(&items[0]),
+                ("pinterest_1.jpg".into(), PathBuf::from(directory))
+            );
         }
-        assert!(media_url("https://v.pinimg.com/a.mp4").is_some());
-        assert!(media_url("https://s.pinimg.com/a.jpg").is_none());
-        assert!(media_url("http://i.pinimg.com/a.jpg").is_none());
-        assert_eq!(
-            parse_rfc2822("Tue, 02 Jan 2024 01:00:00 +0100"),
-            Some(1704153600)
-        );
-        assert_eq!(parse_rfc2822("garbage"), None);
+    }
+
+    #[test]
+    fn pagination_stops_like_upstream() {
+        let body = |bookmarks: Value| json!({"resource": {"options": {"bookmarks": bookmarks}}});
+        assert_eq!(next_bookmarks(&body(json!(["BM"]))), Some(json!(["BM"])));
+        for end in [
+            json!(["-end-"]),
+            json!(["Y2JOb25lOnRydWU="]),
+            json!([]),
+            json!(null),
+            json!([null]),
+        ] {
+            assert_eq!(next_bookmarks(&body(end.clone())), None, "{end}");
+        }
+        assert_eq!(next_bookmarks(&json!({"resource_response": {}})), None);
+        let results = json!({"resource_response": {"data": {"results": [1, 2]}}});
+        assert_eq!(page_results(&results).unwrap(), vec![json!(1), json!(2)]);
+        assert!(page_results(&json!({"resource_response": {"data": null}})).is_err());
     }
 
     fn response(status: &str, extra: &str, body: &[u8]) -> Vec<u8> {
@@ -929,9 +2091,12 @@ mod tests {
         out
     }
 
-    fn ok(data: Value, bookmark: &str) -> Vec<u8> {
-        let body = json!({"resource_response": {"status": "success", "data": data,
-            "bookmark": bookmark}});
+    /// A resource response; `bookmarks` of `None` omits `resource.options`.
+    fn ok(data: Value, bookmarks: Option<&str>) -> Vec<u8> {
+        let mut body = json!({"resource_response": {"status": "success", "data": data}});
+        if let Some(bookmark) = bookmarks {
+            body["resource"] = json!({"options": {"bookmarks": [bookmark]}});
+        }
         response("200 OK", "", body.to_string().as_bytes())
     }
 
@@ -968,80 +2133,391 @@ mod tests {
             .with_api_root(root)
     }
 
-    fn decoded(request: &str) -> String {
+    /// The request path and its decoded `data` options.
+    fn decoded(request: &str) -> (String, Value) {
         let line = request.lines().next().unwrap();
         let url = Url::parse(&format!("http://x{}", line.split(' ').nth(1).unwrap())).unwrap();
-        url.query_pairs()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join("&")
+        let pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
+        assert_eq!(pairs[1], ("source_url".into(), String::new()));
+        assert_eq!(pairs[0].0, "data");
+        let data: Value = serde_json::from_str(&pairs[0].1).unwrap();
+        (url.path().to_owned(), data["options"].clone())
+    }
+
+    /// Events as labels: `+sub` begin child, `-` end child, `P` post,
+    /// file names, `.` end post.
+    fn labels(events: &[ExtractionEvent]) -> Vec<String> {
+        events
+            .iter()
+            .map(|event| match event {
+                ExtractionEvent::BeginChild(ChildScope { metadata, .. }) => {
+                    format!("+{}", metadata.subcategory())
+                }
+                ExtractionEvent::EndChild(_) => "-".into(),
+                ExtractionEvent::Post(_) => "P".into(),
+                ExtractionEvent::Media(media) => media.filename.clone(),
+                ExtractionEvent::EndPost => ".".into(),
+            })
+            .collect()
+    }
+
+    async fn run(native: &Pinterest, url: &str) -> Vec<ExtractionEvent> {
+        native
+            .events(&Url::parse(url).unwrap())
+            .map(|event| event.unwrap())
+            .collect()
+            .await
+    }
+
+    fn media_at(events: &[ExtractionEvent], index: usize) -> &Media {
+        match &events[index] {
+            ExtractionEvent::Media(media) => media,
+            _ => panic!("event {index} is not media"),
+        }
     }
 
     #[tokio::test]
-    async fn fetches_pin_via_short_link_with_retry_and_headers() {
+    async fn short_link_queues_pin_with_upstream_request() {
         let (root, server) = serve(vec![
             response(
                 "302 Found",
-                "Location: https://www.pinterest.com/pin/123/?utm=x\r\n",
+                "Location: https://www.pinterest.com/pin/123/sent/?utm=x\r\n",
                 b"",
             ),
             response("503 Service Unavailable", "", b""),
-            ok(pin("123"), "-end-"),
+            ok(pin("123"), None),
         ]);
-        let media: Vec<_> = pinterest(root)
-            .with_retries(1)
-            .stream(&Url::parse("https://pin.it/AbC").unwrap())
-            .collect()
-            .await;
-        assert_eq!(media.len(), 1);
-        assert_eq!(media[0].as_ref().unwrap().filename, "123_1.jpg");
+        let native = pinterest(root).with_retries(1);
+        let events = run(&native, "https://pin.it/AbC").await;
+        assert_eq!(labels(&events), ["+pinit", "P", "123.jpg", ".", "-"]);
+        assert_eq!(keywords(media_at(&events, 2))["subcategory"], "pin");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /url_shortener/AbC/redirect/ "));
-        assert!(requests[2].starts_with("GET /resource/PinResource/get/?"));
-        let query = decoded(&requests[2]);
-        assert!(query.contains("source_url=/pin/123/"), "{query}");
-        assert!(query.contains(r#""field_set_key":"detailed""#), "{query}");
+        let (path, options) = decoded(&requests[2]);
+        assert_eq!(path, "/resource/PinResource/get/");
+        assert_eq!(options, json!({"id": "123", "field_set_key": "detailed"}));
         let lower = requests[2].to_ascii_lowercase();
-        assert!(lower.contains("x-pinterest-appstate: active"));
-        assert!(lower.contains("x-requested-with: xmlhttprequest"));
-    }
+        for header in [
+            "x-pinterest-appstate: active",
+            "x-requested-with: xmlhttprequest",
+            "x-app-version: a89153f",
+            "x-pinterest-pws-handler: www/[username].js",
+            "sec-fetch-mode: cors",
+            "referer: https://www.pinterest.com/",
+            "cookie: csrftoken=",
+        ] {
+            assert!(lower.contains(header), "{header}");
+        }
+        assert!(!requests[0].to_ascii_lowercase().contains("x-app-version"));
 
-    #[tokio::test]
-    async fn paginates_board_with_bookmarks_and_hides_urls_in_errors() {
+        // A short link to a board queues the board extractor.
         let (root, server) = serve(vec![
-            ok(json!({"id": "900", "name": "cats"}), ""),
-            ok(json!([pin("1"), {"id": "2", "is_promoted": true}]), "BM1"),
-            ok(json!([pin("3")]), "-end-"),
+            response(
+                "302 Found",
+                "Location: https://www.pinterest.com/alice/cats/\r\n",
+                b"",
+            ),
+            ok(
+                json!({"id": "900", "name": "Cats", "section_count": 0}),
+                None,
+            ),
+            ok(json!([pin("1")]), None),
         ]);
-        let media: Vec<_> = pinterest(root)
-            .stream(&Url::parse("https://www.pinterest.com/alice/cats/").unwrap())
-            .collect()
-            .await;
-        let media: Vec<_> = media.into_iter().map(|m| m.unwrap()).collect();
-        assert_eq!(media.len(), 2);
-        assert_eq!(media[1].filename, "3_1.jpg");
+        let events = run(&pinterest(root), "https://pin.it/Board").await;
+        assert_eq!(labels(&events), ["+pinit", "P", "1.jpg", ".", "-"]);
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /resource/BoardResource/get/?"));
-        assert!(decoded(&requests[0]).contains(r#""slug":"cats""#));
-        assert!(requests[1].starts_with("GET /resource/BoardFeedResource/get/?"));
-        assert!(!decoded(&requests[1]).contains("bookmarks"));
-        let second = decoded(&requests[2]);
-        assert!(second.contains(r#""bookmarks":["BM1"]"#), "{second}");
-        assert!(second.contains(r#""board_id":"900""#), "{second}");
+        assert_eq!(decoded(&requests[1]).0, "/resource/BoardResource/get/");
 
-        let (root, server) = serve(vec![response("404 Not Found", "", b"")]);
+        // Other locations are not found.
+        let (root, server) = serve(vec![response(
+            "302 Found",
+            "Location: https://example.com/\r\n",
+            b"",
+        )]);
         let error = pinterest(root)
-            .stream(&Url::parse("https://www.pinterest.com/alice/pins/").unwrap())
+            .events(&Url::parse("https://pin.it/Elsewhere").unwrap())
             .collect::<Vec<_>>()
             .await
             .remove(0)
             .unwrap_err()
             .to_string();
-        assert!(
-            error.contains("not found") && !error.contains("127.0.0.1"),
-            "{error}"
+        assert!(error.contains("did not resolve"), "{error}");
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn board_paginates_then_queues_sections() {
+        let board = json!({"id": "900", "name": "Cats", "url": "/alice/cats/",
+            "section_count": 2, "owner": {"username": "alice"}});
+        let section = json!({"id": "77", "title": "Tabby", "preview_pins": [],
+            "board": board});
+        let (root, server) = serve(vec![
+            ok(board.clone(), None),
+            ok(json!([pin("1"), pin("2")]), Some("BM1")),
+            ok(json!({"results": [pin("3")]}), Some("-end-")),
+            ok(json!([{"id": "77"}, {"id": "bad/id"}]), Some("SB1")),
+            // Children run lazily: the first section's lookup and pins come
+            // before the next page of sections.
+            ok(section, None),
+            ok(json!([pin("4")]), None),
+            ok(json!([{"id": "78"}]), Some("Y2JOb25lO123")),
+            ok(json!({"id": "78", "title": "Black", "board": board}), None),
+            ok(json!([]), None),
+        ]);
+        let native = pinterest(root);
+        let events = run(&native, "https://www.pinterest.com/alice/cats/").await;
+        assert_eq!(
+            labels(&events),
+            [
+                "P", "1.jpg", ".", "P", "2.jpg", ".", "P", "3.jpg", ".", "+board", "P", "4.jpg",
+                ".", "-", "+board", "-"
+            ]
+        );
+        let first = media_at(&events, 1);
+        assert_eq!(keywords(first)["board"]["id"], "900");
+        assert_eq!(paths(first).1, PathBuf::from("pinterest/alice/Cats"));
+        let sectioned = media_at(&events, 11);
+        let k = keywords(sectioned);
+        assert_eq!(k["subcategory"], "section");
+        assert_eq!(k["section"], json!({"id": "77", "title": "Tabby"}));
+        assert_eq!(k["board"]["url"], "/alice/cats/");
+        assert_eq!(
+            paths(sectioned).1,
+            PathBuf::from("pinterest/alice/Cats/Tabby")
+        );
+
+        let requests = server.join().unwrap();
+        let requests: Vec<_> = requests.iter().map(|r| decoded(r)).collect();
+        assert_eq!(requests[0].0, "/resource/BoardResource/get/");
+        assert_eq!(
+            requests[0].1,
+            json!({"slug": "cats", "username": "alice", "field_set_key": "detailed"})
+        );
+        assert_eq!(requests[1].0, "/resource/BoardFeedResource/get/");
+        assert_eq!(
+            requests[1].1,
+            json!({"board_id": "900", "field_set_key": "react_grid_pin", "prepend": false,
+                "bookmarks": null})
+        );
+        assert_eq!(requests[2].1["bookmarks"], json!(["BM1"]));
+        assert_eq!(requests[3].0, "/resource/BoardSectionsResource/get/");
+        assert_eq!(requests[3].1, json!({"board_id": "900"}));
+        assert_eq!(requests[4].0, "/resource/BoardSectionResource/get/");
+        assert_eq!(requests[4].1, json!({"section_id": "77"}));
+        assert_eq!(requests[5].0, "/resource/BoardSectionPinsResource/get/");
+        assert_eq!(requests[5].1, json!({"section_id": "77"}));
+        assert_eq!(requests[6].0, "/resource/BoardSectionsResource/get/");
+        assert_eq!(requests[6].1["bookmarks"], json!(["SB1"]));
+        assert_eq!(requests[7].1, json!({"section_id": "78"}));
+
+        // `sections: false` skips BoardSectionsResource.
+        let (root, server) = serve(vec![ok(board.clone(), None), ok(json!([pin("1")]), None)]);
+        let native = pinterest(root)
+            .with_options(Some(json!({"sections": false}).as_object().unwrap()))
+            .unwrap();
+        let events = run(&native, "https://www.pinterest.com/alice/cats/").await;
+        assert_eq!(labels(&events), ["P", "1.jpg", "."]);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn section_by_slug_and_related_board() {
+        let board = json!({"id": "900", "name": "Cats", "owner": {"username": "alice"}});
+        let (root, server) = serve(vec![
+            ok(json!({"id": "77", "title": "Tabby", "board": board}), None),
+            ok(json!([pin("4")]), Some("-end-")),
+        ]);
+        let events = run(
+            &pinterest(root),
+            "https://www.pinterest.com/alice/cats/tabby%20cat",
+        )
+        .await;
+        assert_eq!(labels(&events), ["P", "4.jpg", "."]);
+        let requests = server.join().unwrap();
+        let (path, options) = decoded(&requests[0]);
+        assert_eq!(path, "/resource/BoardSectionResource/get/");
+        assert_eq!(
+            options,
+            json!({"board_slug": "cats", "section_slug": "tabby cat", "username": "alice"})
+        );
+
+        let (root, server) = serve(vec![
+            ok(
+                json!({"id": "900", "name": "Cats", "section_count": 3, "url": "/alice/cats/",
+                "owner": {"username": "alice"}}),
+                None,
+            ),
+            ok(json!([pin("5")]), None),
+        ]);
+        let events = run(
+            &pinterest(root),
+            "https://www.pinterest.com/alice/cats/#related",
+        )
+        .await;
+        assert_eq!(labels(&events), ["P", "5.jpg", "."]);
+        let media = media_at(&events, 1);
+        assert_eq!(keywords(media)["subcategory"], "related-board");
+        assert_eq!(
+            paths(media).1,
+            PathBuf::from("pinterest/alice/Cats/related")
         );
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /resource/UserPinsResource/get/?"));
+        let (path, options) = decoded(&requests[1]);
+        assert_eq!(path, "/resource/BoardContentRecommendationResource/get/");
+        assert_eq!(
+            options,
+            json!({"id": "900", "type": "board", "add_vase": true})
+        );
+    }
+
+    #[tokio::test]
+    async fn user_queues_each_board() {
+        let (root, server) = serve(vec![
+            ok(
+                json!([{"id": "900", "name": "Cats", "url": "/alice/cats/"},
+                    {"id": "901", "name": "No URL"},
+                    {"id": "902", "name": "Foreign", "url": "//evil.example/x/y/"}]),
+                Some("BM"),
+            ),
+            ok(json!({"id": "900", "name": "Cats"}), None),
+            ok(json!([pin("1")]), None),
+            ok(
+                json!([{"id": "903", "name": "Dogs", "url": "/alice/dogs/"}]),
+                None,
+            ),
+            ok(json!({"id": "903", "name": "Dogs"}), None),
+            ok(json!([]), None),
+        ]);
+        let events = run(&pinterest(root), "https://www.pinterest.com/alice/_saved/").await;
+        assert_eq!(
+            labels(&events),
+            ["+user", "P", "1.jpg", ".", "-", "+user", "-"]
+        );
+        let ExtractionEvent::BeginChild(scope) = &events[0] else {
+            unreachable!()
+        };
+        assert_eq!(scope.metadata.fields()["name"], "Cats");
+        assert_eq!(scope.metadata.fields()["id"], "900");
+        let requests = server.join().unwrap();
+        let requests: Vec<_> = requests.iter().map(|r| decoded(r)).collect();
+        assert_eq!(requests[0].0, "/resource/BoardsResource/get/");
+        assert_eq!(
+            requests[0].1,
+            json!({"sort": "last_pinned_to", "field_set_key": "profile_grid_item",
+                "filter_stories": false, "username": "alice", "page_size": 25,
+                "include_archived": true})
+        );
+        assert_eq!(requests[1].1["slug"], "cats");
+        assert_eq!(requests[3].0, "/resource/BoardsResource/get/");
+        assert_eq!(requests[3].1["bookmarks"], json!(["BM"]));
+        assert_eq!(requests[4].1["slug"], "dogs");
+    }
+
+    #[tokio::test]
+    async fn feeds_use_upstream_resources() {
+        let cases = [
+            (
+                "https://www.pinterest.com/alice/pins/",
+                "/resource/UserPinsResource/get/",
+                json!({"is_own_profile_pins": false, "username": "alice",
+                    "field_set_key": "grid_item", "pin_filter": null}),
+                ("user", json!("alice")),
+                "pinterest/alice",
+            ),
+            (
+                "https://www.pinterest.com/alice/_created/",
+                "/resource/UserActivityPinsResource/get/",
+                json!({"exclude_add_pin_rep": true, "field_set_key": "grid_item",
+                    "is_own_profile_pins": false, "username": "alice"}),
+                ("user", json!("alice")),
+                "pinterest/alice",
+            ),
+            (
+                "https://www.pinterest.com/search/pins/?q=red%20cat",
+                "/resource/BaseSearchResource/get/",
+                json!({"query": "red cat", "scope": "pins", "rs": "typed"}),
+                ("search", json!("red cat")),
+                "pinterest/Search/red cat",
+            ),
+        ];
+        for (url, resource, options, (key, value), directory) in cases {
+            let (root, server) = serve(vec![
+                ok(json!({"results": [pin("1")]}), Some("NEXT")),
+                ok(json!({"results": [pin("2")]}), None),
+            ]);
+            let events = run(&pinterest(root), url).await;
+            assert_eq!(
+                labels(&events),
+                ["P", "1.jpg", ".", "P", "2.jpg", "."],
+                "{url}"
+            );
+            let media = media_at(&events, 1);
+            assert_eq!(keywords(media)[key], value);
+            assert_eq!(paths(media).1, PathBuf::from(directory));
+            let requests = server.join().unwrap();
+            assert_eq!(decoded(&requests[0]), (resource.to_owned(), options));
+            assert_eq!(decoded(&requests[1]).1["bookmarks"], json!(["NEXT"]));
+        }
+
+        let (root, server) = serve(vec![ok(pin("55"), None), ok(json!([pin("56")]), None)]);
+        let events = run(
+            &pinterest(root),
+            "https://www.pinterest.com/pin/55/#related",
+        )
+        .await;
+        assert_eq!(labels(&events), ["P", "56.jpg", "."]);
+        let media = media_at(&events, 1);
+        assert_eq!(keywords(media)["original_pin"]["id"], "55");
+        assert_eq!(paths(media).1, PathBuf::from("pinterest/related 55"));
+        let requests = server.join().unwrap();
+        assert_eq!(
+            decoded(&requests[1]),
+            (
+                "/resource/RelatedPinFeedResource/get/".to_owned(),
+                json!({"pin": "55", "add_vase": true, "pins_only": true})
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_name_the_resource_without_urls() {
+        for (url, what) in [
+            ("https://www.pinterest.com/alice/pins/", "allpins"),
+            ("https://www.pinterest.com/pin/1/#related", "pin"),
+            ("https://www.pinterest.com/alice/cats/x", "section"),
+        ] {
+            let (root, server) = serve(vec![response("404 Not Found", "", b"")]);
+            let error = pinterest(root)
+                .events(&Url::parse(url).unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .remove(0)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(error, format!("Pinterest {what} not found"));
+            server.join().unwrap();
+        }
+        let (root, server) = serve(vec![
+            ok(json!([pin("1")]), Some("NEXT")),
+            response("200 OK", "", b"<html>"),
+        ]);
+        let events: Vec<_> = pinterest(root)
+            .events(&Url::parse("https://www.pinterest.com/alice/pins/").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 4);
+        let error = events[3].as_ref().unwrap_err().to_string();
+        assert!(error.contains("invalid JSON") && !error.contains("127.0.0.1"));
+        server.join().unwrap();
+        let (root, server) = serve(vec![ok(Value::Null, None)]);
+        let error = pinterest(root)
+            .stream(&Url::parse("https://www.pinterest.com/pin/9/").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "Pinterest pin not found");
+        server.join().unwrap();
     }
 }

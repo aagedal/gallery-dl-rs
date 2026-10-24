@@ -422,7 +422,9 @@ async fn failed_handoff_does_not_suppress_a_later_direct_representation() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("archive.sqlite3");
     let archive = Archive::open(&path).await.unwrap();
-    let client = download::client(Duration::from_secs(2)).unwrap();
+    let client = download::client(Duration::from_secs(2))
+        .unwrap()
+        .with_ytdl(None);
     let mut manifest = item("http://127.0.0.1:1/thumbnail.jpg");
     manifest.job = extract::MediaJob::VideoPage {
         page_url: manifest.url.clone(),
@@ -463,6 +465,7 @@ fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
         .arg(&path)
         .arg("--extractor-command")
         .arg(&script)
+        .arg("--no-ytdl")
         .arg("-d")
         .arg(root.path())
         .args(["--jobs", "2", "https://x.com/user/status/123"])
@@ -617,6 +620,18 @@ async fn cancellation_does_not_archive_partial_media_or_keep_its_identity_locked
                 Err(e) => panic!("{e}"),
             }
         };
+        // Answer only after the full request so the client is reading a response.
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let read = socket.read(&mut bytes).unwrap();
+            assert!(read > 0 && request.len() < 65536);
+            request.extend_from_slice(&bytes[..read]);
+        }
         socket
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc")
             .unwrap();

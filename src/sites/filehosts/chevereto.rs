@@ -22,6 +22,7 @@ macro_rules! instance {
             extract: |http, url| extract($category, http, url),
             routes: &[&FILE, &ALBUM, &CATEGORY, &USER],
             api_key: false,
+            cookies: None,
         };
     };
 }

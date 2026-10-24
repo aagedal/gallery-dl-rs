@@ -18,7 +18,7 @@ pub use expansion::{
 };
 #[path = "twitter_images.rs"]
 mod images;
-pub use images::ImageOptions;
+pub use images::{ImageOptions, is_image_url};
 #[path = "twitter_media.rs"]
 mod media;
 pub use media::{MediaOptions, VideoMode};
@@ -52,6 +52,8 @@ mod profile;
 pub(crate) use profile::profile_asset_identity;
 #[path = "twitter_timeline.rs"]
 mod timeline;
+#[path = "twitter_users.rs"]
+mod users;
 use base64::{
     Engine,
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
@@ -70,6 +72,7 @@ use std::{
 };
 pub use timeline::{is_media_timeline_url, is_profile_timeline_url};
 use url::Url;
+pub use users::is_queue_url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
@@ -110,6 +113,11 @@ pub struct Twitter {
     rate_limits: RateLimits,
     transaction: Mutex<Option<Transaction>>,
     initialize: tokio::sync::Mutex<()>,
+    /// Guest token for sessions without any X cookies, like yt-dlp and
+    /// upstream's logged-out mode.
+    guest: Mutex<Option<String>>,
+    /// Guest activation; unit tests leave it unset so they never reach X.
+    guest_endpoint: Option<Url>,
 }
 
 impl Twitter {
@@ -148,7 +156,19 @@ impl Twitter {
             rate_limits: RateLimits::default(),
             transaction: Mutex::new(None),
             initialize: tokio::sync::Mutex::new(()),
+            guest: Mutex::new(None),
+            guest_endpoint: if cfg!(test) {
+                None
+            } else {
+                Url::parse("https://api.x.com/1.1/guest/activate.json").ok()
+            },
         })
+    }
+
+    #[cfg(test)]
+    fn with_guest_endpoint(mut self, endpoint: Url) -> Self {
+        self.guest_endpoint = Some(endpoint);
+        self
     }
 
     pub fn with_include(mut self, include: Option<crate::dispatch::Include>) -> Self {
@@ -257,11 +277,18 @@ impl Twitter {
             .unwrap()
             .header(auth_endpoint)
             .unwrap_or_default();
-        for name in ["auth_token=", "ct0="] {
-            if !scoped
+        let has = |name: &str| {
+            scoped
                 .split("; ")
                 .any(|part| part.strip_prefix(name).is_some_and(|v| !v.is_empty()))
-            {
+        };
+        // Without any session cookie, read public posts as a guest. A
+        // partial session is a configuration error, not a guest.
+        if !has("auth_token=") && !has("ct0=") {
+            return self.ensure_guest().await;
+        }
+        for name in ["auth_token=", "ct0="] {
+            if !has(name) {
                 return Err(error(
                     "Twitter authentication requires x.com auth_token and ct0 cookies; refresh --cookies",
                 ));
@@ -269,6 +296,64 @@ impl Twitter {
         }
         self.bootstrap(code, &http_url("https://x.com/")?, None)
             .await
+    }
+
+    /// Whether the jar holds an X session (`auth_token`) for the API.
+    pub(crate) fn has_session(&self) -> bool {
+        let api = Url::parse("https://x.com/i/api/graphql/").unwrap();
+        self.cookies
+            .lock()
+            .unwrap()
+            .header(&api)
+            .is_some_and(|scoped| {
+                scoped.split("; ").any(|part| {
+                    part.strip_prefix("auth_token=")
+                        .is_some_and(|v| !v.is_empty())
+                })
+            })
+    }
+
+    /// Whether requests run as a guest (no session cookies).
+    pub(crate) fn is_guest(&self) -> bool {
+        self.guest.lock().unwrap().is_some() && !self.has_session()
+    }
+
+    /// Activate a guest token once per extractor.
+    async fn ensure_guest(&self) -> Result<()> {
+        if self.guest.lock().unwrap().is_some() {
+            return Ok(());
+        }
+        let Some(endpoint) = self.guest_endpoint.clone() else {
+            return Err(error(
+                "Twitter authentication requires x.com auth_token and ct0 cookies; refresh --cookies",
+            ));
+        };
+        let request = self
+            .client
+            .post(endpoint)
+            .timeout(self.request_timeout)
+            .header(header::AUTHORIZATION, BEARER);
+        let failed = || {
+            error("X refused a guest session; pass x.com auth_token and ct0 cookies with --cookies")
+        };
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error("native Twitter extraction timed out"))?
+            .map_err(|_| failed())?;
+        if !response.status().is_success() {
+            return Err(failed());
+        }
+        let body = crate::transport::read_capped(response, 64 * 1024)
+            .await
+            .ok_or_else(failed)?;
+        let data: Value = serde_json::from_slice(&body).map_err(|_| failed())?;
+        let token = data
+            .get("guest_token")
+            .and_then(Value::as_str)
+            .filter(|token| !token.is_empty() && token.bytes().all(|b| b.is_ascii_digit()))
+            .ok_or_else(failed)?;
+        *self.guest.lock().unwrap() = Some(token.to_owned());
+        Ok(())
     }
 
     // Endpoint injection keeps bootstrap behavior testable with local fixtures.
@@ -353,31 +438,49 @@ impl Twitter {
             if api {
                 request = request
                     .header(header::AUTHORIZATION, BEARER)
-                    .header("x-twitter-auth-type", "OAuth2Session")
                     .header("x-twitter-active-user", "yes")
                     .header("x-twitter-client-language", "en");
-                let scoped = self.cookies.lock().unwrap().header(&target)
-                .ok_or_else(|| error("Twitter authentication requires scoped auth_token and ct0 cookies; refresh --cookies"))?;
-                let cookie = |name: &str| {
-                    scoped
-                        .split("; ")
-                        .find_map(|part| part.strip_prefix(name))
-                        .filter(|value| !value.is_empty())
-                };
-                if cookie("auth_token=").is_none() {
-                    return Err(error("Twitter authentication requires scoped auth_token and ct0 cookies; refresh --cookies").into());
-                }
-                let csrf = cookie("ct0=").ok_or_else(|| error("Twitter authentication requires scoped auth_token and ct0 cookies; refresh --cookies"))?;
-                request = request
-                    .header("x-csrf-token", csrf)
-                    .header(header::COOKIE, scoped);
-                if let Some(transaction) = self.transaction.lock().unwrap().as_ref() {
-                    request = request.header(
-                        "x-client-transaction-id",
-                        transaction.generate("GET", target.path())?,
-                    );
+                let guest = self.guest.lock().unwrap().clone();
+                let scoped = self.cookies.lock().unwrap().header(&target);
+                let session = scoped.as_deref().is_some_and(|c| {
+                    c.split("; ")
+                        .any(|p| p.strip_prefix("auth_token=").is_some_and(|v| !v.is_empty()))
+                });
+                if let Some(guest) = guest.filter(|_| !session) {
+                    request = request.header("x-guest-token", guest);
+                    if let Some(transaction) = self.transaction.lock().unwrap().as_ref() {
+                        request = request.header(
+                            "x-client-transaction-id",
+                            transaction.generate("GET", target.path())?,
+                        );
+                    }
                 } else {
-                    return Err(error("Twitter client transaction has not been initialized").into());
+                    let scoped = scoped
+                .ok_or_else(|| error("Twitter authentication requires scoped auth_token and ct0 cookies; refresh --cookies"))?;
+                    let cookie = |name: &str| {
+                        scoped
+                            .split("; ")
+                            .find_map(|part| part.strip_prefix(name))
+                            .filter(|value| !value.is_empty())
+                    };
+                    if cookie("auth_token=").is_none() {
+                        return Err(error("Twitter authentication requires scoped auth_token and ct0 cookies; refresh --cookies").into());
+                    }
+                    let csrf = cookie("ct0=").ok_or_else(|| error("Twitter authentication requires scoped auth_token and ct0 cookies; refresh --cookies"))?;
+                    request = request
+                        .header("x-twitter-auth-type", "OAuth2Session")
+                        .header("x-csrf-token", csrf)
+                        .header(header::COOKIE, scoped);
+                    if let Some(transaction) = self.transaction.lock().unwrap().as_ref() {
+                        request = request.header(
+                            "x-client-transaction-id",
+                            transaction.generate("GET", target.path())?,
+                        );
+                    } else {
+                        return Err(
+                            error("Twitter client transaction has not been initialized").into()
+                        );
+                    }
                 }
             } else if target.host_str() != Some("abs.twimg.com")
                 && let Some(cookies) = self.cookies.lock().unwrap().header(&target)
@@ -422,6 +525,32 @@ impl Twitter {
                     format!("Twitter returned HTTP {status}")
                 },
             ));
+        }
+        // Guest tokens expire after a few hours and are rate limited; a
+        // refused one is dropped so the next request activates a new one.
+        let guest = api && self.guest.lock().unwrap().is_some() && !self.has_session();
+        if guest && matches!(status.as_u16(), 401 | 403) {
+            *self.guest.lock().unwrap() = None;
+            if endpoint.path().ends_with("/TweetResultByRestId") {
+                return Err(error(
+                    "X refused the guest session for this post (expired token, rate limit or \
+                     protected post); retry, or pass x.com auth_token and ct0 cookies",
+                )
+                .into());
+            }
+        }
+        // Guests may read single posts only; X answers other queries with
+        // 401/403/404.
+        if api
+            && matches!(status.as_u16(), 401 | 403 | 404)
+            && guest
+            && !endpoint.path().ends_with("/TweetResultByRestId")
+        {
+            return Err(error(
+                "X requires a logged-in session for this; pass x.com auth_token and ct0 \
+                 cookies with --cookies (guests can read single posts only)",
+            )
+            .into());
         }
         if matches!(status.as_u16(), 401 | 403) {
             return Err(error(
@@ -1062,6 +1191,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sessions_without_cookies_read_posts_as_a_guest() {
+        let (endpoint, server) = serve(vec![
+            (
+                response("200 OK", "", br#"{"guest_token":"1234"}"#),
+                Duration::ZERO,
+            ),
+            (response("200 OK", "", PHOTO), Duration::ZERO),
+            (response("404 Not Found", "", b""), Duration::ZERO),
+        ]);
+        let native = Twitter::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_guest_endpoint(endpoint.join("/1.1/guest/activate.json").unwrap());
+        assert!(!native.has_session());
+        let media = native.extract_endpoint(&endpoint, ID).await.unwrap();
+        assert!(!media.is_empty());
+        // Other queries are refused to guests; the error asks for a session.
+        let timeline = endpoint.join("/i/api/graphql/q/UserMedia").unwrap();
+        let message = native
+            .extract_endpoint(&timeline, ID)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("guests can read single posts only"),
+            "{message}"
+        );
+        let requests: Vec<String> = server
+            .join()
+            .unwrap()
+            .iter()
+            .map(|r| r.to_ascii_lowercase())
+            .collect();
+        assert!(requests[0].starts_with("post /1.1/guest/activate.json "));
+        assert!(requests[0].contains("authorization: bearer "));
+        assert!(requests[1].contains("x-guest-token: 1234\r\n"));
+        assert!(!requests[1].contains("x-csrf-token"));
+        assert!(!requests[1].contains("x-twitter-auth-type"));
+        assert!(!requests[1].contains("cookie:"));
+        // The token is activated once per extractor.
+        assert!(requests[2].starts_with("get /i/api/graphql/q/usermedia"));
+    }
+
+    #[tokio::test]
+    async fn refused_guest_tokens_are_replaced() {
+        let (endpoint, server) = serve(vec![
+            (
+                response("200 OK", "", br#"{"guest_token":"1"}"#),
+                Duration::ZERO,
+            ),
+            (response("403 Forbidden", "", b""), Duration::ZERO),
+            (
+                response("200 OK", "", br#"{"guest_token":"2"}"#),
+                Duration::ZERO,
+            ),
+            (response("200 OK", "", PHOTO), Duration::ZERO),
+        ]);
+        let native = Twitter::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_guest_endpoint(endpoint.join("/1.1/guest/activate.json").unwrap());
+        let message = native
+            .extract_endpoint(&endpoint, ID)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("refused the guest session"), "{message}");
+        assert!(
+            !native
+                .extract_endpoint(&endpoint, ID)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let requests: Vec<String> = server
+            .join()
+            .unwrap()
+            .iter()
+            .map(|r| r.to_ascii_lowercase())
+            .collect();
+        assert!(requests[2].starts_with("post /1.1/guest/activate.json "));
+        assert!(requests[3].contains("x-guest-token: 2\r\n"));
+    }
+
+    #[tokio::test]
     async fn api_requests_use_configured_http_proxy() {
         let (proxy, server) = serve(vec![(response("200 OK", "", PHOTO), Duration::ZERO)]);
         let network =
@@ -1371,8 +1585,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_x_scoped_auth_fails_before_any_network_request() {
-        let native = Twitter::new(None, Duration::from_secs(1)).await.unwrap();
+    async fn partial_x_session_fails_before_any_network_request() {
+        let native = Twitter::from_cookie_jar(
+            CookieJar::parse(".x.com\tTRUE\t/\tTRUE\t0\tauth_token\tsession\n").unwrap(),
+            Duration::from_secs(1),
+        )
+        .unwrap();
         let err = native
             .extract(&http_url("https://x.com/test/status/1234567890").unwrap())
             .await

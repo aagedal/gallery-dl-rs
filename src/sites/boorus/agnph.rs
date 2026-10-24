@@ -27,6 +27,7 @@ pub static AGNPH: Site = Site {
     extract,
     routes: &[&TAG, &POST],
     api_key: false,
+    cookies: None,
 };
 
 #[derive(Debug, PartialEq)]

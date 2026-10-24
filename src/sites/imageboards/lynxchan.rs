@@ -30,6 +30,7 @@ macro_rules! instance {
             extract: |http, url| extract($category, http, url),
             routes: &[&THREAD, &BOARD],
             api_key: false,
+            cookies: None,
         };
     };
 }

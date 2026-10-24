@@ -19,6 +19,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&USER, &GALLERY, &IMAGE],
     api_key: false,
+    cookies: None,
 };
 
 const FILENAME: &str = "{id}_{name}.{extension}";

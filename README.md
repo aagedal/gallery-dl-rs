@@ -177,10 +177,25 @@ own `image.uri`, never a global image or Open Graph preview. It selects the larg
 identity-bound image and emits available metadata plus stable archive identities.
 Cookies remain scoped to Facebook page requests; media receives user-agent and
 referer only. Requests have bounded redirects, retries, cooldowns, response size,
-and deadlines. Profile album listings are not implemented. An anonymous public page
-check on 2026-10-18 returned no identity-bound photo; successful live extraction
-and sanitized real response fixtures remain required. See the
+and deadlines. Page requests send upstream's navigation headers
+(`Sec-Fetch-Mode: navigate`); album pages answer HTTP 400 without them. See the
 [Facebook fixture notes](tests/fixtures/facebook/README.md).
+
+Profile routes mirror upstream: `facebook.com/NAME` and `NAME/photos[_by]`
+read the profile's photos, `NAME/avatar` its profile picture, and
+`NAME/photos_albums[/TITLE]` each album (or the one titled `TITLE`), paging the
+album list through `ProfileCometAppCollectionAlbumsRendererPaginationQuery`. `profile.php?id=ID` (with `sk=photos` or
+`sk=photos_albums`) and `people/NAME/ID/...` are accepted too. Profile pages
+only name the set, albums or avatar photo; photos are then read like album and
+photo URLs. Anonymous photo pages carry no next-photo navigation, so without
+cookies an album or profile follows the grid listed on its album or
+`photos_by` page. Album grids continue through
+`ProfileCometLegacyAlbumGridViewPaginationQuery` and profile `photos_by`
+grids through `ProfileCometAppCollectionPhotosRendererPaginationQuery`, both
+with the page's LSD token (persisted IDs observed on 2026-10-23); grids whose
+pagination is refused end with an error asking for `--cookies` after the
+visible photos. Anonymous profile photos,
+albums and avatars were checked live on 2026-10-23.
 
 Experimental Facebook album traversal uses `Facebook::stream` and the native CLI.
 It resolves the first photo only from an ordered collection tied to the requested
@@ -1310,9 +1325,8 @@ expanded threads; explicit values forward to compatibility mode for X. Changing
 this selection can change file/archive positions.
 
 `"videos": "ytdl"` emits a typed video-page job targeting the validated first-party
-post, optionally followed by its preview. Inspection output supports these jobs;
-downloading them still fails explicitly because the companion video adapter is
-not implemented. Direct MP4 downloads do not need that adapter. Library callers
+post, optionally followed by its preview. Downloads run it through yt-dlp (see
+"Video pages and HLS/DASH" below). Direct MP4 downloads do not need yt-dlp. Library callers
 can use `Twitter::with_media_options` and `parse_response_with_media_options`.
 
 Scoped X `"cards": true` extracts summary-card images and unified-card media.
@@ -1328,8 +1342,8 @@ Repost mode uses the repost's card; original mode uses the original post's card.
 card names, vanity domains, or `name:domain` pairs. An empty list clears inherited
 entries. Both options support normal configuration scopes and forward only for X
 when explicit. `"cards": "ytdl"` handles recognized summary/unified cards directly,
-then emits a typed first-party video-page job for an unhandled card. Delegated
-or manifest jobs without a direct HTTP fallback require the companion adapter.
+then emits a typed first-party video-page job for an unhandled card, which is
+downloaded with yt-dlp.
 
 Enabled malformed cards fail the current post atomically with private diagnostics;
 this is stricter than upstream's warning and partial-output behavior. Repeated
@@ -2407,10 +2421,53 @@ available from upstream.
   temporary downloads (or retains checkpoints with `--resume`), and stops the directly owned compatibility process. Files
   already published are kept. Cancellation exits with status 130.
 
+### Social platforms
+
+Native coverage of the largest social platforms (`--extractor native`;
+`telegram`, `snapchat`, `kuaishou`, `xiaohongshu`, `threads`, `youtube`,
+`linkedin`, `shortlink` and `ytdl` have no upstream extractor and
+are always native):
+
+| Platform | Extractor | Anonymous access (checked live) |
+|---|---|---|
+| Instagram | native (experimental) | public posts, reels, app share links (`share/…`) and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
+| X/Twitter | native (experimental) | single posts and a profile's top posts as a guest; full timelines and searches need `--cookies` |
+| Facebook | native photos, posts, albums, videos, reels, share links and profiles | public albums, album lists and profile photos in full, paged through the logged-out grid and collection queries |
+| Reddit | native REST listings, submissions, users | yes; where Reddit sends logged-out JSON clients to its login page, listings, users and submissions fall back to the public Atom feeds (direct images, videos and links; no gallery metadata or comments; about one feed page per minute). `--cookies` restores the full API |
+| Pinterest, Bluesky | native | yes |
+| Tumblr | native | yes; when the shared default API key hits its daily limit, the web client's public token is used (its NPF posts are converted) |
+| TikTok | native posts and user listings | yes |
+| Telegram | public channels and posts via `t.me/s/` | yes |
+| Weibo | native statuses, albums, videos | statuses and albums; timelines need cookies |
+| VK | native photos, albums, walls, tags | yes |
+| Bilibili | native opus articles and user/favorite lists | yes, via the dynamic API under risk control |
+| Discord | native channels and servers | needs the `token` site option |
+| YouTube community posts | native (`post/ID`, `@HANDLE/posts`, `channel/ID/posts`): images at original size, attached videos queued to yt-dlp, the posts tab paged through `browse` | yes |
+| LinkedIn | native public posts (`posts/SLUG`, `feed/update/urn:li:…`): images in order at the size offered to visitors, videos from the post's JSON-LD | yes |
+| YouTube, Twitch, Douyin (yt-dlp needs fresh browser cookies), LinkedIn events, Snapchat Spotlight posts, Bilibili/VK video | `ytdl` site through yt-dlp | as yt-dlp; cookies are forwarded |
+| Snapchat | native public profiles (`@USER`, `add/USER`): story, highlights and Spotlight; single Spotlight URLs through yt-dlp | yes |
+| Xiaohongshu | native image and video notes (`explore/ID`, `discovery/item/ID`) | only through shared links carrying their `xsec_token`, else cookies; fixture-tested only, as this network is sent to login |
+| Threads | native posts (`@USER/post/CODE`) through the logged-out `BarcelonaPostPageTargetQuery`; its rotating query ID is rediscovered from the page's bundles when stale | yes |
+| App short links | `t.snapchat.com`, `v.kuaishou.com`, `xhslink.com`, `v.douyin.com` resolve one redirect and are queued for their site (Xiaohongshu share links keep their `xsec_token`) | yes; Xiaohongshu's note pages still answer this network with a security page |
+| Kuaishou | native short videos (`visionVideoDetail` GraphQL) | no: anonymous clients get a captcha; pass a browser session's cookies |
+
+WhatsApp, WeChat, Messenger and QQ have no public media pages. The Kuaishou
+and Xiaohongshu extractors are tested against fixtures only; this network gets
+a captcha or a login page from them.
+
 ## Limitations
 
 Native Instagram, Facebook, and Twitter/X remain experimental, and live
 authenticated social downloads have not been verified in this repository.
+Without session cookies they fall back to logged-out access, checked live on
+2026-10-23: Instagram posts are read from the public post page's embedded
+post object; X posts use a guest token with `TweetResultByRestId` (upstream's
+`tweet-endpoint: auto` choice for guests); guest profiles read the one page
+of top posts X returns from `UserTweets` (it refuses `UserMedia`) and end with
+a notice that the full timeline needs a session; other X queries report that a
+session is required; Facebook profiles, albums and avatars are read as
+described above. A partial X session (only one of `auth_token` and `ct0`) is
+an error rather than a guest.
 Their undocumented endpoints may change; fixture tests establish parser and
 transport behavior. Anonymous Facebook video extraction has been checked, but
 complete live downloads and authenticated coverage remain unverified.
@@ -2428,15 +2485,32 @@ inline manifests and manifest-specific headers. `_fallback` URL arrays are used
 by the shared Rust downloader for direct HTTP fallbacks. Handoffs
 require an HTTP(S) target/base URL, including synthetic `ytdl:https://…` URLs;
 synthetic non-HTTP identifiers and unknown manifest types fail extraction.
-Without a direct HTTP fallback, video-page and manifest downloads fail explicitly
-before any request or file creation, even if a destination file exists. A stable
-archive hit can skip an already completed logical media item before download-type
-validation.
-No companion dependency or video
-adapter is enabled yet. The parser follows the
+The parser follows the
 [upstream handoff protocol](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/downloader/ytdl.py).
 
-HLS/DASH downloads, video merging, broader native browser cookie import,
+### Video pages and HLS/DASH
+
+Video-page jobs and HLS/DASH manifest URLs are downloaded by running an external
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) (`yt-dlp` on `PATH`, or
+`--ytdl-command PATH`), like gallery-dl's `ytdl` downloader. It is invoked
+directly, without a shell, with `--ignore-config`; request headers, `--proxy`,
+`--retries` and `--limit-rate` are forwarded, and destinations with a video or
+audio container extension are merged/remuxed into that container. Output is
+written to a private temporary directory beside the destination and published
+without replacing an existing file; size limits apply to the finished file.
+Diagnostics never include URLs or yt-dlp output. If yt-dlp is missing or fails,
+direct HTTP `_fallback` URLs are tried. `--no-ytdl` disables yt-dlp; video-page
+and manifest jobs then fail before any request or file creation unless a direct
+fallback exists. Inline manifest data (`_ytdl_manifest_data`) has no fetchable
+location for relative segments and is not passed to yt-dlp. A stable archive hit
+can skip an already completed logical media item before download-type validation.
+
+`--cookies FILE` and `--cookies-from-browser SPEC` are also forwarded to yt-dlp,
+both when extracting `ytdl` sites and when downloading. A cookie file is passed
+as a private temporary copy, because yt-dlp rewrites its cookie file on exit; a
+browser specification is passed through unchanged for yt-dlp to read itself.
+
+Broader native browser cookie import,
 broader native collection pagination, and full gallery-dl filename/config compatibility are
 not implemented.
 
@@ -2447,7 +2521,7 @@ configured retries, the downloader tries the next distinct valid HTTP(S) URL in
 `_fallback` order. Lists are limited to 128 entries and URLs to 16 KiB; invalid,
 repeated, credentialed,
 and manifest targets are skipped. A delegated/manifest job can also use a direct
-fallback without enabling the companion adapter. Local filesystem errors and
+fallback when yt-dlp is unavailable or fails. Local filesystem errors and
 size-filtered results do not advance the fallback chain.
 
 All attempts publish to the original job's destination and retain its metadata

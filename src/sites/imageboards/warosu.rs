@@ -22,6 +22,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&THREAD],
     api_key: false,
+    cookies: None,
 };
 
 fn target(url: &Url) -> Option<(String, String)> {

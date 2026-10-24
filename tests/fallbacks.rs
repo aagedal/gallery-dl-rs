@@ -253,7 +253,17 @@ async fn fallback_is_lazy_disabled_and_deduplicated() {
 
 #[tokio::test]
 async fn unsupported_jobs_use_only_safe_direct_http_fallbacks() {
-    for manifest in [false, true] {
+    // A yt-dlp that always fails, so the job advances to its fallbacks.
+    let tools = tempfile::tempdir().unwrap();
+    let failing = tools.path().join("yt-dlp");
+    std::fs::write(&failing, "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&failing, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    for (manifest, ytdl) in [(false, None), (true, None), (false, Some(&failing))] {
+        let client = client().with_ytdl(ytdl.map(|path| path.as_path()));
         let server = Server::new(vec![reply("200 OK", b"video")]);
         let mut media = item(
             "https://unrequested.invalid/video.mp4",
@@ -278,7 +288,7 @@ async fn unsupported_jobs_use_only_safe_direct_http_fallbacks() {
         };
         let root = tempfile::tempdir().unwrap();
         assert!(
-            download::download(&client(), root.path(), &media, 0)
+            download::download(&client, root.path(), &media, 0)
                 .await
                 .is_ok()
         );

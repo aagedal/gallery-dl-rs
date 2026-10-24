@@ -143,6 +143,9 @@ enum Accessor {
     Key(String),
     Index(i64),
     Slice(Option<i64>, Option<i64>),
+    /// gallery-dl `[b:start:stop]`: slice the UTF-8 encoding and drop
+    /// partial characters at the edges (`decode(errors="ignore")`).
+    ByteSlice(Option<i64>, Option<i64>),
 }
 
 #[derive(Clone, Debug)]
@@ -996,6 +999,15 @@ fn access(value: Value, accessor: &Accessor) -> Value {
             let (start, stop) = bounds(*start, *stop, chars.len());
             Value::Str(chars[start..stop].iter().collect())
         }
+        (Value::Str(text), Accessor::ByteSlice(start, stop)) => {
+            let (start, stop) = bounds(*start, *stop, text.len());
+            Value::Str(
+                text.char_indices()
+                    .filter(|(at, c)| *at >= start && at + c.len_utf8() <= stop)
+                    .map(|(_, c)| c)
+                    .collect(),
+            )
+        }
         _ => Value::Missing,
     }
 }
@@ -1409,6 +1421,9 @@ fn parse_source(text: &str, known: &impl Fn(&str) -> bool) -> Result<Source> {
                     .map_err(|_| error("invalid template slice"))
             };
             accessors.push(match inner.split_once(':') {
+                Some((start, stop)) if start.starts_with('b') => {
+                    Accessor::ByteSlice(integer(&start[1..])?, integer(stop)?)
+                }
                 Some((start, stop)) => Accessor::Slice(integer(start)?, integer(stop)?),
                 None if inner.parse::<i64>().is_ok() => Accessor::Index(inner.parse()?),
                 None if identifier(inner) => Accessor::Key(inner.into()),

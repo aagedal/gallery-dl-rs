@@ -109,6 +109,10 @@ impl ChildMetadata {
             "channel_type",
             "parent_id",
             "post_count",
+            "did",
+            "handle",
+            "displayName",
+            "description",
         ] {
             let Some(value) = data.get(key) else { continue };
             let value = if matches!(key, "server" | "channel") {
@@ -970,6 +974,12 @@ pub fn child_job<'a>(
     })
     .boxed()
 }
+/// Dispatcher for child URLs outside the producing extractor (upstream
+/// `Message.Queue` to another site). `None` means no extractor accepts it.
+pub type Queue<'a> = std::sync::Arc<
+    dyn Fn(url::Url) -> Option<BoxStream<'a, Result<ExtractionEvent>>> + Send + Sync + 'a,
+>;
+
 pub fn group(media: Vec<Media>, category: &str) -> VecDeque<ExtractionEvent> {
     group_with_keywords(media, category, KeywordPolicy::default())
 }

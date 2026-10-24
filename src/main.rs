@@ -228,6 +228,12 @@ struct Args {
     write_tags: bool,
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
+    /// yt-dlp executable for video-page and HLS/DASH downloads
+    #[arg(long, default_value = "yt-dlp", value_name = "PATH")]
+    ytdl_command: PathBuf,
+    /// Never run yt-dlp; video-page and HLS/DASH jobs then fail or use fallbacks
+    #[arg(long)]
+    no_ytdl: bool,
     /// Seconds for native extraction or active compatibility reading (excludes backpressure)
     #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
     extraction_timeout: u64,
@@ -437,7 +443,11 @@ async fn run(args: Args) -> Result<()> {
     }
     let settings = resolved_settings(&args).await?;
     let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
-    let extractors = Extractors::default();
+    let extractors = Extractors {
+        ytdl: args.ytdl_command.clone(),
+        ytdl_cookies: ytdl_cookies(&args),
+        ..Extractors::default()
+    };
     let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
         .values()
         .filter_map(|settings| settings.options.archive.clone())
@@ -520,9 +530,14 @@ async fn run(args: Args) -> Result<()> {
                     let unordered_dates = extract::http_url(&source).ok().is_some_and(|url| {
                         gallery_dl_rs::instagram::is_story_url(&url)
                             || gallery_dl_rs::instagram::is_unordered_collection_url(&url)
+                            || gallery_dl_rs::instagram::is_unordered_user_url(
+                                &url,
+                                settings["instagram"].options.include.as_ref(),
+                            )
                             || gallery_dl_rs::twitter::is_profile_timeline_url(&url)
                             || gallery_dl_rs::twitter::is_search_url(&url)
                             || gallery_dl_rs::twitter::is_collection_url(&url)
+                            || gallery_dl_rs::twitter::is_queue_url(&url)
                             || matches!(
                                 extract::social_site(&url),
                                 Some("bluesky" | "kemono" | "coomer")
@@ -733,7 +748,9 @@ async fn run(args: Args) -> Result<()> {
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep)
-            .with_rate_limit(args.limit_rate);
+            .with_rate_limit(args.limit_rate)
+            .with_ytdl((!args.no_ytdl).then_some(args.ytdl_command.as_path()))
+            .with_ytdl_cookies(ytdl_cookies(&args));
         let aborted = &aborted;
         let terminated = &terminated;
         let results = media
@@ -1050,6 +1067,19 @@ struct Extractors {
     weasyl: OnceCell<Result<gallery_dl_rs::weasyl::Weasyl>>,
     vsco: OnceCell<Result<gallery_dl_rs::vsco::Vsco>>,
     sites: gallery_dl_rs::sites::Runtime,
+    /// yt-dlp executable for sites extracted through it.
+    ytdl: PathBuf,
+    /// Session cookies forwarded to yt-dlp.
+    ytdl_cookies: Option<gallery_dl_rs::cookies::YtdlCookies>,
+}
+
+/// The command-line session cookies, forwarded to yt-dlp as given.
+fn ytdl_cookies(args: &Args) -> Option<gallery_dl_rs::cookies::YtdlCookies> {
+    use gallery_dl_rs::cookies::YtdlCookies;
+    args.cookies
+        .clone()
+        .map(YtdlCookies::File)
+        .or_else(|| args.cookies_from_browser.clone().map(YtdlCookies::Browser))
 }
 
 impl Extractors {
@@ -1062,6 +1092,22 @@ impl Extractors {
             None => Ok(CookieJar::default()),
         }
     }
+}
+
+/// Child jobs for URLs queued by a native extractor to another site, routed
+/// exactly like command-line inputs. Unroutable URLs are skipped.
+fn child_queue<'a>(
+    extractors: &'a Extractors,
+    backend: &'a Backend,
+    extractor: Extractor,
+    settings: &'a BTreeMap<&str, Settings>,
+) -> event::Queue<'a> {
+    Arc::new(move |url: url::Url| {
+        (routed_site(&url, extractor).is_some()
+            || extract::direct(&url).is_some()
+            || matches!(extractor, Extractor::Compatibility))
+        .then(|| extract_input(url.to_string(), extractors, backend, extractor, settings))
+    })
 }
 
 fn extract_input<'a>(
@@ -1089,6 +1135,7 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_include(options.include.clone())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1242,8 +1289,11 @@ fn extract_input<'a>(
                     let native = extractors
                         .reddit
                         .get_or_init(|| async {
+                            let jar = extractors.cookie_jar(configured, "reddit.com").await?;
                             gallery_dl_rs::reddit::Reddit::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_cookies(jar)
+                                    .with_options(options.site_options.as_deref())?
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1252,7 +1302,10 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Reddit initialization failed: {e}")))?;
-                    native.events(&url)
+                    native.events_with_queue(
+                        &url,
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if category == "mastodon" => {
                     let host = url.host_str().expect("Mastodon input host");
@@ -1343,6 +1396,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::tumblr::Tumblr::new(backend.timeout).and_then(|native| {
                                 native
                                     .with_selection(options.tumblr_selection())
+                                    .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1352,7 +1406,10 @@ fn extract_input<'a>(
                         .await
                         .as_ref()
                         .map_err(|e| error(format!("native Tumblr initialization failed: {e}")))?;
-                    native.events(&url)
+                    native.events_with_queue(
+                        &url,
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if category == "flickr" => {
                     let native = extractors
@@ -1407,14 +1464,31 @@ fn extract_input<'a>(
                         .map_err(|e| error(format!("native VSCO initialization failed: {e}")))?;
                     native.events(&url)
                 }
-                Extractor::Native if gallery_dl_rs::sites::is_category(category) => {
+                _ if gallery_dl_rs::sites::is_category(category)
+                    && (matches!(extractor, Extractor::Native)
+                        || gallery_dl_rs::sites::native_only(category)) =>
+                {
                     let site = gallery_dl_rs::sites::site(category).expect("registry site");
+                    // Cookies are read once, when the site's state is created.
+                    let jar = match site.cookies {
+                        Some(domain) if !extractors.sites.initialized(site) => {
+                            let mut jar = extractors.cookie_jar(configured, domain).await?;
+                            for extra in gallery_dl_rs::sites::extra_cookie_domains(site) {
+                                jar.extend(extractors.cookie_jar(configured, extra).await?);
+                            }
+                            Some(jar)
+                        }
+                        _ => None,
+                    };
                     let native = extractors
                         .sites
                         .get(site, || {
                             gallery_dl_rs::sites::Http::new(site.name, backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_cookies(jar.unwrap_or_default())
+                                        .with_ytdl(&extractors.ytdl)
+                                        .with_ytdl_cookies(extractors.ytdl_cookies.clone())
                                         .with_api_key(options.api_key.as_deref())
                                         .with_options(options.site_options.clone())
                                         .with_retries(options.retries.unwrap())
@@ -1495,6 +1569,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::pinterest::Pinterest::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_options(options.site_options.as_deref())?
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)

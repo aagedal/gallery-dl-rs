@@ -35,6 +35,7 @@ macro_rules! instance {
             extract: |http, url| extract($category, http, url),
             routes: &[&TAG, &FAVORITE, &POST],
             api_key: false,
+            cookies: None,
         };
     };
 }
