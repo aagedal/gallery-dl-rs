@@ -14,6 +14,7 @@ mod booth;
 mod civitai;
 mod fivehundredpx;
 mod hatenablog;
+mod inkbunny;
 mod issuu;
 mod itaku;
 mod lightroom;
@@ -23,10 +24,15 @@ mod myportfolio;
 mod naverblog;
 mod picarto;
 mod piczel;
+mod pillowfort;
+mod poipiku;
+mod skeb;
 mod slideshare;
+mod smugmug;
 mod speakerdeck;
 mod steamgriddb;
 mod thirtyfivephoto;
+mod toyhouse;
 mod wikiart;
 mod xfolio;
 
@@ -44,13 +50,19 @@ pub(super) static SITES: &[&Site] = &[
     &booth::SITE,
     &civitai::SITE,
     &fivehundredpx::SITE,
+    &inkbunny::SITE,
     &issuu::SITE,
     &itaku::SITE,
     &lightroom::SITE,
     &picarto::SITE,
     &piczel::SITE,
+    &pillowfort::SITE,
+    &poipiku::SITE,
+    &skeb::SITE,
     &slideshare::SITE,
+    &smugmug::SITE,
     &speakerdeck::SITE,
+    &toyhouse::SITE,
     &wikiart::SITE,
 ];
 
@@ -100,6 +112,45 @@ pub(crate) fn parse_int(text: &str, default: i64) -> i64 {
         return default;
     }
     trimmed.replace('_', "").parse().unwrap_or(default)
+}
+
+/// gallery-dl `text.split_html`.
+pub(crate) fn split_html(text: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    loop {
+        let (piece, tail) = match rest.find('<') {
+            Some(start) => match rest[start + 1..].find('>') {
+                Some(end) if end > 0 => (&rest[..start], Some(&rest[start + end + 2..])),
+                _ => (rest, None),
+            },
+            None => (rest, None),
+        };
+        if !piece.trim().is_empty() {
+            parts.push(crate::sites::unescape(piece).trim().to_owned());
+        }
+        match tail {
+            Some(tail) => rest = tail,
+            None => break,
+        }
+    }
+    parts
+}
+
+/// gallery-dl `text.parse_query`: name-value pairs in order, keeping the
+/// first value of repeated names and skipping pairs without `=`.
+pub(crate) fn parse_query(qs: &str) -> Vec<(String, String)> {
+    let mut result: Vec<(String, String)> = Vec::new();
+    for pair in qs.split('&') {
+        let Some((name, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let name = crate::sites::percent_decode(&name.replace('+', " "));
+        if !result.iter().any(|(n, _)| *n == name) {
+            result.push((name, crate::sites::percent_decode(&value.replace('+', " "))));
+        }
+    }
+    result
 }
 
 /// gallery-dl `text.filename_from_url` on a raw string.
@@ -322,6 +373,13 @@ pub(crate) fn digits(text: &str) -> bool {
     (1..=20).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// The leading ASCII digits of `text`, as upstream `(\d+)` without an
+/// anchor; at most 20 digits.
+pub(crate) fn leading_digits(text: &str) -> Option<&str> {
+    let len = text.bytes().take_while(u8::is_ascii_digit).count();
+    (1..=20).contains(&len).then(|| &text[..len])
+}
+
 /// A path segment matching upstream `[^/?#]+`.
 pub(crate) fn segment(text: &str) -> bool {
     !text.is_empty() && !text.contains(['/', '?', '#'])
@@ -381,6 +439,12 @@ mod tests {
         nameext_into("https://x/a/My%20F.png?1", &mut map);
         assert_eq!(map["filename"], "My F");
         assert_eq!(map["extension"], "png");
+        assert_eq!(
+            parse_query("a=1&b&a=2&c+d=x%20y+z"),
+            [("a".into(), "1".into()), ("c d".into(), "x y z".into())]
+        );
+        assert_eq!(leading_digits("12ab"), Some("12"));
+        assert_eq!(leading_digits("ab"), None);
     }
 
     #[test]
