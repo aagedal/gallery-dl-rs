@@ -8,7 +8,7 @@ use crate::sites::media::{parse_query, query_get};
 use crate::sites::{Events, Http, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
-use text::parse_int;
+use text::{code_to_language, parse_int};
 use url::Url;
 
 pub static SITE: Site = Site {
@@ -37,51 +37,6 @@ static COMIC: Route = Route::new(
     "{title_no}_{type}",
 );
 static ARTIST: Route = Route::new("artist", FILENAME, DIRECTORY, ARCHIVE);
-
-/// `util.CODES`, for `code_to_language`.
-const LANGUAGES: &[(&str, &str)] = &[
-    ("ar", "Arabic"),
-    ("bg", "Bulgarian"),
-    ("bn", "Bengali"),
-    ("ca", "Catalan"),
-    ("cs", "Czech"),
-    ("da", "Danish"),
-    ("de", "German"),
-    ("el", "Greek"),
-    ("en", "English"),
-    ("es", "Spanish"),
-    ("fa", "Persian"),
-    ("fi", "Finnish"),
-    ("fr", "French"),
-    ("he", "Hebrew"),
-    ("hi", "Hindi"),
-    ("hu", "Hungarian"),
-    ("id", "Indonesian"),
-    ("it", "Italian"),
-    ("ja", "Japanese"),
-    ("ko", "Korean"),
-    ("ms", "Malay"),
-    ("nl", "Dutch"),
-    ("no", "Norwegian"),
-    ("pl", "Polish"),
-    ("pt", "Portuguese"),
-    ("ro", "Romanian"),
-    ("ru", "Russian"),
-    ("sk", "Slovak"),
-    ("sl", "Slovenian"),
-    ("sr", "Serbian"),
-    ("sv", "Swedish"),
-    ("th", "Thai"),
-    ("tr", "Turkish"),
-    ("uk", "Ukrainian"),
-    ("vi", "Vietnamese"),
-    ("zh", "Chinese"),
-];
-
-fn code_to_language(code: &str) -> Option<&'static str> {
-    let code = code.to_lowercase();
-    LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, l)| *l)
-}
 
 /// `text.extract_from`: successive extractions from one position; a miss
 /// returns `""` and leaves the position alone.

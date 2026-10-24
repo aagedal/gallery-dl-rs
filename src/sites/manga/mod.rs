@@ -9,13 +9,30 @@ use crate::event::ExtractionEvent;
 use crate::sites::{Events, Http, Item, Route, Site};
 use futures_util::StreamExt;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use url::Url;
 
+mod dynastyscans;
 mod mangadex;
+mod mangahere;
+mod mangapark;
+mod naverwebtoon;
+mod tapas;
 mod text;
 mod webtoons;
+mod weebcentral;
 
-pub(super) static SITES: &[&Site] = &[&mangadex::SITE, &webtoons::SITE];
+pub(super) static SITES: &[&Site] = &[
+    &mangadex::SITE,
+    &webtoons::SITE,
+    &naverwebtoon::SITE,
+    &tapas::SITE,
+    &mangapark::SITE,
+    &dynastyscans::SITE,
+    &weebcentral::SITE,
+    &mangahere::SITE,
+];
 
 /// Insert a key into a keyword map.
 pub(super) fn set(map: &mut Map<String, Value>, key: &str, value: impl Into<Value>) {
@@ -186,6 +203,28 @@ pub(super) fn queue_with<'a>(
         crate::event::ChildMetadata::from_raw(site.category, route.subcategory, data),
         build,
     )
+}
+
+/// `Extractor.cache` memoization, shared by a parent and the children it
+/// queues so per-manga lookups run once per invocation.
+#[derive(Clone, Default)]
+pub(super) struct Memo(Arc<Mutex<HashMap<String, Value>>>);
+
+impl Memo {
+    pub fn get(&self, key: &str) -> Option<Value> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned()
+    }
+
+    pub fn insert(&self, key: impl Into<String>, value: Value) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.into(), value);
+    }
 }
 
 /// A list-valued option: a list of strings, or a string split on `,`

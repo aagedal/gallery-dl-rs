@@ -10,6 +10,16 @@ pub(crate) fn partition<'t>(txt: &'t str, sep: &str) -> (&'t str, &'t str, &'t s
     }
 }
 
+/// `text.rextr`: the text after the last `begin`, up to the next `end`.
+pub(crate) fn rextr<'t>(txt: &'t str, begin: &str, end: &str) -> &'t str {
+    let Some(first) = txt.rfind(begin).map(|i| i + begin.len()) else {
+        return "";
+    };
+    txt[first..]
+        .find(end)
+        .map_or("", |last| &txt[first..first + last])
+}
+
 /// `text.parse_int`: Python `int()` of a string, or 0.
 pub(crate) fn parse_int(txt: &str) -> i64 {
     let txt = txt.trim();
@@ -63,4 +73,49 @@ pub(crate) fn iso(txt: &str) -> Option<i64> {
 /// The `date` keyword text for Unix seconds, or `[Invalid DateTime]`.
 pub(crate) fn date(seconds: Option<i64>) -> Value {
     crate::filter::source_date_text(seconds).into()
+}
+
+/// `util.CODES`, for `code_to_language`.
+const LANGUAGES: &[(&str, &str)] = &[
+    ("ar", "Arabic"),
+    ("bg", "Bulgarian"),
+    ("bn", "Bengali"),
+    ("ca", "Catalan"),
+    ("cs", "Czech"),
+    ("da", "Danish"),
+    ("de", "German"),
+    ("el", "Greek"),
+    ("en", "English"),
+    ("es", "Spanish"),
+    ("fa", "Persian"),
+    ("fi", "Finnish"),
+    ("fr", "French"),
+    ("he", "Hebrew"),
+    ("hi", "Hindi"),
+    ("hu", "Hungarian"),
+    ("id", "Indonesian"),
+    ("it", "Italian"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+    ("ms", "Malay"),
+    ("nl", "Dutch"),
+    ("no", "Norwegian"),
+    ("pl", "Polish"),
+    ("pt", "Portuguese"),
+    ("ro", "Romanian"),
+    ("ru", "Russian"),
+    ("sk", "Slovak"),
+    ("sl", "Slovenian"),
+    ("sr", "Serbian"),
+    ("sv", "Swedish"),
+    ("th", "Thai"),
+    ("tr", "Turkish"),
+    ("uk", "Ukrainian"),
+    ("vi", "Vietnamese"),
+    ("zh", "Chinese"),
+];
+
+pub(crate) fn code_to_language(code: &str) -> Option<&'static str> {
+    let code = code.to_lowercase();
+    LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, l)| *l)
 }
