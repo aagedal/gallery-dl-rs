@@ -679,9 +679,11 @@ mod tests {
         assert_eq!(k["page"], 2);
         assert_eq!(k["count"], 2);
         assert_eq!(k["filename"], "5_6_7_8");
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[1]),
-            "mangapark/Aria/v12 c060.2: Special Navigation/Aria_c060.2_002.jpeg"
+            format!("mangapark/Aria/v12 c060.2{colon} Special Navigation/Aria_c060.2_002.jpeg")
         );
         assert_eq!(
             archive(&files[1]),

@@ -390,9 +390,13 @@ mod tests {
         assert_eq!(k["title"], "Dongguo Xiaojie 4.2");
         assert_eq!(k["page"], 3);
         assert_eq!(k["filename"], "p003");
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[2]),
-            "mangahere/Dongguo & Xiaojie/c004.2: Dongguo Xiaojie 4.2/Dongguo & Xiaojie_c004.2_003.jpg"
+            format!(
+                "mangahere/Dongguo & Xiaojie/c004.2{colon} Dongguo Xiaojie 4.2/Dongguo & Xiaojie_c004.2_003.jpg"
+            )
         );
         assert_eq!(
             archive(&files[2]),

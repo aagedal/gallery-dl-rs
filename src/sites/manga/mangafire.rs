@@ -674,9 +674,13 @@ mod tests {
         assert_eq!(k["lang"], "en");
         assert_eq!(k["page"], 2);
         assert_eq!(k["count"], 2);
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[1]),
-            "mangafire/One Piece & Co/c1101: Vol 109 Chapter 1101: Bonney's Journey/One Piece & Co_c1101_002.jpg"
+            format!(
+                "mangafire/One Piece & Co/c1101{colon} Vol 109 Chapter 1101{colon} Bonney's Journey/One Piece & Co_c1101_002.jpg"
+            )
         );
         assert_eq!(
             archive(&files[1]),

@@ -455,10 +455,14 @@ mod tests {
         assert_eq!(k["language"], "English");
         assert_eq!(k["filename"], "Page 02");
         assert_eq!(k["page"], 2);
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[1]),
-            "dynastyscans/Hitoribocchi no OO Seikatsu/c033: Friends & Rivals/\
-             Hitoribocchi no OO Seikatsu_c033_002.webp"
+            format!(
+                "dynastyscans/Hitoribocchi no OO Seikatsu/c033{colon} Friends & Rivals/\
+                 Hitoribocchi no OO Seikatsu_c033_002.webp"
+            )
         );
         assert_eq!(
             archive(&files[1]),

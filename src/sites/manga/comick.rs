@@ -687,9 +687,11 @@ mod tests {
         assert_eq!(k["page"], 2);
         assert_eq!(k["count"], 2);
         assert!(!k.contains_key("_build_id"));
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[1]),
-            "comick/One Piece/v01 c001.5: Romance Dawn/One Piece_c001.5_002.webp"
+            format!("comick/One Piece/v01 c001.5{colon} Romance Dawn/One Piece_c001.5_002.webp")
         );
         assert_eq!(
             archive(&files[1]),
