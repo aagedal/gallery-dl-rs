@@ -12,6 +12,7 @@ mod furry34;
 mod gelbooru_v01;
 mod gelbooru_v02;
 mod moebooru;
+mod nozomi;
 mod paheal;
 mod philomena;
 mod realbooru;
@@ -19,6 +20,7 @@ mod rule34us;
 mod rule34vault;
 mod rule34xyz;
 mod shimmie2;
+mod sizebooru;
 mod szurubooru;
 mod threedbooru;
 mod twibooru;
@@ -63,6 +65,8 @@ pub(super) static SITES: &[&Site] = &[
     &rule34vault::SITE,
     &furry34::SITE,
     &yiffverse::SITE,
+    &sizebooru::SITE,
+    &nozomi::SITE,
 ];
 
 // ---------------------------------------------------------------------------
