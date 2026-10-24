@@ -675,6 +675,18 @@ pub(crate) mod testing {
             .await
     }
 
+    /// Cancel each queued child before it starts; returns their metadata.
+    pub async fn queued(mut events: Events<'_>) -> Vec<ChildMetadata> {
+        let mut children = Vec::new();
+        while let Some(event) = events.next().await {
+            if let ExtractionEvent::BeginChild(scope) = event.unwrap() {
+                scope.control.cancel();
+                children.push(scope.metadata);
+            }
+        }
+        children
+    }
+
     pub fn keywords(media: &Media) -> &Map<String, Value> {
         media
             .metadata
