@@ -33,6 +33,7 @@ mod picarto;
 mod piczel;
 mod pillowfort;
 mod poipiku;
+mod seiga;
 mod skeb;
 mod slideshare;
 mod smugmug;
@@ -81,6 +82,7 @@ pub(super) static SITES: &[&Site] = &[
     &toyhouse::SITE,
     &wikiart::SITE,
     &architizer::SITE,
+    &seiga::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
