@@ -41,6 +41,7 @@ pub static THREEDBOORU: Site = Site {
     extract,
     routes: &[&TAG, &POOL, &POST, &POPULAR],
     api_key: false,
+    cookies: None,
 };
 
 #[derive(Debug, PartialEq)]

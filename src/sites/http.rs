@@ -4,7 +4,9 @@
 //! transport failures with backoff and `Retry-After` cooldowns, and cap
 //! responses at 16 MiB. Diagnostics never include URLs or credentials.
 use crate::{
-    Result, error,
+    Result,
+    cookies::CookieJar,
+    error,
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
@@ -14,6 +16,11 @@ use std::time::{Duration, SystemTime};
 use url::Url;
 
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
+
+/// Desktop browser User-Agent (upstream gallery-dl's default) for sites that
+/// refuse unknown clients.
+pub const BROWSER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0";
 
 /// Per-site HTTP settings, created once per CLI invocation.
 pub struct Http {
@@ -27,6 +34,21 @@ pub struct Http {
     api_key: Option<String>,
     options: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     root: Option<Url>,
+    /// Session cookies sent with API requests; responses update them in
+    /// memory. They are never attached to emitted media.
+    cookies: std::sync::Mutex<CookieJar>,
+    ytdl: std::path::PathBuf,
+    ytdl_cookies: Option<crate::cookies::YtdlCookies>,
+}
+
+/// A request body.
+#[derive(Clone, Copy)]
+pub enum Body<'b> {
+    Json(&'b Value),
+    /// `application/x-www-form-urlencoded` pairs.
+    Form(&'b [(&'b str, &'b str)]),
+    /// Raw bytes with the given content type.
+    Raw(&'b str, &'b [u8]),
 }
 
 impl Http {
@@ -43,6 +65,9 @@ impl Http {
             api_key: None,
             options: None,
             root: None,
+            cookies: std::sync::Mutex::new(CookieJar::default()),
+            ytdl: "yt-dlp".into(),
+            ytdl_cookies: None,
         })
     }
 
@@ -69,6 +94,83 @@ impl Http {
     pub fn with_api_key(mut self, key: Option<&str>) -> Self {
         self.api_key = key.map(Into::into);
         self
+    }
+
+    /// The yt-dlp executable for sites extracted through it.
+    pub fn with_ytdl(mut self, command: &std::path::Path) -> Self {
+        self.ytdl = command.to_owned();
+        self
+    }
+
+    pub fn ytdl(&self) -> &std::path::Path {
+        &self.ytdl
+    }
+
+    /// Session cookies forwarded to yt-dlp.
+    pub fn with_ytdl_cookies(mut self, cookies: Option<crate::cookies::YtdlCookies>) -> Self {
+        self.ytdl_cookies = cookies;
+        self
+    }
+
+    pub fn ytdl_cookies(&self) -> Option<&crate::cookies::YtdlCookies> {
+        self.ytdl_cookies.as_ref()
+    }
+
+    /// The configured User-Agent, else [`BROWSER_AGENT`]; sites that refuse
+    /// unknown clients send it as an explicit header.
+    pub fn browser_agent(&self) -> &str {
+        self.network.user_agent().unwrap_or(BROWSER_AGENT)
+    }
+
+    /// `headers` plus a browser `User-Agent` unless one is already present.
+    pub fn browser_headers<'h>(
+        &'h self,
+        headers: &[(&'h str, &'h str)],
+    ) -> Vec<(&'h str, &'h str)> {
+        let mut all = headers.to_vec();
+        if !all
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+        {
+            all.push(("User-Agent", self.browser_agent()));
+        }
+        all
+    }
+
+    /// The deadline for one complete extraction call.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// Session cookies for API requests.
+    pub fn with_cookies(self, cookies: CookieJar) -> Self {
+        *self.cookies.lock().unwrap_or_else(|e| e.into_inner()) = cookies;
+        self
+    }
+
+    /// The value of a session cookie that would be sent to `url`.
+    pub fn cookie(&self, url: &Url, name: &str) -> Option<String> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .value(url, name)
+    }
+
+    /// Store a cookie as if `url` had set it with this `Set-Cookie` value.
+    pub fn set_cookie(&self, url: &Url, set_cookie: &str) {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store(url, set_cookie);
+    }
+
+    /// Whether any session cookies are loaded.
+    pub fn has_cookies(&self) -> bool {
+        !self
+            .cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Site-specific configuration values, by upstream option name.
@@ -154,6 +256,61 @@ impl Http {
         self.send(url, headers, None).await
     }
 
+    /// The `Location` of one GET without following it, for short links that
+    /// redirect to another site; `None` unless the response is a redirect.
+    pub async fn location(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Option<Url>> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        if !response.status().is_redirection() {
+            return Ok(None);
+        }
+        Ok(response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| value.len() <= 8192)
+            .and_then(|value| url.join(value).ok())
+            .filter(|target| {
+                matches!(target.scheme(), "http" | "https")
+                    && target.username().is_empty()
+                    && target.password().is_none()
+            }))
+    }
+
+    /// POST a body and return the raw response; redirects are refused.
+    pub async fn post(
+        &self,
+        url: &Url,
+        body: Body<'_>,
+        headers: &[(&str, &str)],
+    ) -> Result<Vec<u8>> {
+        self.send(url, headers, Some(body)).await
+    }
+
+    /// POST a form and parse the JSON response; redirects are refused.
+    pub async fn post_form(
+        &self,
+        url: &Url,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<Value> {
+        let bytes = self.send(url, headers, Some(Body::Form(form))).await?;
+        serde_json::from_slice(&bytes)
+            .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
+    }
+
     /// POST a JSON body; redirects are refused.
     pub async fn post_json(
         &self,
@@ -161,7 +318,7 @@ impl Http {
         body: &Value,
         headers: &[(&str, &str)],
     ) -> Result<Value> {
-        let bytes = self.send(url, headers, Some(body)).await?;
+        let bytes = self.send(url, headers, Some(Body::Json(body))).await?;
         serde_json::from_slice(&bytes)
             .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
     }
@@ -170,7 +327,7 @@ impl Http {
         &self,
         url: &Url,
         headers: &[(&str, &str)],
-        body: Option<&Value>,
+        body: Option<Body<'_>>,
     ) -> Result<Vec<u8>> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
@@ -192,7 +349,7 @@ impl Http {
         &self,
         endpoint: &Url,
         headers: &[(&str, &str)],
-        body: Option<&Value>,
+        body: Option<Body<'_>>,
         attempt: u8,
     ) -> std::result::Result<Vec<u8>, Failure> {
         let name = self.name;
@@ -201,20 +358,50 @@ impl Http {
         let response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = match body {
-                Some(body) => self
+                Some(Body::Json(body)) => self
                     .client
                     .post(target.clone())
                     .header("Content-Type", "application/json")
                     .body(body.to_string()),
+                Some(Body::Form(form)) => self
+                    .client
+                    .post(target.clone())
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .body(
+                        url::form_urlencoded::Serializer::new(String::new())
+                            .extend_pairs(form)
+                            .finish(),
+                    ),
+                Some(Body::Raw(content_type, bytes)) => self
+                    .client
+                    .post(target.clone())
+                    .header("Content-Type", content_type)
+                    .body(bytes.to_vec()),
                 None => self.client.get(target.clone()),
             }
             .timeout(self.request_timeout);
+            let explicit_cookie = headers
+                .iter()
+                .any(|(key, _)| key.eq_ignore_ascii_case("cookie"));
+            if !explicit_cookie
+                && let Some(cookie) = self
+                    .cookies
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .header(&target)
+            {
+                request = request.header("Cookie", cookie);
+            }
             for (key, value) in headers {
                 request = request.header(*key, *value);
             }
             let response = request.send().await.map_err(|_| {
                 Failure::transient(format!("{name} request failed; check network access"))
             })?;
+            self.cookies
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .store_response(&target, response.headers());
             if body.is_some() && response.status().is_redirection() {
                 return Err(error(format!("{name} redirected a POST request")).into());
             }
@@ -245,10 +432,11 @@ impl Http {
             return Err(error(format!("{name} resource not found")).into());
         }
         if matches!(status.as_u16(), 401 | 403) {
-            return Err(error(format!(
-                "{name} refused access; the resource may need authentication"
-            ))
-            .into());
+            let refused: crate::Error = Box::new(Refused {
+                status: status.as_u16(),
+                message: format!("{name} refused access; the resource may need authentication"),
+            });
+            return Err(refused.into());
         }
         if !status.is_success() {
             return Err(error(format!("{name} returned HTTP {status}")).into());
@@ -268,6 +456,29 @@ impl Http {
         }
         Ok(crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?)
     }
+}
+
+/// An HTTP 401/403 response. Displays like any other site error (no URL or
+/// credentials); [`refused_status`] lets a site tell the two apart.
+#[derive(Debug)]
+pub struct Refused {
+    status: u16,
+    message: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// The HTTP status (401 or 403) of a refused request, if `error` is one.
+pub fn refused_status(error: &crate::Error) -> Option<u16> {
+    error
+        .downcast_ref::<Refused>()
+        .map(|refused| refused.status)
 }
 
 fn user_agent() -> String {
@@ -298,5 +509,55 @@ impl From<crate::Error> for Failure {
             error,
             retry: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sites::testing::{http, json, response, serve};
+
+    #[tokio::test]
+    async fn cookies_are_sent_and_updated_from_responses() {
+        let set = response(
+            "200 OK\r\nSet-Cookie: token=fresh; Path=/",
+            "application/json",
+            b"{}",
+        );
+        let (root, server) = serve(vec![set, json(serde_json::json!({"ok": true}))]);
+        let jar = CookieJar::parse(&format!(
+            "{}\tFALSE\t/\tFALSE\t0\tsession\tabc\n",
+            root.host_str().unwrap()
+        ))
+        .unwrap();
+        let http = http("Test", root.clone()).with_cookies(jar);
+        assert!(http.has_cookies());
+        http.json(&root.join("first").unwrap()).await.unwrap();
+        assert_eq!(http.cookie(&root, "token").as_deref(), Some("fresh"));
+        let form = [("a", "1 2"), ("b", "&")];
+        http.post_form(&root.join("second").unwrap(), &form, &[])
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("cookie: session=abc"));
+        assert!(!requests[0].contains("token="));
+        let second = requests[1].to_ascii_lowercase();
+        assert!(second.starts_with("post /second"));
+        assert!(second.contains("cookie: session=abc; token=fresh"));
+        assert!(second.contains("content-type: application/x-www-form-urlencoded"));
+        assert!(requests[1].ends_with("a=1+2&b=%26"));
+    }
+
+    #[tokio::test]
+    async fn explicit_cookie_header_replaces_the_jar() {
+        let (root, server) = serve(vec![json(serde_json::json!({}))]);
+        let http = http("Test", root.clone());
+        http.set_cookie(&root, "jar=1");
+        http.json_with(&root, &[("Cookie", "explicit=1")])
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("cookie: explicit=1"));
+        assert!(!requests[0].contains("jar=1"));
     }
 }

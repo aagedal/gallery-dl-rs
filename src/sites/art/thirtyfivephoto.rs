@@ -16,6 +16,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&USER, &TAG, &GENRE, &IMAGE],
     api_key: false,
+    cookies: None,
 };
 
 const ROOT: &str = "https://35photo.pro";

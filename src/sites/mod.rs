@@ -14,6 +14,8 @@ mod filehosts;
 mod imageboards;
 mod manga;
 mod media;
+mod social;
+mod video;
 
 pub use http::Http;
 
@@ -134,6 +136,9 @@ pub struct Site {
     pub routes: &'static [&'static Route],
     /// Whether the `api-key` setting applies.
     pub api_key: bool,
+    /// Domain whose `--cookies`/`--cookies-from-browser` entries are loaded
+    /// into the site's HTTP state; `None` for sites that never use cookies.
+    pub cookies: Option<&'static str>,
 }
 
 /// Every registry site, in matching order.
@@ -147,6 +152,8 @@ pub fn sites() -> &'static [&'static Site] {
             filehosts::SITES,
             manga::SITES,
             art::SITES,
+            social::SITES,
+            video::SITES,
         ]
         .concat()
     })
@@ -169,6 +176,14 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    /// Whether the site's HTTP state was already created.
+    pub fn initialized(&self, site: &Site) -> bool {
+        sites()
+            .iter()
+            .position(|candidate| candidate.category == site.category)
+            .is_some_and(|index| self.cells[index].initialized())
+    }
+
     /// The site's HTTP state, created by `init` on first use. An
     /// initialization failure is retained for later inputs of the site.
     pub async fn get(&self, site: &Site, init: impl FnOnce() -> Result<Http>) -> Result<&Http> {
@@ -195,6 +210,32 @@ pub fn site(category: &str) -> Option<&'static Site> {
         .iter()
         .copied()
         .find(|site| site.category == category)
+}
+
+/// Categories gallery-dl has no extractor for, which therefore use the
+/// native extractor in compatibility mode too.
+pub fn native_only(category: &str) -> bool {
+    matches!(
+        category,
+        "ytdl"
+            | "telegram"
+            | "snapchat"
+            | "kuaishou"
+            | "xiaohongshu"
+            | "threads"
+            | "youtube"
+            | "shortlink"
+            | "linkedin"
+    )
+}
+
+/// Cookie domains a site needs besides its own: short links are extracted
+/// by their target sites with the short-link site's session.
+pub fn extra_cookie_domains(site: &Site) -> &'static [&'static str] {
+    match site.category {
+        "shortlink" => social::SHORTLINK_COOKIE_DOMAINS,
+        _ => &[],
+    }
 }
 
 pub fn is_category(category: &str) -> bool {
@@ -275,6 +316,8 @@ pub(crate) struct Item {
     pub caption: Option<String>,
     pub timestamp: Option<i64>,
     pub headers: BTreeMap<String, String>,
+    /// How the file is fetched; direct HTTP unless set.
+    pub job: MediaJob,
 }
 
 impl Item {
@@ -288,6 +331,7 @@ impl Item {
             caption: None,
             timestamp: None,
             headers: BTreeMap::new(),
+            job: MediaJob::DirectHttp,
         }
     }
     pub fn ids(mut self, post_id: impl Into<String>, media_id: impl Into<String>) -> Self {
@@ -309,6 +353,10 @@ impl Item {
     }
     pub fn header(mut self, name: &str, value: &str) -> Self {
         self.headers.insert(name.into(), value.into());
+        self
+    }
+    pub fn job(mut self, job: MediaJob) -> Self {
+        self.job = job;
         self
     }
 }
@@ -353,7 +401,7 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
     };
     let mut media = Media {
         url: item.url,
-        job: MediaJob::DirectHttp,
+        job: item.job,
         category: site.category.into(),
         filename,
         metadata: Some(PostMetadata {

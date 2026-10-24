@@ -103,9 +103,23 @@ pub(crate) fn parse_seed(bytes: &[u8], set: &str) -> Result<String> {
     validate_set(set)?;
     let payloads = crate::facebook::embedded_payloads(bytes)?;
     let mut seeds = Vec::new();
+    // Album pages now stream the grid as a deferred `mediaset` fragment
+    // without its own token; it counts only when the page names this set.
+    let mut grid = Vec::new();
+    let mut named = false;
     for payload in &payloads {
         visit(payload, &mut |value| {
+            if value.get("path") == Some(&serde_json::json!(["mediaset"]))
+                && let Some(edges) = value
+                    .pointer("/data/grid_media/edges")
+                    .and_then(Value::as_array)
+                && let Some(node) = edges.first().and_then(|edge| edge.get("node"))
+                && let Some(id) = photo_identifier(node)
+            {
+                grid.push(id.to_owned());
+            }
             if bound_set(value, set) {
+                named = true;
                 for pointer in ["/photos/edges", "/pageItems/edges"] {
                     if let Some(edges) = value.pointer(pointer).and_then(Value::as_array)
                         && let Some(node) = edges.first().and_then(|edge| edge.get("node"))
@@ -117,6 +131,9 @@ pub(crate) fn parse_seed(bytes: &[u8], set: &str) -> Result<String> {
             }
         });
     }
+    if seeds.is_empty() && named {
+        seeds = grid;
+    }
     seeds.sort();
     seeds.dedup();
     match seeds.as_slice() {
@@ -126,6 +143,156 @@ pub(crate) fn parse_seed(bytes: &[u8], set: &str) -> Result<String> {
         )),
         _ => Err(error("Facebook album first photo is ambiguous")),
     }
+}
+
+/// The first page of an album's photo grid, in album order, and whether the
+/// album continues beyond it.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Grid {
+    pub(crate) ids: Vec<String>,
+    pub(crate) more: bool,
+    /// Continuation of an album grid through its pagination query: the
+    /// page's end cursor, the album's node ID and the page's LSD token.
+    pub(crate) cursor: Option<String>,
+    pub(crate) node: Option<String>,
+    pub(crate) lsd: Option<String>,
+    pub(crate) query: GridQuery,
+}
+
+/// The pagination query that continues a grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum GridQuery {
+    /// An album's `grid_media`.
+    #[default]
+    Album,
+    /// A profile photo collection's `pageItems` (the `photos_by` tab).
+    Collection,
+}
+
+impl GridQuery {
+    /// Friendly name and persisted ID, observed on 2026-10-23.
+    pub(crate) fn operation(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Album => (
+                "ProfileCometLegacyAlbumGridViewPaginationQuery",
+                "34407011978913359",
+            ),
+            Self::Collection => (
+                "ProfileCometAppCollectionPhotosRendererPaginationQuery",
+                "27028962643386672",
+            ),
+        }
+    }
+
+    fn items(self) -> &'static str {
+        match self {
+            Self::Album => "/data/node/grid_media",
+            Self::Collection => "/data/node/pageItems",
+        }
+    }
+}
+
+/// Photo IDs, `has_next_page` and `end_cursor` of a `grid_media` object.
+fn grid_media(media: &Value) -> (Vec<String>, bool, Option<String>) {
+    let mut ids: Vec<String> = Vec::new();
+    for edge in media
+        .get("edges")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        // Collection items wrap their photo in a second `node`.
+        let node = edge.get("node");
+        if let Some(id) = node
+            .and_then(photo_identifier)
+            .or_else(|| node.and_then(|n| n.get("node")).and_then(photo_identifier))
+            && !ids.iter().any(|seen| seen == id)
+        {
+            ids.push(id.to_owned());
+        }
+    }
+    let more = media
+        .pointer("/page_info/has_next_page")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let cursor = media
+        .pointer("/page_info/end_cursor")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty() && c.len() <= 1024)
+        .map(str::to_owned);
+    (ids, more, cursor)
+}
+
+/// The next grid page from `ProfileCometLegacyAlbumGridViewPaginationQuery`;
+/// `None` when the response is not one (for example a rotated query ID).
+pub(crate) fn parse_grid_page(bytes: &[u8], query: GridQuery) -> Option<Grid> {
+    let data = serde_json::Deserializer::from_slice(bytes)
+        .into_iter::<Value>()
+        .next()?
+        .ok()?;
+    let (ids, more, cursor) = grid_media(data.pointer(query.items())?);
+    Some(Grid {
+        ids,
+        more,
+        cursor,
+        ..Grid::default()
+    })
+}
+
+/// Anonymous photo pages carry no `nextMediaAfterNodeId`; the album page's
+/// deferred `mediaset` grid still lists its first photos. Empty unless the
+/// page names `set`.
+pub(crate) fn parse_grid(bytes: &[u8], set: &str) -> Grid {
+    let Ok(payloads) = crate::facebook::embedded_payloads(bytes) else {
+        return Grid::default();
+    };
+    let mut named = false;
+    let mut grid: Option<Grid> = None;
+    for payload in &payloads {
+        visit(payload, &mut |value| {
+            named |= bound_set(value, set);
+            if grid.is_none()
+                && value.get("path") == Some(&serde_json::json!(["mediaset"]))
+                && let Some(media) = value.pointer("/data/grid_media")
+            {
+                let (ids, more, cursor) = grid_media(media);
+                let node = value
+                    .pointer("/data/id")
+                    .and_then(Value::as_str)
+                    .filter(|id| validate_id(id).is_ok())
+                    .map(str::to_owned);
+                grid = Some(Grid {
+                    ids,
+                    more,
+                    cursor,
+                    node,
+                    lsd: None,
+                    query: GridQuery::Album,
+                });
+            }
+        });
+    }
+    let Some(mut grid) = grid.filter(|_| named) else {
+        return Grid::default();
+    };
+    grid.lsd = lsd_token(bytes);
+    grid
+}
+
+/// The page's `LSD` token, which authorizes logged-out GraphQL requests.
+pub(crate) fn lsd_token(bytes: &[u8]) -> Option<String> {
+    let page = std::str::from_utf8(bytes).ok()?;
+    let start = page.find(r#"["LSD",[],{"token":""#)? + r#"["LSD",[],{"token":""#.len();
+    let len = page[start..].find('"')?;
+    Some(&page[start..start + len])
+        .filter(|token| {
+            !token.is_empty()
+                && token.len() <= 128
+                && token
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        })
+        .map(str::to_owned)
 }
 
 /// A missing navigation field is an incomplete response, not an empty album.
@@ -222,7 +389,7 @@ fn own_url_matches(value: &Value, id: &str, set: &str) -> bool {
     ids == [id] && sets == [set]
 }
 
-fn visit(value: &Value, f: &mut impl FnMut(&Value)) {
+pub(crate) fn visit(value: &Value, f: &mut impl FnMut(&Value)) {
     f(value);
     match value {
         Value::Object(object) => {

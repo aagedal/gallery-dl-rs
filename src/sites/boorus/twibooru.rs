@@ -26,6 +26,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&POST, &SEARCH, &GALLERY],
     api_key: true,
+    cookies: None,
 };
 
 fn target(url: &Url) -> Option<Target> {

@@ -5,7 +5,12 @@ use crate::{
     cookies::CookieJar,
     error,
     extract::{Media, PostMetadata, http_url},
-    facebook_album::{album_input, parse_navigation, parse_seed},
+    facebook_album::{
+        AlbumInput, Grid, album_input, parse_grid, parse_grid_page, parse_navigation, parse_seed,
+    },
+    facebook_profile::{
+        Tab, parse_albums, parse_avatar, parse_photos_grid, parse_photos_set, profile_input,
+    },
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
@@ -140,6 +145,15 @@ impl Facebook {
     /// Emit an explicit post boundary before each photo or video and its files.
     /// Album navigation preserves one photo group per page without prefetching.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        if is_share_link(url) {
+            let url = url.clone();
+            return stream::once(async move {
+                let target = self.resolve_share(&url).await?;
+                Ok::<_, crate::Error>(self.events(&target))
+            })
+            .try_flatten()
+            .boxed();
+        }
         if let Ok(id) = video_id(url) {
             let mut endpoint = Url::parse("https://www.facebook.com/watch/").unwrap();
             endpoint.query_pairs_mut().append_pair("v", &id);
@@ -153,10 +167,127 @@ impl Facebook {
                 .append_pair("set", "");
             return self.post_events_endpoint(endpoint, id, false);
         }
+        if crate::facebook_profile::is_post_url(url) {
+            let url = url.clone();
+            return stream::once(async move {
+                let mut page = url.clone();
+                page.set_host(Some("www.facebook.com")).ok();
+                let body = self.request_body(&page, self.timeout).await?;
+                let (photos, video) = crate::facebook_profile::parse_post(&body)?;
+                if photos.is_empty()
+                    && let Some(id) = video
+                {
+                    let mut endpoint = Url::parse("https://www.facebook.com/watch/").unwrap();
+                    endpoint.query_pairs_mut().append_pair("v", &id);
+                    return Ok::<_, crate::Error>(self.post_events_endpoint(endpoint, id, true));
+                }
+                Ok(stream::iter(photos)
+                    .map(move |id| {
+                        let mut endpoint = Url::parse("https://www.facebook.com/photo/").unwrap();
+                        endpoint
+                            .query_pairs_mut()
+                            .append_pair("fbid", &id)
+                            .append_pair("set", "");
+                        self.post_events_endpoint(endpoint, id, false)
+                    })
+                    .flatten()
+                    .boxed())
+            })
+            .try_flatten()
+            .boxed();
+        }
+        if let Some(profile) = profile_input(url) {
+            return self.profile_events(profile);
+        }
         match album_input(url) {
             Ok(input) => self.album_events(input, Url::parse("https://www.facebook.com/").unwrap()),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
+    }
+
+    /// The post, reel or video a mobile share link (`/share/p|r|v/TOKEN`)
+    /// stands for: its redirect target, else the page's canonical URL.
+    async fn resolve_share(&self, url: &Url) -> Result<Url> {
+        let mut request = self
+            .client
+            .get(url.clone())
+            .timeout(self.request_timeout)
+            .header(header::ACCEPT, "text/html,application/xhtml+xml")
+            .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.5")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "none");
+        if let Some(cookies) = self.cookies.lock().unwrap().header(url) {
+            request = request.header(header::COOKIE, cookies);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error("native Facebook extraction timed out"))?
+            .map_err(|_| error("Facebook request failed; check network access"))?;
+        self.cookies
+            .lock()
+            .unwrap()
+            .store_response(response.url(), response.headers());
+        let unresolved = || {
+            error("Facebook share link did not resolve to a supported post; login may be required")
+        };
+        let target = if response.status().is_redirection() {
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| url.join(v).ok())
+        } else if response.status().is_success() {
+            let body = crate::transport::read_capped(response, MAX_RESPONSE)
+                .await
+                .ok_or_else(unresolved)?;
+            let page = String::from_utf8_lossy(&body);
+            crate::sites::extr(&page, r#"<link rel="canonical" href=""#, "\"")
+                .or_else(|| crate::sites::extr(&page, r#"<meta property="og:url" content=""#, "\""))
+                .map(|raw| raw.replace("&amp;", "&"))
+                .and_then(|raw| Url::parse(&raw).ok())
+        } else {
+            None
+        };
+        target.filter(share_target).ok_or_else(unresolved)
+    }
+
+    /// Profile routes: the profile page names the photos set, the albums or
+    /// the avatar photo, which are then read like album and photo URLs.
+    fn profile_events(
+        &self,
+        input: crate::facebook_profile::ProfileInput,
+    ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        stream::once(async move {
+            let base = Url::parse("https://www.facebook.com/").unwrap();
+            let body = self.request_body(&input.page()?, self.timeout).await?;
+            let events = match &input.tab {
+                Tab::Photos => match parse_photos_set(&body)? {
+                    Some(set) => {
+                        let grid = parse_photos_grid(&body);
+                        let start = grid.ids.first().cloned();
+                        self.album_events_from(AlbumInput { set, start }, base, grid)
+                    }
+                    None => stream::empty().boxed(),
+                },
+                Tab::Avatar => {
+                    let id = photo_id(&parse_avatar(&body)?)?;
+                    let mut endpoint = base.join("photo/")?;
+                    endpoint
+                        .query_pairs_mut()
+                        .append_pair("fbid", &id)
+                        .append_pair("set", "");
+                    self.post_events_endpoint(endpoint, id, false)
+                }
+                Tab::Albums(name) => {
+                    let list = parse_albums(&body, name.as_deref())?;
+                    let referer = input.page()?;
+                    self.album_list_events(list, name.clone(), base, referer, HashSet::new())
+                }
+            };
+            Ok::<_, crate::Error>(events)
+        })
+        .try_flatten()
+        .boxed()
     }
 
     fn post_events_endpoint(
@@ -192,6 +323,17 @@ impl Facebook {
         input: crate::facebook_album::AlbumInput,
         base: Url,
     ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        self.album_events_from(input, base, Grid::default())
+    }
+
+    /// Album traversal with a known first grid page, which is followed when
+    /// photo pages carry no navigation.
+    fn album_events_from(
+        &self,
+        input: crate::facebook_album::AlbumInput,
+        base: Url,
+        grid: Grid,
+    ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
         let state = AlbumState {
             base,
             set: input.set,
@@ -202,6 +344,8 @@ impl Facebook {
             pending: VecDeque::new(),
             done: false,
             budget: self.timeout,
+            grid,
+            truncated: false,
         };
         stream::unfold(state, move |mut state| async move {
             loop {
@@ -209,6 +353,15 @@ impl Facebook {
                     return Some((Ok(event), state));
                 }
                 if state.done {
+                    if std::mem::take(&mut state.truncated) {
+                        return Some((
+                            Err(error(
+                                "Facebook album continues beyond the photos visible without \
+                                 login; pass --cookies for the rest",
+                            )),
+                            state,
+                        ));
+                    }
                     return None;
                 }
                 let started = tokio::time::Instant::now();
@@ -233,6 +386,7 @@ impl Facebook {
             endpoint.query_pairs_mut().append_pair("set", &state.set);
             let body = self.request_body(&endpoint, state.budget).await?;
             state.next = Some(parse_seed(&body, &state.set)?);
+            state.grid = parse_grid(&body, &state.set);
         }
         let id = state.next.as_deref().unwrap();
         if !state.seen.insert(id.to_owned()) {
@@ -248,7 +402,21 @@ impl Facebook {
             .append_pair("set", &state.set);
         let body = self.request_body(&endpoint, state.budget).await?;
         let mut media = parse_photo(&body, id)?;
-        let next = parse_navigation(&body, id, &state.set)?;
+        let next = match parse_navigation(&body, id, &state.set) {
+            Ok(next) => next,
+            // Without navigation (anonymous sessions), follow the grid.
+            Err(e) => match state.grid.ids.iter().position(|grid| grid == id) {
+                Some(pos) => {
+                    let mut next = state.grid.ids.get(pos + 1).cloned();
+                    if next.is_none() && state.grid.more {
+                        next = self.next_grid_page(state).await;
+                    }
+                    state.truncated = next.is_none() && state.grid.more;
+                    next
+                }
+                None => return Err(e),
+            },
+        };
         match next.as_deref() {
             None => state.done = true,
             Some(next) if Some(next) == state.first.as_deref() => state.done = true,
@@ -272,6 +440,153 @@ impl Facebook {
         Ok(item)
     }
 
+    /// A profile's albums, continuing the album list through
+    /// `ProfileCometAppCollectionAlbumsRendererPaginationQuery`.
+    fn album_list_events(
+        &self,
+        list: crate::facebook_profile::AlbumList,
+        name: Option<String>,
+        base: Url,
+        referer: Url,
+        mut cursors: HashSet<String>,
+    ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        let crate::facebook_profile::AlbumList {
+            albums,
+            more,
+            cursor,
+            collection,
+            lsd,
+        } = list;
+        let base2 = base.clone();
+        let current = stream::iter(albums)
+            .map(move |url| match album_input(&url) {
+                Ok(input) => self.album_events(input, base2.clone()),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            })
+            .flatten();
+        let rest = stream::once(async move {
+            let (Some(cursor), Some(collection), Some(lsd)) = (cursor, collection, lsd) else {
+                return stream::empty().boxed();
+            };
+            // Each cursor is followed once, and the list at most 500 pages.
+            if !more || !cursors.insert(cursor.clone()) || cursors.len() > 500 {
+                return stream::empty().boxed();
+            }
+            let variables = serde_json::json!({
+                "count": 8, "cursor": cursor, "scale": 2, "id": collection,
+            });
+            let next = self
+                .graphql(
+                    &base,
+                    &referer,
+                    &lsd,
+                    (
+                        "ProfileCometAppCollectionAlbumsRendererPaginationQuery",
+                        "27733032642961647",
+                    ),
+                    &variables,
+                )
+                .await
+                .and_then(|body| crate::facebook_profile::parse_album_page(&body, name.as_deref()));
+            match next {
+                // Each page continues only with a new cursor.
+                Some(mut next) if next.cursor.as_ref().is_some_and(|c| c != &cursor) => {
+                    next.collection = Some(collection);
+                    next.lsd = Some(lsd);
+                    self.album_list_events(next, name, base, referer, cursors)
+                }
+                Some(next) => self.album_list_events(
+                    crate::facebook_profile::AlbumList {
+                        more: false,
+                        ..next
+                    },
+                    name,
+                    base,
+                    referer,
+                    cursors,
+                ),
+                None => stream::once(async {
+                    Err(error(
+                        "Facebook profile has more albums than are visible without login; \
+                         pass --cookies for the rest",
+                    ))
+                })
+                .boxed(),
+            }
+        })
+        .flatten();
+        current.chain(rest).boxed()
+    }
+
+    /// A logged-out GraphQL request with the page's LSD token; `None` when
+    /// Facebook refuses it.
+    async fn graphql(
+        &self,
+        base: &Url,
+        referer: &Url,
+        lsd: &str,
+        (name, doc_id): (&str, &str),
+        variables: &Value,
+    ) -> Option<Vec<u8>> {
+        let endpoint = base.join("api/graphql/").ok()?;
+        let variables = variables.to_string();
+        let form = [
+            ("lsd", lsd),
+            ("variables", variables.as_str()),
+            ("doc_id", doc_id),
+            ("fb_api_req_friendly_name", name),
+            ("server_timestamps", "true"),
+        ];
+        self.rate_limits.wait(&endpoint, self.timeout).await.ok()?;
+        let mut request = self
+            .client
+            .post(endpoint.clone())
+            .timeout(self.request_timeout)
+            .header(header::REFERER, referer.as_str())
+            .header(header::ORIGIN, "https://www.facebook.com")
+            .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.5")
+            .header("X-FB-LSD", lsd)
+            .header("X-FB-Friendly-Name", name)
+            .header("Sec-Fetch-Site", "same-origin")
+            .form(&form);
+        if let Some(cookies) = self.cookies.lock().unwrap().header(&endpoint) {
+            request = request.header(header::COOKIE, cookies);
+        }
+        let response = request.send().await.ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        crate::transport::read_capped(response, MAX_RESPONSE).await
+    }
+
+    /// Extend an exhausted album grid through the album's pagination query,
+    /// returning the first new photo. Without a usable page (for example
+    /// after Facebook rotated the query ID) the grid stays truncated.
+    async fn next_grid_page(&self, state: &mut AlbumState) -> Option<String> {
+        let grid = &state.grid;
+        let (cursor, node, lsd) = (grid.cursor.clone()?, grid.node.clone()?, grid.lsd.clone()?);
+        let variables = serde_json::json!({"count": 8, "cursor": cursor, "scale": 2, "id": node});
+        let mut referer = state.base.join("media/set/").ok()?;
+        referer.query_pairs_mut().append_pair("set", &state.set);
+        let query = grid.query;
+        let body = self
+            .graphql(&state.base, &referer, &lsd, query.operation(), &variables)
+            .await?;
+        let page = parse_grid_page(&body, query)?;
+        let new: Vec<String> = page
+            .ids
+            .into_iter()
+            .filter(|id| !state.seen.contains(id) && !state.grid.ids.contains(id))
+            .collect();
+        state.grid.more = page.more && page.cursor.is_some();
+        state.grid.cursor = page.cursor;
+        // A page without new photos ends traversal; `more` then marks the
+        // album as truncated.
+        let first = new.first().cloned();
+        state.grid.ids.extend(new);
+        first
+    }
+
     async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
@@ -281,8 +596,19 @@ impl Facebook {
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout)
-                .header(header::ACCEPT, "text/html,application/xhtml+xml")
-                .header(header::REFERER, "https://www.facebook.com/");
+                .header(
+                    header::ACCEPT,
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,\
+                     image/avif,image/webp,image/png,image/svg+xml,*/*;q=0.8",
+                )
+                .header(header::REFERER, "https://www.facebook.com/")
+                // gallery-dl's default; album titles are otherwise localized.
+                .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.5")
+                // Upstream's session headers; album pages answer HTTP 400
+                // to requests that do not look like navigations.
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Site", "same-origin");
             if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
                 request = request.header(header::COOKIE, cookies);
             }
@@ -306,6 +632,8 @@ impl Facebook {
                         next.path().trim_end_matches('/'),
                         "/photo" | "/photo.php" | "/media/set" | "/watch"
                     ) && video_id(&next).is_err()
+                        && profile_input(&next).is_none()
+                        && !crate::facebook_profile::is_post_url(&next)
                     {
                         return Err(error(
                             "Facebook redirected outside supported media endpoints; login may be required",
@@ -374,6 +702,34 @@ struct AlbumState {
     pending: VecDeque<crate::event::ExtractionEvent>,
     done: bool,
     budget: Duration,
+    /// The album page's first grid page, used when photos lack navigation.
+    grid: Grid,
+    /// The grid ended before the album did.
+    truncated: bool,
+}
+
+/// `facebook.com/share/p|r|v/TOKEN` (and `/share/TOKEN`) mobile share links.
+pub(crate) fn is_share_link(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && matches!(
+            url.host_str(),
+            Some("facebook.com" | "www.facebook.com" | "m.facebook.com" | "web.facebook.com")
+        )
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.path().starts_with("/share/")
+}
+
+/// A share link may only resolve to a URL this extractor reads, never to
+/// another share link (or a login page).
+fn share_target(url: &Url) -> bool {
+    !is_share_link(url)
+        && (video_id(url).is_ok()
+            || photo_id(url).is_ok()
+            || album_input(url).is_ok()
+            || profile_input(url).is_some()
+            || crate::facebook_profile::is_post_url(url))
 }
 
 fn backoff(attempt: u8) -> Duration {
@@ -902,6 +1258,43 @@ mod transport_tests {
         assert!(!media.is_empty());
         let request = server.join().unwrap();
         assert!(request.starts_with(&format!("GET {endpoint} HTTP/1.1\r\n")));
+    }
+
+    #[tokio::test]
+    async fn share_links_resolve_to_supported_targets_only() {
+        let (endpoint, server) =
+            serve_sequence(vec![
+            response(
+                "302 Found",
+                "Location: https://www.facebook.com/reel/1195289147628387/?mibextid=x\r\n",
+                b"",
+            ),
+            response(
+                "200 OK",
+                "Content-Type: text/html\r\n",
+                br#"<link rel="canonical" href="https://www.facebook.com/watch/?v=42&amp;x=1">"#,
+            ),
+            response("302 Found", "Location: https://www.facebook.com/login/\r\n", b""),
+        ]);
+        let native = Facebook::new(None, Duration::from_secs(3)).await.unwrap();
+        let share = endpoint.join("/share/r/AbC/").unwrap();
+        let reel = native.resolve_share(&share).await.unwrap();
+        assert_eq!(video_id(&reel).unwrap(), "1195289147628387");
+        let canonical = native.resolve_share(&share).await.unwrap();
+        assert_eq!(video_id(&canonical).unwrap(), "42");
+        let login = native.resolve_share(&share).await.unwrap_err().to_string();
+        assert!(login.contains("did not resolve"), "{login}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].2.starts_with("GET /share/r/AbC/ "));
+        assert!(is_share_link(
+            &Url::parse("https://www.facebook.com/share/v/1x/").unwrap()
+        ));
+        assert!(!is_share_link(
+            &Url::parse("https://www.facebook.com/reel/1").unwrap()
+        ));
+        assert!(!share_target(
+            &Url::parse("https://www.facebook.com/share/r/x/").unwrap()
+        ));
     }
 
     fn serve_once(

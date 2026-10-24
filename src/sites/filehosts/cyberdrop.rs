@@ -13,6 +13,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&ALBUM, &MEDIA],
     api_key: false,
+    cookies: None,
 };
 
 static ALBUM: Route = Route::new(

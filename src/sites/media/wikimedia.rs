@@ -72,6 +72,7 @@ macro_rules! wiki {
             extract: |http, url| extract(&$ident, &$instance, http, url),
             routes: ROUTES,
             api_key: false,
+            cookies: None,
         };
     };
 }

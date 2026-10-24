@@ -28,6 +28,7 @@ pub static NINETYFOURCHAN: Site = Site {
     extract,
     routes: &[&THREAD, &BOARD],
     api_key: false,
+    cookies: None,
 };
 
 const ROOT: &str = "https://94chan.org";

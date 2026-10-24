@@ -49,6 +49,17 @@ pub(super) fn parse_tweet_media(
         images: image_options,
     } = selection;
     let has_card = card_options.mode != CardMode::Skip && card_source.get("card").is_some();
+    // Cards are skipped by default (as upstream); say so when one is present.
+    let no_media = || {
+        if card_options.mode == CardMode::Skip && card_source.get("card").is_some() {
+            error(
+                "Twitter post has no downloadable media outside its card; \
+                 set the cards option (-o cards=ytdl) to download card videos",
+            )
+        } else {
+            error("Twitter post has no downloadable media")
+        }
+    };
     let has_article =
         article_options != ArticleOptions::disabled() && card_source.get("article").is_some();
     let empty = Vec::new();
@@ -66,13 +77,13 @@ pub(super) fn parse_tweet_media(
                 return Err(error("Twitter post extended media missing"));
             }
             if !allow_empty && !has_card && !has_article {
-                return Err(error("Twitter post has no downloadable media"));
+                return Err(no_media());
             }
             &empty
         }
     };
     if items.is_empty() && !allow_empty && !has_card && !has_article {
-        return Err(error("Twitter post has no downloadable media"));
+        return Err(no_media());
     }
     let username = tweet
         .pointer("/core/user_results/result/core/screen_name")

@@ -12,6 +12,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&THREAD, &BOARD],
     api_key: false,
+    cookies: None,
 };
 
 static THREAD: Route = Route::new(

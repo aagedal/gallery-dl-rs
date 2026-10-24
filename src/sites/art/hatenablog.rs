@@ -16,6 +16,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&ENTRY, &HOME, &ARCHIVE, &SEARCH],
     api_key: false,
+    cookies: None,
 };
 
 const FILENAME: &str = "{category}_{domain}_{entry}_{num:>02}.{extension}";

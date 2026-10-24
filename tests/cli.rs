@@ -205,6 +205,7 @@ fn manifests_are_inspectable_but_not_downloaded() {
     let output = binary()
         .arg("-d")
         .arg(root.path())
+        .args(["--ytdl-command", "/nonexistent/yt-dlp"])
         .arg(url)
         .output()
         .unwrap();
@@ -212,7 +213,7 @@ fn manifests_are_inspectable_but_not_downloaded() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("companion yt-dlp-rs adapter")
+            .contains("need yt-dlp on PATH or --ytdl-command")
     );
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
 }
@@ -606,6 +607,7 @@ mod cancellation {
                 .arg(&destination)
                 .arg("--extractor-command")
                 .arg(script)
+                .args(["--ytdl-command", "/nonexistent/yt-dlp"])
                 .env("PIPELINE_SAVED", saved)
                 .args(["--jobs", "1", &url, "https://x.com/user/status/1"])
                 .stdout(Stdio::piped())
@@ -622,7 +624,7 @@ mod cancellation {
         let output = child.0.take().unwrap().wait_with_output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(1));
-        assert!(stderr.contains("companion yt-dlp-rs adapter"), "{stderr}");
+        assert!(stderr.contains("need yt-dlp on PATH"), "{stderr}");
         assert!(!stderr.contains("extraction failed"), "{stderr}");
         assert!(stderr.contains("1 operation(s) failed"), "{stderr}");
     }
@@ -785,12 +787,16 @@ fn native_twitter_reports_authentication_without_launching_backend_and_continues
         "https://x.com/id:42/with_replies",
         "https://x.com/id:42/highlights",
     ] {
+        // Without cookies X is read as a guest; a closed proxy keeps guest
+        // activation offline, and its failure asks for a session.
         let output = binary()
             .args([
                 "--extractor",
                 "native",
                 "--extractor-command",
                 "/missing/backend",
+                "--proxy",
+                "http://127.0.0.1:9",
                 "-g",
                 source,
                 "https://example.com/image.jpg",

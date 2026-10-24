@@ -35,6 +35,7 @@ macro_rules! instance {
                 &FAVORITE,
             ],
             api_key: false,
+            cookies: None,
         };
     };
 }

@@ -26,6 +26,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&CHANNEL],
     api_key: false,
+    cookies: None,
 };
 
 /// `are\.na/[^/?#]+/([^/?#]+)`: the channel slug.

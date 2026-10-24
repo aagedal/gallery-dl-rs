@@ -133,3 +133,19 @@ fn module_names_and_photo_captions_are_not_global_block_markers() {
     assert!(error.contains("unavailable"));
     assert!(!error.contains("blocked"));
 }
+
+#[test]
+fn reel_urls_are_video_urls() {
+    use gallery_dl_rs::facebook::video_id;
+    let id = |raw: &str| video_id(&Url::parse(raw).unwrap());
+    assert_eq!(
+        id("https://www.facebook.com/reel/1195289147628387").unwrap(),
+        "1195289147628387"
+    );
+    assert_eq!(
+        id("https://m.facebook.com/reel/1195289147628387/?s=1").unwrap(),
+        "1195289147628387"
+    );
+    assert!(id("https://www.facebook.com/reel/").is_err());
+    assert!(id("https://www.facebook.com/reel/abc").is_err());
+}

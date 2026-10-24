@@ -34,6 +34,7 @@ pub static RULE34XYZ: Site = Site {
     extract: |http, url| extract(&XYZ, http, url),
     routes: &[&POST, &PLAYLIST, &TAG],
     api_key: false,
+    cookies: None,
 };
 
 pub static RULE34WORLD: Site = Site {
@@ -43,6 +44,7 @@ pub static RULE34WORLD: Site = Site {
     extract: |http, url| extract(&WORLD, http, url),
     routes: &[&POST, &PLAYLIST, &TAG],
     api_key: false,
+    cookies: None,
 };
 
 const TAG_TYPES: &[(Option<i64>, &str)] = &[

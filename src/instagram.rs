@@ -3,6 +3,8 @@
 mod collections;
 #[path = "instagram_stories.rs"]
 mod stories;
+#[path = "instagram_users.rs"]
+mod users;
 use crate::{
     Result,
     cookies::CookieJar,
@@ -28,9 +30,24 @@ use std::{
 };
 pub use stories::is_story_url;
 use url::Url;
+pub use users::is_unordered_user_url;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
+/// The logged-out profile timeline query, observed on 2026-10-23.
+const PROFILE_POSTS_QUERY: &str = "PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery";
+const PROFILE_POSTS_DOC_ID: &str = "29483846714553007";
+/// Logged-out profile pages followed at most (twelve posts each).
+const MAX_LOGGED_OUT_PAGES: usize = 1000;
+
+fn truncated_profile() -> crate::Error {
+    error(
+        "Instagram profile continues beyond the posts visible without login; \
+         pass --cookies for the rest",
+    )
+}
+const SHORTCODE_ALPHABET: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 pub struct Instagram {
     client: Client,
@@ -40,6 +57,11 @@ pub struct Instagram {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    include: Option<crate::dispatch::Include>,
+    api_base: Url,
+    /// Read a profile's first posts from its public page when the API
+    /// refuses a session-less client; off in unit tests unless enabled.
+    logged_out_profiles: bool,
 }
 
 impl Instagram {
@@ -65,6 +87,9 @@ impl Instagram {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            include: None,
+            api_base: Url::parse("https://www.instagram.com/api/v1/").unwrap(),
+            logged_out_profiles: !cfg!(test),
         })
     }
 
@@ -82,6 +107,19 @@ impl Instagram {
         self
     }
 
+    /// Select bare-profile views like upstream's `include` option; absent
+    /// selects only `posts`.
+    pub fn with_include(mut self, include: Option<crate::dispatch::Include>) -> Self {
+        self.include = include;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_api_base(mut self, base: Url) -> Self {
+        self.api_base = base;
+        self
+    }
+
     /// Bound each HTTP request separately from the overall extraction deadline.
     pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
@@ -90,11 +128,286 @@ impl Instagram {
 
     pub async fn extract(&self, post: &Url) -> Result<Vec<Media>> {
         let code = shortcode(post)?;
+        // The media-info API needs a session. Like yt-dlp's logged-out path,
+        // read the post object that the public post page embeds instead.
+        if !self.has_session() {
+            let page = self.api_base.join(&format!("/p/{code}/"))?;
+            return self.extract_logged_out(&page, &code).await;
+        }
         let id = media_id(&code)?;
         let endpoint = http_url(&format!(
             "https://www.instagram.com/api/v1/media/{id}/info/"
         ))?;
         self.extract_endpoint(&endpoint, &code).await
+    }
+
+    #[cfg(test)]
+    fn with_logged_out_profiles(mut self) -> Self {
+        self.logged_out_profiles = true;
+        self
+    }
+
+    /// Named-profile posts; without a session, an API refusal falls back to
+    /// the posts listed on the public profile page.
+    pub(crate) fn profile_or_logged_out(
+        &self,
+        username: String,
+        base: Url,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let mut primary = self.profile_events(username.clone(), base);
+        if !self.logged_out_profiles || self.has_session() {
+            return primary;
+        }
+        stream::once(async move {
+            match primary.next().await {
+                Some(Err(e)) => {
+                    let page = self.api_base.join(&format!("/{username}/"))?;
+                    let body = tokio::time::timeout(self.timeout, self.request_page(&page))
+                        .await
+                        .map_err(|_| error("native Instagram extraction timed out"))?
+                        .map_err(|_| e)?;
+                    let first = parse_logged_out_profile(&body)?;
+                    Ok::<_, crate::Error>(self.logged_out_posts(username, first, HashSet::new(), 1))
+                }
+                first => Ok(stream::iter(first).chain(primary).boxed()),
+            }
+        })
+        .try_flatten()
+        .boxed()
+    }
+
+    /// The posts of logged-out profile pages, continuing through
+    /// `PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery`; a refused
+    /// continuation ends with an error asking for `--cookies`.
+    fn logged_out_posts(
+        &self,
+        username: String,
+        page: ProfilePage,
+        mut seen: HashSet<String>,
+        pages: usize,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let codes: Vec<String> = page
+            .codes
+            .into_iter()
+            .filter(|code| seen.insert(code.clone()))
+            .collect();
+        let posts = stream::iter(codes.clone())
+            .then(move |code| async move {
+                let url = self.api_base.join(&format!("/p/{code}/"))?;
+                let items = self.extract_logged_out(&url, &code).await?;
+                Ok::<_, crate::Error>(stream::iter(
+                    event::group_with_keywords(items, "instagram", instagram_keywords())
+                        .into_iter()
+                        .map(Ok),
+                ))
+            })
+            .try_flatten();
+        let rest: BoxStream<'_, Result<ExtractionEvent>> = if !page.more {
+            stream::empty().boxed()
+        } else {
+            match (page.cursor, page.lsd) {
+                (Some(cursor), Some(lsd)) if !codes.is_empty() && pages < MAX_LOGGED_OUT_PAGES => {
+                    stream::once(async move {
+                        match self.logged_out_profile_page(&username, &cursor, &lsd).await {
+                            Ok(mut next) => {
+                                next.lsd = Some(lsd);
+                                Ok(self.logged_out_posts(username, next, seen, pages + 1))
+                            }
+                            Err(_) => Err(truncated_profile()),
+                        }
+                    })
+                    .try_flatten()
+                    .boxed()
+                }
+                _ => stream::once(async { Err(truncated_profile()) }).boxed(),
+            }
+        };
+        posts.chain(rest).boxed()
+    }
+
+    async fn logged_out_profile_page(
+        &self,
+        username: &str,
+        cursor: &str,
+        lsd: &str,
+    ) -> Result<ProfilePage> {
+        let endpoint = self.api_base.join("/api/graphql")?;
+        let variables = serde_json::json!({
+            "username": username,
+            "first": 12,
+            "after": cursor,
+            "__relay_internal__pv__PolarisSEOIsCrawlerrelayprovider": false,
+        })
+        .to_string();
+        let form = [
+            ("lsd", lsd),
+            ("variables", variables.as_str()),
+            ("doc_id", PROFILE_POSTS_DOC_ID),
+            ("fb_api_req_friendly_name", PROFILE_POSTS_QUERY),
+        ];
+        self.rate_limits.wait(&endpoint, self.timeout).await?;
+        let mut request = self
+            .client
+            .post(endpoint.clone())
+            .timeout(self.request_timeout)
+            .header(header::ACCEPT, "*/*")
+            .header(
+                header::REFERER,
+                format!("https://www.instagram.com/{username}/"),
+            )
+            .header(header::ORIGIN, "https://www.instagram.com")
+            .header("X-FB-LSD", lsd)
+            .header("X-IG-App-ID", "936619743392459")
+            .header("X-FB-Friendly-Name", PROFILE_POSTS_QUERY)
+            .header("Sec-Fetch-Site", "same-origin")
+            .form(&form);
+        if let Some(cookies) = self.cookies.lock().unwrap().header(&endpoint) {
+            request = request.header(header::COOKIE, cookies);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error("native Instagram extraction timed out"))?
+            .map_err(|_| error("Instagram request failed; check network access"))?;
+        if !response.status().is_success() {
+            return Err(truncated_profile());
+        }
+        let body = crate::transport::read_capped(response, MAX_RESPONSE)
+            .await
+            .ok_or_else(|| error("Instagram response was unreadable or exceeded 16 MiB"))?;
+        serde_json::Deserializer::from_slice(&body)
+            .into_iter::<Value>()
+            .next()
+            .and_then(|doc| doc.ok())
+            .and_then(|doc| profile_page(&doc, 0))
+            .ok_or_else(truncated_profile)
+    }
+
+    /// The post or reel an app share link (`/share/p|reel/TOKEN`) redirects to.
+    async fn resolve_share(&self, url: &Url) -> Result<Url> {
+        let mut request = self
+            .client
+            .get(url.clone())
+            .timeout(self.request_timeout)
+            .header(header::ACCEPT, "text/html,application/xhtml+xml")
+            .header("Sec-Fetch-Mode", "navigate");
+        if let Some(cookies) = self.cookies.lock().unwrap().header(url) {
+            request = request.header(header::COOKIE, cookies);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error("native Instagram extraction timed out"))?
+            .map_err(|_| error("Instagram request failed; check network access"))?;
+        response
+            .status()
+            .is_redirection()
+            .then(|| response.headers().get(header::LOCATION))
+            .flatten()
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| url.join(v).ok())
+            .filter(|target| !is_share_link(target) && shortcode(target).is_ok())
+            .ok_or_else(|| {
+                error("Instagram share link did not resolve to a post; login may be required")
+            })
+    }
+
+    fn has_session(&self) -> bool {
+        let root = self
+            .api_base
+            .join("/")
+            .unwrap_or_else(|_| self.api_base.clone());
+        self.cookies
+            .lock()
+            .unwrap()
+            .value(&root, "sessionid")
+            .is_some_and(|value| !value.is_empty())
+    }
+
+    async fn extract_logged_out(&self, page: &Url, code: &str) -> Result<Vec<Media>> {
+        let body = tokio::time::timeout(self.timeout, self.request_page(page))
+            .await
+            .map_err(|_| error("native Instagram extraction timed out"))??;
+        let mut media = parse_logged_out_page(&body, code)?;
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        Ok(media)
+    }
+
+    /// A logged-out post page. Redirects may only normalize the post path;
+    /// Instagram sends rate-limited and private posts to its login page.
+    async fn request_page(&self, endpoint: &Url) -> Result<Vec<u8>> {
+        let mut target = endpoint.clone();
+        let mut redirects = Redirects::new(endpoint);
+        let mut response = loop {
+            self.rate_limits.wait(&target, self.timeout).await?;
+            let mut request = self
+                .client
+                .get(target.clone())
+                .timeout(self.request_timeout)
+                .header(
+                    header::ACCEPT,
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                )
+                .header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.5")
+                .header("Sec-Fetch-Dest", "document")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Site", "none");
+            if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
+                request = request.header(header::COOKIE, cookies);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|_| error("Instagram request failed; check network access"))?;
+            self.cookies
+                .lock()
+                .unwrap()
+                .store_response(response.url(), response.headers());
+            match redirects.next(response.url(), response.status(), response.headers())? {
+                Some(next)
+                    if next.path().starts_with("/p/")
+                        || next.path().starts_with("/reel/")
+                        || next.path().trim_end_matches('/')
+                            == endpoint.path().trim_end_matches('/') =>
+                {
+                    target = next;
+                }
+                Some(_) => {
+                    return Err(error(
+                        "Instagram sent the logged-out post page to its login page; the post \
+                         may be private or anonymous access is rate limited; pass --cookies",
+                    ));
+                }
+                None => break response,
+            }
+        };
+        let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            if let Some(delay) = retry_after(response.headers(), SystemTime::now()) {
+                self.rate_limits.defer(endpoint, delay);
+            }
+            return Err(error("Instagram rate limit; retry later or pass --cookies"));
+        }
+        if matches!(status.as_u16(), 404 | 410) {
+            return Err(error(
+                "Instagram post unavailable or inaccessible to this session",
+            ));
+        }
+        if !status.is_success() {
+            return Err(error(format!("Instagram returned HTTP {status}")));
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| error("could not read Instagram response"))?
+        {
+            if body.len() + chunk.len() > MAX_RESPONSE {
+                return Err(error("Instagram response exceeded 16 MiB"));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
@@ -150,6 +463,15 @@ impl Instagram {
 
     /// Post boundaries are explicit even when a reel contains no available files.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        if is_share_link(url) {
+            let url = url.clone();
+            return stream::once(async move {
+                let target = self.resolve_share(&url).await?;
+                Ok::<_, crate::Error>(self.events(&target))
+            })
+            .try_flatten()
+            .boxed();
+        }
         if shortcode(url).is_ok() {
             let url = url.clone();
             return stream::once(async move { self.extract(&url).await })
@@ -164,22 +486,16 @@ impl Instagram {
                 .boxed();
         }
         if let Ok(input) = stories::input(url) {
-            return self.story_events(
-                input,
-                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
-            );
+            return self.story_events(input, self.api_base.clone());
         }
         if let Ok(input) = collections::input(url) {
-            return self.collection_events(
-                input,
-                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
-            );
+            return self.collection_events(input, self.api_base.clone());
+        }
+        if let Ok(input) = users::input(url) {
+            return self.user_events(input);
         }
         match profile_username(url) {
-            Ok(username) => self.profile_events(
-                username,
-                Url::parse("https://www.instagram.com/api/v1/").unwrap(),
-            ),
+            Ok(username) => self.profile_or_logged_out(username, self.api_base.clone()),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         }
     }
@@ -528,7 +844,7 @@ pub fn shortcode(url: &Url) -> Result<String> {
 }
 
 fn media_id(code: &str) -> Result<u64> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8] = SHORTCODE_ALPHABET;
     let invalid = || error("invalid Instagram post shortcode");
     if code.is_empty() || code.len() > 11 {
         return Err(invalid());
@@ -548,6 +864,133 @@ pub fn parse_response(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
         error("Instagram returned a web page or invalid JSON; login may be required")
     })?;
     parse_value(&data, code)
+}
+
+/// The shortcodes of the posts a logged-out profile page lists, in order
+/// (`xig_user_by_username.polaris_ordered_timeline_connection`), and whether
+/// more follow.
+/// `instagram.com/share/…` app share links.
+pub fn is_share_link(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && matches!(url.host_str(), Some("instagram.com" | "www.instagram.com"))
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.path().starts_with("/share/")
+}
+
+pub fn parse_logged_out_profile(bytes: &[u8]) -> Result<ProfilePage> {
+    let page = std::str::from_utf8(bytes).map_err(|_| error("Instagram returned invalid UTF-8"))?;
+    let payloads = crate::facebook::embedded_payloads(bytes)?;
+    let mut profile = payloads
+        .iter()
+        .find_map(|payload| profile_page(payload, 0))
+        .ok_or_else(|| {
+            error("Instagram profile page lists no posts without login; pass --cookies")
+        })?;
+    profile.lsd = page
+        .find(r#"["LSD",[],{"token":""#)
+        .map(|start| &page[start + r#"["LSD",[],{"token":""#.len()..])
+        .and_then(|rest| rest.find('"').map(|end| &rest[..end]))
+        .filter(|token| {
+            !token.is_empty()
+                && token.len() <= 128
+                && token
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        })
+        .map(str::to_owned);
+    Ok(profile)
+}
+
+/// One logged-out profile page: post shortcodes in order, whether more
+/// follow, the continuation cursor and the page's LSD token.
+#[derive(Debug, Default, PartialEq)]
+pub struct ProfilePage {
+    pub codes: Vec<String>,
+    pub more: bool,
+    pub cursor: Option<String>,
+    pub lsd: Option<String>,
+}
+
+/// `xig_user_by_username.polaris_ordered_timeline_connection` within `value`.
+fn profile_page(value: &Value, depth: usize) -> Option<ProfilePage> {
+    if depth > 64 {
+        return None;
+    }
+    if let Some(connection) = value
+        .get("xig_user_by_username")
+        .and_then(|user| user.get("polaris_ordered_timeline_connection"))
+    {
+        let mut codes: Vec<String> = Vec::new();
+        for edge in connection
+            .get("edges")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(code) = edge.pointer("/node/code").and_then(Value::as_str)
+                && media_id(code).is_ok()
+                && !codes.iter().any(|seen| seen == code)
+            {
+                codes.push(code.to_owned());
+            }
+        }
+        let more = connection
+            .pointer("/page_info/has_next_page")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let cursor = connection
+            .pointer("/page_info/end_cursor")
+            .and_then(Value::as_str)
+            .filter(|c| !c.is_empty() && c.len() <= 1024)
+            .map(str::to_owned);
+        return Some(ProfilePage {
+            codes,
+            more,
+            cursor,
+            lsd: None,
+        });
+    }
+    match value {
+        Value::Object(map) => map.values().find_map(|v| profile_page(v, depth + 1)),
+        Value::Array(list) => list.iter().find_map(|v| profile_page(v, depth + 1)),
+        _ => None,
+    }
+}
+
+/// The post object a logged-out post page embeds as
+/// `xig_polaris_media.if_not_gated_logged_out`, which has the media-info
+/// item's shape.
+pub fn parse_logged_out_page(bytes: &[u8], code: &str) -> Result<Vec<Media>> {
+    std::str::from_utf8(bytes).map_err(|_| error("Instagram returned invalid UTF-8"))?;
+    fn find<'a>(value: &'a Value, code: &str, depth: usize) -> Option<&'a Value> {
+        if depth > 64 {
+            return None;
+        }
+        if let Some(media) = value.get("xig_polaris_media")
+            && media.get("code").and_then(Value::as_str) == Some(code)
+        {
+            return Some(media);
+        }
+        match value {
+            Value::Object(map) => map.values().find_map(|v| find(v, code, depth + 1)),
+            Value::Array(list) => list.iter().find_map(|v| find(v, code, depth + 1)),
+            _ => None,
+        }
+    }
+    let payloads = crate::facebook::embedded_payloads(bytes)?;
+    let media = payloads
+        .iter()
+        .find_map(|payload| find(payload, code, 0))
+        .ok_or_else(|| error("Instagram post page has no logged-out post data; pass --cookies"))?;
+    let post = media
+        .get("if_not_gated_logged_out")
+        .filter(|post| post.is_object())
+        .ok_or_else(|| {
+            error("Instagram only shows this post to logged-in users; pass --cookies")
+        })?;
+    parse_post(post, code)
 }
 
 fn validate_response(data: &Value) -> Result<()> {
@@ -783,6 +1226,199 @@ mod transport_tests {
     };
 
     const PHOTO: &[u8] = include_bytes!("../tests/fixtures/instagram/photo.json");
+
+    fn logged_out_page(product: Option<Value>) -> Vec<u8> {
+        let media = match product {
+            Some(product) => {
+                serde_json::json!({"code": "BA", "if_not_gated_logged_out": product})
+            }
+            None => serde_json::json!({"code": "BA", "if_not_gated_logged_out": null}),
+        };
+        let data = serde_json::json!({"require": [["RelayPrefetchedStreamCache", "next", [],
+            ["adp", {"__bbox": {"result": {"data": {"xig_polaris_media": media}}}}]]]});
+        format!("<html><script type=\"application/json\" data-sjs>{data}</script></html>")
+            .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn logged_out_posts_read_the_embedded_post_object() {
+        let photo: Value = serde_json::from_slice(PHOTO).unwrap();
+        let product = photo["items"][0].clone();
+        let page = logged_out_page(Some(product.clone()));
+        let (endpoint, server) = serve_once("200 OK", "", &page, Duration::ZERO);
+        let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+        assert!(!native.has_session());
+        let media = native
+            .extract_logged_out(&endpoint.join("/p/BA/").unwrap(), "BA")
+            .await
+            .unwrap();
+        let from_api = parse_response(PHOTO, "BA").unwrap();
+        assert_eq!(media.len(), from_api.len());
+        assert_eq!(media[0].url, from_api[0].url);
+        assert_eq!(media[0].archive_key(), from_api[0].archive_key());
+        let request = server.join().unwrap().to_ascii_lowercase();
+        assert!(request.starts_with("get /p/ba/ "), "{request}");
+        assert!(request.contains("sec-fetch-mode: navigate\r\n"));
+        assert!(!request.contains("x-ig-app-id"));
+
+        let gated = parse_logged_out_page(&logged_out_page(None), "BA").unwrap_err();
+        assert!(gated.to_string().contains("logged-in users"), "{gated}");
+        let other = parse_logged_out_page(&logged_out_page(Some(product)), "BC").unwrap_err();
+        assert!(
+            other.to_string().contains("no logged-out post data"),
+            "{other}"
+        );
+    }
+
+    #[tokio::test]
+    async fn refused_profiles_fall_back_to_the_public_profile_page() {
+        let photo: Value = serde_json::from_slice(PHOTO).unwrap();
+        let profile = serde_json::json!({"require": [{"data": {"xig_user_by_username": {
+            "polaris_ordered_timeline_connection": {
+                "edges": [{"node": {"code": "BA"}}, {"node": {"code": "BA"}},
+                          {"node": {"code": "not a code!"}}],
+                "page_info": {"has_next_page": true}}}}}]});
+        let profile = format!("<script type=\"application/json\">{profile}</script>");
+        let (endpoint, server) = serve_sequence(vec![
+            response(
+                "401 Unauthorized",
+                "",
+                br#"{"message":"Please wait a few minutes before you try again.","require_login":true,"status":"fail"}"#,
+            ),
+            response("200 OK", "", profile.as_bytes()),
+            response("200 OK", "", &logged_out_page(Some(photo["items"][0].clone()))),
+        ]);
+        let native = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_api_base(endpoint.join("/api/v1/").unwrap())
+            .with_logged_out_profiles();
+        let results: Vec<_> = native
+            .stream(&Url::parse("https://www.instagram.com/alice/").unwrap())
+            .collect()
+            .await;
+        assert_eq!(results.len(), 2, "{results:?}");
+        assert_eq!(
+            results[0].as_ref().unwrap().url,
+            parse_response(PHOTO, "BA").unwrap()[0].url
+        );
+        let message = results[1].as_ref().unwrap_err().to_string();
+        assert!(message.contains("--cookies"), "{message}");
+        let requests: Vec<String> = server.join().unwrap().into_iter().map(|r| r.2).collect();
+        assert!(requests[1].starts_with("GET /alice/ "), "{}", requests[1]);
+        assert!(requests[2].starts_with("GET /p/BA/ "), "{}", requests[2]);
+    }
+
+    #[tokio::test]
+    async fn logged_out_profiles_continue_through_the_profile_query() {
+        let photo: Value = serde_json::from_slice(PHOTO).unwrap();
+        let mut second = photo["items"][0].clone();
+        second["code"] = "BC".into();
+        let second_page = {
+            let data = serde_json::json!({"require": [{"xig_polaris_media":
+                {"code": "BC", "if_not_gated_logged_out": second}}]});
+            format!("<script type=\"application/json\">{data}</script>").into_bytes()
+        };
+        let connection = |code: &str, more: bool| {
+            serde_json::json!({"data": {"xig_user_by_username": {
+                "polaris_ordered_timeline_connection": {
+                    "edges": [{"node": {"code": code}}],
+                    "page_info": {"has_next_page": more, "end_cursor": "c1"}}}}})
+        };
+        let profile = format!(
+            "<script>[\"LSD\",[],{{\"token\":\"lsd1\"}}]</script>\
+             <script type=\"application/json\">{}</script>",
+            connection("BA", true)
+        );
+        let (endpoint, server) = serve_sequence(vec![
+            response("401 Unauthorized", "", br#"{"status":"fail"}"#),
+            response("200 OK", "", profile.as_bytes()),
+            response(
+                "200 OK",
+                "",
+                &logged_out_page(Some(photo["items"][0].clone())),
+            ),
+            response("200 OK", "", connection("BC", false).to_string().as_bytes()),
+            response("200 OK", "", &second_page),
+        ]);
+        let native = Instagram::new(None, Duration::from_secs(3))
+            .await
+            .unwrap()
+            .with_api_base(endpoint.join("/api/v1/").unwrap())
+            .with_logged_out_profiles();
+        let results: Vec<_> = native
+            .stream(&Url::parse("https://www.instagram.com/alice/").unwrap())
+            .collect()
+            .await;
+        assert_eq!(results.len(), 2, "{results:?}");
+        assert!(results.iter().all(Result::is_ok));
+        let requests: Vec<String> = server.join().unwrap().into_iter().map(|r| r.2).collect();
+        assert!(
+            requests[3].starts_with("POST /api/graphql "),
+            "{}",
+            requests[3]
+        );
+        let lower = requests[3].to_ascii_lowercase();
+        assert!(lower.contains("x-fb-lsd: lsd1\r\n"));
+        assert!(requests[3].contains(&format!("doc_id={PROFILE_POSTS_DOC_ID}")));
+        assert!(requests[3].contains("c1"));
+        assert!(requests[4].starts_with("GET /p/BC/ "), "{}", requests[4]);
+    }
+
+    #[tokio::test]
+    async fn share_links_resolve_to_their_post() {
+        let (endpoint, server) = serve_sequence(vec![
+            response(
+                "302 Found",
+                "Location: https://www.instagram.com/reel/CDUMkliABpa/?igsh=x\r\n",
+                b"",
+            ),
+            response(
+                "302 Found",
+                "Location: https://www.instagram.com/accounts/login/\r\n",
+                b"",
+            ),
+        ]);
+        let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+        let share = endpoint.join("/share/reel/BAb1/").unwrap();
+        let target = native.resolve_share(&share).await.unwrap();
+        assert_eq!(shortcode(&target).unwrap(), "CDUMkliABpa");
+        let login = native.resolve_share(&share).await.unwrap_err().to_string();
+        assert!(login.contains("did not resolve"), "{login}");
+        let requests: Vec<String> = server.join().unwrap().into_iter().map(|r| r.2).collect();
+        assert!(requests[0].starts_with("GET /share/reel/BAb1/ "));
+        assert!(is_share_link(
+            &Url::parse("https://www.instagram.com/share/p/BAb1/").unwrap()
+        ));
+        assert!(!is_share_link(
+            &Url::parse("https://www.instagram.com/p/BAb1/").unwrap()
+        ));
+    }
+
+    #[tokio::test]
+    async fn logged_out_login_redirects_ask_for_cookies() {
+        let (endpoint, server) = serve_once(
+            "302 Found",
+            "Location: /accounts/login/?next=%2Fp%2FBA%2F\r\n",
+            b"",
+            Duration::ZERO,
+        );
+        let native = Instagram::new(None, Duration::from_secs(3)).await.unwrap();
+        let message = native
+            .extract_logged_out(&endpoint.join("/p/BA/").unwrap(), "BA")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("--cookies"), "{message}");
+        assert!(!message.contains("/accounts/login"));
+        server.join().unwrap();
+        let session = Instagram::from_cookie_jar(
+            CookieJar::parse(".instagram.com\tTRUE\t/\tTRUE\t0\tsessionid\tsecret\n").unwrap(),
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        assert!(session.has_session());
+    }
 
     #[tokio::test]
     async fn request_timeout_is_separate_from_the_overall_extraction_deadline() {
@@ -1699,6 +2335,10 @@ mod story_tests;
 #[cfg(test)]
 #[path = "instagram_collections_tests.rs"]
 mod collection_tests;
+
+#[cfg(test)]
+#[path = "instagram_users_tests.rs"]
+mod user_tests;
 
 fn instagram_keywords() -> event::KeywordPolicy {
     event::KeywordPolicy::copied_after_post(&[
