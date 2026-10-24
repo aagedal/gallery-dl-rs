@@ -11,12 +11,18 @@ mod adultempire;
 mod eporner;
 mod fikfap;
 mod okporn;
+mod pornhub;
 mod pornstarstube;
 mod scatbooru;
 mod xasiat;
+mod xhamster;
+mod xvideos;
 mod yourlesbians;
 
 pub(super) static SITES: &[&Site] = &[
+    &pornhub::SITE,
+    &xvideos::SITE,
+    &xhamster::SITE,
     &okporn::SITE,
     &pornstarstube::SITE,
     &eporner::SITE,
