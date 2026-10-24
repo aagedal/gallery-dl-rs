@@ -10,6 +10,14 @@ pub(crate) fn partition<'t>(txt: &'t str, sep: &str) -> (&'t str, &'t str, &'t s
     }
 }
 
+/// `str.rpartition`.
+pub(crate) fn partition_last<'t>(txt: &'t str, sep: &str) -> (&'t str, &'t str, &'t str) {
+    match txt.rfind(sep) {
+        Some(i) => (&txt[..i], &txt[i..i + sep.len()], &txt[i + sep.len()..]),
+        None => ("", "", txt),
+    }
+}
+
 /// `text.rextr`: the text after the last `begin`, up to the next `end`.
 pub(crate) fn rextr<'t>(txt: &'t str, begin: &str, end: &str) -> &'t str {
     let Some(first) = txt.rfind(begin).map(|i| i + begin.len()) else {
@@ -172,4 +180,17 @@ const LANGUAGES: &[(&str, &str)] = &[
 pub(crate) fn code_to_language(code: &str) -> Option<&'static str> {
     let code = code.to_lowercase();
     LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, l)| *l)
+}
+
+/// `util.language_to_code`: the code of a capitalized language name.
+pub(crate) fn language_to_code(language: &str) -> Option<&'static str> {
+    let mut chars = language.chars();
+    let name: String = match chars.next() {
+        Some(first) => first
+            .to_uppercase()
+            .chain(chars.flat_map(char::to_lowercase))
+            .collect(),
+        None => String::new(),
+    };
+    LANGUAGES.iter().find(|(_, l)| *l == name).map(|(c, _)| *c)
 }

@@ -2467,7 +2467,12 @@ and options: `unsplash`, `pexels`, `tenor`, `imgbb`, `imagechest`, `telegraph`,
 `username`/`password`), `readcomiconline`, `senmanga`, `keenspot`, `comicvine`,
 `photovogue`, `architizer`, `naver-chzzk`, `bbc`, `tungsten`, `slickpic`,
 `tumblrgallery`, `pholder`, `scrolller`, `seiga`, `arcalive`, Shopify stores,
-`reactor`/`joyreactor`, Nitter instances and XenForo forums. Gallery-dl's
+`reactor`/`joyreactor`, Nitter instances, XenForo forums, `mangafreak`,
+Manganelo mirrors, `mangataro`, `mangoxo`, `weebdex`, `hentai2read`,
+`hentaihere`, `simplyhentai`, IMHentai mirrors, `tmohentai`, `sankaku`,
+`idolcomplex`, `sankakucomplex`, `nozomi`, `sizebooru`, `aryion`, `iwara`
+(direct video files), `foriio`, `kabeuchi`, `comedywildlifephoto`,
+`nekohouse` and Raddle (`postmill`). Gallery-dl's
 `shopify:`/`xenforo:` URL prefixes and extra configured instances are not
 supported, and all `*.reactor.cc` subdomains share the `reactor` category.
 Username/password logins and SmugMug OAuth are not ported; pass `--cookies`
