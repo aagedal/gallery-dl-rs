@@ -309,17 +309,7 @@ impl Http {
         if !response.status().is_redirection() {
             return Ok(None);
         }
-        Ok(response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| value.len() <= 8192)
-            .and_then(|value| url.join(value).ok())
-            .filter(|target| {
-                matches!(target.scheme(), "http" | "https")
-                    && target.username().is_empty()
-                    && target.password().is_none()
-            }))
+        Ok(redirect_target(url, response.headers()))
     }
 
     /// POST a body and return the raw response; redirects are refused.
@@ -330,6 +320,27 @@ impl Http {
         headers: &[(&str, &str)],
     ) -> Result<Vec<u8>> {
         Ok(self.send(url, headers, Method::Post(body)).await?.2)
+    }
+
+    /// POST a body without following a redirect (upstream
+    /// `allow_redirects=False`): the response body, or the redirect's
+    /// HTTP(S) `Location` resolved against `url`.
+    pub async fn post_or_redirect(
+        &self,
+        url: &Url,
+        body: Body<'_>,
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<Vec<u8>, Url>> {
+        match self.send(url, headers, Method::Post(body)).await {
+            Ok((_, _, bytes)) => Ok(Ok(bytes)),
+            Err(failure) => match failure
+                .downcast_ref::<PostRedirect>()
+                .and_then(|redirect| redirect.location.clone())
+            {
+                Some(location) => Ok(Err(location)),
+                None => Err(failure),
+            },
+        }
     }
 
     /// POST a form and parse the JSON response; redirects are refused.
@@ -445,7 +456,11 @@ impl Http {
                 .unwrap_or_else(|e| e.into_inner())
                 .store_response(&target, response.headers());
             if body.is_some() && response.status().is_redirection() {
-                return Err(error(format!("{name} redirected a POST request")).into());
+                let redirected: crate::Error = Box::new(PostRedirect {
+                    message: format!("{name} redirected a POST request"),
+                    location: redirect_target(&target, response.headers()),
+                });
+                return Err(redirected.into());
             }
             match redirects.next(response.url(), response.status(), response.headers())? {
                 Some(next) => target = next,
@@ -528,6 +543,35 @@ impl std::fmt::Display for Refused {
 }
 
 impl std::error::Error for Refused {}
+
+/// A redirect answering a POST request, which is never followed.
+#[derive(Debug)]
+struct PostRedirect {
+    message: String,
+    location: Option<Url>,
+}
+
+impl std::fmt::Display for PostRedirect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PostRedirect {}
+
+/// A response's `Location` resolved against `url`, if it is plain HTTP(S).
+fn redirect_target(url: &Url, headers: &HeaderMap) -> Option<Url> {
+    headers
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| value.len() <= 8192)
+        .and_then(|value| url.join(value).ok())
+        .filter(|target| {
+            matches!(target.scheme(), "http" | "https")
+                && target.username().is_empty()
+                && target.password().is_none()
+        })
+}
 
 /// The HTTP status (401 or 403) of a refused request, if `error` is one.
 pub fn refused_status(error: &crate::Error) -> Option<u16> {

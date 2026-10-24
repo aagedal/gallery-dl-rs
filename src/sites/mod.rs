@@ -8,6 +8,7 @@
 //! `directory_fmt`; archive identities use the upstream `archive_fmt` fields.
 pub mod http;
 
+mod adult_video;
 mod art;
 mod boorus;
 mod filehosts;
@@ -153,6 +154,7 @@ pub fn sites() -> &'static [&'static Site] {
             manga::SITES,
             art::SITES,
             social::SITES,
+            adult_video::SITES,
             video::SITES,
         ]
         .concat()
