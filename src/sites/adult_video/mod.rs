@@ -10,6 +10,8 @@ use url::Url;
 mod adultempire;
 mod eporner;
 mod fikfap;
+mod girlswithmuscle;
+mod motherless;
 mod okporn;
 mod pornhub;
 mod pornstarstube;
@@ -23,6 +25,7 @@ pub(super) static SITES: &[&Site] = &[
     &pornhub::SITE,
     &xvideos::SITE,
     &xhamster::SITE,
+    &motherless::SITE,
     &okporn::SITE,
     &pornstarstube::SITE,
     &eporner::SITE,
@@ -31,6 +34,7 @@ pub(super) static SITES: &[&Site] = &[
     &scatbooru::SITE,
     &xasiat::SITE,
     &fikfap::SITE,
+    &girlswithmuscle::SITE,
 ];
 
 /// An upstream `ytdl:` URL with `_ytdl_manifest`: yt-dlp reads the HLS or
