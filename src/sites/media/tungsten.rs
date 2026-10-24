@@ -282,9 +282,11 @@ mod tests {
         assert_eq!(k["filename"], "u1");
         assert_eq!(k["extension"], "webp");
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
+        // Windows path sanitization replaces the colons in the date.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             file.render(&files[0]).unwrap(),
-            "2024-01-02 03:04:05 Cat u1.webp"
+            format!("2024-01-02 03{colon}04{colon}05 Cat u1.webp")
         );
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),

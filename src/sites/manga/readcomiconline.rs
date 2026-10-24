@@ -509,9 +509,15 @@ var pth = ''; var _q9z = ''; _q9z = '{}'; _q9z = '{}';</script>",
         assert_eq!(k["page"], 2);
         assert_eq!(k["count"], 2);
         assert_eq!(k["language"], "English");
+        // Windows path sanitization strips a component's trailing dot.
+        let series = if cfg!(windows) {
+            "W.I.T.C.H"
+        } else {
+            "W.I.T.C.H."
+        };
         assert_eq!(
             path(&files[1]),
-            "readcomiconline/W.I.T.C.H./130/W.I.T.C.H._130_002.png=s1600"
+            format!("readcomiconline/{series}/130/W.I.T.C.H._130_002.png=s1600")
         );
         assert_eq!(archive(&files[1]), r#"["{issue_id}_{page}",["22289","2"]]"#);
         let requests = requests.join().unwrap();
