@@ -1,0 +1,33 @@
+query SubredditQuery(
+    $url: String!
+    $iterator: String
+    $sortBy: GallerySortBy
+    $filter: GalleryFilter
+    $limit: Int!
+) {
+    getSubreddit(
+        data: {
+            url: $url,
+            iterator: $iterator,
+            filter: $filter,
+            limit: $limit,
+            sortBy: $sortBy
+        }
+    ) {
+        __typename id url title secondaryTitle description createdAt isNsfw
+        subscribers isComplete itemCount videoCount pictureCount albumCount
+        isPaid username tags isFollowing
+        banner { url width height isOptimized }
+        children {
+            iterator items {
+                __typename id url title subredditId subredditTitle subredditUrl
+                redditPath isNsfw hasAudio fullLengthSource gfycatSource
+                redgifsSource ownerAvatar username displayName favoriteCount
+                isPaid tags commentsCount commentsRepliesCount isFavorite
+                albumContent { mediaSources { url width height isOptimized } }
+                mediaSources { url width height isOptimized }
+                blurredMediaSources { url width height isOptimized }
+            }
+        }
+    }
+}

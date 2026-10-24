@@ -1,0 +1,453 @@
+query TagPageQuery(
+  $name: String
+  $lineType: PostLineType!
+  $favoriteType: PostLineType
+  $page: Int
+  $isAuthorised: Boolean!
+  $isHomepage: Boolean!
+) {
+  tag(name: $name) {
+    id
+    name
+    mainTag {
+      id
+      hierarchy {
+        mainTag {
+          name
+          id
+        }
+        id
+      }
+      nsfw
+      unsafe
+      synonyms
+      count
+      seoName
+      category {
+        name
+        unsafe
+        nsfw
+        id
+      }
+    }
+    count
+    postPager(type: $lineType, favoriteType: $favoriteType) {
+      count
+      id
+    }
+    ...TagHeader_blog @skip(if: $isHomepage)
+    ...TagSidebar_blog @skip(if: $isHomepage)
+    ...TagPostPager_blog_qTg8U
+  }
+}
+
+fragment AttributeEmbed_attribute on AttributeEmbed {
+  __isAttributeEmbed: __typename
+  type
+  value
+  image {
+    comment
+    id
+  }
+}
+
+fragment AttributePicture_attribute on AttributePicture {
+  __isAttributePicture: __typename
+  id
+  type
+  insertId
+  image {
+    width
+    height
+    type
+    comment
+    hasVideo
+    id
+  }
+}
+
+fragment AttributePicture_post on Post {
+  nsfw
+  tags {
+    name
+    seoName
+    synonyms
+    id
+  }
+}
+
+fragment Attribute_attribute on Attribute {
+  __isAttribute: __typename
+  type
+  ...AttributePicture_attribute
+  ...AttributeEmbed_attribute
+}
+
+fragment Attribute_post on Post {
+  ...AttributePicture_post
+}
+
+fragment BlogDescription_blog on Tag {
+  id
+  articlePost {
+    ...Content_post
+    ...Content_content
+    id
+  }
+}
+
+fragment CommentTree_comments_2EWd0p on Comment {
+  id
+  locale
+  level
+  parent {
+    __typename
+    id
+  }
+  createdAt
+  user {
+    id
+  }
+  ...Comment_comment_2EWd0p
+}
+
+fragment CommentTree_post on Post {
+  id
+  ...Comment_post
+}
+
+fragment Comment_comment_2EWd0p on Comment {
+  id
+  user {
+    id
+    username
+  }
+  createdAt
+  rating
+  level
+  contentVersion
+  banned
+  contentEditedAt
+  locale
+  ...EditableCommentContent_content
+  ...Content_content
+}
+
+fragment Comment_post on Post {
+  id
+  ...Content_post
+}
+
+fragment Content_content on Content {
+  __isContent: __typename
+  text
+  attributes {
+    __typename
+    id
+    insertId
+    ...Attribute_attribute
+  }
+}
+
+fragment Content_post on Post {
+  ...Attribute_post
+}
+
+fragment EditableCommentContent_content on Content {
+  __isContent: __typename
+  text
+  attributes {
+    __typename
+    id
+    insertId
+    type
+    image {
+      id
+      hasVideo
+      type
+      width
+      height
+    }
+    ... on CommentAttributeEmbed {
+      value
+    }
+  }
+}
+
+fragment Poll_post_2lIf9C on Post {
+  id
+  poll {
+    question
+    answers {
+      id
+      answer
+      count
+    }
+    voted @include(if: $isAuthorised)
+  }
+}
+
+fragment PostComments_post_2lIf9C on Post {
+  id
+  viewedCommentsAt @include(if: $isAuthorised)
+  viewedCommentsCount @include(if: $isAuthorised)
+  commentsCount
+  user {
+    id
+  }
+  unsafe
+  ...CommentTree_post
+}
+
+fragment PostFooter_post_2lIf9C on Post {
+  id
+  commentsCount
+  rating
+  ratingGeneral
+  createdAt
+  viewedCommentsCount @include(if: $isAuthorised)
+  favorite @include(if: $isAuthorised)
+  ...PostVote_post @include(if: $isAuthorised)
+}
+
+fragment PostPager_posts_3OSKdM on PostPager {
+  posts(page: $page) {
+    id
+    nsfw
+    unsafe
+    tags {
+      mainTag {
+        id
+        nsfw
+        unsafe
+        category {
+          id
+        }
+        userTag {
+          state
+        }
+      }
+      id
+    }
+    user {
+      username
+      id
+    }
+    commentsCount
+    ...Post_post_2lIf9C
+  }
+  count
+  id
+}
+
+fragment PostTags_post on Post {
+  id
+  user {
+    id
+  }
+  postTags {
+    deletable
+    tag {
+      id
+      name
+      seoName
+      showAsCategory
+      mainTag {
+        id
+        category {
+          id
+        }
+        userTag {
+          state
+        }
+      }
+    }
+  }
+}
+
+fragment PostVote_post on Post {
+  id
+  rating
+  ratingGeneral
+  minusThreshold
+  vote {
+    createdAt
+    power
+  }
+}
+
+fragment Post_post_2lIf9C on Post {
+  id
+  user {
+    id
+    username
+  }
+  bestComments {
+    ...CommentTree_comments_2EWd0p
+    id
+  }
+  tags {
+    mainTag {
+      id
+      name
+      category {
+        id
+      }
+      userTag {
+        state
+      }
+    }
+    id
+  }
+  nsfw
+  unsafe
+  createdAt
+  editableUntil
+  text
+  favorite @include(if: $isAuthorised)
+  ...PostVote_post @include(if: $isAuthorised)
+  banned
+  poll {
+    question
+  }
+  commentsCount
+  ...CommentTree_post
+  ...PostTags_post
+  ...Content_post
+  ...Content_content
+  ...PostFooter_post_2lIf9C
+  ...PostComments_post_2lIf9C
+  ...Poll_post_2lIf9C
+}
+
+fragment TagHeader_blog on Tag {
+  id
+  seoName
+  name
+  mainTag {
+    id
+    unsafe
+    nsfw
+    articlePost {
+      id
+    }
+    ...BlogDescription_blog
+    subTagsMenu {
+      ...TagList_blogs
+      id
+    }
+    subTags {
+      ...TagList_blogs
+      id
+    }
+    ...TagSuperBlogs_blog
+    hierarchy {
+      mainTag {
+        id
+        name
+        showAsCategory
+      }
+      id
+    }
+    synonyms
+    subscribers
+    count
+    image {
+      id
+    }
+    userTag {
+      state
+    }
+    articleImage {
+      id
+      type
+    }
+    category {
+      id
+      name
+      category {
+        id
+      }
+      showAsCategory
+      nsfw
+      unsafe
+    }
+    moderators {
+      ...UserList_users
+      id
+    }
+  }
+  ...TagSidebar_blog
+}
+
+fragment TagList_blogs on Tag {
+  id
+  name
+  seoName
+  count
+  subscribers
+  showAsCategory
+  mainTag {
+    nsfw
+    unsafe
+    category {
+      name
+      id
+    }
+    id
+  }
+}
+
+fragment TagPostPager_blog_qTg8U on Tag {
+  unsafe
+  postPager(type: $lineType, favoriteType: $favoriteType) {
+    ...PostPager_posts_3OSKdM
+    count
+    id
+  }
+}
+
+fragment TagSidebar_blog on Tag {
+  name
+  mainTag {
+    subTagsMenu {
+      id
+    }
+    subTags {
+      ...TagList_blogs
+      id
+    }
+    ...TagSuperBlogs_blog
+    nsfw
+    unsafe
+    category {
+      id
+      name
+      category {
+        id
+      }
+      nsfw
+      unsafe
+    }
+    moderators {
+      ...UserList_users
+      id
+    }
+    id
+  }
+}
+
+fragment TagSuperBlogs_blog on Tag {
+  subTagsMenu {
+    id
+    name
+    nsfw
+    unsafe
+    showAsCategory
+  }
+}
+
+fragment UserList_users on User {
+  id
+  username
+}
