@@ -1465,6 +1465,12 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
         *spec = rest;
         Ok(argument.into())
     };
+    // Specifiers parsed with `str.partition` upstream may omit the final `/`.
+    let take_rest = |spec: &mut &str| -> String {
+        let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
+        *spec = rest;
+        argument.into()
+    };
     while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI[".contains(*c)) {
         if ops.len() >= 16 {
             return Err(error("template field has too many specifiers"));
@@ -1487,13 +1493,13 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                     .ok_or_else(|| error("invalid template length limit"))?,
                 replacement: take(&mut spec)?,
             },
-            'J' => Op::Join(take(&mut spec)?),
+            'J' => Op::Join(take_rest(&mut spec)),
             'R' => Op::Replace {
                 old: take(&mut spec)?,
                 new: take(&mut spec)?,
             },
             'A' => {
-                let argument = take(&mut spec)?;
+                let argument = take_rest(&mut spec);
                 let mut chars = argument.chars();
                 let operation = match chars.next() {
                     Some('+') => Arithmetic::Add,
@@ -1508,14 +1514,14 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 Op::Arithmetic(operation, operand)
             }
             'C' => {
-                let conversions: Vec<char> = take(&mut spec)?.chars().collect();
+                let conversions: Vec<char> = take_rest(&mut spec).chars().collect();
                 if conversions.is_empty() || conversions.iter().any(|c| !CONVERSIONS.contains(*c)) {
                     return Err(error("unknown template conversion"));
                 }
                 Op::Convert(conversions)
             }
             'S' => Op::Sort {
-                reverse: match take(&mut spec)?.as_str() {
+                reverse: match take_rest(&mut spec).as_str() {
                     "" | "a" => false,
                     "r" | "d" => true,
                     _ => return Err(error("template sort order must be a, r, or d")),
@@ -1896,6 +1902,16 @@ fn strftime(date: &OffsetDateTime, pattern: &str) -> Result<String> {
 #[cfg(test)]
 mod strict_missing_tests {
     use super::{Field, Value};
+    #[test]
+    fn partitioned_specifiers_may_omit_their_terminator() {
+        let field = Field::parse("artist:?[/] /J, ", |_| true).unwrap();
+        let artists = Value::List(vec![Value::Str("A".into()), Value::Str("B".into())]);
+        assert_eq!(
+            field.render(|_| Some(artists.clone())).unwrap(),
+            Some("[A, B] ".into())
+        );
+        assert!(Field::parse("artist:?[/]", |_| true).is_err());
+    }
     #[test]
     fn strict_required_fields_keep_missing_errors_while_source_content_uses_default() {
         let field = Field::parse("user[name]", |_| true).unwrap();
