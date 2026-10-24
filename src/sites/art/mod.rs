@@ -26,6 +26,7 @@ mod inkbunny;
 mod issuu;
 mod itaku;
 mod itchio;
+mod iwara;
 mod kabeuchi;
 mod lightroom;
 mod livedoor;
@@ -93,6 +94,7 @@ pub(super) static SITES: &[&Site] = &[
     &nekohouse::SITE,
     &aryion::SITE,
     &foriio::SITE,
+    &iwara::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
