@@ -1,5 +1,5 @@
 //! livedoor Blog, mirroring gallery_dl/extractor/livedoor.py.
-use super::{Scan, extr, extract_iter, parse_int};
+use super::{Scan, extr, extract_iter, parse_int, split_html};
 use crate::sites::{Events, Http, Item, Route, Site, unescape};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -116,29 +116,6 @@ fn blog_page(
         .filter(|u| crate::sites::plain(u) && u.host_str() == Some(HOST))
         .map(|u| u.to_string());
     Ok((events, next))
-}
-
-/// gallery-dl `text.split_html`.
-fn split_html(text: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut rest = text;
-    loop {
-        let (piece, tail) = match rest.find('<') {
-            Some(start) => match rest[start + 1..].find('>') {
-                Some(end) if end > 0 => (&rest[..start], Some(&rest[start + end + 2..])),
-                _ => (rest, None),
-            },
-            None => (rest, None),
-        };
-        if !piece.trim().is_empty() {
-            parts.push(unescape(piece).trim().to_owned());
-        }
-        match tail {
-            Some(tail) => rest = tail,
-            None => break,
-        }
-    }
-    parts
 }
 
 /// Upstream `_load`: the post object plus its body HTML.

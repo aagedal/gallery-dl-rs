@@ -119,7 +119,8 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
     }
 }
 
-fn parse_thread(root: &str, body: &Value) -> Result<Vec<Item>> {
+/// A thread's files in post order; shared with 8chan, which runs LynxChan.
+pub(super) fn parse_thread(root: &str, body: &Value) -> Result<Vec<Item>> {
     let mut thread = body
         .as_object()
         .cloned()

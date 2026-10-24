@@ -8,25 +8,38 @@ use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod ao3;
 mod arena;
 mod behance;
+mod boosty;
 mod booth;
+mod cien;
 mod civitai;
+mod fantia;
 mod fivehundredpx;
 mod hatenablog;
+mod inkbunny;
 mod issuu;
 mod itaku;
+mod itchio;
 mod lightroom;
 mod livedoor;
 mod lofter;
 mod myportfolio;
 mod naverblog;
+mod nijie;
 mod picarto;
 mod piczel;
+mod pillowfort;
+mod poipiku;
+mod skeb;
 mod slideshare;
+mod smugmug;
 mod speakerdeck;
 mod steamgriddb;
+mod subscribestar;
 mod thirtyfivephoto;
+mod toyhouse;
 mod wikiart;
 mod xfolio;
 
@@ -40,17 +53,31 @@ pub(super) static SITES: &[&Site] = &[
     &steamgriddb::SITE,
     &thirtyfivephoto::SITE,
     &xfolio::SITE,
+    &ao3::SITE,
     &arena::SITE,
+    &boosty::SITE,
     &booth::SITE,
+    &cien::SITE,
     &civitai::SITE,
+    &fantia::SITE,
     &fivehundredpx::SITE,
+    &inkbunny::SITE,
     &issuu::SITE,
+    &itchio::SITE,
     &itaku::SITE,
     &lightroom::SITE,
+    &nijie::NIJIE,
+    &nijie::HORNE,
     &picarto::SITE,
     &piczel::SITE,
+    &pillowfort::SITE,
+    &poipiku::SITE,
+    &skeb::SITE,
     &slideshare::SITE,
+    &smugmug::SITE,
     &speakerdeck::SITE,
+    &subscribestar::SITE,
+    &toyhouse::SITE,
     &wikiart::SITE,
 ];
 
@@ -92,6 +119,29 @@ pub(crate) fn extr<'t>(text: &'t str, begin: &str, end: &str) -> &'t str {
     crate::sites::extr(text, begin, end).unwrap_or_default()
 }
 
+/// gallery-dl `text.split_html`.
+pub(crate) fn split_html(text: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    loop {
+        let (piece, tail) = match rest.find('<') {
+            Some(start) => match rest[start + 1..].find('>') {
+                Some(end) if end > 0 => (&rest[..start], Some(&rest[start + end + 2..])),
+                _ => (rest, None),
+            },
+            None => (rest, None),
+        };
+        if !piece.trim().is_empty() {
+            parts.push(crate::sites::unescape(piece).trim().to_owned());
+        }
+        match tail {
+            Some(tail) => rest = tail,
+            None => break,
+        }
+    }
+    parts
+}
+
 /// gallery-dl `text.parse_int`: Python `int()` of a string, else `default`.
 pub(crate) fn parse_int(text: &str, default: i64) -> i64 {
     let trimmed = text.trim();
@@ -100,6 +150,22 @@ pub(crate) fn parse_int(text: &str, default: i64) -> i64 {
         return default;
     }
     trimmed.replace('_', "").parse().unwrap_or(default)
+}
+
+/// gallery-dl `text.parse_query`: name-value pairs in order, keeping the
+/// first value of repeated names and skipping pairs without `=`.
+pub(crate) fn parse_query(qs: &str) -> Vec<(String, String)> {
+    let mut result: Vec<(String, String)> = Vec::new();
+    for pair in qs.split('&') {
+        let Some((name, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let name = crate::sites::percent_decode(&name.replace('+', " "));
+        if !result.iter().any(|(n, _)| *n == name) {
+            result.push((name, crate::sites::percent_decode(&value.replace('+', " "))));
+        }
+    }
+    result
 }
 
 /// gallery-dl `text.filename_from_url` on a raw string.
@@ -168,6 +234,16 @@ pub(crate) fn parse_ts(value: &Value) -> Option<i64> {
     crate::source_date::parse_timestamp(value)
 }
 
+const WEEKDAYS: [&str; 7] = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+];
+
 const MONTHS: [&str; 12] = [
     "january",
     "february",
@@ -184,7 +260,8 @@ const MONTHS: [&str; 12] = [
 ];
 
 /// A subset of Python `datetime.strptime` returning UTC seconds: `%Y %m %d
-/// %H %M %S %y %B %b %p %I %z %f %%` and literal text. Like Python,
+/// %H %M %S %y %B %b %A %a %p %I %z %f %%` and literal text; weekday names
+/// are matched but not checked against the date. Like Python,
 /// whitespace in the format matches any run of whitespace.
 pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
     let (mut year, mut month, mut day) = (1900i32, 1u8, 1u8);
@@ -250,6 +327,17 @@ pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
                     }
                 })?;
                 month = index as u8 + 1;
+                input = input.get(len..)?;
+            }
+            'A' | 'a' => {
+                let lower = input.to_lowercase();
+                let len = WEEKDAYS.iter().find_map(|name| {
+                    if lower.starts_with(name) {
+                        Some(name.len())
+                    } else {
+                        lower.starts_with(&name[..3]).then_some(3)
+                    }
+                })?;
                 input = input.get(len..)?;
             }
             'z' => {
@@ -322,6 +410,13 @@ pub(crate) fn digits(text: &str) -> bool {
     (1..=20).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// The leading ASCII digits of `text`, as upstream `(\d+)` without an
+/// anchor; at most 20 digits.
+pub(crate) fn leading_digits(text: &str) -> Option<&str> {
+    let len = text.bytes().take_while(u8::is_ascii_digit).count();
+    (1..=20).contains(&len).then(|| &text[..len])
+}
+
 /// A path segment matching upstream `[^/?#]+`.
 pub(crate) fn segment(text: &str) -> bool {
     !text.is_empty() && !text.contains(['/', '?', '#'])
@@ -363,6 +458,64 @@ pub(crate) fn json_loads(text: &str, name: &str) -> Result<Value> {
     serde_json::from_str(text).map_err(|_| error(format!("{name} page contains no valid JSON")))
 }
 
+/// `Extractor._extract_nextdata`: a Next.js page's `__NEXT_DATA__` JSON.
+pub(crate) fn next_data(page: &str, name: &str) -> Result<Value> {
+    let data = match extr(
+        page,
+        " id=\"__NEXT_DATA__\" type=\"application/json\">",
+        "</script>",
+    ) {
+        "" => extr(
+            page,
+            " id='__NEXT_DATA__' type='application/json'>",
+            "</script>",
+        ),
+        data => data,
+    };
+    json_loads(data, name)
+}
+
+/// Upstream `Dispatch._dispatch_extractors`: the subcategories named by the
+/// `include` option (`"all"`, a comma-separated string or a list), else
+/// `default`, in option order; unknown names are dropped.
+pub(crate) fn include(
+    http: &crate::sites::Http,
+    all: &[&'static str],
+    default: &[&'static str],
+) -> Vec<&'static str> {
+    let names: Vec<String> = match http.option("include") {
+        None => default.iter().map(|s| (*s).to_owned()).collect(),
+        Some(Value::String(s)) if s == "all" => all.iter().map(|s| (*s).to_owned()).collect(),
+        Some(Value::String(s)) => s.replace(' ', "").split(',').map(str::to_owned).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        Some(_) => Vec::new(),
+    };
+    names
+        .iter()
+        .filter_map(|name| all.iter().copied().find(|sub| sub == name))
+        .collect()
+}
+
+/// Send the session's cookies with a file, as upstream downloads share the
+/// extractor's cookie jar; only cookies scoped to the file's host apply.
+pub(crate) fn session_cookies(
+    http: &crate::sites::Http,
+    item: crate::sites::Item,
+) -> crate::sites::Item {
+    let cookie = http
+        .api(item.url.as_str())
+        .ok()
+        .and_then(|url| http.cookie_header(&url));
+    match cookie {
+        Some(cookie) => item.header("Cookie", &cookie),
+        None => item,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,6 +534,12 @@ mod tests {
         nameext_into("https://x/a/My%20F.png?1", &mut map);
         assert_eq!(map["filename"], "My F");
         assert_eq!(map["extension"], "png");
+        assert_eq!(
+            parse_query("a=1&b&a=2&c+d=x%20y+z"),
+            [("a".into(), "1".into()), ("c d".into(), "x y z".into())]
+        );
+        assert_eq!(leading_digits("12ab"), Some("12"));
+        assert_eq!(leading_digits("ab"), None);
     }
 
     #[test]
@@ -395,6 +554,17 @@ mod tests {
             Some(1577934245 - 3600)
         );
         assert_eq!(strptime("2020-13-02", "%Y-%m-%d"), None);
+        assert_eq!(
+            strptime(
+                "Thu, 02 Jan 2020 12:04:05 +0900",
+                "%a, %d %b %Y %H:%M:%S %z"
+            ),
+            Some(1577934245)
+        );
+        assert_eq!(
+            strptime("Thursday Jan 02 03:04:05 2020", "%a %b %d %H:%M:%S %Y"),
+            Some(1577934245)
+        );
         assert_eq!(parse_iso("2020-01-02T03:04:05Z"), Some(1577934245));
         assert_eq!(parse_iso("12345"), None);
         assert_eq!(date(Some(1577934245)), Value::from("2020-01-02 03:04:05"));

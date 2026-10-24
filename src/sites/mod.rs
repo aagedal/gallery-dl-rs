@@ -230,10 +230,13 @@ pub fn native_only(category: &str) -> bool {
 }
 
 /// Cookie domains a site needs besides its own: short links are extracted
-/// by their target sites with the short-link site's session.
+/// by their target sites with the short-link site's session, and some
+/// sites serve the same extractors from a second domain.
 pub fn extra_cookie_domains(site: &Site) -> &'static [&'static str] {
     match site.category {
         "shortlink" => social::SHORTLINK_COOKIE_DOMAINS,
+        "cien" => &["ci-en.dlsite.com"],
+        "subscribestar" => &["subscribestar.adult"],
         _ => &[],
     }
 }
@@ -673,6 +676,18 @@ pub(crate) mod testing {
         crate::event::media_only(events)
             .any(|m| async move { m.is_err() })
             .await
+    }
+
+    /// Cancel each queued child before it starts; returns their metadata.
+    pub async fn queued(mut events: Events<'_>) -> Vec<ChildMetadata> {
+        let mut children = Vec::new();
+        while let Some(event) = events.next().await {
+            if let ExtractionEvent::BeginChild(scope) = event.unwrap() {
+                scope.control.cancel();
+                children.push(scope.metadata);
+            }
+        }
+        children
     }
 
     pub fn keywords(media: &Media) -> &Map<String, Value> {

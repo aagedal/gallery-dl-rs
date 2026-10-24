@@ -970,6 +970,9 @@ fn lookup(
         "extension" => Value::Str(extension.into()),
         "num" if metadata?.source_num.is_some() => convert(context.get("num")?, "num"),
         "num" if metadata?.pixiv_novel_metadata.is_some() => convert(context.get("num")?, "num"),
+        // Registry sites carry upstream's keywords: files without `num`
+        // leave it undefined, as gallery-dl does.
+        "num" if metadata?.site_keywords.is_some() => return None,
         "index" | "num" => match metadata?.index {
             0 => Value::None,
             index => Value::Int(index as i128),

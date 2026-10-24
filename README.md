@@ -2451,6 +2451,23 @@ are always native):
 | App short links | `t.snapchat.com`, `v.kuaishou.com`, `xhslink.com`, `v.douyin.com` resolve one redirect and are queued for their site (Xiaohongshu share links keep their `xsec_token`) | yes; Xiaohongshu's note pages still answer this network with a security page |
 | Kuaishou | native short videos (`visionVideoDetail` GraphQL) | no: anonymous clients get a captcha; pass a browser session's cookies |
 
+Further native ports of upstream modules keep their categories, path formats
+and options: `unsplash`, `pexels`, `tenor`, `imgbb`, `imagechest`, `telegraph`,
+`naver-webtoon`, `tapas`, `mangapark`, `dynastyscans`, `weebcentral`,
+`mangahere`, `inkbunny`, `skeb`, `toyhouse`, `poipiku`, `pillowfort`,
+`smugmug`, `blogspot`, `plurk`, `itchio`, `soundgasm`, `8chan`, `2chan`,
+`comick`, `mangafire`, `mangareader`, `mangatown`, `tcbscans`, `mangafox`,
+`boosty`, `fantia`, `subscribestar`, `cien`, `ao3`, `nijie`, `horne`,
+`imagebam`, `imageshack`, `imagefap`, `wallpapercave`, `desktopography`,
+`lexica`, `pixnet`, `listal`, `khinsider`, `audiochan` and `whyp`.
+Username/password logins and SmugMug OAuth are not ported; pass `--cookies`
+instead where upstream accepts session cookies (Nijie and Horne require
+them). Unsplash, Pexels, Toyhouse, Comick, Lexica and Khinsider answered this
+network with bot challenges; MangaPark, MangaFire, MangaReader, TCB Scans,
+Desktopography, Pixnet and AO3 were unreachable or had changed; and 8chan
+needs browser cookies past its proof-of-work page, so those are
+fixture-tested only. Plurk queues only links a native site handles.
+
 WhatsApp, WeChat, Messenger and QQ have no public media pages. The Kuaishou
 and Xiaohongshu extractors are tested against fixtures only; this network gets
 a captcha or a login page from them.

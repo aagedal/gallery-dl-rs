@@ -7,12 +7,31 @@ use crate::sites::Site;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod audiochan;
+mod desktopography;
+mod imagebam;
+mod imagechest;
+mod imagefap;
+mod imageshack;
+mod imgbb;
+mod khinsider;
+mod lexica;
+mod listal;
 mod misskey;
+mod pexels;
+mod pixnet;
 mod redgifs;
+mod soundgasm;
+mod telegraph;
+mod tenor;
+mod unsplash;
+mod wallpapercave;
+mod whyp;
 mod wikimedia;
 
 pub(super) static SITES: &[&Site] = &[
     &redgifs::SITE,
+    &soundgasm::SITE,
     &misskey::MISSKEY_IO,
     &misskey::MISSKEY_DESIGN,
     &misskey::MISSKEY_ART,
@@ -35,6 +54,23 @@ pub(super) static SITES: &[&Site] = &[
     &wikimedia::PIDGIWIKI,
     &wikimedia::AZURLANEWIKI,
     &wikimedia::MGEWIKI,
+    &unsplash::SITE,
+    &pexels::SITE,
+    &tenor::SITE,
+    &imgbb::SITE,
+    &imagechest::SITE,
+    &telegraph::SITE,
+    &imagebam::SITE,
+    &imageshack::SITE,
+    &imagefap::SITE,
+    &wallpapercave::SITE,
+    &desktopography::SITE,
+    &lexica::SITE,
+    &pixnet::SITE,
+    &listal::SITE,
+    &khinsider::SITE,
+    &audiochan::SITE,
+    &whyp::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
@@ -172,4 +208,58 @@ pub(crate) fn web_url(raw: &str) -> Option<Url> {
 /// The text of a string field, or empty.
 pub(crate) fn str_of<'v>(value: &'v Value, key: &str) -> &'v str {
     value.get(key).and_then(Value::as_str).unwrap_or_default()
+}
+
+/// Python `\w` for one character.
+pub(crate) fn word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Upstream `(?:[^/?#]*-)?(ID)` over one path segment, where `id` accepts
+/// the ID characters: the greedy slug ends at the last `-` that is followed
+/// by an ID character. Returns the matched text and the ID.
+pub(crate) fn slug_id(segment: &str, id: fn(char) -> bool) -> Option<(&str, &str)> {
+    let run = |start: usize| {
+        let len = segment[start..]
+            .find(|c: char| !id(c))
+            .unwrap_or(segment.len() - start);
+        (len > 0).then(|| (&segment[..start + len], &segment[start..start + len]))
+    };
+    segment
+        .match_indices('-')
+        .rev()
+        .find_map(|(i, _)| run(i + 1))
+        .or_else(|| run(0))
+}
+
+/// A raw path segment that stays one segment when formatted into a URL:
+/// non-empty and not a (percent-encoded) dot segment.
+pub(crate) fn path_segment(text: &str) -> bool {
+    let dots = text.to_ascii_lowercase().replace("%2e", ".");
+    !text.is_empty() && dots != "." && dots != ".." && !text.contains(['/', '?', '#', '\\'])
+}
+
+/// Set a request parameter like a Python dict item: an existing name keeps
+/// its position.
+pub(crate) fn set_param(params: &mut Vec<(String, String)>, name: &str, value: String) {
+    match params.iter_mut().find(|(k, _)| k == name) {
+        Some((_, v)) => *v = value,
+        None => params.push((name.into(), value)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slug_ids() {
+        let digit = |c: char| c.is_ascii_digit();
+        assert_eq!(slug_id("a-b-123", digit), Some(("a-b-123", "123")));
+        assert_eq!(slug_id("a-1-b", digit), Some(("a-1", "1")));
+        assert_eq!(slug_id("12ab", digit), Some(("12", "12")));
+        assert_eq!(slug_id("ab", digit), None);
+        assert_eq!(slug_id("x-a1b.c", word_char), Some(("x-a1b", "a1b")));
+        assert!(path_segment("abc") && !path_segment("%2E.") && !path_segment(""));
+    }
 }
