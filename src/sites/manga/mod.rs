@@ -18,7 +18,10 @@ mod comicvine;
 mod dandadan;
 mod dankefuerslesen;
 mod dynastyscans;
+mod hentai2read;
+mod hentaihere;
 mod hiperdex;
+mod imhentai;
 mod kaliscan;
 mod keenspot;
 mod komikcast;
@@ -26,20 +29,27 @@ mod madokami;
 mod mangadex;
 mod mangafire;
 mod mangafox;
+mod mangafreak;
 mod mangahere;
+mod manganelo;
 mod mangapark;
 mod mangaread;
 mod mangareader;
+mod mangataro;
 mod mangatown;
+mod mangoxo;
 mod naverwebtoon;
 mod rawkuma;
 mod readcomiconline;
 mod senmanga;
+mod simplyhentai;
 mod tapas;
 mod tcbscans;
 pub(super) mod text;
+mod tmohentai;
 mod webtoons;
 mod weebcentral;
+mod weebdex;
 
 pub(super) static SITES: &[&Site] = &[
     &mangadex::SITE,
@@ -68,6 +78,24 @@ pub(super) static SITES: &[&Site] = &[
     &senmanga::SITE,
     &keenspot::SITE,
     &comicvine::SITE,
+    &mangafreak::SITE,
+    &manganelo::NELOMANGA,
+    &manganelo::NATOMANGA,
+    &manganelo::MANGANATO,
+    &manganelo::MANGAKAKALOT,
+    &mangataro::SITE,
+    &mangoxo::SITE,
+    &weebdex::SITE,
+    &hentai2read::SITE,
+    &hentaihere::SITE,
+    &simplyhentai::SITE,
+    &imhentai::IMHENTAI,
+    &imhentai::HENTAIERA,
+    &imhentai::HENTAIROX,
+    &imhentai::HENTAIFOX,
+    &imhentai::HENTAIENVY,
+    &imhentai::HENTAIZAP,
+    &tmohentai::SITE,
 ];
 
 /// Insert a key into a keyword map.
