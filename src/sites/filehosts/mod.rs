@@ -14,9 +14,19 @@ use url::Url;
 mod bunkr;
 mod chevereto;
 mod cyberdrop;
+mod cyberfile;
 mod filester;
 mod gofile;
+mod imagehosts;
+mod imagepond;
+mod imgpile;
+mod imgth;
+mod koofr;
+mod lensdump;
+mod mixdrop;
 mod turbo;
+mod urlgalleries;
+mod webmshare;
 
 pub(super) static SITES: &[&Site] = &[
     &gofile::SITE,
@@ -27,6 +37,32 @@ pub(super) static SITES: &[&Site] = &[
     &chevereto::PUTMEGA,
     &turbo::SITE,
     &filester::SITE,
+    &koofr::SITE,
+    &cyberfile::SITE,
+    &webmshare::SITE,
+    &mixdrop::SITE,
+    &imgpile::SITE,
+    &imagepond::SITE,
+    &imgth::SITE,
+    &lensdump::SITE,
+    &urlgalleries::SITE,
+    &imagehosts::IMXTO,
+    &imagehosts::ACIDIMG,
+    &imagehosts::IMAGEVENUE,
+    &imagehosts::IMAGETWIST,
+    &imagehosts::IMGADULT,
+    &imagehosts::IMGSPICE,
+    &imagehosts::PIXHOST,
+    &imagehosts::TURBOIMAGEHOST,
+    &imagehosts::VIPR,
+    &imagehosts::IMGCLICK,
+    &imagehosts::FAPPIC,
+    &imagehosts::PICSTATE,
+    &imagehosts::IMGDRIVE,
+    &imagehosts::IMGTAXI,
+    &imagehosts::IMGWALLET,
+    &imagehosts::SILVERPIC,
+    &imagehosts::IMGPV,
 ];
 
 // ---------------------------------------------------------------------------
