@@ -23,6 +23,7 @@ mod pexels;
 mod photovogue;
 mod pixnet;
 mod redgifs;
+mod shopify;
 mod slickpic;
 mod soundgasm;
 mod telegraph;
@@ -81,6 +82,17 @@ pub(super) static SITES: &[&Site] = &[
     &tungsten::SITE,
     &slickpic::SITE,
     &tumblrgallery::SITE,
+    &shopify::CHELSEACREW,
+    &shopify::FASHIONNOVA,
+    &shopify::LOUNGEUNDERWEAR,
+    &shopify::MICHAELSCAMERAS,
+    &shopify::MODCLOTH,
+    &shopify::OHPOLLY,
+    &shopify::OMGMIAMISWIMWEAR,
+    &shopify::PINUPGIRLCLOTHING,
+    &shopify::RAIDLONDON,
+    &shopify::UNIQUE_VINTAGE,
+    &shopify::WINDSORSTORE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
