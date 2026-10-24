@@ -14,6 +14,7 @@ mod naverchzzk;
 mod nitter;
 mod pholder;
 mod plurk;
+mod postmill;
 mod reactor;
 mod scrolller;
 mod shortlink;
@@ -63,6 +64,7 @@ pub(super) static SITES: &[&Site] = &[
     &xenforo::TITSINTOPS,
     &xenforo::SOCIALMEDIAGIRLSFORUM,
     &xenforo::BLACKTOWHITE,
+    &postmill::RADDLE_SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;
