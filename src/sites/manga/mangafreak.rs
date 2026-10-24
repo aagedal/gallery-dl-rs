@@ -17,7 +17,8 @@ pub static SITE: Site = Site {
     cookies: None,
 };
 
-const ROOT: &str = "https://ww2.mangafreak.me";
+// ww2 now redirects here, off-origin for the same-origin HTTP layer.
+const ROOT: &str = "https://ww3.mangafreak.me";
 const IMAGES: &str = "https://images.mangafreak.me/mangas/";
 
 static CHAPTER: Route = Route::new(
@@ -304,7 +305,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(
             list[0].0.as_str(),
-            "https://ww2.mangafreak.me/Read1_Onepunch_Man_2b"
+            "https://ww3.mangafreak.me/Read1_Onepunch_Man_2b"
         );
         let k = &list[0].1;
         assert_eq!(k["manga"], "Onepunch Man");
