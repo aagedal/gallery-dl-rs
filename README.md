@@ -2459,7 +2459,17 @@ and options: `unsplash`, `pexels`, `tenor`, `imgbb`, `imagechest`, `telegraph`,
 `comick`, `mangafire`, `mangareader`, `mangatown`, `tcbscans`, `mangafox`,
 `boosty`, `fantia`, `subscribestar`, `cien`, `ao3`, `nijie`, `horne`,
 `imagebam`, `imageshack`, `imagefap`, `wallpapercave`, `desktopography`,
-`lexica`, `pixnet`, `listal`, `khinsider`, `audiochan` and `whyp`.
+`lexica`, `pixnet`, `listal`, `khinsider`, `audiochan`, `whyp`, the
+`imagehosts` family (imxto, imagetwist, imagevenue, pixhost, vipr and others),
+`koofr`, `cyberfile`, `webmshare`, `mixdrop`, `imgpile`, `imagepond`, `imgth`,
+`lensdump`, `urlgalleries`, `hiperdex`, `mangaread`, `kaliscan`, `rawkuma`,
+`komikcast`, `dandadan`, `dankefuerslesen`, `madokami` (site options
+`username`/`password`), `readcomiconline`, `senmanga`, `keenspot`, `comicvine`,
+`photovogue`, `architizer`, `naver-chzzk`, `bbc`, `tungsten`, `slickpic`,
+`tumblrgallery`, `pholder`, `scrolller`, `seiga`, `arcalive`, Shopify stores,
+`reactor`/`joyreactor`, Nitter instances and XenForo forums. Gallery-dl's
+`shopify:`/`xenforo:` URL prefixes and extra configured instances are not
+supported, and all `*.reactor.cc` subdomains share the `reactor` category.
 Username/password logins and SmugMug OAuth are not ported; pass `--cookies`
 instead where upstream accepts session cookies (Nijie and Horne require
 them). Unsplash, Pexels, Toyhouse, Comick, Lexica and Khinsider answered this
