@@ -139,29 +139,6 @@ pub(crate) fn parse_int(text: &str, default: i64) -> i64 {
     trimmed.replace('_', "").parse().unwrap_or(default)
 }
 
-/// gallery-dl `text.split_html`.
-pub(crate) fn split_html(text: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut rest = text;
-    loop {
-        let (piece, tail) = match rest.find('<') {
-            Some(start) => match rest[start + 1..].find('>') {
-                Some(end) if end > 0 => (&rest[..start], Some(&rest[start + end + 2..])),
-                _ => (rest, None),
-            },
-            None => (rest, None),
-        };
-        if !piece.trim().is_empty() {
-            parts.push(crate::sites::unescape(piece).trim().to_owned());
-        }
-        match tail {
-            Some(tail) => rest = tail,
-            None => break,
-        }
-    }
-    parts
-}
-
 /// gallery-dl `text.parse_query`: name-value pairs in order, keeping the
 /// first value of repeated names and skipping pairs without `=`.
 pub(crate) fn parse_query(qs: &str) -> Vec<(String, String)> {
