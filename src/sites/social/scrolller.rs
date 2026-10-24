@@ -115,7 +115,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 "filter": filter,
                 "sortBy": "RANDOM",
                 "limit": 50,
-                "isNsfw": subreddit.get("isNsfw").cloned().unwrap_or(Value::Null),
+                "nsfw": "ALL",
             });
             let first = subreddit.get("children").cloned();
             Ok(pagination(
@@ -127,23 +127,15 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             ))
         }),
         Some(Target::User(user)) => crate::sites::once(async move {
-            let mut variables = json!({
+            let variables = json!({
                 "username": crate::sites::percent_decode(&user),
                 "iterator": null,
                 "limit": 40,
                 "filter": null,
                 "sortBy": "RANDOM",
-                "isNsfw": true,
+                "nsfw": "ALL",
             });
-            let data = graphql(http, USER_QUERY, &variables).await?;
-            let posts = data.get("getUserPosts").cloned();
-            let first = if crate::sites::art::truthy(posts.as_ref().and_then(|p| p.get("items"))) {
-                posts
-            } else {
-                variables["isNsfw"] = false.into();
-                None
-            };
-            Ok(pagination(http, &USER, USER_QUERY, variables, first))
+            Ok(pagination(http, &USER, USER_QUERY, variables, None))
         }),
         Some(Target::Following) => crate::sites::fail(error(
             "Scrolller followed subreddits require a login, which is not supported",
@@ -228,6 +220,12 @@ pub(crate) fn parse_post(post: &Value) -> Vec<Item> {
     let Some(mut post) = post.as_object().cloned() else {
         return Vec::new();
     };
+    // The API dropped `posted_by`; `reddit_posted_by` names the same user.
+    if !post.contains_key("posted_by")
+        && let Some(user) = post.get("reddit_posted_by").cloned()
+    {
+        post.insert("posted_by".into(), user);
+    }
     let album = post.remove("albumContent");
     let mut files: Vec<Map<String, Value>> = Vec::new();
     match album
@@ -394,6 +392,33 @@ mod tests {
         assert!(requests[1].contains("query SubredditChildrenQuery"));
         assert!(requests[1].contains(r#""iterator":"it1""#));
         assert!(requests[1].contains(r#""subredditId":7"#));
+        assert!(requests[1].contains(r#""nsfw":"ALL""#));
+        assert!(requests[1].contains("nsfw: $nsfw"));
+    }
+
+    #[tokio::test]
+    async fn user_posts_take_the_reddit_poster_as_posted_by() {
+        let page = json!({"data": {"getUserPosts": {"iterator": null, "items": [
+            {"id": 3, "title": "", "reddit_posted_by": "spez", "subredditTitle": "pics",
+             "mediaSources": [source("https://images.scrolller.com/3.jpg", 1, false)]}]}}});
+        let (root, server) = serve(vec![json(page)]);
+        let http = http("scrolller", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://scrolller.com/reddit-user/spez").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        let (_, dir) = crate::sites::default_templates(&files[0]).unwrap();
+        assert_eq!(
+            dir.render(&files[0]).unwrap().unwrap(),
+            std::path::PathBuf::from("scrolller/User/spez")
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].contains("query UserPostsQuery"));
+        assert!(requests[0].contains(r#""nsfw":"ALL""#));
+        assert!(!requests[0].contains(" posted_by "));
     }
 
     #[tokio::test]

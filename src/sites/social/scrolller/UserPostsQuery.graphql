@@ -4,7 +4,7 @@ query UserPostsQuery(
     $limit: Int!
     $filter: GalleryFilter
     $sortBy: GallerySortBy
-    $isNsfw: Boolean
+    $nsfw: NsfwFilter!
 ) {
     getUserPosts(
         data: {
@@ -13,11 +13,11 @@ query UserPostsQuery(
             limit: $limit
             filter: $filter
             sortBy: $sortBy
-            isNsfw: $isNsfw
+            nsfw: $nsfw
         }
     ) {
         iterator items {
-            __typename id url title posted_by reddit_posted_by subredditId
+            __typename id url title reddit_posted_by subredditId
             subredditTitle subredditUrl subredditIsFollowing redditPath isNsfw
             hasAudio fullLengthSource gfycatSource redgifsSource ownerAvatar
             username displayName favoriteCount isPaid tags commentsCount

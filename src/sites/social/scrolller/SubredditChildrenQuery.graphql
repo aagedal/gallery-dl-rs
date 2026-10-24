@@ -4,7 +4,7 @@ query SubredditChildrenQuery(
     $filter: GalleryFilter
     $sortBy: GallerySortBy
     $limit: Int!
-    $isNsfw: Boolean
+    $nsfw: NsfwFilter!
 ) {
     getSubredditChildren(
         data: {
@@ -13,7 +13,7 @@ query SubredditChildrenQuery(
             filter: $filter,
             sortBy: $sortBy,
             limit: $limit,
-            isNsfw: $isNsfw
+            nsfw: $nsfw
         },
     ) {
         iterator items {
