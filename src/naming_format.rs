@@ -167,14 +167,27 @@ enum Arithmetic {
 #[derive(Clone, Debug)]
 enum Op {
     Identity,
-    Optional { before: String, after: String },
-    Limit { max: usize, replacement: String },
+    Optional {
+        before: String,
+        after: String,
+    },
+    Limit {
+        max: usize,
+        replacement: String,
+    },
     Join(String),
-    Replace { old: String, new: String },
+    Replace {
+        old: String,
+        new: String,
+    },
     Arithmetic(Arithmetic, i128),
     Convert(Vec<char>),
-    Sort { reverse: bool },
+    Sort {
+        reverse: bool,
+    },
     Offset(source_offset::Offset),
+    /// gallery-dl `[start:stop]` and `[bstart:stop]` slicing specifiers.
+    Slice(Accessor),
 }
 
 #[derive(Clone, Debug)]
@@ -483,6 +496,7 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
             value => value,
         },
         Op::Offset(offset) => offset_date(value, *offset)?,
+        Op::Slice(accessor) => access(value, accessor),
     };
     apply(rest, spec, value)
 }
@@ -654,6 +668,7 @@ fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
             Value::List(values)
         }
         Op::Offset(offset) => offset_date(value, *offset)?,
+        Op::Slice(accessor) => access(value, accessor),
     };
     apply_identity(rest, spec, value)
 }
@@ -1450,7 +1465,7 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
         *spec = rest;
         Ok(argument.into())
     };
-    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI".contains(*c)) {
+    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI[".contains(*c)) {
         if ops.len() >= 16 {
             return Err(error("template field has too many specifiers"));
         }
@@ -1510,6 +1525,31 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
                 spec = rest;
                 Op::Offset(source_offset::Offset::parse(argument)?)
+            }
+            '[' => {
+                let (indices, rest) = spec
+                    .split_once(']')
+                    .ok_or_else(|| error("unclosed template slice specifier"))?;
+                spec = rest;
+                let bound = |text: &str| -> Result<Option<i64>> {
+                    if text.is_empty() {
+                        return Ok(None);
+                    }
+                    text.parse()
+                        .map(Some)
+                        .map_err(|_| error("invalid template slice"))
+                };
+                let (bytes, indices) = match indices.strip_prefix('b') {
+                    Some(indices) => (true, indices),
+                    None => (false, indices),
+                };
+                let (start, stop) = indices.split_once(':').unwrap_or((indices, ""));
+                let (start, stop) = (bound(start)?, bound(stop)?);
+                Op::Slice(if bytes {
+                    Accessor::ByteSlice(start, stop)
+                } else {
+                    Accessor::Slice(start, stop)
+                })
             }
             _ => unreachable!(),
         });

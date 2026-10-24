@@ -262,7 +262,15 @@ impl Http {
     }
 
     pub async fn get(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
-        self.send(url, headers, None).await
+        Ok(self.send(url, headers, None).await?.1)
+    }
+
+    /// The body text and the URL it was served from after same-origin
+    /// redirects, for sites that read the final location (upstream
+    /// `response.url`).
+    pub async fn page(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(Url, String)> {
+        let (url, body) = self.send(url, headers, None).await?;
+        Ok((url, String::from_utf8_lossy(&body).into_owned()))
     }
 
     /// The `Location` of one GET without following it, for short links that
@@ -305,7 +313,7 @@ impl Http {
         body: Body<'_>,
         headers: &[(&str, &str)],
     ) -> Result<Vec<u8>> {
-        self.send(url, headers, Some(body)).await
+        Ok(self.send(url, headers, Some(body)).await?.1)
     }
 
     /// POST a form and parse the JSON response; redirects are refused.
@@ -315,7 +323,7 @@ impl Http {
         form: &[(&str, &str)],
         headers: &[(&str, &str)],
     ) -> Result<Value> {
-        let bytes = self.send(url, headers, Some(Body::Form(form))).await?;
+        let (_, bytes) = self.send(url, headers, Some(Body::Form(form))).await?;
         serde_json::from_slice(&bytes)
             .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
     }
@@ -327,7 +335,7 @@ impl Http {
         body: &Value,
         headers: &[(&str, &str)],
     ) -> Result<Value> {
-        let bytes = self.send(url, headers, Some(Body::Json(body))).await?;
+        let (_, bytes) = self.send(url, headers, Some(Body::Json(body))).await?;
         serde_json::from_slice(&bytes)
             .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
     }
@@ -337,7 +345,7 @@ impl Http {
         url: &Url,
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<(Url, Vec<u8>)> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
                 match self.attempt(url, headers, body, attempt).await {
@@ -360,7 +368,7 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
         attempt: u8,
-    ) -> std::result::Result<Vec<u8>, Failure> {
+    ) -> std::result::Result<(Url, Vec<u8>), Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
@@ -451,6 +459,7 @@ impl Http {
             return Err(error(format!("{name} returned HTTP {status}")).into());
         }
         let headers = response.headers().clone();
+        let location = response.url().clone();
         let mut response = response;
         let mut bytes = Vec::new();
         while let Some(chunk) = response
@@ -463,7 +472,10 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok(crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?)
+        Ok((
+            location,
+            crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
+        ))
     }
 }
 
