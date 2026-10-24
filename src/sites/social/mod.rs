@@ -23,6 +23,7 @@ mod threads;
 mod tiktok;
 mod vk;
 mod weibo;
+mod xenforo;
 mod xiaohongshu;
 mod youtube_posts;
 
@@ -55,6 +56,13 @@ pub(super) static SITES: &[&Site] = &[
     &nitter::NITTER_TIEKOETTER,
     &nitter::XCANCEL,
     &nitter::LIGHTBRD,
+    &xenforo::SIMPCITY,
+    &xenforo::NUDOSTARFORUM,
+    &xenforo::ATFFORUM,
+    &xenforo::CELEBFORUM,
+    &xenforo::TITSINTOPS,
+    &xenforo::SOCIALMEDIAGIRLSFORUM,
+    &xenforo::BLACKTOWHITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;

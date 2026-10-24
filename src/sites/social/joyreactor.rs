@@ -239,7 +239,7 @@ fn pagination(http: &Http, listing: Listing, path: String, variables: Value) -> 
                 let data = graphql(http, &listing.root, listing.query, &variables).await?;
                 let posts = data
                     .as_object()
-                    .and_then(|map| map.values().last())
+                    .and_then(|map| map.values().next_back())
                     .and_then(|value| value.pointer("/postPager/posts"))
                     .and_then(Value::as_array)
                     .cloned()

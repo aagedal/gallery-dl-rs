@@ -184,7 +184,7 @@ fn pagination<'a>(
             data = match data {
                 Value::Object(map) => map
                     .into_iter()
-                    .last()
+                    .next_back()
                     .map(|(_, value)| value)
                     .ok_or_else(|| error("Scrolller API response has no items"))?,
                 _ => return Err(error("Scrolller API response has no items")),

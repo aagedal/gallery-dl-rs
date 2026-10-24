@@ -304,9 +304,7 @@ mod tests {
 
     #[test]
     fn classifies_urls() {
-        let t = |hosts: fn(&str) -> bool, raw: &str| {
-            target(hosts, &Url::parse(raw).unwrap()).map(|(t, root, path)| (t, root, path))
-        };
+        let t = |hosts: fn(&str) -> bool, raw: &str| target(hosts, &Url::parse(raw).unwrap());
         assert_eq!(
             t(reactor_host, "http://anime.reactor.cc/tag/Anime+Art/2"),
             Some((
