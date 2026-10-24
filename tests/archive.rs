@@ -620,6 +620,18 @@ async fn cancellation_does_not_archive_partial_media_or_keep_its_identity_locked
                 Err(e) => panic!("{e}"),
             }
         };
+        // Answer only after the full request so the client is reading a response.
+        socket.set_nonblocking(false).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let read = socket.read(&mut bytes).unwrap();
+            assert!(read > 0 && request.len() < 65536);
+            request.extend_from_slice(&bytes[..read]);
+        }
         socket
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc")
             .unwrap();
