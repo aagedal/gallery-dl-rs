@@ -8,10 +8,14 @@ use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod ao3;
 mod arena;
 mod behance;
+mod boosty;
 mod booth;
+mod cien;
 mod civitai;
+mod fantia;
 mod fivehundredpx;
 mod hatenablog;
 mod inkbunny;
@@ -23,6 +27,7 @@ mod livedoor;
 mod lofter;
 mod myportfolio;
 mod naverblog;
+mod nijie;
 mod picarto;
 mod piczel;
 mod pillowfort;
@@ -32,6 +37,7 @@ mod slideshare;
 mod smugmug;
 mod speakerdeck;
 mod steamgriddb;
+mod subscribestar;
 mod thirtyfivephoto;
 mod toyhouse;
 mod wikiart;
@@ -47,15 +53,21 @@ pub(super) static SITES: &[&Site] = &[
     &steamgriddb::SITE,
     &thirtyfivephoto::SITE,
     &xfolio::SITE,
+    &ao3::SITE,
     &arena::SITE,
+    &boosty::SITE,
     &booth::SITE,
+    &cien::SITE,
     &civitai::SITE,
+    &fantia::SITE,
     &fivehundredpx::SITE,
     &inkbunny::SITE,
     &issuu::SITE,
     &itchio::SITE,
     &itaku::SITE,
     &lightroom::SITE,
+    &nijie::NIJIE,
+    &nijie::HORNE,
     &picarto::SITE,
     &piczel::SITE,
     &pillowfort::SITE,
@@ -64,6 +76,7 @@ pub(super) static SITES: &[&Site] = &[
     &slideshare::SITE,
     &smugmug::SITE,
     &speakerdeck::SITE,
+    &subscribestar::SITE,
     &toyhouse::SITE,
     &wikiart::SITE,
 ];
@@ -221,6 +234,16 @@ pub(crate) fn parse_ts(value: &Value) -> Option<i64> {
     crate::source_date::parse_timestamp(value)
 }
 
+const WEEKDAYS: [&str; 7] = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+];
+
 const MONTHS: [&str; 12] = [
     "january",
     "february",
@@ -237,7 +260,8 @@ const MONTHS: [&str; 12] = [
 ];
 
 /// A subset of Python `datetime.strptime` returning UTC seconds: `%Y %m %d
-/// %H %M %S %y %B %b %p %I %z %f %%` and literal text. Like Python,
+/// %H %M %S %y %B %b %A %a %p %I %z %f %%` and literal text; weekday names
+/// are matched but not checked against the date. Like Python,
 /// whitespace in the format matches any run of whitespace.
 pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
     let (mut year, mut month, mut day) = (1900i32, 1u8, 1u8);
@@ -303,6 +327,17 @@ pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
                     }
                 })?;
                 month = index as u8 + 1;
+                input = input.get(len..)?;
+            }
+            'A' | 'a' => {
+                let lower = input.to_lowercase();
+                let len = WEEKDAYS.iter().find_map(|name| {
+                    if lower.starts_with(name) {
+                        Some(name.len())
+                    } else {
+                        lower.starts_with(&name[..3]).then_some(3)
+                    }
+                })?;
                 input = input.get(len..)?;
             }
             'z' => {
@@ -440,6 +475,47 @@ pub(crate) fn next_data(page: &str, name: &str) -> Result<Value> {
     json_loads(data, name)
 }
 
+/// Upstream `Dispatch._dispatch_extractors`: the subcategories named by the
+/// `include` option (`"all"`, a comma-separated string or a list), else
+/// `default`, in option order; unknown names are dropped.
+pub(crate) fn include(
+    http: &crate::sites::Http,
+    all: &[&'static str],
+    default: &[&'static str],
+) -> Vec<&'static str> {
+    let names: Vec<String> = match http.option("include") {
+        None => default.iter().map(|s| (*s).to_owned()).collect(),
+        Some(Value::String(s)) if s == "all" => all.iter().map(|s| (*s).to_owned()).collect(),
+        Some(Value::String(s)) => s.replace(' ', "").split(',').map(str::to_owned).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        Some(_) => Vec::new(),
+    };
+    names
+        .iter()
+        .filter_map(|name| all.iter().copied().find(|sub| sub == name))
+        .collect()
+}
+
+/// Send the session's cookies with a file, as upstream downloads share the
+/// extractor's cookie jar; only cookies scoped to the file's host apply.
+pub(crate) fn session_cookies(
+    http: &crate::sites::Http,
+    item: crate::sites::Item,
+) -> crate::sites::Item {
+    let cookie = http
+        .api(item.url.as_str())
+        .ok()
+        .and_then(|url| http.cookie_header(&url));
+    match cookie {
+        Some(cookie) => item.header("Cookie", &cookie),
+        None => item,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,6 +554,17 @@ mod tests {
             Some(1577934245 - 3600)
         );
         assert_eq!(strptime("2020-13-02", "%Y-%m-%d"), None);
+        assert_eq!(
+            strptime(
+                "Thu, 02 Jan 2020 12:04:05 +0900",
+                "%a, %d %b %Y %H:%M:%S %z"
+            ),
+            Some(1577934245)
+        );
+        assert_eq!(
+            strptime("Thursday Jan 02 03:04:05 2020", "%a %b %d %H:%M:%S %Y"),
+            Some(1577934245)
+        );
         assert_eq!(parse_iso("2020-01-02T03:04:05Z"), Some(1577934245));
         assert_eq!(parse_iso("12345"), None);
         assert_eq!(date(Some(1577934245)), Value::from("2020-01-02 03:04:05"));

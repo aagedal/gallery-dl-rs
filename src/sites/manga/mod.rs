@@ -25,7 +25,7 @@ mod mangatown;
 mod naverwebtoon;
 mod tapas;
 mod tcbscans;
-mod text;
+pub(super) mod text;
 mod webtoons;
 mod weebcentral;
 
