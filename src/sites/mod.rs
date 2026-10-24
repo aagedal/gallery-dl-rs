@@ -541,25 +541,36 @@ pub(crate) fn archive_key(media: &Media) -> Option<(&'static str, String)> {
     while let Some(start) = rest.find('{') {
         let end = rest[start..].find('}')? + start;
         let spec = rest[start + 1..end].split([':', '!']).next()?;
-        let mut parts = spec.split('[');
-        let mut value = keywords.fields.get(parts.next()?)?.clone();
-        for key in parts {
-            let key = key.strip_suffix(']')?;
-            value = match (&value, key.parse::<usize>()) {
-                (Value::Array(items), Ok(i)) => items.get(i)?.clone(),
-                (Value::String(text), Ok(i)) => text.chars().nth(i)?.to_string().into(),
-                (Value::Object(map), _) => map.get(key)?.clone(),
-                _ => return None,
-            };
+        // `{a|b}` takes the first truthy alternative, else the last value.
+        let mut value = None;
+        for alternative in spec.split('|') {
+            value = field(&keywords.fields, alternative);
+            if art::truthy(value.as_ref()) {
+                break;
+            }
         }
-        if value.is_null() {
-            return None;
-        }
+        let value = value.filter(|value| !value.is_null())?;
         fields.push(scalar(&value));
         rest = &rest[end + 1..];
     }
     let identity = serde_json::json!([format, fields]).to_string();
     (identity.len() <= 4096).then_some((site.category, identity))
+}
+
+/// One `name[key][index]` archive field.
+fn field(fields: &Map<String, Value>, spec: &str) -> Option<Value> {
+    let mut parts = spec.split('[');
+    let mut value = fields.get(parts.next()?)?.clone();
+    for key in parts {
+        let key = key.strip_suffix(']')?;
+        value = match (&value, key.parse::<usize>()) {
+            (Value::Array(items), Ok(i)) => items.get(i)?.clone(),
+            (Value::String(text), Ok(i)) => text.chars().nth(i)?.to_string().into(),
+            (Value::Object(map), _) => map.get(key)?.clone(),
+            _ => return None,
+        };
+    }
+    Some(value)
 }
 
 /// Default filename and directory templates for registry media.

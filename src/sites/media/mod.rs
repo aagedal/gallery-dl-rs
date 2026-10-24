@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod audiochan;
+mod bbc;
 mod desktopography;
 mod imagebam;
 mod imagechest;
@@ -19,11 +20,16 @@ mod lexica;
 mod listal;
 mod misskey;
 mod pexels;
+mod photovogue;
 mod pixnet;
 mod redgifs;
+mod shopify;
+mod slickpic;
 mod soundgasm;
 mod telegraph;
 mod tenor;
+mod tumblrgallery;
+mod tungsten;
 mod unsplash;
 mod wallpapercave;
 mod whyp;
@@ -71,6 +77,22 @@ pub(super) static SITES: &[&Site] = &[
     &khinsider::SITE,
     &audiochan::SITE,
     &whyp::SITE,
+    &photovogue::SITE,
+    &bbc::SITE,
+    &tungsten::SITE,
+    &slickpic::SITE,
+    &tumblrgallery::SITE,
+    &shopify::CHELSEACREW,
+    &shopify::FASHIONNOVA,
+    &shopify::LOUNGEUNDERWEAR,
+    &shopify::MICHAELSCAMERAS,
+    &shopify::MODCLOTH,
+    &shopify::OHPOLLY,
+    &shopify::OMGMIAMISWIMWEAR,
+    &shopify::PINUPGIRLCLOTHING,
+    &shopify::RAIDLONDON,
+    &shopify::UNIQUE_VINTAGE,
+    &shopify::WINDSORSTORE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12

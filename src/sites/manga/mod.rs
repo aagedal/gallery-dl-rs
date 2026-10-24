@@ -14,15 +14,27 @@ use std::sync::{Arc, Mutex};
 use url::Url;
 
 mod comick;
+mod comicvine;
+mod dandadan;
+mod dankefuerslesen;
 mod dynastyscans;
+mod hiperdex;
+mod kaliscan;
+mod keenspot;
+mod komikcast;
+mod madokami;
 mod mangadex;
 mod mangafire;
 mod mangafox;
 mod mangahere;
 mod mangapark;
+mod mangaread;
 mod mangareader;
 mod mangatown;
 mod naverwebtoon;
+mod rawkuma;
+mod readcomiconline;
+mod senmanga;
 mod tapas;
 mod tcbscans;
 pub(super) mod text;
@@ -44,6 +56,18 @@ pub(super) static SITES: &[&Site] = &[
     &mangareader::SITE,
     &mangafire::SITE,
     &comick::SITE,
+    &hiperdex::SITE,
+    &mangaread::SITE,
+    &kaliscan::SITE,
+    &rawkuma::SITE,
+    &komikcast::SITE,
+    &dandadan::SITE,
+    &dankefuerslesen::SITE,
+    &madokami::SITE,
+    &readcomiconline::SITE,
+    &senmanga::SITE,
+    &keenspot::SITE,
+    &comicvine::SITE,
 ];
 
 /// Insert a key into a keyword map.
