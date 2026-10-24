@@ -2,9 +2,11 @@
 use crate::sites::Site;
 
 mod bilibili;
+mod blogger;
 mod discord;
 mod kuaishou;
 mod linkedin;
+mod plurk;
 mod shortlink;
 mod snapchat;
 mod telegram;
@@ -29,6 +31,8 @@ pub(super) static SITES: &[&Site] = &[
     &youtube_posts::SITE,
     &shortlink::SITE,
     &linkedin::SITE,
+    &blogger::SITE,
+    &plurk::SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;

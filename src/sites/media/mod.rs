@@ -12,6 +12,7 @@ mod imgbb;
 mod misskey;
 mod pexels;
 mod redgifs;
+mod soundgasm;
 mod telegraph;
 mod tenor;
 mod unsplash;
@@ -19,6 +20,7 @@ mod wikimedia;
 
 pub(super) static SITES: &[&Site] = &[
     &redgifs::SITE,
+    &soundgasm::SITE,
     &misskey::MISSKEY_IO,
     &misskey::MISSKEY_DESIGN,
     &misskey::MISSKEY_ART,

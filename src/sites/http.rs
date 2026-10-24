@@ -156,6 +156,15 @@ impl Http {
             .value(url, name)
     }
 
+    /// The `Cookie` header the session would send to `url`, for sites whose
+    /// files are served only to the session that fetched their pages.
+    pub fn cookie_header(&self, url: &Url) -> Option<String> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .header(url)
+    }
+
     /// Store a cookie as if `url` had set it with this `Set-Cookie` value.
     pub fn set_cookie(&self, url: &Url, set_cookie: &str) {
         self.cookies

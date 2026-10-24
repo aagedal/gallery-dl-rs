@@ -16,6 +16,7 @@ mod fivehundredpx;
 mod hatenablog;
 mod issuu;
 mod itaku;
+mod itchio;
 mod lightroom;
 mod livedoor;
 mod lofter;
@@ -45,6 +46,7 @@ pub(super) static SITES: &[&Site] = &[
     &civitai::SITE,
     &fivehundredpx::SITE,
     &issuu::SITE,
+    &itchio::SITE,
     &itaku::SITE,
     &lightroom::SITE,
     &picarto::SITE,
