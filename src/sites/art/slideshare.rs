@@ -1,6 +1,6 @@
 //! SlideShare presentations, mirroring gallery_dl/extractor/slideshare.py
 //! through the page's `__NEXT_DATA__` slideshow description.
-use super::{extr, on_host, raw_segments, str_of};
+use super::{on_host, raw_segments, str_of};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -54,23 +54,6 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     })
 }
 
-fn next_data(page: &str) -> Result<Value> {
-    let data = Some(extr(
-        page,
-        " id=\"__NEXT_DATA__\" type=\"application/json\">",
-        "</script>",
-    ))
-    .filter(|data| !data.is_empty())
-    .unwrap_or_else(|| {
-        extr(
-            page,
-            " id='__NEXT_DATA__' type='application/json'>",
-            "</script>",
-        )
-    });
-    super::json_loads(data, "SlideShare")
-}
-
 fn trimmed(slideshow: &Value, key: &str) -> Value {
     match slideshow.get(key) {
         Some(Value::String(text)) => text.trim().into(),
@@ -80,7 +63,7 @@ fn trimmed(slideshow: &Value, key: &str) -> Value {
 }
 
 pub(crate) fn parse_page(page: &str, presentation: &str) -> Result<Vec<Item>> {
-    let data = next_data(page)?;
+    let data = super::next_data(page, "SlideShare")?;
     let slideshow = data
         .pointer("/props/pageProps/slideshow")
         .ok_or_else(|| error("SlideShare page contains no slideshow"))?;

@@ -423,6 +423,23 @@ pub(crate) fn json_loads(text: &str, name: &str) -> Result<Value> {
     serde_json::from_str(text).map_err(|_| error(format!("{name} page contains no valid JSON")))
 }
 
+/// `Extractor._extract_nextdata`: a Next.js page's `__NEXT_DATA__` JSON.
+pub(crate) fn next_data(page: &str, name: &str) -> Result<Value> {
+    let data = match extr(
+        page,
+        " id=\"__NEXT_DATA__\" type=\"application/json\">",
+        "</script>",
+    ) {
+        "" => extr(
+            page,
+            " id='__NEXT_DATA__' type='application/json'>",
+            "</script>",
+        ),
+        data => data,
+    };
+    json_loads(data, name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

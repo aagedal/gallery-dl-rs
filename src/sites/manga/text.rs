@@ -20,6 +20,60 @@ pub(crate) fn rextr<'t>(txt: &'t str, begin: &str, end: &str) -> &'t str {
         .map_or("", |last| &txt[first..first + last])
 }
 
+/// `text.extract`: the text between `begin` and `end` from `pos`, and the
+/// position after `end`; a miss keeps `pos`.
+pub(crate) fn extract<'t>(
+    txt: &'t str,
+    begin: &str,
+    end: &str,
+    pos: usize,
+) -> (Option<&'t str>, usize) {
+    let found = txt.get(pos..).and_then(|rest| {
+        let first = pos + rest.find(begin)? + begin.len();
+        let last = first + txt[first..].find(end)?;
+        Some((&txt[first..last], last + end.len()))
+    });
+    match found {
+        Some((value, next)) => (Some(value), next),
+        None => (None, pos),
+    }
+}
+
+/// `text.parse_float`: Python `float()` of a string, or 0.0.
+pub(crate) fn parse_float(txt: &str) -> Value {
+    let value = txt.trim().parse::<f64>().unwrap_or(0.0);
+    Value::from(if value.is_finite() { value } else { 0.0 })
+}
+
+/// `str.title`: each run of letters starts upper case, the rest is lower
+/// case.
+pub(crate) fn title(txt: &str) -> String {
+    let mut out = String::with_capacity(txt.len());
+    let mut cased = false;
+    for c in txt.chars() {
+        if cased {
+            out.extend(c.to_lowercase());
+        } else {
+            out.extend(c.to_uppercase());
+        }
+        cased = c.is_alphabetic();
+    }
+    out
+}
+
+/// `text.quote`: `urllib.parse.quote` with its default `safe="/"`.
+pub(crate) fn quote(txt: &str) -> String {
+    let mut out = String::with_capacity(txt.len());
+    for byte in txt.bytes() {
+        if byte.is_ascii_alphanumeric() || b"_.-~/".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 /// `text.parse_int`: Python `int()` of a string, or 0.
 pub(crate) fn parse_int(txt: &str) -> i64 {
     let txt = txt.trim();

@@ -133,20 +133,6 @@ async fn page(http: &Http, url: &str) -> Result<String> {
     .await
 }
 
-/// `text.extract`: the text between `begin` and `end` from `pos`, and the
-/// position after `end`; a miss keeps `pos`.
-fn extract_at<'t>(txt: &'t str, begin: &str, end: &str, pos: usize) -> (Option<&'t str>, usize) {
-    let found = txt.get(pos..).and_then(|rest| {
-        let first = pos + rest.find(begin)? + begin.len();
-        let last = first + txt[first..].find(end)?;
-        Some((&txt[first..last], last + end.len()))
-    });
-    match found {
-        Some((value, next)) => (Some(value), next),
-        None => (None, pos),
-    }
-}
-
 /// `MangahereChapterExtractor.metadata`, before the title lookup.
 fn metadata(page: &str, volume: &str, chapter: &str) -> Result<Map<String, Value>> {
     let pos = page
@@ -156,10 +142,10 @@ fn metadata(page: &str, volume: &str, chapter: &str) -> Result<Map<String, Value
     while !page.is_char_boundary(start) {
         start -= 1;
     }
-    let (count, pos) = extract_at(page, ">", "<", start);
-    let (manga_id, pos) = extract_at(page, "series_id = ", ";", pos);
-    let (chapter_id, pos) = extract_at(page, "chapter_id = ", ";", pos);
-    let (manga, _) = extract_at(page, "\"name\":\"", "\"", pos);
+    let (count, pos) = text::extract(page, ">", "<", start);
+    let (manga_id, pos) = text::extract(page, "series_id = ", ";", pos);
+    let (chapter_id, pos) = text::extract(page, "chapter_id = ", ";", pos);
+    let (manga, _) = text::extract(page, "\"name\":\"", "\"", pos);
     let (number, minor) = text::chapter(chapter);
     Ok(keywords([
         ("manga", unescape(manga.unwrap_or_default()).into()),
@@ -185,17 +171,18 @@ fn title(page: &str, part: &str) -> String {
     let after = |pos: usize| page[pos..].find(part).map(|i| pos + i + part.len());
     after(0)
         .and_then(after)
-        .and_then(|pos| extract_at(page, " title=\"", "\"", pos).0)
+        .and_then(|pos| text::extract(page, " title=\"", "\"", pos).0)
         .unwrap_or_default()
         .to_owned()
 }
 
-/// The two images of one mobile page.
-fn images(page: &str) -> Result<[String; 2]> {
-    let missing = || error("MangaHere page has no image");
-    let (first, pos) = extract_at(page, "<img src=\"", "\"", 0);
+/// The two images of one mobile page; fanfox.net (mangafox) shares the
+/// layout.
+pub(super) fn images(page: &str, name: &str) -> Result<[String; 2]> {
+    let missing = || error(format!("{name} page has no image"));
+    let (first, pos) = text::extract(page, "<img src=\"", "\"", 0);
     let first = first.ok_or_else(missing)?;
-    let second = extract_at(page, " src=\"", "\"", pos)
+    let second = text::extract(page, " src=\"", "\"", pos)
         .0
         .ok_or_else(missing)?;
     Ok([first, second].map(|url| text::ensure_http_scheme(&unescape(url))))
@@ -226,7 +213,7 @@ async fn chapter_events<'a>(
         if number > 1 {
             current = page(http, &format!("{base}{number}.html")).await?;
         }
-        pages.extend(images(&current)?.map(|url| (url, None)));
+        pages.extend(images(&current, "MangaHere")?.map(|url| (url, None)));
         number += 2;
     }
     let id = data
@@ -265,9 +252,9 @@ fn label(info: &str) -> Option<(&str, &str, &str, &str)> {
 
 /// `MangahereMangaExtractor.chapters`, in page order.
 fn chapters(page: &str) -> Vec<(Url, Map<String, Value>)> {
-    let (manga, pos) = extract_at(page, "<meta name=\"og:title\" content=\"", "\"", 0);
+    let (manga, pos) = text::extract(page, "<meta name=\"og:title\" content=\"", "\"", 0);
     let manga = unescape(manga.unwrap_or_default());
-    let (list, _) = extract_at(
+    let (list, _) = text::extract(
         page,
         "id=\"chapterlist\"",
         "class=\"detail-main-list-more\"",
@@ -277,12 +264,12 @@ fn chapters(page: &str) -> Vec<(Url, Map<String, Value>)> {
     let mut results = Vec::new();
     let mut pos = 0;
     loop {
-        let (href, next) = extract_at(list, " href=\"", "\"", pos);
+        let (href, next) = text::extract(list, " href=\"", "\"", pos);
         let Some(href) = href.filter(|href| !href.is_empty()) else {
             return results;
         };
-        let (info, next) = extract_at(list, "class=\"title3\">", "<", next);
-        let (date, next) = extract_at(list, "class=\"title2\">", "<", next);
+        let (info, next) = text::extract(list, "class=\"title3\">", "<", next);
+        let (date, next) = text::extract(list, "class=\"title2\">", "<", next);
         pos = next;
         let (volume, chapter, minor, title) = match label(info.unwrap_or_default()) {
             Some((volume, chapter, minor, title)) => {

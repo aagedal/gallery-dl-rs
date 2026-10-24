@@ -13,12 +13,18 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
+mod comick;
 mod dynastyscans;
 mod mangadex;
+mod mangafire;
+mod mangafox;
 mod mangahere;
 mod mangapark;
+mod mangareader;
+mod mangatown;
 mod naverwebtoon;
 mod tapas;
+mod tcbscans;
 mod text;
 mod webtoons;
 mod weebcentral;
@@ -32,6 +38,12 @@ pub(super) static SITES: &[&Site] = &[
     &dynastyscans::SITE,
     &weebcentral::SITE,
     &mangahere::SITE,
+    &mangatown::SITE,
+    &mangafox::SITE,
+    &tcbscans::SITE,
+    &mangareader::SITE,
+    &mangafire::SITE,
+    &comick::SITE,
 ];
 
 /// Insert a key into a keyword map.
