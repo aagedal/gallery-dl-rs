@@ -9,10 +9,12 @@ use url::Url;
 
 mod misskey;
 mod redgifs;
+mod soundgasm;
 mod wikimedia;
 
 pub(super) static SITES: &[&Site] = &[
     &redgifs::SITE,
+    &soundgasm::SITE,
     &misskey::MISSKEY_IO,
     &misskey::MISSKEY_DESIGN,
     &misskey::MISSKEY_ART,
