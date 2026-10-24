@@ -10,7 +10,7 @@ use crate::{
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
 };
-use reqwest::{Client, StatusCode};
+use reqwest::{Client, StatusCode, header::HeaderMap};
 use serde_json::Value;
 use std::time::{Duration, SystemTime};
 use url::Url;
@@ -262,14 +262,30 @@ impl Http {
     }
 
     pub async fn get(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
-        Ok(self.send(url, headers, None).await?.1)
+        Ok(self.send(url, headers, Method::Get).await?.2)
+    }
+
+    /// The response headers and body of one GET, for sites that read
+    /// headers such as `Content-Range`.
+    pub async fn get_with_headers(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<(HeaderMap, Vec<u8>)> {
+        let (_, response_headers, body) = self.send(url, headers, Method::Get).await?;
+        Ok((response_headers, body))
+    }
+
+    /// The response headers of one HEAD request (upstream `method="HEAD"`).
+    pub async fn head(&self, url: &Url, headers: &[(&str, &str)]) -> Result<HeaderMap> {
+        Ok(self.send(url, headers, Method::Head).await?.1)
     }
 
     /// The body text and the URL it was served from after same-origin
     /// redirects, for sites that read the final location (upstream
     /// `response.url`).
     pub async fn page(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(Url, String)> {
-        let (url, body) = self.send(url, headers, None).await?;
+        let (url, _, body) = self.send(url, headers, Method::Get).await?;
         Ok((url, String::from_utf8_lossy(&body).into_owned()))
     }
 
@@ -313,7 +329,7 @@ impl Http {
         body: Body<'_>,
         headers: &[(&str, &str)],
     ) -> Result<Vec<u8>> {
-        Ok(self.send(url, headers, Some(body)).await?.1)
+        Ok(self.send(url, headers, Method::Post(body)).await?.2)
     }
 
     /// POST a form and parse the JSON response; redirects are refused.
@@ -323,7 +339,9 @@ impl Http {
         form: &[(&str, &str)],
         headers: &[(&str, &str)],
     ) -> Result<Value> {
-        let (_, bytes) = self.send(url, headers, Some(Body::Form(form))).await?;
+        let (_, _, bytes) = self
+            .send(url, headers, Method::Post(Body::Form(form)))
+            .await?;
         serde_json::from_slice(&bytes)
             .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
     }
@@ -335,7 +353,9 @@ impl Http {
         body: &Value,
         headers: &[(&str, &str)],
     ) -> Result<Value> {
-        let (_, bytes) = self.send(url, headers, Some(Body::Json(body))).await?;
+        let (_, _, bytes) = self
+            .send(url, headers, Method::Post(Body::Json(body)))
+            .await?;
         serde_json::from_slice(&bytes)
             .map_err(|_| error(format!("{} returned invalid JSON", self.name)))
     }
@@ -344,11 +364,11 @@ impl Http {
         &self,
         url: &Url,
         headers: &[(&str, &str)],
-        body: Option<Body<'_>>,
-    ) -> Result<(Url, Vec<u8>)> {
+        method: Method<'_>,
+    ) -> Result<(Url, HeaderMap, Vec<u8>)> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
-                match self.attempt(url, headers, body, attempt).await {
+                match self.attempt(url, headers, method, attempt).await {
                     Ok(body) => return Ok(body),
                     Err(failure) if failure.retry && attempt < self.retries => {
                         tokio::time::sleep(backoff(attempt)).await;
@@ -366,12 +386,16 @@ impl Http {
         &self,
         endpoint: &Url,
         headers: &[(&str, &str)],
-        body: Option<Body<'_>>,
+        method: Method<'_>,
         attempt: u8,
-    ) -> std::result::Result<(Url, Vec<u8>), Failure> {
+    ) -> std::result::Result<(Url, HeaderMap, Vec<u8>), Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
+        let body = match method {
+            Method::Post(body) => Some(body),
+            Method::Get | Method::Head => None,
+        };
         let response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = match body {
@@ -394,6 +418,7 @@ impl Http {
                     .post(target.clone())
                     .header("Content-Type", content_type)
                     .body(bytes.to_vec()),
+                None if matches!(method, Method::Head) => self.client.head(target.clone()),
                 None => self.client.get(target.clone()),
             }
             .timeout(self.request_timeout);
@@ -472,11 +497,20 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok((
-            location,
-            crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
-        ))
+        if matches!(method, Method::Head) {
+            return Ok((location, headers, bytes));
+        }
+        let bytes = crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?;
+        Ok((location, headers, bytes))
     }
+}
+
+/// How one request is sent.
+#[derive(Clone, Copy)]
+enum Method<'b> {
+    Get,
+    Head,
+    Post(Body<'b>),
 }
 
 /// An HTTP 401/403 response. Displays like any other site error (no URL or

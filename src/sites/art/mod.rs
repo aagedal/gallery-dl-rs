@@ -11,23 +11,28 @@ use url::Url;
 mod ao3;
 mod architizer;
 mod arena;
+mod aryion;
 mod behance;
 mod boosty;
 mod booth;
 mod cien;
 mod civitai;
+mod comedywildlifephoto;
 mod fantia;
 mod fivehundredpx;
+mod foriio;
 mod hatenablog;
 mod inkbunny;
 mod issuu;
 mod itaku;
 mod itchio;
+mod kabeuchi;
 mod lightroom;
 mod livedoor;
 mod lofter;
 mod myportfolio;
 mod naverblog;
+mod nekohouse;
 mod nijie;
 mod picarto;
 mod piczel;
@@ -83,6 +88,11 @@ pub(super) static SITES: &[&Site] = &[
     &wikiart::SITE,
     &architizer::SITE,
     &seiga::SITE,
+    &comedywildlifephoto::SITE,
+    &kabeuchi::SITE,
+    &nekohouse::SITE,
+    &aryion::SITE,
+    &foriio::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
