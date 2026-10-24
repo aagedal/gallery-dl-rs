@@ -331,9 +331,13 @@ mod tests {
         assert_eq!(k["lang"], Value::Null);
         assert_eq!(k["page"], 2);
         assert_eq!(k["count"], 2);
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[1]),
-            "dankefuerslesen/Alice & Co/v02 c007.5: Middle/Alice & Co_c007.5_002.jpg"
+            format!(
+                "dankefuerslesen/Alice & Co/v02 c007.5{colon} Middle/Alice & Co_c007.5_002.jpg"
+            )
         );
         assert_eq!(
             archive(&files[1]),
@@ -364,9 +368,11 @@ mod tests {
         assert_eq!(k["extension"], "zip");
         assert_eq!(k["page"], 0);
         assert_eq!(k["count"], 0);
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[0]),
-            "dankefuerslesen/Alice & Co/v02 c007.5: Middle.zip"
+            format!("dankefuerslesen/Alice & Co/v02 c007.5{colon} Middle.zip")
         );
         assert_eq!(
             archive(&files[0]),

@@ -315,9 +315,11 @@ mod tests {
         assert_eq!(k["count"], 2);
         assert_eq!(k["page"], 2);
         assert_eq!(k["language"], "English");
+        // Windows path sanitization replaces the colon in the chapter title.
+        let colon = if cfg!(windows) { "_" } else { ":" };
         assert_eq!(
             path(&files[1]),
-            "mangaread/One Piece/c1053.5: Emperor/One Piece_c1053.5_002.png"
+            format!("mangaread/One Piece/c1053.5{colon} Emperor/One Piece_c1053.5_002.png")
         );
         assert_eq!(
             archive(&files[1]),
