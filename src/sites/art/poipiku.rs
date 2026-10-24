@@ -64,18 +64,32 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     let Some(target) = target(&url) else {
         return crate::sites::fail(error("unsupported Poipiku URL"));
     };
-    if let Ok(root) = http.api(ROOT) {
-        http.set_cookie(&root, "LANG=en; Path=/");
-        http.set_cookie(&root, "POIPIKU_CONTENTS_VIEW_MODE=1; Path=/");
-    }
+    // Upstream checks for a session before any request; the site answers
+    // anonymous visitors with an empty `POIPIKU_LK` cookie.
+    let logged_in = http
+        .api(ROOT)
+        .ok()
+        .and_then(|root| http.cookie(&root, "POIPIKU_LK"))
+        .is_some_and(|value| !value.is_empty());
     match target {
-        Target::Post(user, post) => post_events(http, &POST, format!("/{user}/{post}.html")),
-        Target::User(user, page) => listing(http, user, page),
+        Target::Post(user, post) => {
+            post_events(http, &POST, format!("/{user}/{post}.html"), logged_in)
+        }
+        Target::User(user, page) => listing(http, user, page, logged_in),
     }
 }
 
+/// Upstream's `LANG` and `POIPIKU_CONTENTS_VIEW_MODE` cookies, set again
+/// before each page since the site answers with `LANG=ja`.
+fn set_cookies(http: &Http) -> Result<()> {
+    let root = http.api(ROOT)?;
+    http.set_cookie(&root, "LANG=en; Path=/");
+    http.set_cookie(&root, "POIPIKU_CONTENTS_VIEW_MODE=1; Path=/");
+    Ok(())
+}
+
 /// Upstream `PoipikuUserExtractor.posts`: 48 post links per page.
-fn listing(http: &Http, user: String, first: i64) -> Events<'_> {
+fn listing(http: &Http, user: String, first: i64, logged_in: bool) -> Events<'_> {
     crate::sites::paginate(Some(first), move |page| {
         let user = user.clone();
         async move {
@@ -87,6 +101,7 @@ fn listing(http: &Http, user: String, first: i64) -> Events<'_> {
                 .append_pair("PG", &page.to_string())
                 .append_pair("ID", &user)
                 .append_pair("KWD", "");
+            set_cookies(http)?;
             let text = http.text(&url).await?;
             let paths: Vec<String> = extract_iter(&text, "class=\"IllustInfo\" href=\"", "\"")
                 .into_iter()
@@ -94,7 +109,7 @@ fn listing(http: &Http, user: String, first: i64) -> Events<'_> {
                 .collect();
             let next = (paths.len() >= 48).then_some(page + 1);
             let events = stream::iter(paths)
-                .map(move |path| post_events(http, &USER, path))
+                .map(move |path| post_events(http, &USER, path, logged_in))
                 .flatten()
                 .boxed();
             Ok(Some((events, next)))
@@ -115,9 +130,14 @@ fn headers(referer: &str) -> [(&str, &str); 7] {
     ]
 }
 
-fn post_events<'a>(http: &'a Http, route: &'static Route, path: String) -> Events<'a> {
+fn post_events<'a>(
+    http: &'a Http,
+    route: &'static Route,
+    path: String,
+    logged_in: bool,
+) -> Events<'a> {
     crate::sites::once(async move {
-        let items = post(http, &path).await?;
+        let items = post(http, &path, logged_in).await?;
         Ok(crate::sites::events(crate::sites::post(
             &SITE, http, route, items,
         )))
@@ -125,7 +145,7 @@ fn post_events<'a>(http: &'a Http, route: &'static Route, path: String) -> Event
 }
 
 /// Upstream `items` for one post page.
-async fn post(http: &Http, path: &str) -> Result<Vec<Item>> {
+async fn post(http: &Http, path: &str, logged_in: bool) -> Result<Vec<Item>> {
     let post_url = if path.starts_with('/') {
         format!("{ROOT}{path}")
     } else {
@@ -135,9 +155,8 @@ async fn post(http: &Http, path: &str) -> Result<Vec<Item>> {
     if !matches!(target(&parsed), Some(Target::Post(..))) {
         return Err(error("Poipiku post link left poipiku.com"));
     }
+    set_cookies(http)?;
     let page = http.text(&http.api(&post_url)?).await?;
-    let root = http.api(ROOT)?;
-    let logged_in = http.cookie(&root, "POIPIKU_LK").is_some();
     let mut scan = Scan::new(&page);
     let (mut data, thumb) = parse_page(&mut scan, &post_url, logged_in);
     let password = http.option_str("password").unwrap_or_default();
@@ -435,5 +454,41 @@ mod tests {
         assert_eq!(data["requires"], "login");
         assert_eq!(data["password"], true);
         assert_eq!(data["original"], true);
+    }
+
+    #[tokio::test]
+    async fn session_cookies_select_the_detail_endpoint() {
+        let detail = json!({"html": "<img src=\"https://img-org.poipiku.com/o/1.png\">\
+            <img src=\"https://img-org.poipiku.com/o/2.png\">"});
+        let (root, server) = serve(vec![html(PAGE), json(detail)]);
+        let session = http("poipiku", root.clone());
+        session.set_cookie(&root, "POIPIKU_LK=session; Path=/");
+        let files = media(extract(
+            &session,
+            Url::parse("https://poipiku.com/9/77.html").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 2);
+        assert_eq!(keywords(&files[0])["original"], true);
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("POST /f/ShowIllustDetailF.jsp "));
+        assert!(requests[1].ends_with("ID=9&TD=77&AD=-1&PAS="));
+
+        // The site answers anonymous visitors with an empty `POIPIKU_LK`.
+        let single = "<title>[Art] A(1 images)</title>\
+            <img class=\"IllustItemThumbImg\" src=\"https://img-org.poipiku.com/x/1.png\">";
+        let (root, server) = serve(vec![html(single)]);
+        let http = http("poipiku", root.clone());
+        http.set_cookie(&root, "POIPIKU_LK=; Path=/");
+        http.set_cookie(&root, "LANG=ja; Path=/");
+        let files = media(extract(
+            &http,
+            Url::parse("https://poipiku.com/9/78.html").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(keywords(&files[0])["original"], false);
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("LANG=en"), "{}", requests[0]);
     }
 }
