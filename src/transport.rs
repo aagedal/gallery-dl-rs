@@ -132,6 +132,7 @@ async fn decode_gzip_body(body: Vec<u8>, limit: usize, state: Arc<DecodeState>) 
 pub(crate) struct Redirects {
     visited: Vec<Url>,
     subdomains: bool,
+    cross_origin: bool,
 }
 
 impl Redirects {
@@ -141,7 +142,16 @@ impl Redirects {
         Self {
             visited: vec![url],
             subdomains: false,
+            cross_origin: false,
         }
+    }
+
+    /// Also follow redirects to other origins, as upstream's `requests`
+    /// session does. The caller must drop request credentials that do not
+    /// belong to the new origin.
+    pub(crate) fn allow_cross_origin(mut self, allow: bool) -> Self {
+        self.cross_origin = allow;
+        self
     }
 
     /// Also accept HTTPS redirects from an HTTPS origin to a subdomain of its
@@ -197,7 +207,9 @@ impl Redirects {
         if !matches!(target.scheme(), "http" | "https")
             || !target.username().is_empty()
             || target.password().is_some()
-            || target.origin() != self.visited[0].origin() && !self.subdomain_of_origin(&target)
+            || !self.cross_origin
+                && target.origin() != self.visited[0].origin()
+                && !self.subdomain_of_origin(&target)
         {
             return Err(error(
                 "HTTP redirect requires the same origin and no URL credentials",
