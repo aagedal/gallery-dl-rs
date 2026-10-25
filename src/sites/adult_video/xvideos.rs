@@ -150,7 +150,7 @@ async fn images(http: &Http, mut page: String) -> crate::Result<Vec<String>> {
         .map(str::to_owned)
         .collect();
     for _ in 0..MAX_PAGES {
-        if results.is_empty() || results.len() % 500 != 0 {
+        if results.is_empty() || !results.len().is_multiple_of(500) {
             break;
         }
         // `text.rextr(page, ' href="', '"', page.find(">Next</"))`.

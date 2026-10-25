@@ -10,6 +10,7 @@ use url::Url;
 mod adultempire;
 mod bellazon;
 mod eporner;
+mod fansly;
 mod fikfap;
 mod girlswithmuscle;
 mod motherless;
@@ -32,6 +33,7 @@ pub(super) static SITES: &[&Site] = &[
     &sexcom::SITE,
     &vipergirls::SITE,
     &bellazon::SITE,
+    &fansly::SITE,
     &okporn::SITE,
     &pornstarstube::SITE,
     &eporner::SITE,

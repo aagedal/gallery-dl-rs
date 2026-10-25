@@ -138,14 +138,12 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     })
 }
 
+/// A post's keywords and image URLs.
+type Post = (Map<String, Value>, Vec<String>);
+
 /// Each post's keywords and image URLs, in the requested order: newest
 /// first by default, limited to the posts up to `pageN`.
-fn posts(
-    xml: &str,
-    thread_id: &str,
-    page: Option<&str>,
-    ascending: bool,
-) -> Result<Vec<(Map<String, Value>, Vec<String>)>> {
+fn posts(xml: &str, thread_id: &str, page: Option<&str>, ascending: bool) -> Result<Vec<Post>> {
     let document = roxmltree::Document::parse_with_options(
         xml,
         roxmltree::ParsingOptions {
