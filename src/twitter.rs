@@ -96,6 +96,7 @@ pub const SUBCATEGORIES: &[&str] = &[
     "list",
     "list-members",
     "media",
+    "notifications",
     "quotes",
     "search",
     "timeline",
@@ -328,11 +329,15 @@ impl Twitter {
 
     /// Whether the jar holds an X session (`auth_token`) for the API.
     pub(crate) fn has_session(&self) -> bool {
-        let api = Url::parse("https://x.com/i/api/graphql/").unwrap();
+        self.has_session_for(&Url::parse("https://x.com/i/api/graphql/").unwrap())
+    }
+
+    /// Whether the jar holds an `auth_token` scoped to this endpoint.
+    pub(crate) fn has_session_for(&self, endpoint: &Url) -> bool {
         self.cookies
             .lock()
             .unwrap()
-            .header(&api)
+            .header(endpoint)
             .is_some_and(|scoped| {
                 scoped.split("; ").any(|part| {
                     part.strip_prefix("auth_token=")

@@ -838,6 +838,15 @@ impl Twitter {
                     self.timeline_options.limit,
                     self.text_tweets,
                 )?;
+                if matches!(kind, collections::Collection::Notifications)
+                    && !self.has_session_for(&target)
+                {
+                    // Guests cannot read notifications; fail before any request.
+                    return Err(error(
+                        "Twitter notifications require a logged-in session; pass x.com \
+                         auth_token and ct0 cookies with --cookies",
+                    ));
+                }
                 self.ensure_transaction_at("", &target).await?;
                 let body = self.fetch(&target, "", true).await?;
                 let page = if self.text_tweets {
@@ -1340,9 +1349,18 @@ fn feed_endpoint(
             &extra,
         );
     }
+    if let Collection::Notifications = kind {
+        // Upstream `notifications_devicefollow`: `count` is the `limit` option.
+        let count = limit.to_string();
+        let mut extra = vec![("count", count.as_str())];
+        if let Some(cursor) = cursor {
+            extra.push(("cursor", cursor));
+        }
+        return collections::rest_endpoint(base, "2/notifications/device_follow.json", &extra);
+    }
     let mut variables = serde_json::json!({"count":limit});
     let operation = match kind {
-        Collection::Event(_) => unreachable!("REST timeline"),
+        Collection::Event(_) | Collection::Notifications => unreachable!("REST timeline"),
         Collection::Bookmarks => {
             variables["includePromotedContent"] = false.into();
             "pLtjrO4ubNh996M_Cubwsg/Bookmarks"

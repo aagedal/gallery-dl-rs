@@ -259,9 +259,15 @@ listing classes page lazily through the `3` API with the `Client-ID` header
 album (`/a/ID`) or image child job: `user` (`/user/NAME[/posts|/submitted]`),
 `favorite` (`/user/NAME/favorites`), `favorite-folder`
 (`/user/NAME/favorites/folder/ID`, `post/v1`-style paging), `subreddit`
-(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). The
-cookie-only `/user/me` listings are not supported. Compatibility mode sends
-Imgur URLs to the backend.
+(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). Your own
+posts (`me`: `/user/me[/posts]`, or the hidden albums with `/hidden`) page
+`post/v1/accounts/me/all_posts` (or `hidden_albums`) from page 1, newest
+first, like upstream; these requests carry the imgur.com session cookies from
+`--cookies`/`--cookies-from-browser` and an `Origin` header instead of
+`Client-ID`, and fail before any request unless an `accesstoken` cookie is
+available (upstream only logs an error). No OAuth flow is involved; other
+Imgur routes never send cookies. Compatibility mode sends Imgur URLs to the
+backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
@@ -1850,6 +1856,17 @@ feeds; deleted tweets are skipped and a page without a bottom cursor ends the
 feed. Every post and file carries the `event` keyword (`{event[id]}`,
 `{event[short_title]}`); default paths and archive identity are those of other
 posts. Live verification is outstanding: X may no longer serve these endpoints.
+
+Native notifications (`/notifications[/...]` and `/i/timeline`, upstream's
+`notifications` class) page the legacy REST
+`2/notifications/device_follow.json` timeline (the posts of accounts whose
+notifications you enabled) with upstream's REST parameters, `count` set by
+`"limit"` (default 50) and the bottom cursor. It reads the logged-in session's
+own feed, so it fails before any request unless `auth_token`/`ct0` cookies are
+available; requests are signed like other authenticated collection routes. The
+`globalObjects` posts go through the same conversion, expansion, default paths
+and archive identity as live events and other feeds. Live verification is
+outstanding.
 
 Scoped `"limit"` sets the page size for profile and collection requests (integer
 1–100, default 50), independently of `search-limit`, and forwards to compatibility
