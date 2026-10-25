@@ -1,5 +1,13 @@
-//! MangaDex chapters, manga, covers, MDLists and authors, mirroring
-//! gallery_dl/extractor/mangadex.py through the public API v5.
+//! MangaDex chapters, manga, covers, MDLists, authors and the account's
+//! updates feed and library, mirroring gallery_dl/extractor/mangadex.py
+//! through the API v5.
+//!
+//! `feed`, `following` and (when configured) MDLists authenticate like
+//! upstream: with `client-id`/`client-secret`, `username` and `password`
+//! against auth.mangadex.org's OpenID Connect token endpoint, else through
+//! the legacy `/auth/login`. Refresh tokens (90 days) and access tokens (15
+//! minutes) share upstream's credential cache keys, so either program can
+//! reuse the other's session.
 use super::{Gallery, get, keywords, set, str_of, text};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -13,7 +21,9 @@ pub static SITE: Site = Site {
     name: "MangaDex",
     matches: |url| target(url).is_some(),
     extract,
-    routes: &[&CHAPTER, &MANGA, &COVERS, &LIST, &LIST_FEED, &AUTHOR],
+    routes: &[
+        &CHAPTER, &MANGA, &COVERS, &FEED, &FOLLOWING, &LIST, &LIST_FEED, &AUTHOR,
+    ],
     api_key: false,
     cookies: None,
 };
@@ -35,6 +45,8 @@ static COVERS: Route = Route::new(
     &["{category}", "{manga}", "Covers"],
     "c_{cover_id}",
 );
+static FEED: Route = Route::new("feed", FILENAME, DIRECTORY, ARCHIVE);
+static FOLLOWING: Route = Route::new("following", FILENAME, DIRECTORY, ARCHIVE);
 static LIST: Route = Route::new("list", FILENAME, DIRECTORY, ARCHIVE);
 static LIST_FEED: Route = Route::new("list-feed", FILENAME, DIRECTORY, ARCHIVE);
 static AUTHOR: Route = Route::new("author", FILENAME, DIRECTORY, ARCHIVE);
@@ -44,7 +56,14 @@ enum Target {
     Chapter(String),
     Manga(String),
     Covers(String),
-    List { uuid: String, feed: bool },
+    /// `/titles?/feed$`: the Updates Feed.
+    Feed,
+    /// `/titles?/follows(?:\?...)?$`: followed manga.
+    Following,
+    List {
+        uuid: String,
+        feed: bool,
+    },
     Author(String),
 }
 
@@ -62,6 +81,14 @@ fn target(url: &Url) -> Option<Target> {
     }
     let parts = crate::sites::segments(url);
     let query = url.query().unwrap_or_default();
+    let fragment = url.fragment().is_some();
+    match url.path() {
+        "/title/feed" | "/titles/feed" if url.query().is_none() && !fragment => {
+            return Some(Target::Feed);
+        }
+        "/title/follows" | "/titles/follows" if !fragment => return Some(Target::Following),
+        _ => {}
+    }
     let (kind, id, rest) = match parts.as_slice() {
         [kind, id, rest @ ..] if uuid(id) => (kind.as_str(), id.clone(), rest),
         _ => return None,
@@ -116,7 +143,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 ],
             );
             let endpoint = format!("{root}/manga/{uuid}/feed");
-            pages(http, root, endpoint, params, Kind::Chapters(&MANGA))
+            pages(http, root, endpoint, params, Kind::Chapters(&MANGA), None)
         }
         Target::Covers(uuid) => {
             let mut params = vec![("manga[]".to_owned(), uuid.clone())];
@@ -137,15 +164,57 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 format!("{root}/cover"),
                 params,
                 Kind::Covers(uuid),
+                None,
             )
         }
-        Target::List { uuid, feed: true } => {
+        Target::Feed => crate::sites::once(async move {
+            let auth = authenticate(http, &root)
+                .await?
+                .ok_or_else(login_required)?;
+            let params = chapter_params(http, vec![("order[publishAt]".into(), "desc".into())]);
+            let endpoint = format!("{root}/user/follows/manga/feed");
+            Ok(pages(
+                http,
+                root,
+                endpoint,
+                params,
+                Kind::Chapters(&FEED),
+                Some(auth),
+            ))
+        }),
+        Target::Following => crate::sites::once(async move {
+            let auth = authenticate(http, &root)
+                .await?
+                .ok_or_else(login_required)?;
+            // `contentRating: None` suppresses the default rating filter.
+            let params = finish_params(http, Vec::new(), true);
+            let endpoint = format!("{root}/user/follows/manga");
+            Ok(pages(
+                http,
+                root,
+                endpoint,
+                params,
+                Kind::Following,
+                Some(auth),
+            ))
+        }),
+        Target::List { uuid, feed: true } => crate::sites::once(async move {
+            let auth = authenticate(http, &root).await?;
             let params = chapter_params(http, Vec::new());
             let endpoint = format!("{root}/list/{uuid}/feed");
-            pages(http, root, endpoint, params, Kind::Chapters(&LIST_FEED))
-        }
+            Ok(pages(
+                http,
+                root,
+                endpoint,
+                params,
+                Kind::Chapters(&LIST_FEED),
+                auth,
+            ))
+        }),
         Target::List { uuid, feed: false } => crate::sites::once(async move {
-            let list = call(http, &format!("{root}/list/{uuid}"), &[]).await?;
+            let auth = authenticate(http, &root).await?;
+            let list =
+                call_auth(http, &format!("{root}/list/{uuid}"), &[], auth.as_deref()).await?;
             let children = list
                 .pointer("/data/relationships")
                 .and_then(Value::as_array)
@@ -164,6 +233,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 format!("{root}/manga"),
                 params,
                 Kind::Author,
+                None,
             )
         }
     }
@@ -192,12 +262,183 @@ fn api_root(http: &Http) -> Result<String> {
 }
 
 async fn call(http: &Http, endpoint: &str, params: &[(String, String)]) -> Result<Value> {
+    call_auth(http, endpoint, params, None).await
+}
+
+/// Upstream `_call`, with `headers_auth` when `auth` is set.
+async fn call_auth(
+    http: &Http,
+    endpoint: &str,
+    params: &[(String, String)],
+    auth: Option<&str>,
+) -> Result<Value> {
     let mut url = http.api(endpoint)?;
     if !params.is_empty() {
         url.query_pairs_mut().extend_pairs(params);
     }
-    http.json_with(&url, &[("Referer", "https://mangadex.org/")])
+    let mut headers = vec![("Referer", "https://mangadex.org/")];
+    if let Some(auth) = auth {
+        headers.push(("Authorization", auth));
+    }
+    http.json_with(&url, &headers).await
+}
+
+const TOKEN_URL: &str = "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token";
+/// Upstream `_exp=900` for the cached `Authorization` value.
+const ACCESS_LIFETIME: std::time::Duration = std::time::Duration::from_secs(900);
+/// Upstream `_exp=90*86400` for refresh tokens.
+const REFRESH_LIFETIME: std::time::Duration = std::time::Duration::from_secs(90 * 86400);
+
+fn login_required() -> crate::Error {
+    error(
+        "MangaDex feeds and libraries need a login: set the mangadex `username` and \
+         `password` (and optionally `client-id`/`client-secret`)",
+    )
+}
+
+fn nonempty(value: Option<&str>) -> Option<&str> {
+    value.filter(|v| !v.is_empty())
+}
+
+/// Upstream `MangadexAPI.authenticate`: the `Authorization` value for the
+/// configured account, or `None` without a `username`.
+async fn authenticate(http: &Http, root: &str) -> Result<Option<String>> {
+    let Some(username) = nonempty(http.option_str("username")) else {
+        return Ok(None);
+    };
+    let password = http
+        .option("password")
+        .filter(|p| !p.is_null())
+        .map(crate::sites::scalar)
+        .unwrap_or_default();
+    let client = nonempty(http.option_str("client-id"))
+        .map(|id| (id, http.option_str("client-secret").unwrap_or_default()));
+    // Bound-method names select upstream's cache key.
+    let (function, refresh_arg) = match client {
+        Some(_) => (
+            "_authenticate_impl_client",
+            crate::cache::tuple_repr(&[username, "personal"]),
+        ),
+        None => ("_authenticate_impl_legacy", username.to_owned()),
+    };
+    let access_key = crate::cache::key("extractor.mangadex", function, username);
+    let refresh_key = crate::cache::key("extractor.mangadex", "_refresh_token_cache", &refresh_arg);
+    let cache = http.cache();
+    if let Some(cache) = cache
+        && let Ok(Some(bearer)) = cache.get_str(&access_key).await
+    {
+        return Ok(Some(bearer));
+    }
+    let cached = match cache {
+        Some(cache) => cache.get_str(&refresh_key).await.ok().flatten(),
+        None => None,
+    };
+    let password = password.as_str();
+    let login = |refresh| async move {
+        match client {
+            Some((id, secret)) => client_login(http, username, password, id, secret, refresh).await,
+            None => legacy_login(http, root, username, password, refresh).await,
+        }
+    };
+    let mut result = login(cached.as_deref()).await;
+    if result.is_err() && cached.is_some() {
+        // A stale refresh token falls back to a password login.
+        result = login(None).await;
+    }
+    let (bearer, refresh) = result?;
+    if let Some(cache) = cache {
+        if refresh.as_deref() != cached.as_deref()
+            && let Some(refresh) = &refresh
+        {
+            let _ = cache
+                .set(
+                    &refresh_key,
+                    &Value::from(refresh.as_str()),
+                    Some(REFRESH_LIFETIME),
+                )
+                .await;
+        }
+        let _ = cache
+            .set(
+                &access_key,
+                &Value::from(bearer.as_str()),
+                Some(ACCESS_LIFETIME),
+            )
+            .await;
+    }
+    Ok(Some(bearer))
+}
+
+/// Upstream `_authenticate_impl_client`: the OpenID Connect token endpoint.
+async fn client_login(
+    http: &Http,
+    username: &str,
+    password: &str,
+    client_id: &str,
+    client_secret: &str,
+    refresh: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    let form: Vec<(&str, &str)> = match refresh {
+        Some(token) => vec![
+            ("grant_type", "refresh_token"),
+            ("refresh_token", token),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+        ],
+        None => vec![
+            ("grant_type", "password"),
+            ("username", username),
+            ("password", password),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+        ],
+    };
+    let data = http
+        .post_form(&http.api(TOKEN_URL)?, &form, &[])
         .await
+        .map_err(|_| error("MangaDex authentication failed"))?;
+    let access = data
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| error("MangaDex authentication failed"))?;
+    let refresh = data
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Ok((format!("Bearer {access}"), refresh))
+}
+
+/// Upstream `_authenticate_impl_legacy`: `/auth/refresh` or `/auth/login`.
+async fn legacy_login(
+    http: &Http,
+    root: &str,
+    username: &str,
+    password: &str,
+    refresh: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    let (endpoint, body) = match refresh {
+        Some(token) => ("refresh", serde_json::json!({"token": token})),
+        None => (
+            "login",
+            serde_json::json!({"username": username, "password": password}),
+        ),
+    };
+    let url = http.api(&format!("{root}/auth/{endpoint}"))?;
+    let data = http
+        .post_json(&url, &body, &[])
+        .await
+        .map_err(|_| error("MangaDex authentication failed"))?;
+    let session = data
+        .pointer("/token/session")
+        .and_then(Value::as_str)
+        .filter(|_| str_of(&data, "result") == "ok")
+        .ok_or_else(|| error("MangaDex authentication failed"))?;
+    let refresh = data
+        .pointer("/token/refresh")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Ok((format!("Bearer {session}"), refresh))
 }
 
 /// `_pagination_chapters`: language filter and scanlation group includes.
@@ -247,6 +488,7 @@ enum Kind {
     Chapters(&'static Route),
     Covers(String),
     Author,
+    Following,
 }
 
 type Cache = HashMap<String, Map<String, Value>>;
@@ -258,16 +500,18 @@ fn pages<'a>(
     endpoint: String,
     params: Vec<(String, String)>,
     kind: Kind,
+    auth: Option<String>,
 ) -> Events<'a> {
     crate::sites::paginate(Some((0u64, Cache::new())), move |state| {
         let (root, endpoint, kind) = (root.clone(), endpoint.clone(), kind.clone());
+        let auth = auth.clone();
         let mut params = params.clone();
         async move {
             let Some((offset, mut cache)) = state else {
                 return Ok(None);
             };
             params.push(("offset".into(), offset.to_string()));
-            let data = call(http, &endpoint, &params).await?;
+            let data = call_auth(http, &endpoint, &params, auth.as_deref()).await?;
             let items = data
                 .get("data")
                 .and_then(Value::as_array)
@@ -300,6 +544,13 @@ async fn page_events<'a>(
                     chapter_events(http, child_root, uuid, Some(child))
                 }));
             }
+        }
+        Kind::Following => {
+            let children = items
+                .iter()
+                .filter_map(|manga| Some((title_url(manga)?, Map::new())))
+                .collect();
+            streams.push(super::queue_urls(http, &SITE, &FOLLOWING, children));
         }
         Kind::Author => {
             let children = items
@@ -614,7 +865,7 @@ fn cover_item(uuid: &str, cover: &Value, info: &Map<String, Value>) -> Option<It
 mod tests {
     use super::super::tests::{archive, path};
     use super::*;
-    use crate::sites::testing::{http, json, keywords as kw, media, serve};
+    use crate::sites::testing::{fails, http, json, keywords as kw, media, queued, serve};
     use serde_json::json;
 
     const C1: &str = "11111111-aaaa-bbbb-cccc-000000000001";
@@ -658,10 +909,20 @@ mod tests {
             t(&format!("https://mangadex.org/author/{M}/name")),
             Some(Target::Author(M.into()))
         );
+        assert_eq!(t("https://mangadex.org/title/feed"), Some(Target::Feed));
+        assert_eq!(t("https://www.mangadex.cc/titles/feed"), Some(Target::Feed));
+        assert_eq!(
+            t("https://mangadex.org/title/follows"),
+            Some(Target::Following)
+        );
+        assert_eq!(
+            t("https://mangadex.org/titles/follows?tab=manga"),
+            Some(Target::Following)
+        );
         for raw in [
-            "https://mangadex.org/title/feed",
-            "https://mangadex.org/title/follows",
-            "https://mangadex.org/titles/feed",
+            "https://mangadex.org/title/feed/",
+            "https://mangadex.org/title/feed?x=1",
+            "https://mangadex.org/title/follows/x",
             "https://mangadex.org/chapter/XYZ",
             "https://mangadex.org.evil.test/chapter/abc",
             "https://evilmangadex.org/chapter/abc",
@@ -888,6 +1149,168 @@ mod tests {
             "{}",
             requests[0]
         );
+    }
+
+    fn with_options(http: Http, options: Value) -> Http {
+        http.with_options(Some(std::sync::Arc::new(
+            options.as_object().unwrap().clone(),
+        )))
+    }
+
+    #[tokio::test]
+    async fn feed_logs_in_through_the_client_and_caches_tokens() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        let (root, requests) = serve(vec![
+            json(json!({"access_token": "A1", "refresh_token": "R1"})),
+            json(json!({"data": [chapter(C1, "7")], "offset": 0, "limit": 100, "total": 1})),
+            json(manga()),
+        ]);
+        let http = with_options(
+            http("MangaDex", root),
+            json!({"username": "alice", "password": "pw",
+                "client-id": "personal-client-1", "client-secret": "s3"}),
+        )
+        .with_cache(Some(cache.clone()));
+        let children = queued(extract(
+            &http,
+            Url::parse("https://mangadex.org/title/feed").unwrap(),
+        ))
+        .await;
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].subcategory(), "feed");
+        let requests = requests.join().unwrap();
+        assert!(requests[2].starts_with(&format!("GET /manga/{M}?")));
+        assert!(requests[0].starts_with("POST /realms/mangadex/protocol/openid-connect/token "));
+        assert!(requests[0].ends_with(
+            "grant_type=password&username=alice&password=pw\
+             &client_id=personal-client-1&client_secret=s3"
+        ));
+        assert!(
+            requests[1].starts_with(
+                "GET /user/follows/manga/feed?order%5BpublishAt%5D=desc\
+                 &includes%5B%5D=scanlation_group&contentRating%5B%5D=safe"
+            ),
+            "{}",
+            requests[1]
+        );
+        assert!(requests[1].contains("authorization: Bearer A1"));
+        assert!(!requests[2].contains("authorization"));
+        assert_eq!(
+            cache
+                .get_str("gallery_dl.extractor.mangadex._refresh_token_cache-('alice', 'personal')")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("R1")
+        );
+        assert_eq!(
+            cache
+                .get_str("gallery_dl.extractor.mangadex._authenticate_impl_client-alice")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("Bearer A1")
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_refresh_tokens_are_exchanged_before_logging_in() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        cache
+            .set(
+                "gallery_dl.extractor.mangadex._refresh_token_cache-('alice', 'personal')",
+                &json!("R0"),
+                None,
+            )
+            .await
+            .unwrap();
+        let (root, requests) = serve(vec![
+            json(json!({"access_token": "A2", "refresh_token": "R0"})),
+            json(json!({"data": [], "offset": 0, "limit": 100, "total": 0})),
+        ]);
+        let http = with_options(
+            http("MangaDex", root),
+            json!({"username": "alice", "client-id": "cid", "client-secret": "s"}),
+        )
+        .with_cache(Some(cache.clone()));
+        let children = queued(extract(
+            &http,
+            Url::parse("https://mangadex.org/title/feed").unwrap(),
+        ))
+        .await;
+        assert!(children.is_empty());
+        let requests = requests.join().unwrap();
+        assert!(
+            requests[0].ends_with(
+                "grant_type=refresh_token&refresh_token=R0&client_id=cid&client_secret=s"
+            )
+        );
+        assert!(requests[1].contains("authorization: Bearer A2"));
+    }
+
+    #[tokio::test]
+    async fn following_uses_the_legacy_login_and_queues_titles() {
+        let (root, requests) = serve(vec![
+            json(json!({"result": "ok", "token": {"session": "S1", "refresh": "R1"}})),
+            json(
+                json!({"data": [{"id": M, "type": "manga"}], "offset": 0, "limit": 1, "total": 2}),
+            ),
+            json(
+                json!({"data": [{"id": C2, "type": "manga"}], "offset": 1, "limit": 1, "total": 2}),
+            ),
+        ]);
+        let http = with_options(
+            http("MangaDex", root),
+            json!({"username": "alice", "password": "pw", "ratings": ["safe"]}),
+        );
+        let children = queued(extract(
+            &http,
+            Url::parse("https://mangadex.org/title/follows").unwrap(),
+        ))
+        .await;
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].subcategory(), "following");
+        let requests = requests.join().unwrap();
+        assert!(requests[0].starts_with("POST /auth/login "));
+        assert!(requests[0].ends_with(r#"{"username":"alice","password":"pw"}"#));
+        assert!(
+            requests[1].starts_with("GET /user/follows/manga?offset=0 "),
+            "{}",
+            requests[1]
+        );
+        assert!(requests[1].contains("authorization: Bearer S1"));
+        assert!(requests[2].starts_with("GET /user/follows/manga?offset=1 "));
+        assert!(requests[2].contains("authorization: Bearer S1"));
+    }
+
+    #[tokio::test]
+    async fn feed_without_credentials_fails_before_requests() {
+        let http = http("MangaDex", Url::parse("http://127.0.0.1:9/").unwrap());
+        for raw in [
+            "https://mangadex.org/title/feed",
+            "https://mangadex.org/title/follows",
+        ] {
+            assert!(fails(extract(&http, Url::parse(raw).unwrap())).await);
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_logins_are_errors() {
+        let (root, requests) = serve(vec![json(json!({"result": "error"}))]);
+        let http = with_options(
+            http("MangaDex", root),
+            json!({"username": "alice", "password": "bad"}),
+        );
+        assert!(
+            fails(extract(
+                &http,
+                Url::parse("https://mangadex.org/title/feed").unwrap()
+            ))
+            .await
+        );
+        requests.join().unwrap();
     }
 
     #[tokio::test]
