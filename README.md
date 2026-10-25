@@ -1132,19 +1132,28 @@ width/height. Default filenames are `wallhaven-{id}.{extension}`; archive
 identity is the wallpaper ID. Plain `w.wallhaven.cc` links stay direct.
 
 Experimental native ArtStation extraction (`--extractor native`, `artstation`
-category) uses the site JSON: `www.artstation.com/artwork/HASH` and
-`USER.artstation.com/projects/HASH` (`projects/HASH.json`), and portfolios
-`www.artstation.com/USER[/albums/all]` or `USER.artstation.com`
-(`users/USER/projects.json?page=N` until `total_count`, capped at 200 pages,
-then each project's JSON). ArtStation sits behind Cloudflare: requests send a
-browser User-Agent, Accept and Referer, but may still be blocked (HTTP 403
-reports this). Only `image` assets are downloaded, using `image_url` as-is
-(no `4k` rewrite), HTTPS on `cdn*.artstation.com` only; covers, video/player
-embeds (YouTube etc.) and 3D/other assets are skipped. `post_id`/`id` is the
-project hash, `media_id` the asset ID, `username` the artist, caption the
-title, timestamp `published_at`, index 1-based per project, with width/height.
-Default filenames are `{post_id}_{media_id}.{extension}`; archive identity is
-the asset ID. Plain CDN links stay direct.
+category) uses the site JSON. Upstream classes: `image` (`/artwork/HASH`,
+`USER.artstation.com/projects/HASH`, `artstn.co/p/HASH`), `user`
+(`www.artstation.com/USER[/albums/all]`, `USER.artstation.com`), `album`
+(`/USER/albums/ID`), `likes`, `collection` (`/USER/collections/ID`),
+`collections` and `following` (queued as child jobs), `challenge`
+(`/contests/NAME/challenges/ID[?sorting=...]`), `search` (`/search?query=...`,
+POSTed with a CSRF token) and `artwork` (`/artwork?sorting=...`). Listings page
+until `total_count` (capped at 200 pages) and fetch each project lazily.
+ArtStation sits behind Cloudflare: requests send a browser User-Agent, Accept
+and Referer, but may still be blocked (HTTP 403 reports this). Every asset with
+an image is downloaded; `/images/images/` URLs are upgraded to `8k` with `4k`,
+`large`, `medium` and `small` download fallbacks. Embedded players: on-site
+video clips (`videos`) and Marmoset viewers (`mviews`) are read from their
+embed pages, external embeds go to yt-dlp (`ytdl:`) when `external` is true,
+and `previews` also keeps their preview images. Settings: `videos`, `mviews`,
+`external`, `previews`, `max-posts`, `pro-first`. Files carry upstream's
+keywords (project fields, `asset`, `num`, `count`, `userinfo`, `album`,
+`collection`, `search`, `artwork`, `challenge`) and default formats
+(`artstation/{userinfo[username]}/artstation_{id}_{asset[id]}_{title}.{extension}`
+and per-class directories). HTTPS on `cdn*.artstation.com` only; archive
+identity is the asset ID (challenge images: challenge and URL-derived ID).
+Plain CDN links stay direct.
 
 Experimental native Pinterest extraction (`--extractor native`, `pinterest`
 category) uses the web resource API (`resource/NAME/get/?source_url=..&data=..`

@@ -214,8 +214,8 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         };
         return Some(descriptor("wallhaven", format));
     }
-    if crate::artstation::target(url).is_ok() {
-        return Some(descriptor("artstation", "{asset[id]}"));
+    if let Ok(target) = crate::artstation::target(url) {
+        return Some(descriptor("artstation", target.route().archive));
     }
     if let Ok(target) = crate::pinterest::target(url) {
         let format = if matches!(target, crate::pinterest::Target::Board { .. }) {

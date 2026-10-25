@@ -48,6 +48,17 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ("pinterest", &["sections", "stories", "videos", "domain"]),
     ("vsco", &["videos", "include"]),
     (
+        "artstation",
+        &[
+            "mviews",
+            "videos",
+            "external",
+            "previews",
+            "max-posts",
+            "pro-first",
+        ],
+    ),
+    (
         "flickr",
         &[
             "videos", "exif", "info", "contexts", "profile", "metadata", "size-max",
@@ -2852,6 +2863,7 @@ mod site_scope_tests {
                 "pinterest":{"sections":false},
                 "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
                 "vsco":{"videos":false,"include":"all"},
+                "artstation":{"external":true,"max-posts":3},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -2873,6 +2885,9 @@ mod site_scope_tests {
         let options = config.resolve("vsco").unwrap().site_options.unwrap();
         assert_eq!(options["videos"], serde_json::json!(false));
         assert_eq!(options["include"], serde_json::json!("all"));
+        let options = config.resolve("artstation").unwrap().site_options.unwrap();
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert_eq!(options["max-posts"], serde_json::json!(3));
         let tumblr = config.resolve("tumblr").unwrap();
         assert_eq!(tumblr.api_key.as_deref(), Some("k"));
         assert_eq!(tumblr.posts.as_deref(), Some(&["photo".to_owned()][..]));

@@ -996,10 +996,15 @@ the API with an optional `api-key`. Remaining: folders, journals, favorites,
 characters, multi-file/non-visual submissions, and upstream's `metadata`
 option.
 
-**Implemented experimental native ArtStation:** projects and user portfolios
-via site JSON with browser-like headers. Remaining: Cloudflare challenges,
-video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
-albums by ID, collections, challenges, search/artwork listings, following.
+**Implemented experimental native ArtStation:** upstream's image, user, album,
+likes, collection, collections, challenge, search, artwork and following
+classes via site JSON with browser-like headers, upstream keywords and default
+paths, `8k` image upgrades with `4k`/`large`/`medium`/`small` fallbacks,
+on-site video clips and Marmoset viewers, external embeds handed to yt-dlp,
+and the `videos`, `mviews`, `external`, `previews`, `max-posts` and
+`pro-first` options. Remaining: Cloudflare challenges (plain requests
+currently get HTTP 403), upstream's `_no_cache` random query parameter, and
+upstream's per-class archive formats (the asset ID is the archive identity).
 
 **Implemented experimental native Flickr:** upstream's image, album (and album
 lists queued as child jobs), gallery, group, user, favorite and search classes
