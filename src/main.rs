@@ -1034,8 +1034,18 @@ fn list_extractors(detailed: bool) {
     let mut lines: Vec<String> = dedicated.iter().map(|c| (*c).to_owned()).collect();
     for site in gallery_dl_rs::sites::sites() {
         if detailed {
-            let routes: Vec<_> = site.routes.iter().map(|route| route.subcategory).collect();
-            lines.push(format!("{}: {}", site.category, routes.join(", ")));
+            // Per-URL subcategories (generic, directlink) have no fixed name.
+            let routes: Vec<_> = site
+                .routes
+                .iter()
+                .map(|route| route.subcategory)
+                .filter(|subcategory| !subcategory.is_empty())
+                .collect();
+            lines.push(if routes.is_empty() {
+                site.category.to_owned()
+            } else {
+                format!("{}: {}", site.category, routes.join(", "))
+            });
         } else {
             lines.push(site.category.to_owned());
         }
