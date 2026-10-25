@@ -47,6 +47,12 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
     (
+        "flickr",
+        &[
+            "videos", "exif", "info", "contexts", "profile", "metadata", "size-max",
+        ],
+    ),
+    (
         "tumblr",
         &[
             "external",
@@ -2843,6 +2849,7 @@ mod site_scope_tests {
         let config = super::Config::parse_with_options(
             br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3},
                 "pinterest":{"sections":false},
+                "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -2856,6 +2863,11 @@ mod site_scope_tests {
         assert_eq!(options["recursion"], serde_json::json!(2));
         let options = config.resolve("pinterest").unwrap().site_options.unwrap();
         assert_eq!(options["sections"], serde_json::json!(false));
+        let flickr = config.resolve("flickr").unwrap();
+        assert_eq!(flickr.api_key.as_deref(), Some("fk"));
+        let options = flickr.site_options.unwrap();
+        assert_eq!(options["size-max"], serde_json::json!("k"));
+        assert_eq!(options["metadata"], serde_json::json!(["geo"]));
         let tumblr = config.resolve("tumblr").unwrap();
         assert_eq!(tumblr.api_key.as_deref(), Some("k"));
         assert_eq!(tumblr.posts.as_deref(), Some(&["photo".to_owned()][..]));

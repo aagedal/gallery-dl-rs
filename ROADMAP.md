@@ -996,11 +996,15 @@ via site JSON with browser-like headers. Remaining: Cloudflare challenges,
 video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
 albums by ID, collections, challenges, search/artwork listings, following.
 
-**Implemented experimental native Flickr:** photos, videos, albums, user
-photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
-Remaining: OAuth/private content, favorites, galleries, groups, tags/search,
-album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
-`videos` options, and album metadata on listed items.
+**Implemented experimental native Flickr:** upstream's image, album (and album
+lists queued as child jobs), gallery, group, user, favorite and search classes
+via the REST API with the `/prints` site key (overridable `api-key`), upstream
+keyword dictionaries and default paths, album/gallery/group/search metadata,
+`video.getStreamInfo` videos, `_d` download URLs and the `videos`, `size-max`,
+`metadata`, `info`, `exif`, `contexts` and `profile` settings. Remaining:
+OAuth/private content, upstream's per-class archive formats (the photo ID is
+the archive identity) and `*.staticflickr.com` image URLs (kept as direct
+downloads).
 
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,

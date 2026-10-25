@@ -1096,20 +1096,26 @@ the title, with `published_time` and width/height. Default filenames are
 `{post_id}.{extension}`; archive identity is the UUID.
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
-uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
-echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
-`photos.getSizes`: "Original" or the largest photo; videos pick the best
-stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
-`photos/USER` (`urls.lookupUser` + `people.getPhotos`) and `flic.kr/p/CODE`
-(base58 photo ID). Listings page 500 per page, capped at 200 pages, using
-`url_o/k/h/l` extras; videos cost one `getSizes` call each. Media must be HTTPS
-on `*.staticflickr.com` (videos also `*.flickr.com`). API `stat: fail` replies
-map to errors (code 1 not found, 100 invalid key). `post_id`/`media_id`/`id` is
-the photo ID, `username` the owner, caption the title, timestamp the upload
-date, with width/height and photo/video type. Default filenames are
-`{post_id}.{extension}`; archive identity is the photo ID. Plain
-`staticflickr.com` links stay direct downloads.
+uses the REST API with the public site key upstream reads from
+`www.flickr.com/prints` (fetched once) unless `extractor.flickr.api-key` is set
+(accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
+echoed). Supported upstream classes: `image` (`photos/USER/ID`, `flic.kr/p/CODE`),
+`album` (`photos/USER/albums/ID`; `photos/USER/albums` queues every album),
+`gallery` (`photos/USER/galleries/ID`), `group` (`groups/NAME`), `user`
+(`photos/USER`), `favorite` (`photos/USER/favorites`) and `search`
+(`search/?text=...&tags=...`, query passed to `photos.search`). Files carry
+upstream's keyword dictionaries (`id`, `title`, `description`, `tags`, `date`,
+`views`, `owner`, `user`, `album`, `gallery`, `group`, `search`, `url`,
+`label`, `width`, `height`, ...) and default formats
+(`flickr_{id}.{extension}` under `flickr/{user[username]}` and the per-class
+`Albums`/`Galleries`/`Groups`/`Favorites`/`Search` directories). Photos use the
+largest listed `url_*` size (or the last `getSizes` entry) with upstream's `_d`
+download suffix; videos use `video.getStreamInfo`. Settings: `videos`
+(default true), `size-max`, `metadata` (extra listing fields), `info`, `exif`,
+`contexts` and `profile`. Listings page 500 per page, capped at 200 pages.
+Media must be HTTPS on `*.staticflickr.com` (videos also `*.flickr.com`). API
+`stat: fail` replies map to errors without echoing details. Archive identity is
+the photo ID. Plain `staticflickr.com` links stay direct downloads.
 
 Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
 category) uses the public API (`/api/v1`). Supported: `wallhaven.cc/w/ID` and

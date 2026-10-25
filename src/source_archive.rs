@@ -197,6 +197,10 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             crate::flickr::Target::Photo { .. } => "{id}",
             crate::flickr::Target::Album { .. } => "a_{album[id]}_{id}",
             crate::flickr::Target::User { .. } => "u_{user[nsid]}_{id}",
+            crate::flickr::Target::Gallery { .. } => "g_{gallery[id]}_{id}",
+            crate::flickr::Target::Group { .. } => "G_{group[nsid]}_{id}",
+            crate::flickr::Target::Favorite { .. } => "f_{user[nsid]}_{id}",
+            crate::flickr::Target::Search { .. } => "s_{search}_{id}",
         };
         return Some(descriptor("flickr", format));
     }
@@ -520,7 +524,7 @@ mod tests {
             for_url(&Url::parse("https://example.invalid/not-a-native-route").unwrap()).is_none()
         );
         assert!(
-            for_url(&Url::parse("https://www.flickr.com/photos/example/favorites").unwrap())
+            for_url(&Url::parse("https://www.flickr.com/photos/example/galleries").unwrap())
                 .is_none()
         );
         assert!(for_url(&Url::parse("https://user:PRIVATE@imgur.com/abcde").unwrap()).is_none());
