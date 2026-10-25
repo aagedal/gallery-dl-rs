@@ -724,7 +724,7 @@ ignore `posts`, matching upstream. Disabling `original` avoids token lookups;
 legacy inline `_1280` rewriting remains enabled. Plain media links stay direct downloads.
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
-requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
+requires `extractor.pixiv.refresh-token` (accepted in the `pixiv`, `pixiv-novel` or `deviantart`
 category, never echoed); without it selected Pixiv jobs fail before any network access,
 except for public Pixiv Sketch feeds and the Pixivision article request described below.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
@@ -1083,17 +1083,28 @@ Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
 category) uses the OAuth2 API with a client-credentials token (upstream's public
 client unless `extractor.deviantart.client-id`/`client-secret` are set; accepted
 only in the `deviantart` category, never echoed), cached for the run and
-refreshed once on HTTP 401. Supported: `www.deviantart.com/USER/art/SLUG-ID`
-(UUID from the page's `DeviantArt://deviation/UUID` app link, then
-`deviation/UUID`), `USER`, `USER/gallery[/all]` (`gallery/all`) and
-`USER/gallery/FOLDER/NAME` (folder UUID matched by name via `gallery/folders`);
-legacy `USER.deviantart.com` hosts are normalized. Listings use offset paging
-capped at 200 pages. Media are `content.src`, or the `deviation/download`
-original for downloadable deviations; HTTPS on `*.wixmp.com`/`*.deviantart.net`
-only. Deviations without image content (literature, journals) are skipped.
-`post_id`/`media_id`/`id` is the deviation UUID, `username` the author, caption
-the title, with `published_time` and width/height. Default filenames are
-`{post_id}.{extension}`; archive identity is the UUID.
+refreshed once on HTTP 401. `extractor.deviantart.refresh-token` enables
+upstream's private token where upstream uses one (short or mature listing
+pages, mature deviations, downloads, `public: false`); DeviantArt may rotate
+it, and the rotated token is kept only in memory for the run. Supported:
+deviations (`USER/art|journal/SLUG-ID`, `view/ID`, `fav.me/dID`), user profiles
+(`include` children; default `gallery`), galleries, folders (by name or UUID,
+subfolders as child jobs), scraps and gallery searches (web "Eclipse"
+endpoints with a CSRF token and session cookies), favourites, collections,
+journals, status updates, avatars, banners, tags, searches (logged-out HTML
+results) and stash links; legacy `USER.deviantart.com` and `fxdeviantart.com`
+hosts are normalized. Listings page lazily (offset or cursor, capped at 200
+pages); web page requests are spaced two seconds apart like upstream. Files use
+upstream's `content` handling: preview URLs with `quality`/`intermediary`
+rewriting by default, originals via `deviation/download` only with `original`
+(upstream's default `false`; `"images"` supported); videos and flash files are
+added; literature, journals and statuses become `.htm` (default) or `.txt`
+files per `journals`. HTTPS media on `*.wixmp.com`/`*.deviantart.net` only.
+Files carry upstream's keywords (`index`, `index_base36`, `username`,
+`filename`, `target`, `folder`, `collection`, `search_tags`, ...) and default
+paths such as `deviantart/USER/deviantart_{index}_{title}.{extension}`.
+Archive identity is the deviation (or status) UUID, unchanged from earlier
+releases for primary files, plus the file kind for secondary files.
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
 uses the REST API with upstream's default public key unless

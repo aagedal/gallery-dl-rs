@@ -47,6 +47,23 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
     (
+        "deviantart",
+        &[
+            "include",
+            "journals",
+            "original",
+            "quality",
+            "intermediary",
+            "mature",
+            "metadata",
+            "flat",
+            "public",
+            "group",
+            "folder",
+            "avatar",
+        ],
+    ),
+    (
         "tumblr",
         &[
             "external",
@@ -191,7 +208,7 @@ pub struct Options {
     pub metadata_bookmark: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
-    /// Pixiv OAuth refresh token; accepted in pixiv and pixiv-novel scopes.
+    /// OAuth refresh token; accepted in pixiv, pixiv-novel and deviantart scopes.
     pub refresh_token: Option<String>,
     pub covers: Option<bool>,
     pub full_series: Option<bool>,
@@ -1561,9 +1578,11 @@ impl Config {
                     "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
                 ));
             }
-            if !matches!(name, "pixiv" | "pixiv-novel") && settings.refresh_token.0.is_some() {
+            if !matches!(name, "pixiv" | "pixiv-novel" | "deviantart")
+                && settings.refresh_token.0.is_some()
+            {
                 return Err(error(
-                    "native configuration refresh-token is only supported for pixiv or pixiv-novel",
+                    "native configuration refresh-token is only supported for pixiv, pixiv-novel or deviantart",
                 ));
             }
             if name != "deviantart"

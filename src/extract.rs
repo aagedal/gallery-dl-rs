@@ -316,14 +316,11 @@ impl Media {
                 }
                 ("flickr", serde_json::json!([post.post_id]).to_string())
             }
-            // DeviantArt files are identified by deviation UUID.
-            "deviantart" => {
-                let post = self.metadata.as_ref()?;
-                if !crate::deviantart::valid_uuid(&post.post_id) {
-                    return None;
-                }
-                ("deviantart", serde_json::json!([post.post_id]).to_string())
-            }
+            // DeviantArt files are identified by deviation UUID (plus file kind).
+            "deviantart" => (
+                "deviantart",
+                crate::deviantart::archive_identity(self.metadata.as_ref()?)?,
+            ),
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;

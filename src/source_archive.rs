@@ -179,15 +179,22 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         return Some(descriptor("imgur", format));
     }
     if let Ok(target) = crate::deviantart::target(url) {
+        use crate::deviantart::Target;
         let format = match target {
-            crate::deviantart::Target::Folder { .. } => "F_{folder[uuid]}_{index}.{extension}",
-            crate::deviantart::Target::Deviation { .. } => "g_{_username}_{index}.{extension}",
-            crate::deviantart::Target::Gallery(_) => {
-                if path.split('/').any(|part| part == "gallery") {
-                    "g_{_username}_{index}.{extension}"
-                } else {
-                    ""
-                }
+            Target::User(_) => "",
+            Target::Folder { .. } => "F_{folder[uuid]}_{index}.{extension}",
+            Target::Collection { .. } => "C_{collection[uuid]}_{index}.{extension}",
+            Target::Favorite(_) => "f_{_username}_{index}.{extension}",
+            Target::Scraps(_) => "s_{_username}_{index}.{extension}",
+            Target::Journal(_) => "j_{_username}_{index}.{extension}",
+            Target::Status(_) => "S_{_username}_{index}.{extension}",
+            Target::Avatar(_) => "a_{_username}_{index}",
+            Target::Background(_) => "b_{index}",
+            Target::Tag(_) => "T_{search_tags}_{index}.{extension}",
+            Target::Search(_) => "Q_{search_tags}_{index}.{extension}",
+            Target::Stash(_) => "{index}.{extension}",
+            Target::Gallery(_) | Target::GallerySearch { .. } | Target::Deviation { .. } => {
+                "g_{_username}_{index}.{extension}"
             }
         };
         return Some(descriptor("deviantart", format));

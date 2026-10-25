@@ -951,12 +951,28 @@ forwarding and full hook/event parity remain unfinished.
 Remaining: bookmark resume-cursor diagnostics, additional metadata fields and
 Referer-routed plain `i.pximg.net` links.
 
-**Implemented experimental native DeviantArt:** deviations, user galleries and
-folders via the OAuth2 API (client credentials, overridable `client-id`/
-`client-secret`). Remaining: user OAuth (refresh tokens) and private/premium
-content, literature/journal text, favorites, collections, scraps, stash, tags,
-search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
-and metadata options, and upstream's `{title}_{index}` filenames.
+**Implemented experimental native DeviantArt:** upstream's `deviation`
+(`art`/`journal` pages, `view/ID`, `fav.me`), `user` (dispatching `include`:
+avatar, background, gallery, scraps, journal, status, favorite), `gallery`,
+`folder` (with subfolder child jobs), `scraps` and `gallery-search` (Eclipse
+API with front-page CSRF token and session cookies), `favorite`, `collection`,
+`journal`, `status`, `avatar`, `background`, `tag`, `search` (logged-out HTML
+results) and `stash` classes over the OAuth2 API (client credentials,
+overridable `client-id`/`client-secret`, and `refresh-token` for upstream's
+private-token switching; rotated refresh tokens are kept only for the run).
+Files carry upstream's keyword dictionary and default filename/directory
+formats; literature, journals and statuses are written as HTML or text per
+`journals`. Options: `include`, `journals`, `original` (incl. `"images"`),
+`quality`, `intermediary`, `mature`, `metadata`, `flat`, `public`, `group`,
+`folder.subfolders`, `avatar.formats`. Archive identity stays the deviation
+UUID (plus file kind for videos/flash/journal text; user+index for avatars),
+not upstream's per-class `archive_fmt`. Remaining: login/cookies, groups
+(`group-*` subcategories), premium/watcher-locked content and
+`auto-watch`/`auto-unwatch`, `watch`/`watch-posts`/`following`, additional
+media of multi-image deviations, tiptap literature markup (falls back to the
+excerpt), `comments`/`comments-avatars`, `extra` stash links, `previews`,
+`folders`, `jwt`, `pagination`/`wait-min`, CloudFront block waits, persisting
+rotated refresh tokens, and legacy `sta.sh/2…` redirects.
 
 **Implemented experimental native Wallhaven:** wallpapers, searches, user
 uploads and collections via the API (optional `api-key`). Remaining: per-item

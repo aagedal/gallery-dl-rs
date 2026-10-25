@@ -2020,6 +2020,16 @@ fn client_credentials_are_deviantart_only_and_never_echoed() {
     assert_eq!(resolved.client_id.as_deref(), Some("123"));
     assert_eq!(resolved.client_secret.as_deref(), Some("abcdef0"));
     assert_eq!(config.resolve("pixiv").unwrap().client_secret, None);
+    let config = parse(
+        r#"{"extractor":{"deviantart":{"refresh-token":"0a1b2c","include":"all","journals":"text","folder":{"subfolders":false}}}}"#,
+    )
+    .unwrap();
+    let resolved = config.resolve("deviantart").unwrap();
+    assert_eq!(resolved.refresh_token.as_deref(), Some("0a1b2c"));
+    let options = resolved.site_options.unwrap();
+    assert_eq!(options["include"], "all");
+    assert_eq!(options["journals"], "text");
+    assert_eq!(options["folder"]["subfolders"], false);
     for json in [
         r#"{"client-secret":"abc123"}"#,
         r#"{"extractor":{"client-id":"123"}}"#,
