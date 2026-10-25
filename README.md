@@ -2528,12 +2528,14 @@ its base category's settings. In compatibility mode prefixed inputs are
 passed to gallery-dl with their prefix.
 
 Families and base categories: `2chen`, `blogger`, `chevereto`, `foolfuuka`,
+`foolslide` (no built-in instances; `/read/...` chapters and `/series/NAME`
+manga, every page requested as a POST with `adult=true`),
 `gelbooru_v01`, `gelbooru_v02`, `hentaicosplays`, `IMHentai`, `jschan`,
 `lolisafe` (no built-in instances; `/a/ID` albums), `lynxchan`, `manganelo`,
 `misskey`, `moebooru`, `Nijie`, `nitter`, `philomena`, `postmill`, `reactor`,
 `shimmie2`, `shopify`, `szurubooru`, `urlshortener`, `vichan`, `wikimedia` and
 `xenforo`. Danbooru, e621 and Mastodon instances are handled by their
-dedicated extractors (see their sections); FoOlSlide has no native port.
+dedicated extractors (see their sections).
 
 ## Native postprocessors
 
@@ -2893,7 +2895,8 @@ and options: `unsplash`, `pexels`, `tenor`, `imgbb`, `imagechest`, `telegraph`,
 `mangahere`, `inkbunny`, `skeb`, `toyhouse`, `poipiku`, `pillowfort`,
 `smugmug`, `blogspot`, `plurk`, `itchio`, `soundgasm`, `8chan`, `2chan`,
 `comick`, `mangafire`, `mangareader`, `mangatown`, `tcbscans`, `mangafox`,
-`boosty`, `fantia`, `subscribestar`, `cien`, `ao3`, `nijie`, `horne`,
+`boosty`, `fanbox`, `fantia`, `patreon`, `subscribestar`, `cien`, `ao3`,
+`nijie`, `horne`,
 `imagebam`, `imageshack`, `imagefap`, `wallpapercave`, `desktopography`,
 `lexica`, `pixnet`, `listal`, `khinsider`, `audiochan`, `whyp`, the
 `imagehosts` family (imxto, imagetwist, imagevenue, pixhost, vipr and others),
@@ -2913,7 +2916,20 @@ Manganelo mirrors, `mangataro`, `mangoxo`, `weebdex`, `hentai2read`,
 galleries are also native (`8muses`, `luscious`, `erome`, `pornpics`,
 `pornhub`, `xvideos`, `xhamster`, `vipergirls`, `bellazon`, `fansly` with its
 owner `token`, and the other upstream adult modules); sites built around
-leaked private content or celebrity fakes are intentionally not ported.
+leaked private content or celebrity fakes are intentionally not ported, and
+neither are `picazor` (redistributes leaked OnlyFans content) and `wikifeet`
+(collects sexualised photos of real people), under the same policy.
+
+Account feeds in registry sites: `500px` liked photos (`/liked`, the
+`favorite` class) need the logged-in cookies (`--cookies`), whose
+`x-csrf-token` is echoed as upstream does; the `civitai` generator feed
+(`/generate`, `generated`) needs `api-key` or the `__Secure-civitai-token`
+cookie; MangaDex's Updates Feed (`/title/feed`, `feed`) and library
+(`/title/follows`, `following`) log in with the `mangadex` site options
+`username`/`password`, through `client-id`/`client-secret` (OpenID Connect at
+auth.mangadex.org) when set, else the legacy `/auth/login`. MangaDex refresh
+and access tokens use upstream's credential-cache keys, and configured
+credentials also authenticate MDList requests.
 
 Upstream's input prefixes work natively too: `generic:URL` (or `g:URL`)
 downloads the images and videos a page references (tag sources plus URLs

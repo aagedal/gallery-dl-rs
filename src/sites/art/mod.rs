@@ -18,6 +18,7 @@ mod booth;
 mod cien;
 mod civitai;
 mod comedywildlifephoto;
+mod fanbox;
 mod fantia;
 mod fivehundredpx;
 mod foriio;
@@ -35,6 +36,7 @@ mod myportfolio;
 mod naverblog;
 mod nekohouse;
 mod nijie;
+mod patreon;
 mod picarto;
 mod piczel;
 mod pillowfort;
@@ -67,6 +69,7 @@ pub(super) static SITES: &[&Site] = &[
     &booth::SITE,
     &cien::SITE,
     &civitai::SITE,
+    &fanbox::SITE,
     &fantia::SITE,
     &fivehundredpx::SITE,
     &inkbunny::SITE,
@@ -76,6 +79,7 @@ pub(super) static SITES: &[&Site] = &[
     &lightroom::SITE,
     &nijie::NIJIE,
     &nijie::HORNE,
+    &patreon::SITE,
     &picarto::SITE,
     &piczel::SITE,
     &pillowfort::SITE,

@@ -18,6 +18,7 @@ mod comicvine;
 mod dandadan;
 mod dankefuerslesen;
 mod dynastyscans;
+mod foolslide;
 mod hentai2read;
 mod hentaihere;
 mod hiperdex;
@@ -141,6 +142,9 @@ pub(super) struct Gallery {
     /// Enumerate every page and leave `count` alone, for extractors with a
     /// custom `items()` that does not zip pages with `count`.
     pub uncounted: bool,
+    /// A configured instance root whose origin may serve images on a
+    /// non-default port.
+    pub root: Option<&'static str>,
 }
 
 impl Gallery {
@@ -154,7 +158,14 @@ impl Gallery {
             timestamp: None,
             headers: Vec::new(),
             uncounted: false,
+            root: None,
         }
+    }
+
+    /// Also accept image URLs on `root`'s origin (configured instances).
+    pub fn root(mut self, root: &'static str) -> Self {
+        self.root = Some(root);
+        self
     }
 
     pub fn uncounted(mut self) -> Self {
@@ -209,7 +220,10 @@ impl Gallery {
         let mut items = Vec::new();
         for (number, (raw, image)) in numbered {
             set(&mut data, self.enum_key, number);
-            let url = Url::parse(raw.trim()).ok().filter(crate::sites::plain);
+            let url = Url::parse(raw.trim()).ok().filter(|url| match self.root {
+                Some(root) => crate::sites::instances::plain_or_root(url, root),
+                None => crate::sites::plain(url),
+            });
             let needs_name = match image {
                 Some(image) => {
                     let has_extension = image.contains_key("extension");
@@ -305,7 +319,7 @@ pub(super) fn option_list(http: &Http, key: &str) -> Option<Vec<String>> {
 
 /// Families with configurable instances (`crate::sites::instances`).
 pub(super) static FAMILIES: &[&crate::sites::instances::Family] =
-    &[&manganelo::FAMILY, &imhentai::FAMILY];
+    &[&manganelo::FAMILY, &imhentai::FAMILY, &foolslide::FAMILY];
 
 #[cfg(test)]
 pub(super) mod tests {

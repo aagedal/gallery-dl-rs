@@ -730,8 +730,8 @@ real captures remain required.
 
 **Implemented experimental configurable registry instances:** upstream's
 `BaseExtractor.update`/`_init_category` for the registry families (2chen,
-blogger, chevereto, foolfuuka, gelbooru_v01, gelbooru_v02, hentaicosplays,
-IMHentai, jschan, lolisafe, lynxchan, manganelo, misskey, moebooru, Nijie,
+blogger, chevereto, foolfuuka, foolslide, gelbooru_v01, gelbooru_v02,
+hentaicosplays, IMHentai, jschan, lolisafe, lynxchan, manganelo, misskey, moebooru, Nijie,
 nitter, philomena, postmill, reactor, shimmie2, shopify, szurubooru,
 urlshortener, vichan, wikimedia, xenforo). `extractor.<basecategory>.<category>`
 objects with a `root` (http(s), no credentials; optional bounded `pattern`
@@ -747,13 +747,25 @@ reads through `config_instance` are honoured where the port has the feature
 (Shimmie2 `file_url`/`quote`/`cookies`, Wikimedia `api-path`/`useragent` with
 API-path probing, Gelbooru v0.2 `root-api`/`request-interval`, Philomena
 `filter_id`, szurubooru `query-all`, URL shortener `headers`); lolisafe gained
-a generic album extractor for configured instances. Remaining: FoOlSlide (no
-port), upstream's `root: null` configured instances (roots are required),
+a generic album extractor and FoOlSlide chapter/manga extractors for
+configured instances. Remaining: upstream's `root: null` configured instances
+(roots are required),
 regex-level backtracking between an instance pattern and the family suffix
 (the pattern must end at a path boundary), xenforo's `cookies` login names,
 lolisafe's `domain` option, ports in embedded-video URLs handed to yt-dlp, and
 host-named settings scopes for prefixed inputs first seen in input files (they
 use the base scope).
+
+**Registry class audit follow-ups (2026-10-25):** added 500px `favorite`
+(session cookies with the echoed `x-csrf-token`), civitai `generated`
+(`api-key` or session cookie), MangaDex `feed`/`following` (password or
+OpenID Connect client login with upstream's cached refresh/access tokens; MDLists
+authenticate when credentials are configured), readcomiconline's `tag` class
+(for the empty listing kind; `artist`/`genre`/`publisher`/`writer` remain the
+instance subcategories, as upstream sets them) and the FoOlSlide family.
+tumblrgallery `gallery` is not an upstream extractor: it is the
+pattern-less base class's inherited `GalleryExtractor` subcategory. The
+account feeds still need authenticated live verification.
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept
@@ -871,6 +883,42 @@ coverage. A public revision-enabled native inspection on 2026-10-20 emitted one
 current-version thumbnail job, whose hash matched the Python calculation on a
 separate API response. Successful live historical-version extraction remains
 unverified.
+
+**Implemented experimental native pixivFANBOX:** every upstream class
+(`creator` with `offset`, `tag`, `post`, `home`, `supporting` and pixiv's
+`fanbox/creator/ID` `redirect`) through `api.fanbox.cc` with upstream's
+Origin/Referer/Sec-Fetch headers, keywords (`content`, `archives`,
+`articleBody`, `isCoverImage`, `fileUrl`, `fileId`) and default paths, the
+`embeds` (queued to the site router, or `ytdl` files for video providers),
+`metadata` (`user`, `plan`, `comments`), `comments` and `fee-max` options.
+A `FANBOXSESSID` cookie from `--cookies` unlocks paid posts and the feeds;
+restricted single posts and feeds without it end in an error naming the
+cookie. The current API's wrapped bodies (`post`, `pageUrls`, `posts`,
+`plans`, listing `cover`) are read beside upstream's shapes, guest sessions
+the API assigns are not sent back (it refuses this client's later requests
+carrying them), and calls are spaced 0.5 s apart. Public posts, creators,
+tags and the redirect were checked live on 2026-10-25; paid content is
+fixture-tested only.
+
+**Implemented experimental native Patreon:** every upstream class
+(`creator` including `c/`, `cw/`, `id:`, `user?u=`, `profile/creators`
+and `filters[...]`/`sort` queries, `user` home feed, `post`, `collection`)
+through the JSON:API `posts`/`stream` endpoints and the pages' bootstrap
+data, with upstream's Patreon app User-Agent, keywords (`creator` from the
+user API, `campaign`, `tags`, `hash`, `type`, `file`, TipTap
+`content_json_string` rendered as `content`), MD5-hash de-duplication and
+default paths, and the `files`, `format-images`, `order-posts`, `cursor`
+and (home feed) `date-max` options. `.m3u8` videos become `ytdl:` HLS
+manifest jobs; attachments resolve their redirect with the session, and
+unnamed files take their `Content-Disposition` name (HEAD). A `session_id`
+cookie from `--cookies` unlocks patron-only posts; unviewable single posts,
+refusals and the home feed without it report the missing cookie. Beyond
+upstream, bootstrap data is also read from `__NEXT_DATA__` scripts with a
+`nonce` and from post pages' React Server Component chunks, which current
+pages need. Public posts (images, postfile/attachments, Mux HLS), creators,
+`filters[month]`, `user?u=`, a collection and `format-images` were checked
+live on 2026-10-25; logged-in feeds and patron-only posts are
+fixture-tested only.
 
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
 lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries

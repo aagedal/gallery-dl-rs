@@ -118,6 +118,45 @@ fn prefixed_input_selects_the_family_for_any_host() {
 }
 
 #[test]
+fn foolslide_works_only_through_configured_or_prefixed_instances() {
+    let page = br#"<h1 class="tbtitle dnone"><a title="Manga"></a><a title="Chapter 1: One"></a></h1>
+<script>var pages = [{"id":"5","chapter_id":"9","filename":"01.jpg","url":"https://cdn.fool.test/01.jpg","thumb_url":"t","width":"1","height":"1","size":"1"}];</script>"#;
+    let (root, server) = serve(vec![
+        ("text/html", page.to_vec()),
+        ("text/html", page.to_vec()),
+    ]);
+    let configured = gallery_dl()
+        .arg("-o")
+        .arg(format!("extractor.foolslide.myslide.root={root}/reader"))
+        .arg("-g")
+        .arg(format!("{root}/reader/read/manga/en/0/1/"))
+        .output()
+        .unwrap();
+    assert!(
+        configured.status.success(),
+        "{}",
+        String::from_utf8_lossy(&configured.stderr)
+    );
+    let stdout = String::from_utf8(configured.stdout).unwrap();
+    assert_eq!(stdout.trim(), "https://cdn.fool.test/01.jpg");
+    let prefixed = gallery_dl()
+        .arg("-g")
+        .arg(format!("foolslide:{root}/read/manga/en/0/1/"))
+        .output()
+        .unwrap();
+    assert!(
+        prefixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prefixed.stderr)
+    );
+    let stdout = String::from_utf8(prefixed.stdout).unwrap();
+    assert_eq!(stdout.trim(), "https://cdn.fool.test/01.jpg");
+    let requests = server.join().unwrap();
+    assert_eq!(requests[0], "POST /reader/read/manga/en/0/1 HTTP/1.1");
+    assert_eq!(requests[1], "POST /read/manga/en/0/1 HTTP/1.1");
+}
+
+#[test]
 fn invalid_instance_settings_are_rejected() {
     let output = gallery_dl()
         .args(["-o", "extractor.moebooru.bad.root=ftp://x.test"])

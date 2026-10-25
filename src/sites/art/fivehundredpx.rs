@@ -1,4 +1,4 @@
-//! 500px photostreams, galleries and photos, mirroring
+//! 500px photostreams, galleries, likes and photos, mirroring
 //! gallery_dl/extractor/500px.py through the GraphQL and `v1/photos` APIs.
 use super::{digits, parse_iso, str_of};
 use crate::event::ExtractionEvent;
@@ -17,9 +17,9 @@ pub static SITE: Site = Site {
     name: "500px",
     matches: |url| target(url).is_some(),
     extract,
-    routes: &[&USER, &GALLERY, &IMAGE],
+    routes: &[&USER, &GALLERY, &FAVORITE, &IMAGE],
     api_key: false,
-    cookies: None,
+    cookies: Some("500px.com"),
 };
 
 const FILENAME: &str = "{id}_{name}.{extension}";
@@ -35,6 +35,12 @@ static GALLERY: Route = Route::new(
     &["{category}", "{user[username]}", "{gallery[name]}"],
     "{id}",
 );
+static FAVORITE: Route = Route::new(
+    "favorite",
+    FILENAME,
+    &["{category}", "{user[username]}"],
+    "{id}",
+);
 static IMAGE: Route = Route::new(
     "image",
     FILENAME,
@@ -46,6 +52,7 @@ static IMAGE: Route = Route::new(
 enum Target {
     User(String),
     Gallery(String, String),
+    Favorite,
     Image(String),
 }
 
@@ -56,6 +63,10 @@ fn target(url: &Url) -> Option<Target> {
     }
     let path = url.path().strip_prefix('/')?;
     let parts: Vec<&str> = path.split('/').collect();
+    // `/liked/?$`
+    if matches!(parts.as_slice(), ["liked"] | ["liked", ""]) {
+        return Some(Target::Favorite);
+    }
     if let ["photo", id, ..] = parts.as_slice() {
         let len = id.bytes().take_while(u8::is_ascii_digit).count();
         return digits(&id[..len]).then(|| Target::Image(id[..len].to_owned()));
@@ -103,6 +114,13 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 Step::Photos(photos),
             ))
         }),
+        Some(Target::Favorite) => photo_pages(
+            http,
+            &FAVORITE,
+            Map::new(),
+            Kind::Favorite,
+            Step::Cursor(None),
+        ),
         Some(Target::Image(id)) => crate::sites::once(async move {
             let photos = extend(http, &[id]).await?;
             Ok(crate::sites::events(photo_events(
@@ -129,11 +147,20 @@ async fn graphql(http: &Http, name: &str, variables: Value) -> Result<Value> {
         "query": query,
     });
     let url = http.api(GRAPHQL)?;
-    let mut response = http.post_json(&url, &body, &[]).await?;
+    let csrf = csrf_token(http);
+    let headers: Vec<(&str, &str)> = csrf.iter().map(|t| ("x-csrf-token", t.as_str())).collect();
+    let mut response = http.post_json(&url, &body, &headers).await?;
     match response.get_mut("data").map(Value::take) {
         Some(data @ Value::Object(_)) => Ok(data),
         _ => Err(error("500px GraphQL response contains no data")),
     }
+}
+
+/// The session's `x-csrf-token` cookie, which upstream echoes as a header
+/// so logged-in queries such as `likedPhotos` are authorised.
+fn csrf_token(http: &Http) -> Option<String> {
+    let root = Url::parse(ROOT).ok()?;
+    http.cookie(&root, "x-csrf-token")
 }
 
 /// Upstream `_extend`: full photo objects for `ids`, in order.
@@ -154,7 +181,10 @@ async fn extend(http: &Http, ids: &[String]) -> Result<Vec<Value>> {
         .append_pair("following_sample", "100")
         .append_pair("image_size", "4096")
         .append_pair("ids", &ids.join(","));
-    let body = http.json_with(&url, &[("Origin", ROOT)]).await?;
+    let csrf = csrf_token(http);
+    let mut headers = vec![("Origin", ROOT)];
+    headers.extend(csrf.iter().map(|t| ("x-csrf-token", t.as_str())));
+    let body = http.json_with(&url, &headers).await?;
     let photos = body
         .get("photos")
         .and_then(Value::as_object)
@@ -181,6 +211,7 @@ fn edge_ids(photos: &Value) -> Vec<String> {
 enum Kind {
     User(String),
     Gallery(String, String),
+    Favorite,
 }
 
 enum Step {
@@ -206,6 +237,16 @@ async fn fetch_photos(http: &Http, kind: &Kind, cursor: Option<String>) -> Resul
                 "pageSize": PAGE_SIZE, "cursor": cursor}),
             &["galleryByOwnerIdAndSlugOrToken", "photos"],
         ),
+        (Kind::Favorite, None) => (
+            "LikedPhotosQueryRendererQuery",
+            json!({"pageSize": PAGE_SIZE}),
+            &["likedPhotos"],
+        ),
+        (Kind::Favorite, Some(cursor)) => (
+            "LikedPhotosPaginationContainerQuery",
+            json!({"pageSize": PAGE_SIZE, "cursor": cursor}),
+            &["likedPhotos"],
+        ),
     };
     let mut data = graphql(http, name, variables).await?;
     for key in path {
@@ -213,7 +254,10 @@ async fn fetch_photos(http: &Http, kind: &Kind, cursor: Option<String>) -> Resul
             .get_mut(*key)
             .map(Value::take)
             .filter(|v| !v.is_null())
-            .ok_or_else(|| error("500px user or gallery not found"))?;
+            .ok_or_else(|| match kind {
+                Kind::Favorite => error("500px liked photos need a logged-in session"),
+                _ => error("500px user or gallery not found"),
+            })?;
     }
     Ok(data)
 }
@@ -728,12 +772,132 @@ fragment GalleriesDetailPaginationContainer_gallery_3e6UuE on Gallery {
 }
 "#,
     ),
+    (
+        "LikedPhotosQueryRendererQuery",
+        r#"query LikedPhotosQueryRendererQuery($pageSize: Int) {
+  ...LikedPhotosPaginationContainer_query_RlXb8
+}
+
+fragment LikedPhotosPaginationContainer_query_RlXb8 on Query {
+  likedPhotos(first: $pageSize) {
+    edges {
+      node {
+        id
+        legacyId
+        canonicalPath
+        name
+        description
+        category
+        uploadedAt
+        location
+        width
+        height
+        isLikedByMe
+        notSafeForWork
+        tags
+        photographer: uploader {
+          id
+          legacyId
+          username
+          displayName
+          canonicalPath
+          avatar {
+            images {
+              url
+              id
+            }
+            id
+          }
+          followedByUsers {
+            totalCount
+            isFollowedByMe
+          }
+        }
+        images(sizes: [33, 35]) {
+          size
+          url
+          jpegUrl
+          webpUrl
+          id
+        }
+        __typename
+      }
+      cursor
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+"#,
+    ),
+    (
+        "LikedPhotosPaginationContainerQuery",
+        r#"query LikedPhotosPaginationContainerQuery($cursor: String, $pageSize: Int) {
+  ...LikedPhotosPaginationContainer_query_3e6UuE
+}
+
+fragment LikedPhotosPaginationContainer_query_3e6UuE on Query {
+  likedPhotos(first: $pageSize, after: $cursor) {
+    edges {
+      node {
+        id
+        legacyId
+        canonicalPath
+        name
+        description
+        category
+        uploadedAt
+        location
+        width
+        height
+        isLikedByMe
+        notSafeForWork
+        tags
+        photographer: uploader {
+          id
+          legacyId
+          username
+          displayName
+          canonicalPath
+          avatar {
+            images {
+              url
+              id
+            }
+            id
+          }
+          followedByUsers {
+            totalCount
+            isFollowedByMe
+          }
+        }
+        images(sizes: [33, 35]) {
+          size
+          url
+          jpegUrl
+          webpUrl
+          id
+        }
+        __typename
+      }
+      cursor
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+"#,
+    ),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{http, json, keywords, media, serve};
+    use crate::sites::testing::{fails, http, json, keywords, media, serve};
     use futures_util::StreamExt;
 
     #[test]
@@ -748,6 +912,8 @@ mod tests {
             Some(Target::User("alice".into()))
         );
         assert_eq!(t("https://500px.com/p"), Some(Target::User("p".into())));
+        assert_eq!(t("https://500px.com/liked"), Some(Target::Favorite));
+        assert_eq!(t("https://web.500px.com/liked/"), Some(Target::Favorite));
         assert_eq!(
             t("https://500px.com/p/alice/galleries/trips"),
             Some(Target::Gallery("alice".into(), "trips".into()))
@@ -762,7 +928,7 @@ mod tests {
         );
         for raw in [
             "https://500px.com/",
-            "https://500px.com/liked",
+            "https://500px.com/liked/x",
             "https://500px.com/likedbob",
             "https://500px.com/alice/photos",
             "https://500px.com/photo/abc",
@@ -862,6 +1028,60 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[1].contains(r#"\"galleryOwnerLegacyId\":\"9\""#));
         assert!(requests[1].contains(r#"\"slug\":\"trips\""#));
+    }
+
+    #[tokio::test]
+    async fn favorites_page_liked_photos_with_the_csrf_cookie() {
+        let (root, server) = serve(vec![
+            json(json!({"data": {"likedPhotos": edges(&[4], Some("L1"))}})),
+            json(photos(&[4])),
+            json(json!({"data": {"likedPhotos": edges(&[6], None)}})),
+            json(photos(&[6])),
+        ]);
+        let http = http("500px", root);
+        http.set_cookie(
+            &Url::parse(ROOT).unwrap(),
+            "x-csrf-token=tok; Domain=.500px.com; Path=/",
+        );
+        let files = media(extract(
+            &http,
+            Url::parse("https://500px.com/liked").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 2);
+        let k = keywords(&files[1]);
+        assert_eq!(k["subcategory"], "favorite");
+        assert_eq!(k["id"], 6);
+        let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
+        assert_eq!(file.render(&files[0]).unwrap(), "4_Shot 4.jpeg");
+        assert_eq!(
+            dir.render(&files[0]).unwrap().unwrap(),
+            std::path::PathBuf::from("500px/alice")
+        );
+        let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
+        assert_eq!(identity, r#"["{id}",["4"]]"#);
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains(r#""operationName":"LikedPhotosQueryRendererQuery""#));
+        assert!(requests[0].contains(r#""variables":"{\"pageSize\":20}""#));
+        assert!(requests[0].contains("x-csrf-token: tok"));
+        assert!(requests[1].contains("x-csrf-token: tok"));
+        assert!(requests[1].contains("&ids=4 "));
+        assert!(requests[2].contains("LikedPhotosPaginationContainerQuery"));
+        assert!(requests[2].contains(r#"\"cursor\":\"L1\""#));
+    }
+
+    #[tokio::test]
+    async fn favorites_without_a_session_fail() {
+        let (root, server) = serve(vec![json(json!({"data": {"likedPhotos": null}}))]);
+        let http = http("500px", root);
+        assert!(
+            fails(extract(
+                &http,
+                Url::parse("https://500px.com/liked").unwrap()
+            ))
+            .await
+        );
+        server.join().unwrap();
     }
 
     #[tokio::test]
