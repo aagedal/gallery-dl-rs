@@ -380,7 +380,9 @@ never with media. Plain `i.redd.it` file links
 stay direct downloads in both modes.
 
 Experimental native booru extraction (`--extractor native`) covers categories
-`danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and
+`danbooru` (danbooru.donmai.us and upstream's other `danbooru` hosts
+hijiribe.donmai.us, sonohara.donmai.us, safebooru.donmai.us and donmai.moe,
+each using its own host as API root), `e621` (e621.net, e926.net), `gelbooru` and
 `safebooru` (safebooru.org), plus upstream's other Danbooru instances
 `atfbooru` (booru.allthefallen.moe), `aibooru` (aibooru.online,
 aibooru.download and their `safe.`/`general.` hosts) and `booruvar`
@@ -578,8 +580,7 @@ e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
 Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
 `tags_<type>` strings and note lists. These requests happen when a page is
 fetched, before its posts are emitted. Not supported natively: the DAPI `url`
-option, Danbooru host aliases (hijiribe, sonohara, safebooru.donmai.us,
-donmai.moe), upstream's `Danbooru:URL`/`E621:URL` prefixes and user-configured
+option, upstream's `Danbooru:URL`/`E621:URL` prefixes and user-configured
 instances.
 
 The additional instances accept only upstream's exact hosts (no `www.` or

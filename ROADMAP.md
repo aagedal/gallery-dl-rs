@@ -680,8 +680,10 @@ scopes `extractor.Danbooru`/`extractor.E621` (also consulted by danbooru and
 e621), credentials are instance-scoped, and atfbooru/booruvar resolve
 root-relative file URLs like upstream. Existing danbooru, e621/e926, gelbooru
 and safebooru output, archive identities and paths are unchanged.
-Remaining: the DAPI `url` option, Danbooru host aliases (hijiribe, sonohara,
-safebooru.donmai.us, donmai.moe), upstream's separate `e926` category (e926
+Upstream's other `danbooru` hosts (hijiribe, sonohara and safebooru.donmai.us,
+donmai.moe) route to the danbooru instance with their own host as API root,
+exactly as upstream's instance pattern (no `www.` or other subdomains).
+Remaining: the DAPI `url` option, upstream's separate `e926` category (e926
 still shares e621's category and credentials natively), user-configured
 instances and the `Danbooru:URL`/`E621:URL` prefixes, class scopes under the
 base scopes, recorded source-oracle fixtures for the new instances, per-post

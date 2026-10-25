@@ -278,7 +278,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             // The native parser accepts extra host aliases which have no
             // matching installed upstream extractor; do not invent a class.
             if match category {
-                "danbooru" => url.host_str() != Some("danbooru.donmai.us"),
+                "danbooru" => !url.host_str().is_some_and(crate::booru::danbooru_host),
                 "e621" => !matches!(
                     url.host_str(),
                     Some("e621.net" | "e926.net" | "e621.cc" | "e621.anthro.fr")

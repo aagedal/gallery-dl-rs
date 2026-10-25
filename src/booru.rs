@@ -188,7 +188,9 @@ impl Site {
     fn media_host(self, host: &str) -> bool {
         let within = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
         match self {
-            Self::Danbooru => host == "cdn.donmai.us" || host.ends_with(".donmai.us"),
+            Self::Danbooru => {
+                host == "cdn.donmai.us" || host.ends_with(".donmai.us") || within("donmai.moe")
+            }
             Self::E621 => {
                 host == "static1.e621.net"
                     || host.ends_with(".e621.net")
@@ -222,6 +224,20 @@ impl Site {
             _ => "static1.e621.net",
         }
     }
+}
+
+/// Upstream's `danbooru` instance pattern
+/// `(?:danbooru|hijiribe|sonohara|safebooru)\.donmai\.us|donmai\.moe`.
+/// Upstream's `root: None` derives the API root from the matched host.
+pub fn danbooru_host(host: &str) -> bool {
+    matches!(
+        host,
+        "danbooru.donmai.us"
+            | "hijiribe.donmai.us"
+            | "sonohara.donmai.us"
+            | "safebooru.donmai.us"
+            | "donmai.moe"
+    )
 }
 
 /// aibooru's upstream pattern `(?:safe\.|general\.)?aibooru\.(?:online|download)`;
@@ -341,7 +357,7 @@ fn source_search_tags_raw(site: Site, url: &Url) -> Option<&str> {
     // Upstream instance patterns: the original hosts, or each additional
     // instance's exact hosts.
     let instance_host = url.host_str().is_some_and(|host| match site {
-        Site::Danbooru => host == "danbooru.donmai.us",
+        Site::Danbooru => danbooru_host(host),
         Site::E621 => matches!(host, "e621.net" | "e926.net"),
         _ => Site::from_instance_host(host) == Some(site),
     });
@@ -426,6 +442,8 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => {
             "https://danbooru.donmai.us/".into()
         }
+        // Upstream's other `danbooru` hosts keep their own (exact) root.
+        (Site::Danbooru, _) if danbooru_host(exact_host) => format!("https://{exact_host}/").into(),
         (Site::E621, "e621.net" | "e621.cc" | "e621.anthro.fr") => "https://e621.net/".into(),
         (Site::E621, "e926.net") => "https://e926.net/".into(),
         (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/".into(),
@@ -892,7 +910,7 @@ fn defaults(
 
 pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDefaults>> {
     let category = match url.host_str()? {
-        "danbooru.donmai.us" => "danbooru",
+        host if danbooru_host(host) => "danbooru",
         "e621.net" | "e621.cc" | "e621.anthro.fr" => "e621",
         "e926.net" => "e926",
         "gelbooru.com" => "gelbooru",
@@ -2914,7 +2932,8 @@ mod tests {
             (Site::Danbooru, "https://danbooru.donmai.us/posts"),
             (Site::Danbooru, "https://danbooru.donmai.us/posts/abc"),
             (Site::Danbooru, "https://danbooru.donmai.us:444/posts/1"),
-            (Site::Danbooru, "https://safebooru.donmai.us/posts/1"),
+            // Upstream's danbooru alternation has no testbooru host.
+            (Site::Danbooru, "https://testbooru.donmai.us/posts/1"),
             (Site::E621, "https://e621.net/users/1"),
             (
                 Site::Gelbooru,

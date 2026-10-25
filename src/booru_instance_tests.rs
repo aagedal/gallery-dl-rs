@@ -489,3 +489,93 @@ fn compatibility_output_of_the_instances_is_dedicated_booru_output() {
         assert_eq!(media.archive_key(), native.archive_key(), "{category}");
     }
 }
+
+#[test]
+fn danbooru_accepts_exactly_upstreams_instance_hosts_with_their_own_root() {
+    for host in [
+        "danbooru.donmai.us",
+        "hijiribe.donmai.us",
+        "sonohara.donmai.us",
+        "safebooru.donmai.us",
+        "donmai.moe",
+    ] {
+        assert!(danbooru_host(host), "{host}");
+        let post = Url::parse(&format!("https://{host}/posts/22")).unwrap();
+        assert_eq!(crate::extract::social_site(&post), Some("danbooru"));
+        assert_eq!(
+            target(Site::Danbooru, &post).unwrap(),
+            (
+                Target::Post { id: 22 },
+                Url::parse(&format!("https://{host}/")).unwrap()
+            ),
+            "{host}"
+        );
+        let search = Url::parse(&format!("https://{host}/posts?tags=a+b")).unwrap();
+        assert_eq!(
+            source_search_tags(Site::Danbooru, &search).as_deref(),
+            Some("a b")
+        );
+        let defaults = defaults_for_url(&search).unwrap();
+        assert_eq!(
+            (defaults.category, defaults.archive),
+            ("danbooru", "t_{search_tags}_{id}")
+        );
+        let descriptor = crate::source_archive::for_url(&search).unwrap();
+        assert_eq!(descriptor.category, "danbooru");
+        assert_eq!(descriptor.format, "t_{search_tags}_{id}");
+    }
+    // The existing native shorthands keep danbooru.donmai.us as their root.
+    for raw in [
+        "https://donmai.us/posts/1",
+        "https://www.danbooru.donmai.us/posts/1",
+    ] {
+        assert_eq!(
+            t(Site::Danbooru, raw).unwrap().1.as_str(),
+            "https://danbooru.donmai.us/"
+        );
+    }
+    // Anything outside upstream's alternation is not the danbooru instance.
+    for raw in [
+        "https://www.hijiribe.donmai.us/posts/1",
+        "https://www.donmai.moe/posts/1",
+        "https://evil.donmai.moe/posts/1",
+        "https://testbooru.donmai.us/posts/1",
+        "https://donmai.moe.example/posts/1",
+        "https://hijiribe.donmai.us:8443/posts/1",
+    ] {
+        assert!(t(Site::Danbooru, raw).is_err(), "{raw}");
+    }
+    assert!(!danbooru_host("donmai.us"));
+    // Files from donmai.moe's own hosts are accepted like cdn.donmai.us.
+    let media = parse_post(
+        Site::Danbooru,
+        &danbooru_dialect_post(1, &format!("https://cdn.donmai.moe/original/{MD5}.png")),
+    )
+    .unwrap();
+    assert_eq!(media.category, "danbooru");
+}
+
+#[tokio::test]
+async fn danbooru_alias_hosts_extract_as_danbooru() {
+    let cdn = format!("https://cdn.donmai.us/original/01/23/{MD5}.png");
+    let body = danbooru_dialect_post(9, &cdn).to_string();
+    let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+    let events: Vec<_> = booru(Site::Danbooru, root)
+        .events(&Url::parse("https://safebooru.donmai.us/posts/9").unwrap())
+        .collect()
+        .await;
+    let files = media(&events);
+    assert_eq!(files.len(), 1, "{events:?}");
+    assert_eq!(files[0].category, "danbooru");
+    assert_eq!(
+        paths(files[0]),
+        (format!("danbooru_9_{MD5}.png"), "danbooru".into())
+    );
+    assert!(files[0].archive_key().unwrap().starts_with("danbooru:"));
+    let requests = server.join().unwrap();
+    assert!(
+        requests[0].starts_with("GET /posts/9.json"),
+        "{}",
+        requests[0]
+    );
+}
