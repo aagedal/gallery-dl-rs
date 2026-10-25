@@ -246,9 +246,15 @@ defaults with the usual configuration precedence. Each post is one
 group: `post_id` is the album/gallery ID (or image ID), `media_id`/`id` the image
 ID, `index` is 1-based, `timestamp` comes from `created_at`, `username` from the
 account and `caption` from the image or post description/title. Default
-filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. User
-profiles, favorites, subreddit listings, searches and tag listings are rejected
-as unsupported. Compatibility mode sends Imgur URLs to the backend.
+filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. Upstream's
+listing classes page lazily through the `3` API with the `Client-ID` header
+(`extractor.imgur.client-id` overrides the default) and queue every post as an
+album (`/a/ID`) or image child job: `user` (`/user/NAME[/posts|/submitted]`),
+`favorite` (`/user/NAME/favorites`), `favorite-folder`
+(`/user/NAME/favorites/folder/ID`, `post/v1`-style paging), `subreddit`
+(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). The
+cookie-only `/user/me` listings are not supported. Compatibility mode sends
+Imgur URLs to the backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
@@ -1107,20 +1113,26 @@ Archive identity is the deviation (or status) UUID, unchanged from earlier
 releases for primary files, plus the file kind for secondary files.
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
-uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
-echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
-`photos.getSizes`: "Original" or the largest photo; videos pick the best
-stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
-`photos/USER` (`urls.lookupUser` + `people.getPhotos`) and `flic.kr/p/CODE`
-(base58 photo ID). Listings page 500 per page, capped at 200 pages, using
-`url_o/k/h/l` extras; videos cost one `getSizes` call each. Media must be HTTPS
-on `*.staticflickr.com` (videos also `*.flickr.com`). API `stat: fail` replies
-map to errors (code 1 not found, 100 invalid key). `post_id`/`media_id`/`id` is
-the photo ID, `username` the owner, caption the title, timestamp the upload
-date, with width/height and photo/video type. Default filenames are
-`{post_id}.{extension}`; archive identity is the photo ID. Plain
-`staticflickr.com` links stay direct downloads.
+uses the REST API with the public site key upstream reads from
+`www.flickr.com/prints` (fetched once) unless `extractor.flickr.api-key` is set
+(accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
+echoed). Supported upstream classes: `image` (`photos/USER/ID`, `flic.kr/p/CODE`),
+`album` (`photos/USER/albums/ID`; `photos/USER/albums` queues every album),
+`gallery` (`photos/USER/galleries/ID`), `group` (`groups/NAME`), `user`
+(`photos/USER`), `favorite` (`photos/USER/favorites`) and `search`
+(`search/?text=...&tags=...`, query passed to `photos.search`). Files carry
+upstream's keyword dictionaries (`id`, `title`, `description`, `tags`, `date`,
+`views`, `owner`, `user`, `album`, `gallery`, `group`, `search`, `url`,
+`label`, `width`, `height`, ...) and default formats
+(`flickr_{id}.{extension}` under `flickr/{user[username]}` and the per-class
+`Albums`/`Galleries`/`Groups`/`Favorites`/`Search` directories). Photos use the
+largest listed `url_*` size (or the last `getSizes` entry) with upstream's `_d`
+download suffix; videos use `video.getStreamInfo`. Settings: `videos`
+(default true), `size-max`, `metadata` (extra listing fields), `info`, `exif`,
+`contexts` and `profile`. Listings page 500 per page, capped at 200 pages.
+Media must be HTTPS on `*.staticflickr.com` (videos also `*.flickr.com`). API
+`stat: fail` replies map to errors without echoing details. Archive identity is
+the photo ID. Plain `staticflickr.com` links stay direct downloads.
 
 Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
 category) uses the public API (`/api/v1`). Supported: `wallhaven.cc/w/ID` and
@@ -1137,19 +1149,28 @@ width/height. Default filenames are `wallhaven-{id}.{extension}`; archive
 identity is the wallpaper ID. Plain `w.wallhaven.cc` links stay direct.
 
 Experimental native ArtStation extraction (`--extractor native`, `artstation`
-category) uses the site JSON: `www.artstation.com/artwork/HASH` and
-`USER.artstation.com/projects/HASH` (`projects/HASH.json`), and portfolios
-`www.artstation.com/USER[/albums/all]` or `USER.artstation.com`
-(`users/USER/projects.json?page=N` until `total_count`, capped at 200 pages,
-then each project's JSON). ArtStation sits behind Cloudflare: requests send a
-browser User-Agent, Accept and Referer, but may still be blocked (HTTP 403
-reports this). Only `image` assets are downloaded, using `image_url` as-is
-(no `4k` rewrite), HTTPS on `cdn*.artstation.com` only; covers, video/player
-embeds (YouTube etc.) and 3D/other assets are skipped. `post_id`/`id` is the
-project hash, `media_id` the asset ID, `username` the artist, caption the
-title, timestamp `published_at`, index 1-based per project, with width/height.
-Default filenames are `{post_id}_{media_id}.{extension}`; archive identity is
-the asset ID. Plain CDN links stay direct.
+category) uses the site JSON. Upstream classes: `image` (`/artwork/HASH`,
+`USER.artstation.com/projects/HASH`, `artstn.co/p/HASH`), `user`
+(`www.artstation.com/USER[/albums/all]`, `USER.artstation.com`), `album`
+(`/USER/albums/ID`), `likes`, `collection` (`/USER/collections/ID`),
+`collections` and `following` (queued as child jobs), `challenge`
+(`/contests/NAME/challenges/ID[?sorting=...]`), `search` (`/search?query=...`,
+POSTed with a CSRF token) and `artwork` (`/artwork?sorting=...`). Listings page
+until `total_count` (capped at 200 pages) and fetch each project lazily.
+ArtStation sits behind Cloudflare: requests send a browser User-Agent, Accept
+and Referer, but may still be blocked (HTTP 403 reports this). Every asset with
+an image is downloaded; `/images/images/` URLs are upgraded to `8k` with `4k`,
+`large`, `medium` and `small` download fallbacks. Embedded players: on-site
+video clips (`videos`) and Marmoset viewers (`mviews`) are read from their
+embed pages, external embeds go to yt-dlp (`ytdl:`) when `external` is true,
+and `previews` also keeps their preview images. Settings: `videos`, `mviews`,
+`external`, `previews`, `max-posts`, `pro-first`. Files carry upstream's
+keywords (project fields, `asset`, `num`, `count`, `userinfo`, `album`,
+`collection`, `search`, `artwork`, `challenge`) and default formats
+(`artstation/{userinfo[username]}/artstation_{id}_{asset[id]}_{title}.{extension}`
+and per-class directories). HTTPS on `cdn*.artstation.com` only; archive
+identity is the asset ID (challenge images: challenge and URL-derived ID).
+Plain CDN links stay direct.
 
 Experimental native Pinterest extraction (`--extractor native`, `pinterest`
 category) uses the web resource API (`resource/NAME/get/?source_url=..&data=..`
@@ -1169,14 +1190,21 @@ archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
 
 Experimental native VSCO extraction (`--extractor native`, `vsco` category)
 reads the page-embedded `window.__PRELOADED_STATE__` JSON, which is
-undocumented and fragile. `vsco.co/USER/media/ID` uses `medias.byId`;
-`vsco.co/USER` and `/USER/gallery` take the site ID and anonymous `tkn` bearer
-token from that state and page `api/3.0/medias/profile` by cursor (capped at
-200 pages). Images use `responsiveUrl` with an `https://` prefix; videos are
-kept only as progressive MP4 (HLS is skipped). HTTPS on `*.vsco.co` only.
-`post_id`/`media_id` is the media ID, `username` the `permaSubdomain`, caption
-the description, timestamp `uploadDate`, with width/height. Default filenames
-are `{media_id}.{extension}`; archive identity is the media ID.
+undocumented and fragile, plus the APIs authorized by its anonymous `tkn`
+bearer token. Upstream classes: `user` (`vsco.co/USER`, queues the `include`
+extractors: `avatar`, `gallery`, `spaces`, `collection`; default `gallery`),
+`gallery` (`/USER/gallery`, `api/3.0/medias/profile` by cursor), `collection`
+(`/USER/collection/1`, page state then `api/2.0/collections/ID/medias`),
+`space` (`vsco.co/spaces/ID`, `grpc/spaces/ID/posts` by post cursor), `spaces`
+(`/USER/spaces`, queues each space), `avatar` (the `im.vsco.co` profile image
+redirect), `image` (`/USER/media/ID`) and `video` (`/USER/video/ID`). Listings
+are capped at 200 pages. Images use upstream's `image-CDN.vsco.co` URLs; HLS
+videos go to the manifest downloader (`_ytdl_manifest: hls`, extension
+`mp4`), and `videos: false` skips videos. Files carry upstream's keywords
+(`id`, `user`, `grid`, `meta`, `tags`, `date`, `video`, `width`, `height`,
+`description`) and default formats (`vsco/{user}/{id}.{extension}`,
+`vsco/{user}/collection`, `vsco/space/{user}`). HTTPS on `*.vsco.co` only;
+archive identity is the media ID.
 
 Experimental native Newgrounds extraction (`--extractor native`, `newgrounds`
 category) scrapes art pages `www.newgrounds.com/art/view/USER/SLUG` (main

@@ -618,7 +618,11 @@ downloads. Document compatibility differences as features land.
 posts via the public `post/v1` API, with shared retries, timeouts, network
 options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
 to true; false preserves animated GIFs while leaving native video unchanged.
-Not yet: user profiles, favorites, subreddits, searches and tag listings.
+User submissions, favorites, favorite folders, subreddits, tags and searches
+page lazily through the `3` API and queue each post as an album or image
+child job (overridable `client-id`). Not yet: the cookie-only `/user/me`
+listings, upstream's keyword dictionaries and default formats for images and
+albums, and upstream's over-capacity wait.
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite
@@ -985,10 +989,15 @@ board sections, secret boards, search, related pins, created/saved/all-pins
 listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
 `videos` and `domain` options.
 
-**Implemented experimental native VSCO:** single media and user galleries via
-the page preloaded state and `medias/profile` API. Remaining: HLS videos
-(upstream ytdl), collections, journals, spaces, avatars, and upstream's
-`videos` option.
+**Implemented experimental native VSCO:** upstream's user (`include`
+dispatch), gallery, collection, space, spaces, avatar, image and video classes
+via the page preloaded state and the `medias/profile`, `collections` and
+`grpc/spaces` APIs, with upstream keywords and default paths, `image-CDN`
+URLs, HLS videos handed to the manifest downloader and the `videos` option.
+Remaining: journals (upstream has no journal extractor; journal entries are
+skipped), browser TLS impersonation for VSCO's Cloudflare front (plain
+requests currently get HTTP 403), and upstream's per-class archive formats
+(the media ID is the archive identity).
 
 **Implemented experimental native Newgrounds:** art posts and user art
 listings via page scraping and XHR listing pages. Remaining: login/cookies
@@ -1007,16 +1016,25 @@ the API with an optional `api-key`. Remaining: folders, journals, favorites,
 characters, multi-file/non-visual submissions, and upstream's `metadata`
 option.
 
-**Implemented experimental native ArtStation:** projects and user portfolios
-via site JSON with browser-like headers. Remaining: Cloudflare challenges,
-video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
-albums by ID, collections, challenges, search/artwork listings, following.
+**Implemented experimental native ArtStation:** upstream's image, user, album,
+likes, collection, collections, challenge, search, artwork and following
+classes via site JSON with browser-like headers, upstream keywords and default
+paths, `8k` image upgrades with `4k`/`large`/`medium`/`small` fallbacks,
+on-site video clips and Marmoset viewers, external embeds handed to yt-dlp,
+and the `videos`, `mviews`, `external`, `previews`, `max-posts` and
+`pro-first` options. Remaining: Cloudflare challenges (plain requests
+currently get HTTP 403), upstream's `_no_cache` random query parameter, and
+upstream's per-class archive formats (the asset ID is the archive identity).
 
-**Implemented experimental native Flickr:** photos, videos, albums, user
-photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
-Remaining: OAuth/private content, favorites, galleries, groups, tags/search,
-album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
-`videos` options, and album metadata on listed items.
+**Implemented experimental native Flickr:** upstream's image, album (and album
+lists queued as child jobs), gallery, group, user, favorite and search classes
+via the REST API with the `/prints` site key (overridable `api-key`), upstream
+keyword dictionaries and default paths, album/gallery/group/search metadata,
+`video.getStreamInfo` videos, `_d` download URLs and the `videos`, `size-max`,
+`metadata`, `info`, `exif`, `contexts` and `profile` settings. Remaining:
+OAuth/private content, upstream's per-class archive formats (the photo ID is
+the archive identity) and `*.staticflickr.com` image URLs (kept as direct
+downloads).
 
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,

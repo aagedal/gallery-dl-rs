@@ -46,6 +46,25 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
+    ("vsco", &["videos", "include"]),
+    ("imgur", &["client-id"]),
+    (
+        "artstation",
+        &[
+            "mviews",
+            "videos",
+            "external",
+            "previews",
+            "max-posts",
+            "pro-first",
+        ],
+    ),
+    (
+        "flickr",
+        &[
+            "videos", "exif", "info", "contexts", "profile", "metadata", "size-max",
+        ],
+    ),
     (
         "deviantart",
         &[
@@ -2862,6 +2881,10 @@ mod site_scope_tests {
         let config = super::Config::parse_with_options(
             br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3},
                 "pinterest":{"sections":false},
+                "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
+                "vsco":{"videos":false,"include":"all"},
+                "artstation":{"external":true,"max-posts":3},
+                "imgur":{"client-id":"abc123","mp4":false},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -2875,6 +2898,21 @@ mod site_scope_tests {
         assert_eq!(options["recursion"], serde_json::json!(2));
         let options = config.resolve("pinterest").unwrap().site_options.unwrap();
         assert_eq!(options["sections"], serde_json::json!(false));
+        let flickr = config.resolve("flickr").unwrap();
+        assert_eq!(flickr.api_key.as_deref(), Some("fk"));
+        let options = flickr.site_options.unwrap();
+        assert_eq!(options["size-max"], serde_json::json!("k"));
+        assert_eq!(options["metadata"], serde_json::json!(["geo"]));
+        let options = config.resolve("vsco").unwrap().site_options.unwrap();
+        assert_eq!(options["videos"], serde_json::json!(false));
+        assert_eq!(options["include"], serde_json::json!("all"));
+        let options = config.resolve("artstation").unwrap().site_options.unwrap();
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert_eq!(options["max-posts"], serde_json::json!(3));
+        let imgur = config.resolve("imgur").unwrap();
+        assert_eq!(imgur.mp4, Some(false));
+        let options = imgur.site_options.unwrap();
+        assert_eq!(options["client-id"], serde_json::json!("abc123"));
         let tumblr = config.resolve("tumblr").unwrap();
         assert_eq!(tumblr.api_key.as_deref(), Some("k"));
         assert_eq!(tumblr.posts.as_deref(), Some(&["photo".to_owned()][..]));

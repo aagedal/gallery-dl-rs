@@ -174,7 +174,9 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         let format = match target {
             crate::imgur::Target::Image(_) => "{id}",
             crate::imgur::Target::Album(_) => "{album[id]}_{id}",
-            crate::imgur::Target::Gallery(_) => "",
+            // Galleries and listings are queue-only; their format is the
+            // inherited empty default.
+            _ => "",
         };
         return Some(descriptor("imgur", format));
     }
@@ -204,6 +206,10 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             crate::flickr::Target::Photo { .. } => "{id}",
             crate::flickr::Target::Album { .. } => "a_{album[id]}_{id}",
             crate::flickr::Target::User { .. } => "u_{user[nsid]}_{id}",
+            crate::flickr::Target::Gallery { .. } => "g_{gallery[id]}_{id}",
+            crate::flickr::Target::Group { .. } => "G_{group[nsid]}_{id}",
+            crate::flickr::Target::Favorite { .. } => "f_{user[nsid]}_{id}",
+            crate::flickr::Target::Search { .. } => "s_{search}_{id}",
         };
         return Some(descriptor("flickr", format));
     }
@@ -217,8 +223,8 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         };
         return Some(descriptor("wallhaven", format));
     }
-    if crate::artstation::target(url).is_ok() {
-        return Some(descriptor("artstation", "{asset[id]}"));
+    if let Ok(target) = crate::artstation::target(url) {
+        return Some(descriptor("artstation", target.route().archive));
     }
     if let Ok(target) = crate::pinterest::target(url) {
         let format = if matches!(target, crate::pinterest::Target::Board { .. }) {
@@ -237,8 +243,13 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if crate::weasyl::target(url).is_ok() {
         return Some(descriptor("weasyl", "{submitid}"));
     }
-    if crate::vsco::target(url).is_ok() {
-        return Some(descriptor("vsco", "{id}"));
+    if let Ok(target) = crate::vsco::target(url) {
+        let format = match target {
+            crate::vsco::Target::Collection { .. } => "c_{user}_{id}",
+            crate::vsco::Target::Space { .. } => "s_{user}_{id}",
+            _ => "{id}",
+        };
+        return Some(descriptor("vsco", format));
     }
     if let Ok(target) = crate::imagehosts::target(url) {
         use crate::imagehosts::Target;
@@ -527,7 +538,7 @@ mod tests {
             for_url(&Url::parse("https://example.invalid/not-a-native-route").unwrap()).is_none()
         );
         assert!(
-            for_url(&Url::parse("https://www.flickr.com/photos/example/favorites").unwrap())
+            for_url(&Url::parse("https://www.flickr.com/photos/example/galleries").unwrap())
                 .is_none()
         );
         assert!(for_url(&Url::parse("https://user:PRIVATE@imgur.com/abcde").unwrap()).is_none());

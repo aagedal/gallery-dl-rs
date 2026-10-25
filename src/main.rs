@@ -1278,6 +1278,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_options(options.site_options.as_deref())?
                                     .with_mp4(options.mp4.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1457,6 +1458,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::flickr::Flickr::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -1475,6 +1477,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::artstation::ArtStation::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_options(options.site_options.as_deref())?
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1494,6 +1497,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::vsco::Vsco::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_options(options.site_options.as_deref())?
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
