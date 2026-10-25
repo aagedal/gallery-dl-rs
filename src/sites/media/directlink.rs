@@ -10,12 +10,12 @@ use url::Url;
 
 /// Upstream names the subcategory after the link's domain; registry routes
 /// are static, so files carry an empty subcategory. Upstream's filename
-/// format `{domain}/{path}/{filename}.{extension}` nests folders, which
-/// filename templates reject, so the domain and path are directories here.
+/// `{domain}/{path}/{filename}.{extension}` is cleaned as one segment, so
+/// its slashes become underscores; `R` does that replacement here.
 static DIRECTLINK: Route = Route::new(
     "",
-    "{filename}.{extension}",
-    &["{category}", "{domain}", "{path}"],
+    "{domain}_{path:R/_/}_{filename}.{extension}",
+    &["{category}"],
     "{domain}/{path}/{filename}.{extension}",
 );
 
@@ -143,11 +143,13 @@ mod tests {
             "https://img.example.org/a%20b/c/My%20Pic.JPG?s=1#top"
         );
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
-        assert_eq!(file.render(&files[0]).unwrap(), "My Pic.jpg");
-        // The path's folders flatten into one sanitized component.
+        assert_eq!(
+            file.render(&files[0]).unwrap(),
+            "img.example.org_a b_c_My Pic.jpg"
+        );
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
-            std::path::PathBuf::from("directlink/img.example.org/a b_c")
+            std::path::PathBuf::from("directlink")
         );
         let (_, identity) = crate::sites::archive_key(&files[0]).unwrap();
         assert!(identity.contains("img.example.org"), "{identity}");
@@ -164,10 +166,8 @@ mod tests {
         let root = Url::parse("https://cdn.example.net/top.png").unwrap();
         let files = media(crate::sites::extract(&http, root)).await;
         assert_eq!(keywords(&files[0])["path"], "");
-        let (_, dir) = crate::sites::default_templates(&files[0]).unwrap();
-        assert_eq!(
-            dir.render(&files[0]).unwrap().unwrap(),
-            std::path::PathBuf::from("directlink/cdn.example.net")
-        );
+        // An empty path leaves upstream's doubled separator.
+        let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
+        assert_eq!(file.render(&files[0]).unwrap(), "cdn.example.net__top.png");
     }
 }
