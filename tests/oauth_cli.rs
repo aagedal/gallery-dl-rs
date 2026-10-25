@@ -1,8 +1,9 @@
 //! `oauth:SITE` inputs through the command line, without network access.
+mod common;
 use std::process::{Command, Stdio};
 
 fn gallery_dl() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+    let mut command = common::binary_command();
     command
         .args(["--native-config-ignore", "-o", "cache.file=null"])
         .args(["-o", "extractor.oauth.browser=false"])
@@ -46,7 +47,7 @@ fn unknown_sites_and_invalid_settings_are_rejected() {
 
 #[test]
 fn listed_as_an_extractor_category() {
-    let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .arg("--list-extractors")
         .output()
         .unwrap();

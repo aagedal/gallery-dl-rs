@@ -1,4 +1,5 @@
 //! Network configuration tests use only bounded loopback servers and synthetic data.
+mod common;
 use gallery_dl_rs::{
     config::{Config, Options},
     download,
@@ -82,7 +83,7 @@ impl Drop for Server {
     }
 }
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    common::binary_command()
 }
 fn direct(value: &str) -> extract::Media {
     extract::direct(&extract::http_url(value).unwrap()).unwrap()

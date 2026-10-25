@@ -1,3 +1,4 @@
+mod common;
 use gallery_dl_rs::{
     download::{self, Outcome},
     extract::{self, Media},
@@ -1012,7 +1013,7 @@ async fn invalid_retry_after_uses_backoff_and_rate_limit_retries_are_bounded() {
 #[test]
 fn compatibility_mode_downloads_plain_imgur_file_links_directly() {
     // A fake backend executable proves the Python backend is not consulted.
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .args(["--extractor-command", "/nonexistent/gallery-dl", "-g"])
         .arg("https://i.imgur.com/abcdefg.jpg")
         .output()
@@ -1031,7 +1032,7 @@ fn compatibility_mode_downloads_plain_imgur_file_links_directly() {
 #[test]
 fn plain_reddit_image_links_download_directly_in_both_modes() {
     for mode in ["compatibility", "native"] {
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        let output = common::binary_command()
             .args([
                 "--extractor-command",
                 "/nonexistent/gallery-dl",
@@ -1056,7 +1057,7 @@ fn plain_reddit_image_links_download_directly_in_both_modes() {
 
 #[test]
 fn plain_booru_file_links_download_directly() {
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .args([
             "--extractor-command",
             "/nonexistent/gallery-dl",

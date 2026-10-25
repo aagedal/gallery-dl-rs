@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use md5::{Digest, Md5};
 use serde_json::{Value, json};
 use std::{
@@ -116,7 +117,7 @@ fn trace(root: &Path, event: &str) -> Value {
     json!({"name":"metadata","mode":"custom","event":event,"content-format":format!("{event}:{{post_id}}\n"),"open":"a","base-directory":root,"filename":"trace.txt"})
 }
 async fn cli(root: &Path, backend: &Path, config: &Path, extra: &[&str]) -> std::process::Output {
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+    let mut command = tokio::process::Command::from(common::binary_command());
     command
         .args([
             "--jobs",

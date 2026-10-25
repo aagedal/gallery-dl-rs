@@ -1,3 +1,4 @@
+mod common;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -13,7 +14,7 @@ use std::{
 use tokio::process::Command;
 
 fn binary(cwd: &Path, config: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+    let mut command = Command::from(common::binary_command());
     command
         .current_dir(cwd)
         .kill_on_drop(true)
@@ -553,7 +554,7 @@ async fn default_native_configuration_is_discovered_and_can_be_ignored() {
     // An unknown setting proves the file was loaded, because parsing rejects it.
     std::fs::write(xdg.join("gallery-dl-rs/config.json"), br#"{"bogus":1}"#).unwrap();
     let run = |extra: &[&str], vars: &[(&str, &Path)]| {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+        let mut command = Command::from(common::binary_command());
         command
             .kill_on_drop(true)
             .env_remove("GALLERY_DL_RS_CONFIG")

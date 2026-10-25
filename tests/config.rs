@@ -1,3 +1,4 @@
+mod common;
 use gallery_dl_rs::config::{Config, MAX_CONFIG_BYTES, Options};
 use std::{
     path::{Path, PathBuf},
@@ -3837,7 +3838,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             ),
             ("https://instagram.com/p/Example/", false),
         ] {
-            let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            let output = common::binary_command()
                 .env("BOORU_THRESHOLD_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)

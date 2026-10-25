@@ -1,3 +1,4 @@
+mod common;
 use std::{
     process::{Command, Stdio},
     time::Duration,
@@ -6,7 +7,7 @@ use std::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    common::binary_command()
 }
 
 #[test]
@@ -97,7 +98,7 @@ async fn stdin_publishes_urls_before_eof_then_continues_to_the_next_file() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("after.txt");
     std::fs::write(&path, b"https://example.com/after.jpg\n").unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let mut child = tokio::process::Command::from(common::binary_command())
         .args(["-g", "-i", "-", "-i"])
         .arg(path)
         .stdin(Stdio::piped())
@@ -140,7 +141,7 @@ async fn stdin_publishes_urls_before_eof_then_continues_to_the_next_file() {
 #[cfg(unix)]
 #[tokio::test]
 async fn interrupt_while_waiting_for_stdin_exits_promptly() {
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let mut child = tokio::process::Command::from(common::binary_command())
         .args(["-g", "-i", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

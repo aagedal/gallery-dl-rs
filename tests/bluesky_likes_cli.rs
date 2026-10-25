@@ -1,3 +1,4 @@
+mod common;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -113,7 +114,7 @@ async fn category_api_server_and_likes_endpoint_drive_independent_native_childre
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("native.json");
     std::fs::write(&config,serde_json::to_vec(&json!({"extractor":{"bluesky":{"api-server":"http://appview.test/fixture/","proxy":server.proxy,"endpoint":"getActorLikes","include":["likes","media"],"timeout":2,"retries":0}}})).unwrap()).unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+    let mut command = Command::from(common::binary_command());
     command
         .current_dir(root.path())
         .kill_on_drop(true)

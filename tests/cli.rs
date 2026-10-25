@@ -1,7 +1,8 @@
+mod common;
 use std::process::Command;
 
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    common::binary_command()
 }
 
 #[test]

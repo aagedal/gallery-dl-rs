@@ -1,3 +1,4 @@
+mod common;
 use gallery_dl_rs::{
     archive::{Archive, ArchiveOutcome},
     download::{self, DownloadOptions, Outcome},
@@ -713,7 +714,7 @@ async fn cli_resume_opt_in_persists_between_processes() {
     server.watch(root.path());
     let url = server.url.replace("media.dat", "media.jpg");
     for expected_success in [false, true] {
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+        let mut command = tokio::process::Command::from(common::binary_command());
         command
             .kill_on_drop(true)
             .arg("--resume")
