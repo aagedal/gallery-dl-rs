@@ -82,6 +82,10 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
             "avatar",
         ],
     ),
+    ("wallhaven", &["metadata"]),
+    ("furaffinity", &["descriptions", "external", "layout"]),
+    ("weasyl", &["metadata"]),
+    ("newgrounds", &["flash", "format"]),
     (
         "tumblr",
         &[
@@ -2885,6 +2889,10 @@ mod site_scope_tests {
                 "vsco":{"videos":false,"include":"all"},
                 "artstation":{"external":true,"max-posts":3},
                 "imgur":{"client-id":"abc123","mp4":false},
+                "wallhaven":{"metadata":true,"retries":4},
+                "furaffinity":{"layout":"old","external":true,"descriptions":"html"},
+                "weasyl":{"metadata":true},
+                "newgrounds":{"flash":false,"format":"720p"},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -2913,6 +2921,21 @@ mod site_scope_tests {
         assert_eq!(imgur.mp4, Some(false));
         let options = imgur.site_options.unwrap();
         assert_eq!(options["client-id"], serde_json::json!("abc123"));
+        let wallhaven = config.resolve("wallhaven").unwrap();
+        assert_eq!(wallhaven.retries, Some(4));
+        assert_eq!(
+            wallhaven.site_options.unwrap()["metadata"],
+            serde_json::json!(true)
+        );
+        let options = config.resolve("furaffinity").unwrap().site_options.unwrap();
+        assert_eq!(options["layout"], serde_json::json!("old"));
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert_eq!(options["descriptions"], serde_json::json!("html"));
+        let options = config.resolve("weasyl").unwrap().site_options.unwrap();
+        assert_eq!(options["metadata"], serde_json::json!(true));
+        let options = config.resolve("newgrounds").unwrap().site_options.unwrap();
+        assert_eq!(options["flash"], serde_json::json!(false));
+        assert_eq!(options["format"], serde_json::json!("720p"));
         let tumblr = config.resolve("tumblr").unwrap();
         assert_eq!(tumblr.api_key.as_deref(), Some("k"));
         assert_eq!(tumblr.posts.as_deref(), Some(&["photo".to_owned()][..]));

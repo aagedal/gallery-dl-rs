@@ -422,7 +422,15 @@ fn routes_social_hosts_without_lookalike_domains() {
             Some("newgrounds"),
         ),
         ("https://alice.newgrounds.com/art", Some("newgrounds")),
-        ("https://www.newgrounds.com/portal/view/1", None),
+        (
+            "https://www.newgrounds.com/portal/view/1",
+            Some("newgrounds"),
+        ),
+        (
+            "https://www.newgrounds.com/audio/listen/1",
+            Some("newgrounds"),
+        ),
+        ("https://alice.newgrounds.com/", Some("newgrounds")),
         ("https://www.newgrounds.com/art", None),
         ("https://art.ngfiles.com/images/1/1_a.png", None),
         ("https://www.newgrounds.com.evil.example/art/view/a/b", None),
@@ -436,7 +444,15 @@ fn routes_social_hosts_without_lookalike_domains() {
             "https://www.furaffinity.net/scraps/alice/2/",
             Some("furaffinity"),
         ),
-        ("https://www.furaffinity.net/user/alice/", None),
+        (
+            "https://www.furaffinity.net/user/alice/",
+            Some("furaffinity"),
+        ),
+        (
+            "https://www.furaffinity.net/favorites/alice/",
+            Some("furaffinity"),
+        ),
+        ("https://www.furaffinity.net/", None),
         ("https://d.furaffinity.net/art/alice/1/1.alice_a.png", None),
         ("https://www.furaffinity.net.evil.example/view/42/", None),
         (
@@ -446,6 +462,8 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.weasyl.com/submission/42", Some("weasyl")),
         ("https://www.weasyl.com/~alice", Some("weasyl")),
         ("https://www.weasyl.com/~alice/gallery", Some("weasyl")),
+        ("https://www.weasyl.com/journal/7", Some("weasyl")),
+        ("https://www.weasyl.com/favorites/alice", Some("weasyl")),
         ("https://www.weasyl.com/", None),
         ("https://cdn.weasyl.com/~alice/submissions/42/a/b.png", None),
         ("https://www.weasyl.com.evil.example/submission/42", None),
@@ -466,7 +484,16 @@ fn routes_social_hosts_without_lookalike_domains() {
             Some("wallhaven"),
         ),
         ("https://wallhaven.cc/", None),
-        ("https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg", None),
+        // Upstream maps wallpaper files to the `image` class for metadata.
+        (
+            "https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg",
+            Some("wallhaven"),
+        ),
+        ("https://wallhaven.cc/user/alice", Some("wallhaven")),
+        (
+            "https://w.wallhaven.cc.evil.example/full/94/wallhaven-a.jpg",
+            None,
+        ),
         ("https://wallhaven.cc.evil.example/w/94x38z", None),
         ("https://www.flickr.com/photos/alice/123", Some("flickr")),
         (

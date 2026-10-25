@@ -215,9 +215,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     }
     if let Ok(target) = crate::wallhaven::target(url) {
         let format = match target {
-            crate::wallhaven::Target::Search { .. } if path.ends_with("/uploads") => {
-                "u_{username}_{id}"
-            }
+            crate::wallhaven::Target::Uploads { .. } => "u_{username}_{id}",
             crate::wallhaven::Target::Search { .. } => "s_{search[q]}_{id}",
             _ => "{id}",
         };
@@ -700,7 +698,7 @@ mod tests {
         let template = crate::postprocess::template::Template::parse("{submitid}").unwrap();
         assert_eq!(template.render(&context).unwrap(), "123");
         // Source Weasyl.populate_submission retains submitid without rewriting.
-        assert_eq!(context["submitid"], submission["submitid"].to_string());
+        assert_eq!(context["submitid"], submission["submitid"]);
         let status = json!({"id":"42","account":{"acct":"artist"},"reblog":null,
             "media_attachments":[{"id":"77","type":"image","url":"https://mastodon.social/example.jpg"}]});
         let mut media = crate::mastodon::parse_status(&status, "mastodon.social")

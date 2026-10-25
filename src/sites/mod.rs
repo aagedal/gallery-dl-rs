@@ -19,6 +19,8 @@ mod media;
 mod social;
 mod video;
 
+/// gallery-dl `text` helpers shared with the dedicated native extractors.
+pub(crate) use art::{Scan, extract_iter, parse_int, parse_query, split_html};
 pub use http::Http;
 
 use crate::{

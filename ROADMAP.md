@@ -978,10 +978,17 @@ excerpt), `comments`/`comments-avatars`, `extra` stash links, `previews`,
 `folders`, `jwt`, `pagination`/`wait-min`, CloudFront block waits, persisting
 rotated refresh tokens, and legacy `sta.sh/2…` redirects.
 
-**Implemented experimental native Wallhaven:** wallpapers, searches, user
-uploads and collections via the API (optional `api-key`). Remaining: per-item
-`w/ID` metadata (tags/uploader) for listings, collection lists, upstream's
-`{category}_{id}_{resolution}` filenames and `metadata` option.
+**Implemented experimental native Wallhaven:** upstream's `image` (including
+`w.wallhaven.cc` file URLs), `search`, `uploads`, `collection`, `collections`
+(queued children) and `user` (`include` dispatch) classes via the API
+(optional `api-key`), with upstream keyword dictionaries (`search[tags]`/
+`tag_id` from `meta.query`, `username`, `collection_id`, `wh_category`, tag
+names), the `metadata` option (per-item `w/ID` objects with tags/uploader) and
+searches starting at the URL's `page`. Default paths now follow upstream
+(`{category}_{id}_{resolution}.{extension}` in each class's directory, e.g.
+`wallhaven/{username}/`) instead of `wallhaven/wallhaven-ID.ext`; archive keys
+remain the wallpaper ID, so existing archives still match. Remaining:
+upstream's default API key and 1.4 s request interval.
 
 **Implemented experimental native Pinterest:** pins, boards, user pins and
 `pin.it` links via the resource API. Remaining: login/cookies and CSRF token,
@@ -999,22 +1006,53 @@ skipped), browser TLS impersonation for VSCO's Cloudflare front (plain
 requests currently get HTTP 403), and upstream's per-class archive formats
 (the media ID is the archive identity).
 
-**Implemented experimental native Newgrounds:** art posts and user art
-listings via page scraping and XHR listing pages. Remaining: login/cookies
-(adult posts), audio, movies/games, favorites, following, search, user
-overview, upstream's `flash`, `format` and `include` options, and tags/rating/
-score metadata.
+**Implemented experimental native Newgrounds:** upstream's `image` (including
+`art.ngfiles.com` file URLs), `media` (portal movies/games and audio),
+`art`, `audio`, `movies`, `games`, `favorite`, `following` (queued
+profiles), `search` and `user` (`include` dispatch) classes via page scraping
+and XHR listing pages, with `ng_session` cookies from `--cookies`/
+`--cookies-from-browser` for adult-rated posts. Movies are downloaded
+directly from `portal/video` sources chosen by the `format` option (other
+formats as fallbacks), as upstream does (no yt-dlp handoff); the `flash`
+option is honored. Files carry upstream's keywords (title, description,
+date, rating, score, favorites, sorted tags, artists, comment, `_type`/
+`_index`, `num`), including author-comment images. Default paths now follow
+upstream (`{category}_{_index}_{title}.{extension}` in
+`newgrounds/{artist[:10]:J, }/`) instead of `newgrounds/INDEX_N.ext`; art
+archive keys are unchanged, audio and portal files use `a`/`p`-prefixed
+identities. Remaining: username/password login, search `suitabilities`
+(a session POST), the 0.5–1.5 s request interval, and live verification:
+the "NG Guard" bot check answered every request with HTTP 403 on
+2026-10-25 (reported as an error suggesting browser cookies).
 
-**Implemented experimental native Fur Affinity:** submissions, galleries and
-scraps via page scraping with optional `a`/`b` session cookies. Remaining:
-favorites, search, user profile/journals, followed users, upstream's
-`descriptions`, `external`, `include` and `layout` options, and tags/
-description metadata.
+**Implemented experimental native Fur Affinity:** upstream's `post`,
+`gallery`, `scraps`, `folder`, `favorite` (with `favorite_id`), `search`
+(POSTed form pagination), `submissions` (`/msg/submissions`, needs cookies),
+`following` (queued profiles) and `user` (`include` dispatch) classes via
+page scraping with optional `a`/`b` session cookies, including the
+`fxraffinity`/`xfuraffinity`/`fxfuraffinity` mirrors. Files carry
+`_parse_post`'s keywords for the new and old layouts, plus the current page
+layout those markers no longer match (tags, title, artist,
+description, statistics, rating, category/theme, species, gender, size,
+folders, thumbnail) with upstream's `descriptions`, `external` and `layout`
+options. Default paths now follow upstream (`{id}{title:? //}.{extension}` in
+`furaffinity/{user!l}/`, plus `Scraps`, `Favorites`, `Folders/...` or
+`Search/{search}`) instead of `furaffinity/ID.ext`; archive keys remain the
+submission ID. Remaining: the missing-cookie warning, 1 s request interval
+and `skip`-based offsets. Upstream has no journal extractor.
 
-**Implemented experimental native Weasyl:** submissions and user galleries via
-the API with an optional `api-key`. Remaining: folders, journals, favorites,
-characters, multi-file/non-visual submissions, and upstream's `metadata`
-option.
+**Implemented experimental native Weasyl:** upstream's `submission`,
+`submissions`, `folder` (`folder_name` from the first submission's full
+object), `journal`/`journals` (saved as `.html` text like upstream's `text:`
+URLs, archived as `jID`) and `favorite` (scraped pages, `user` keyword)
+classes via the API with an optional `api-key` and the `metadata` option.
+Files carry the API object as upstream's keywords (`url`, `date`,
+`filename`, `extension`, `folderid`) with upstream's default
+`{submitid} {title}.{extension}` filenames in `weasyl/{owner_login}/` (plus
+`{folder_name}` or `{user}/Favorites`) instead of `weasyl/ID.ext`; archive
+keys remain the submission ID. Like upstream, submissions without
+`media.submission` are skipped and only its first file is used; upstream has
+no character extractor.
 
 **Implemented experimental native ArtStation:** upstream's image, user, album,
 likes, collection, collections, challenge, search, artwork and following

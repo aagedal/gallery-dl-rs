@@ -106,6 +106,7 @@ impl FirefoxProfile {
                 | "kemono.cr"
                 | "coomer.st"
                 | "furaffinity.net"
+                | "newgrounds.com"
         ) {
             return Err(error("unsupported browser cookie site"));
         }
@@ -504,6 +505,7 @@ mod tests {
             "kemono.cr",
             "coomer.st",
             "furaffinity.net",
+            "newgrounds.com",
         ];
         for site in sites {
             insert(&connection, &format!(".{site}"), "session", site, "");
