@@ -543,7 +543,8 @@ upstream instance labels; existing files are not moved. Stable archive identity
 remains (instance, attachment ID), including for older `mastodon` archive entries.
 
 Experimental native Kemono/Coomer extraction (`--extractor native`) covers
-kemono.cr/.su/.party (`kemono` category) and coomer.st/.su/.party (`coomer`).
+kemono.cr/.st/.su/.party (`kemono` category) and coomer.st/.cr/.su/.party
+(`coomer`), matching upstream's domains.
 Supported: posts (`/SERVICE/user/USER/post/ID`), creator listings
 (`/SERVICE/user/USER`) and global post listings (`/posts`) via the `/api/v1` API
 with `Accept: text/css`. Listings accept search (`q`), tag (`tag`) and initial
@@ -601,6 +602,15 @@ and post/DM/share/chat counts when present. Filters and templates expose these
 fields through `creator` and `user_profile`, plus `creator_id` and `creator_name`.
 Profile renames preserve archive identity. Templates that previously used
 `username` for the numeric ID should use `user` or `creator_id` instead.
+
+Upstream's `comments` option (default false) requests each post's
+`/comments` once (shared by its revisions) and exposes the list as `comments`;
+like upstream, failures and non-list responses yield an empty list.
+Category-scoped `dms` and `announcements` (default false) expose each creator's
+`/dms` and `/announcements` responses on all of its posts; they are fetched once
+per host/service/creator (upstream reuses the first creator's values for an
+entire run) and request failures end extraction. These values reach filters,
+templates and JSON output and are bounded to 8 MiB each.
 
 API responses support gzip with separate 32 MiB encoded and decoded limits,
 complete member/checksum validation and cancellable background decoding.

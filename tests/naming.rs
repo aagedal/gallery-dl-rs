@@ -42,6 +42,7 @@ fn media() -> Media {
             rating: None,
             score: None,
             revision: None,
+            kemono_extras: None,
             discord: None,
             creator: None,
             community: None,

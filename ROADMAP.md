@@ -668,9 +668,14 @@ no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
 thumbnail job and a Coomer MP4 original job with creator display names; no media
 was downloaded in those inspections. Authenticated verification, wider service
 captures and successful original transfers remain required.
-Remaining: popular views, comments/DMs, archive/link
-extraction from post text, username/password login, additional endpoint behavior
-and full upstream metadata/default naming.
+Upstream's `comments`, `dms` and `announcements` options now attach those API
+values to posts (comments non-fatal per post, DMs/announcements once per
+creator rather than upstream's first-creator reuse), and upstream's
+kemono.st/coomer.cr domains are recognized. Upstream 1.32.17 has no popular
+class, so none is planned. Remaining: the `archives`/`archives-format` options
+(per-hash archive file metadata and the always-present `archives` keyword),
+username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
+upstream extractors) and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
 lookups attach typed immutable IDs and optional display names, public IDs, dates,
