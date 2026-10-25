@@ -48,6 +48,23 @@ instance!(REACTOR, "reactor", "Reactor", reactor_host);
 instance!(PORNREACTOR, "pornreactor", "PornReactor", pornreactor_host);
 instance!(THATPERVERT, "thatpervert", "ThatPervert", thatpervert_host);
 
+/// Configured `extractor.reactor.<category>` instances; joyreactor's
+/// upstream class shares the `reactor` scope.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "reactor",
+    builtin: &[&REACTOR, &PORNREACTOR, &THATPERVERT],
+    related: &["joyreactor"],
+    template: &REACTOR,
+    matches: |category, url| configured_target(category, url).is_some(),
+    extract: |category, http, url| match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => match configured_target(category, &url) {
+            Some(target) => run(&instance.site, target, http),
+            None => crate::sites::fail(error("unsupported reactor URL")),
+        },
+        None => crate::sites::fail(error("unsupported reactor URL")),
+    },
+};
+
 /// `(?:[^/.]+\.)?reactor\.cc`.
 fn reactor_host(host: &str) -> bool {
     host == "reactor.cc"
@@ -80,7 +97,25 @@ fn target(hosts: fn(&str) -> bool, url: &Url) -> Option<(Target, String, String)
     if !crate::sites::plain(url) || !hosts(url.host_str()?) {
         return None;
     }
-    let path = url.path();
+    let root = format!("{}://{}", url.scheme(), url.host_str()?);
+    let (target, request) = parse_path(url.path(), url.query())?;
+    Some((target, root, request))
+}
+
+/// [`target`] below a configured instance's root, where requests go.
+fn configured_target(category: &str, url: &Url) -> Option<(Target, String, String)> {
+    let instance = crate::sites::instances::configured(&FAMILY, category)?;
+    let rest = crate::sites::instances::below(url, instance.spec)?;
+    let (path, query) = match rest.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (rest.as_str(), None),
+    };
+    let (target, request) = parse_path(path, query)?;
+    Some((target, instance.root.to_owned(), request))
+}
+
+/// The class and its captured value, and the path (with query) to request.
+fn parse_path(path: &str, query: Option<&str>) -> Option<(Target, String)> {
     let first = |rest: &str| {
         let value = rest.split(['/', '?', '#']).next().unwrap_or_default();
         (!value.is_empty()).then(|| value.to_owned())
@@ -90,19 +125,18 @@ fn target(hosts: fn(&str) -> bool, url: &Url) -> Option<(Target, String, String)
     } else if let Some(rest) = path.strip_prefix("/search/") {
         Target::Search(first(rest)?)
     } else if path == "/search" {
-        Target::Search(first(url.query()?.strip_prefix("q=")?)?)
+        Target::Search(first(query?.strip_prefix("q=")?)?)
     } else if let Some(rest) = path.strip_prefix("/user/") {
         Target::User(first(rest)?)
     } else {
         crate::sites::art::leading_digits(path.strip_prefix("/post/")?)?;
         Target::Post
     };
-    let root = format!("{}://{}", url.scheme(), url.host_str()?);
     let mut request = path.to_owned();
-    if let Some(query) = url.query() {
+    if let Some(query) = query {
         request = format!("{request}?{query}");
     }
-    Some((target, root, request))
+    Some((target, request))
 }
 
 fn extract<'a>(
@@ -111,9 +145,17 @@ fn extract<'a>(
     http: &'a Http,
     url: Url,
 ) -> Events<'a> {
-    let Some((target, root, path)) = target(hosts, &url) else {
+    let Some(target) = target(hosts, &url) else {
         return crate::sites::fail(error("unsupported reactor URL"));
     };
+    run(site, target, http)
+}
+
+fn run<'a>(
+    site: &'static Site,
+    (target, root, path): (Target, String, String),
+    http: &'a Http,
+) -> Events<'a> {
     let gif = http.option_bool("gif", false);
     let mut meta = Map::new();
     let route = match target {
@@ -301,6 +343,35 @@ pub(crate) fn parse_post(post: &str, meta: &Map<String, Value>, gif: bool) -> Ve
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+
+    #[test]
+    fn routes_configured_instances() {
+        crate::sites::instances::define(
+            "reactor",
+            "reactor-configured",
+            serde_json::json!({
+                "root": "http://reactor.configured.test",
+                "pattern": r"(?:[^/.]+\.)?reactor\.configured\.test",
+            }),
+        );
+        let url = Url::parse("http://anime.reactor.configured.test/tag/Cats/2").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "reactor-configured");
+        let canonical = Url::parse("http://reactor.configured.test/search?q=a+b").unwrap();
+        assert_eq!(
+            configured_target("reactor-configured", &canonical),
+            Some((
+                Target::Search("a+b".into()),
+                "http://reactor.configured.test".into(),
+                "/search?q=a+b".into()
+            ))
+        );
+        assert_eq!(configured_target("reactor", &canonical), None);
+        assert_eq!(
+            crate::sites::instances::basecategory("joyreactor"),
+            Some("reactor")
+        );
+    }
 
     #[test]
     fn classifies_urls() {

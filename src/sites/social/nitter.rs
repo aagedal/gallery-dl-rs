@@ -47,6 +47,33 @@ instance!(
 instance!(XCANCEL, "xcancel", "XCancel", "xcancel.com");
 instance!(LIGHTBRD, "lightbrd", "lightbrd", "lightbrd.com");
 
+/// Configured `extractor.nitter.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "nitter",
+    builtin: &[
+        &NITTER_NET,
+        &NITTER_SPACE,
+        &NITTER_TIEKOETTER,
+        &XCANCEL,
+        &LIGHTBRD,
+    ],
+    related: &[],
+    template: &NITTER_NET,
+    matches: |category, url| {
+        crate::sites::instances::configured(&FAMILY, category)
+            .is_some_and(|instance| configured_target(instance.spec, url).is_some())
+    },
+    extract: |category, http, url| {
+        let Some(instance) = crate::sites::instances::configured(&FAMILY, category) else {
+            return crate::sites::fail(error("unsupported Nitter URL"));
+        };
+        match configured_target(instance.spec, &url) {
+            Some(target) => run(&instance.site, target, instance.root.to_owned(), http),
+            None => crate::sites::fail(error("unsupported Nitter URL")),
+        }
+    },
+};
+
 #[derive(Debug)]
 enum Target {
     /// The timeline route, the user path segment(s) and the numeric ID
@@ -71,7 +98,17 @@ fn target(domain: &str, url: &Url) -> Option<Target> {
     if !crate::sites::art::on_host(url, &[domain]) {
         return None;
     }
-    let path = url.path().strip_prefix('/')?;
+    parse_path(url.path())
+}
+
+/// [`target`] below a configured instance's `host[:port][/prefix]`.
+fn configured_target(spec: &str, url: &Url) -> Option<Target> {
+    let rest = crate::sites::instances::below(url, spec)?;
+    parse_path(rest.split('?').next().unwrap_or_default())
+}
+
+fn parse_path(path: &str) -> Option<Target> {
+    let path = path.strip_prefix('/')?;
     let numeric = path
         .strip_prefix("i/user/")
         .or_else(|| path.strip_prefix("id:"))
@@ -115,7 +152,10 @@ fn extract<'a>(site: &'static Site, domain: &'static str, http: &'a Http, url: U
     let Some(target) = target(domain, &url) else {
         return crate::sites::fail(error("unsupported Nitter URL"));
     };
-    let root = format!("https://{domain}");
+    run(site, target, format!("https://{domain}"), http)
+}
+
+fn run<'a>(site: &'static Site, target: Target, root: String, http: &'a Http) -> Events<'a> {
     let options = Options {
         retweets: http.option_bool("retweets", false),
         quoted: http.option_bool("quoted", false),
@@ -342,7 +382,10 @@ fn tweet_events(
         let item = if ytdl {
             super::ytdl_item(&url, fields)
         } else {
-            crate::sites::media::web_url(&url).map(|u| Item::new(u, fields))
+            Url::parse(url.trim())
+                .ok()
+                .filter(|u| crate::sites::instances::plain_or_root(u, root))
+                .map(|u| Item::new(u, fields))
         };
         if let Some(item) = item {
             items.push(
@@ -634,6 +677,48 @@ mod tests {
         assert!(requests[0].starts_with("GET /supernaturepics "));
         assert!(requests[0].contains("hlsPlayback=on"));
         assert!(requests[1].starts_with("GET /supernaturepics?cursor=abc&x=1 "));
+    }
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        crate::sites::instances::define(
+            "nitter",
+            "nitter-configured",
+            serde_json::json!({
+                "root": "https://nitter.configured.test/mirror",
+                "pattern": r"(?:www\.)?nitter\.configured\.test/mirror|nitter-alias\.test",
+            }),
+        );
+        let first = format!(
+            "{PROFILE}{}",
+            item(1, r#"<a href="/pic/orig/media%2FAbC.jpg">x</a>"#, false)
+        );
+        let (root, server) = serve(vec![html(&first)]);
+        let http = http("nitter-configured", root);
+        let url = Url::parse("https://nitter-alias.test/supernaturepics/media").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "nitter-configured");
+        assert!(
+            crate::sites::find(&Url::parse("https://nitter-alias.test/a/likes").unwrap())
+                .is_none_or(|site| site.category != "nitter-configured")
+        );
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].url.as_str(),
+            "https://nitter.configured.test/mirror/pic/orig/media%2FAbC.jpg"
+        );
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "nitter-configured");
+        assert_eq!(k["subcategory"], "media");
+        assert_eq!(k["tweet_id"], "1");
+        assert_eq!(k["user"]["name"], "supernaturepics");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /mirror/supernaturepics/media "),
+            "{}",
+            requests[0]
+        );
     }
 
     #[tokio::test]
