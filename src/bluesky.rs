@@ -1,7 +1,9 @@
-//! Experimental native Bluesky post, author-feed, custom-feed, list, search and follows extraction.
+//! Experimental native Bluesky post, author-feed, custom-feed, list, search,
+//! follows and bookmark extraction.
 //!
 //! Mirrors gallery_dl/extractor/bluesky.py: posts are read from the public,
-//! unauthenticated AppView, and files are downloaded as full-size blobs via
+//! unauthenticated AppView (or, after a `username`/`password` login, through
+//! bsky.social), and files are downloaded as full-size blobs via
 //! `com.atproto.sync.getBlob`, with URLs built from validated DIDs and CIDs only.
 use crate::{
     Result,
@@ -29,6 +31,9 @@ use url::Url;
 #[path = "bluesky_likes.rs"]
 mod likes;
 pub use likes::LikesEndpoint;
+
+#[path = "bluesky_session.rs"]
+mod session;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const API_ROOT: &str = "https://public.api.bsky.app/xrpc/";
@@ -72,6 +77,8 @@ pub enum Feed {
         query: String,
         sort: Option<String>,
     },
+    /// The logged-in account's `app.bsky.bookmark.getBookmarks`.
+    Bookmarks,
 }
 
 impl Feed {
@@ -81,7 +88,11 @@ impl Feed {
             Self::Posts => Some("posts_and_author_threads"),
             Self::Replies => Some("posts_with_replies"),
             Self::Video => Some("posts_with_video"),
-            Self::Custom(_) | Self::List(_) | Self::ActorLikes | Self::Search { .. } => None,
+            Self::Custom(_)
+            | Self::List(_)
+            | Self::ActorLikes
+            | Self::Search { .. }
+            | Self::Bookmarks => None,
         }
     }
 }
@@ -110,6 +121,8 @@ pub enum Target {
         query: String,
         sort: Option<String>,
     },
+    /// The logged-in account's bookmarks (`/saved`).
+    Bookmarks,
 }
 
 const MAX_QUERY: usize = 4096;
@@ -280,9 +293,7 @@ pub fn target(url: &Url) -> Result<Target> {
             }
             search_target(format!("#{tag}"), sort)
         }
-        ["saved"] => Err(error(
-            "native Bluesky bookmarks require an authenticated session; use --extractor compatibility",
-        )),
+        ["saved"] => Ok(Target::Bookmarks),
         _ => Err(unsupported()),
     }
 }
@@ -521,19 +532,45 @@ fn post_identity(uri: &str) -> Result<(&str, &str)> {
 }
 
 fn thread_post(bytes: &[u8], uri: &str) -> Result<Value> {
-    let body: Value =
+    thread_posts(bytes, uri).map(|mut posts| posts.swap_remove(0))
+}
+
+/// Upper bound for the posts of one thread (`depth` replies included).
+const MAX_THREAD_POSTS: usize = 10_000;
+
+/// The requested post followed by its replies in breadth-first order, as
+/// upstream's `get_post_thread_uri`. Replies that are not available post
+/// views (not found, blocked) carry no record and are skipped.
+fn thread_posts(bytes: &[u8], uri: &str) -> Result<Vec<Value>> {
+    let mut body: Value =
         serde_json::from_slice(bytes).map_err(|_| error("Bluesky returned invalid JSON"))?;
-    let thread = body.get("thread").unwrap_or(&Value::Null);
+    let thread = body.get_mut("thread").map(Value::take).unwrap_or_default();
     match thread.get("$type").and_then(Value::as_str) {
         Some("app.bsky.feed.defs#threadViewPost") => {}
         Some("app.bsky.feed.defs#blockedPost") => return Err(error("Bluesky post is blocked")),
         _ => return Err(error("Bluesky post not found or removed")),
     }
-    let post = thread.get("post").unwrap_or(&Value::Null);
-    if string(post, "uri") != Some(uri) {
+    if thread.get("post").and_then(|post| string(post, "uri")) != Some(uri) {
         return Err(error("Bluesky response does not match the requested post"));
     }
-    Ok(post.clone())
+    let mut posts = Vec::new();
+    let mut queue = VecDeque::from([thread]);
+    while let Some(mut node) = queue.pop_front() {
+        if posts.len() >= MAX_THREAD_POSTS {
+            break;
+        }
+        if let Some(Value::Array(replies)) = node.get_mut("replies").map(Value::take) {
+            queue.extend(replies.into_iter().filter(|reply| {
+                reply.get("$type").and_then(Value::as_str)
+                    == Some("app.bsky.feed.defs#threadViewPost")
+                    && reply.pointer("/post/record").is_some_and(Value::is_object)
+            }));
+        }
+        if let Some(post) = node.get_mut("post").map(Value::take) {
+            posts.push(post);
+        }
+    }
+    Ok(posts)
 }
 
 /// A quote can be fully hydrated in the AppView embed, or only a strong record
@@ -690,6 +727,12 @@ pub struct Bluesky {
     discovery_root: Option<Url>,
     pds_fallback: Url,
     discovery_cache: std::sync::Mutex<likes::DiscoveryCache>,
+    /// Upstream `depth`: reply levels fetched with single-post threads.
+    depth: u64,
+    /// Whether `api-server` chose the API root (a login then keeps it).
+    api_server_configured: bool,
+    credentials: Option<session::Credentials>,
+    session: tokio::sync::Mutex<Option<session::Session>>,
     #[cfg(test)]
     blob_root_override: Option<Url>,
 }
@@ -746,6 +789,10 @@ impl Bluesky {
             discovery_root: None,
             pds_fallback: Url::parse("https://bsky.social/").unwrap(),
             discovery_cache: std::sync::Mutex::new(likes::DiscoveryCache::default()),
+            depth: 0,
+            api_server_configured: false,
+            credentials: None,
+            session: tokio::sync::Mutex::new(None),
             #[cfg(test)]
             blob_root_override: None,
         })
@@ -815,16 +862,18 @@ impl Bluesky {
             .ok_or_else(|| error("Bluesky handle did not resolve to a valid DID"))
     }
 
-    async fn post(&self, actor: &str, rkey: &str) -> Result<Value> {
+    /// The post and, with upstream's `depth`, its replies.
+    async fn post_thread(&self, actor: &str, rkey: &str) -> Result<Vec<Value>> {
         let did = self.resolve(actor).await?;
         let uri = format!("at://{did}/app.bsky.feed.post/{rkey}");
+        let depth = self.depth.to_string();
         let body = self
             .call(
                 "app.bsky.feed.getPostThread",
-                &[("uri", &uri), ("depth", "0"), ("parentHeight", "0")],
+                &[("uri", &uri), ("depth", &depth), ("parentHeight", "0")],
             )
             .await?;
-        thread_post(&body, &uri)
+        thread_posts(&body, &uri)
     }
 
     async fn next_selected(&self, state: &mut SelectedState) -> Result<Option<ExtractionEvent>> {
@@ -895,8 +944,8 @@ impl Bluesky {
     async fn next_page(&self, state: &mut FeedState) -> Result<()> {
         let did = match &state.did {
             Some(did) => did.clone(),
-            // Searches are not owned by an actor; nothing to resolve.
-            None if matches!(state.feed, Feed::Search { .. }) => String::new(),
+            // Searches and bookmarks are not owned by an actor; nothing to resolve.
+            None if matches!(state.feed, Feed::Search { .. } | Feed::Bookmarks) => String::new(),
             None => {
                 let did = self.resolve(&state.actor).await?;
                 state.did = Some(did.clone());
@@ -919,8 +968,12 @@ impl Bluesky {
                 format!("at://{did}/app.bsky.graph.list/{rkey}"),
             ),
             Feed::Search { query, .. } => ("app.bsky.feed.searchPosts", "q", query.clone()),
+            Feed::Bookmarks => ("app.bsky.bookmark.getBookmarks", "", String::new()),
         };
-        let mut query = vec![(parameter, resource.as_str())];
+        let mut query = Vec::new();
+        if !parameter.is_empty() {
+            query.push((parameter, resource.as_str()));
+        }
         if let Some(filter) = state.feed.filter() {
             query.push(("filter", filter));
         }
@@ -938,8 +991,13 @@ impl Bluesky {
         let body: Value =
             serde_json::from_slice(&body).map_err(|_| error("Bluesky returned invalid JSON"))?;
         let search = matches!(state.feed, Feed::Search { .. });
+        let bookmarks = state.feed == Feed::Bookmarks;
         let items = body
-            .get(if search { "posts" } else { "feed" })
+            .get(match &state.feed {
+                Feed::Search { .. } => "posts",
+                Feed::Bookmarks => "bookmarks",
+                _ => "feed",
+            })
             .and_then(Value::as_array)
             .ok_or_else(|| error("Bluesky response is missing its feed"))?;
         let cursor = page_cursor(&body)?;
@@ -948,12 +1006,22 @@ impl Bluesky {
             .as_ref()
             .is_none_or(|cursor| !state.seen_cursors.insert(cursor.clone()))
             || state.pages >= MAX_PAGES
-            || state.feed == Feed::ActorLikes && items.is_empty();
+            || matches!(state.feed, Feed::ActorLikes | Feed::Bookmarks) && items.is_empty();
         state.cursor = cursor;
         // Collection owners identify the feed/list record, not the returned post
         // authors. Upstream's reposts author restriction applies only to author feeds.
         let author = state.feed.filter().map(|_| did.as_str());
-        if search {
+        if bookmarks {
+            // Bookmarked posts are `item` views; deleted or blocked posts have
+            // no record and are skipped, as upstream does.
+            state.posts.extend(
+                items
+                    .iter()
+                    .filter_map(|bookmark| bookmark.get("item"))
+                    .filter(|post| post.get("record").is_some_and(Value::is_object))
+                    .cloned(),
+            );
+        } else if search {
             // Search results are bare post views rather than feed items.
             state
                 .posts
@@ -978,21 +1046,9 @@ impl Bluesky {
         };
         match target {
             Target::Post { actor, rkey } => {
-                stream::once(async move { self.post(&actor, &rkey).await.map(SelectedState::new) })
+                stream::once(async move { self.post_thread(&actor, &rkey).await })
                     .map(move |result| match result {
-                        Ok(state) => stream::unfold(Some(state), move |state| async move {
-                            let mut state = state?;
-                            match self.next_selected(&mut state).await {
-                                Ok(Some(event)) => Some((Ok(event), Some(state))),
-                                Ok(None) if !state.emitted => Some((
-                                    Err(error("Bluesky post contains no selected media")),
-                                    None,
-                                )),
-                                Ok(None) => None,
-                                Err(e) => Some((Err(e), None)),
-                            }
-                        })
-                        .boxed(),
+                        Ok(posts) => self.thread_events(posts.into()),
                         Err(e) => stream::once(async move { Err(e) }).boxed(),
                     })
                     .flatten()
@@ -1040,6 +1096,13 @@ impl Bluesky {
             Target::Search { query, sort } => {
                 self.feed_events(String::new(), Feed::Search { query, sort })
             }
+            Target::Bookmarks if !self.logged_in() => stream::once(async {
+                Err(error(
+                    "native Bluesky bookmarks require the username and password settings",
+                ))
+            })
+            .boxed(),
+            Target::Bookmarks => self.feed_events(String::new(), Feed::Bookmarks),
         }
     }
 
@@ -1202,6 +1265,45 @@ impl Bluesky {
         }
     }
 
+    /// A post followed by its `depth` replies; an error only if none of them
+    /// had selected media.
+    fn thread_events(&self, posts: VecDeque<Value>) -> BoxStream<'_, Result<ExtractionEvent>> {
+        struct State {
+            posts: VecDeque<Value>,
+            active: Option<SelectedState>,
+            emitted: bool,
+        }
+        let state = State {
+            posts,
+            active: None,
+            emitted: false,
+        };
+        stream::unfold(Some(state), move |state| async move {
+            let mut state = state?;
+            loop {
+                if let Some(active) = &mut state.active {
+                    match self.next_selected(active).await {
+                        Ok(Some(event)) => return Some((Ok(event), Some(state))),
+                        Ok(None) => {
+                            state.emitted |= active.emitted;
+                            state.active = None;
+                        }
+                        Err(e) => return Some((Err(e), None)),
+                    }
+                }
+                if let Some(post) = state.posts.pop_front() {
+                    state.active = Some(SelectedState::new(post));
+                    continue;
+                }
+                if state.emitted {
+                    return None;
+                }
+                return Some((Err(error("Bluesky post contains no selected media")), None));
+            }
+        })
+        .boxed()
+    }
+
     fn feed_events(&self, actor: String, feed: Feed) -> BoxStream<'_, Result<ExtractionEvent>> {
         let state = FeedState {
             did: None,
@@ -1240,28 +1342,50 @@ impl Bluesky {
     }
 
     async fn request(&self, endpoint: &Url) -> Result<Vec<u8>> {
-        for attempt in 0..=self.retries {
-            match self.attempt(endpoint, attempt).await {
+        let mut attempt = 0;
+        let mut renewed = false;
+        loop {
+            let token = self.access_token(endpoint).await?;
+            match self.attempt(endpoint, attempt, token.as_ref()).await {
                 Ok(body) => return Ok(body),
+                // Upstream re-authenticates once its cached access token expires.
+                Err(failure) if failure.expired && !renewed => {
+                    renewed = true;
+                    if let Some(token) = &token {
+                        self.renew_session(token).await?;
+                    }
+                }
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
+                    attempt += 1;
                 }
                 Err(failure) => return Err(failure.error),
             }
         }
-        unreachable!()
     }
 
-    async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
+    async fn attempt(
+        &self,
+        endpoint: &Url,
+        attempt: u8,
+        token: Option<&header::HeaderValue>,
+    ) -> std::result::Result<Vec<u8>, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let response = self
+            let mut request = self
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout)
-                .header(header::ACCEPT, "application/json")
+                .header(header::ACCEPT, "application/json");
+            // Session tokens never follow a redirect to another origin.
+            if let Some(token) = token
+                && target.origin() == self.api_root.origin()
+            {
+                request = request.header(header::AUTHORIZATION, token.clone());
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Bluesky request failed; check network access"))?;
@@ -1271,6 +1395,26 @@ impl Bluesky {
             }
         };
         let status = response.status();
+        if token.is_some() && matches!(status.as_u16(), 400 | 401) {
+            let mut body = Vec::new();
+            while let Ok(Some(chunk)) = response.chunk().await {
+                if body.len() + chunk.len() > 64 * 1024 {
+                    break;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            let code = serde_json::from_slice::<Value>(&body)
+                .ok()
+                .and_then(|body| string(&body, "error").map(str::to_owned));
+            if status == StatusCode::UNAUTHORIZED
+                || matches!(code.as_deref(), Some("ExpiredToken" | "InvalidToken"))
+            {
+                return Err(Failure {
+                    expired: true,
+                    ..error("Bluesky refused the session token; check username and password").into()
+                });
+            }
+        }
         if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
             let delay = retry_after(response.headers(), SystemTime::now());
             self.rate_limits
@@ -1342,6 +1486,8 @@ fn backoff(attempt: u8) -> Duration {
 struct Failure {
     error: crate::Error,
     retry: bool,
+    /// The session's access token was refused; renew it once and retry.
+    expired: bool,
 }
 
 impl Failure {
@@ -1349,6 +1495,7 @@ impl Failure {
         Self {
             error: error(message),
             retry: true,
+            expired: false,
         }
     }
 }
@@ -1358,6 +1505,7 @@ impl From<crate::Error> for Failure {
         Self {
             error,
             retry: false,
+            expired: false,
         }
     }
 }
@@ -3429,8 +3577,7 @@ mod tests {
         }
         let long = format!("https://bsky.app/search?q={}", "a".repeat(MAX_QUERY + 1));
         assert!(t(&long).is_err());
-        let saved = t("https://bsky.app/saved").unwrap_err().to_string();
-        assert!(saved.contains("authenticated"), "{saved}");
+        assert_eq!(t("https://bsky.app/saved").unwrap(), Target::Bookmarks);
         for host in [
             "bsky.app",
             "www.bsky.app",

@@ -101,6 +101,8 @@ struct State {
     pages: usize,
     done: bool,
     records: VecDeque<Value>,
+    /// Replies of the current liked post, fetched with upstream's `depth`.
+    replies: VecDeque<Value>,
     active: Option<SelectedState>,
 }
 
@@ -114,6 +116,7 @@ impl Bluesky {
     /// owner's DID service document. Empty explicitly restores the public API.
     pub fn with_api_server(mut self, server: Option<&str>) -> Result<Self> {
         if let Some(server) = server {
+            self.api_server_configured = !server.is_empty();
             self.api_root = if server.is_empty() {
                 Url::parse(API_ROOT).unwrap()
             } else {
@@ -272,6 +275,7 @@ impl Bluesky {
             pages: 0,
             done: false,
             records: VecDeque::new(),
+            replies: VecDeque::new(),
             active: None,
         };
         self.record_likes_events(state)
@@ -294,30 +298,38 @@ impl Bluesky {
                         Ok(None) | Err(_) => state.active = None,
                     }
                 }
+                if let Some(reply) = state.replies.pop_front() {
+                    state.active = Some(SelectedState::new(reply));
+                    continue;
+                }
                 if let Some(record) = state.records.pop_front() {
                     let Some((uri, cid)) =
                         subject(&record, state.did.as_deref().expect("resolved owner"))
                     else {
                         continue;
                     };
+                    let depth = self.depth.to_string();
                     let body = match self
                         .call(
                             "app.bsky.feed.getPostThread",
-                            &[("uri", &uri), ("depth", "0"), ("parentHeight", "0")],
+                            &[("uri", &uri), ("depth", &depth), ("parentHeight", "0")],
                         )
                         .await
                     {
                         Ok(body) => body,
                         Err(_) => continue,
                     };
-                    let post = match thread_post(&body, &uri) {
-                        Ok(post)
-                            if post.get("cid").and_then(Value::as_str) == Some(cid.as_str()) =>
+                    let mut posts = match thread_posts(&body, &uri) {
+                        Ok(posts)
+                            if posts[0].get("cid").and_then(Value::as_str)
+                                == Some(cid.as_str()) =>
                         {
-                            post
+                            VecDeque::from(posts)
                         }
                         _ => continue,
                     };
+                    let post = posts.pop_front().expect("thread root");
+                    state.replies = posts;
                     state.active = Some(SelectedState::new(post));
                     continue;
                 }
@@ -419,6 +431,7 @@ mod tests {
             pages: 1,
             done: true,
             records,
+            replies: VecDeque::new(),
             active: None,
         };
         let mut events = client.record_likes_events(state);

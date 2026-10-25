@@ -318,14 +318,37 @@ later hydration and pages while leaving sibling include views available.
 
 `extractor.bluesky.endpoint: "getActorLikes"` selects the alternative AppView
 feed endpoint; other bounded strings, `false` or `null` select repository records.
-The alternative stops on an empty feed even with a cursor. No native Bluesky
-login is implemented; restricted endpoints/content still report access errors.
+The alternative stops on an empty feed even with a cursor.
 Category-scoped `api-server` overrides the AppView base URL (HTTP(S), optional
 path, no credentials/query/fragment), appending `/xrpc/`; it does not redirect
 DID discovery or repository reads. An empty string, `false` or `null` restores
 the public AppView. Both settings forward to compatibility mode. Blob routing
 and repository reads use their authors' DID service roots independently of this
 override; no API credentials are copied to blob jobs.
+
+Further upstream classes: `/profile/NAME/follows` (`following`) pages
+`app.bsky.graph.getFollows` and queues each followed account as a lazy user
+dispatcher child; `/search?q=QUERY` or `/search/QUERY` (`search`) and
+`/hashtag/TAG[/top|/latest]` (`hashtag`, a search for `#TAG`) page
+`app.bsky.feed.searchPosts` without author filtering; `/saved` (`bookmark`)
+pages the logged-in account's `app.bsky.bookmark.getBookmarks` until an empty
+page, skipping deleted or blocked bookmarks. Upstream's mirror hosts
+(`fxbsky.app`, `vxbsky.app`, `cbsky.app`, `bskye.app`, `bskyx.app`,
+`main.bsky.dev`, ...) are accepted. `extractor.bluesky.depth` (integer or numeric
+string up to 1000, default 0) also emits that many reply levels of single posts
+and liked posts, breadth-first after the post itself; unavailable replies are
+skipped, and a thread without selected media is an error.
+
+Category-scoped `username` (handle or email; DIDs contain `:` and are not
+accepted) and `password` (preferably an app password) log in lazily with
+`com.atproto.server.createSession` on `https://bsky.social`, or on `api-server`
+when set, and then send API calls there with the session's bearer token, as
+upstream does. Sessions live in memory only; an expired or refused access token
+is refreshed once through `refreshSession` (falling back to a new login). Tokens
+are attached only to the API origin, never to DID discovery, repository reads
+or blob downloads, and login errors report only the XRPC error code. Search may
+require a login on the public AppView; bookmarks always do and fail before any
+request without one.
 
 Experimental native Reddit extraction (`--extractor native`, category `reddit`)
 accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),

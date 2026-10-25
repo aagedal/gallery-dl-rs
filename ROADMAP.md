@@ -517,7 +517,7 @@ Valid own media now emit before quote validation, so a malformed quote cannot
 erase those files or poison later likes. On 2026-10-20 bounded public native
 likes inspection emitted one media job with no errors; an upstream resolved-JSON
 inspection selected the same original post, author DID and blob CID. Neither
-inspection downloaded media. Native login/restricted likes remain unfinished.
+inspection downloaded media. Logged-in AppView hydration of restricted liked posts is untested live.
 
 **Implemented author-specific Bluesky blob routing:** asynchronous native post,
 feed, liked-post, quote and profile-image streams now use each media author's
@@ -1085,18 +1085,26 @@ downloads).
 and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
 DASH audio, comment scanning, external-site recursion, and reddit options.
 
-**Implemented experimental native Bluesky:** single posts, author media/posts
-feeds, public custom feeds and list feeds via the public AppView, with full-size
-`getBlob` images and videos. Custom feeds/lists resolve their record owner once,
-retain mixed post authors/reposts, follow opaque cursors lazily, and stop cursor
-cycles. `reposts`, `quoted`, and boolean `videos` match upstream defaults;
-quoted records retain their own media identity, validate reference/view
-identities, use hydrated data and fetch missing records lazily with cycle and
-depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
-requested; own pinned posts are retained. Ordered include, replies/video and
-profile-image and public likes views are described above. Not yet: searches,
-authentication, thread `depth`,
-metadata facets/user expansion, and newer multi-item media embeds.
+**Implemented experimental native Bluesky:** every upstream class: single posts,
+author media/posts/replies/video feeds, public custom feeds and list feeds,
+follows (queued user dispatcher children), searches and hashtags
+(`searchPosts`), bookmarks, info/avatar/background and likes, plus upstream's
+mirror hosts, with full-size `getBlob` images and videos. Custom feeds/lists
+resolve their record owner once, retain mixed post authors/reposts, follow opaque
+cursors lazily, and stop cursor cycles. `reposts`, `quoted`, and boolean `videos`
+match upstream defaults; quoted records retain their own media identity, validate
+reference/view identities, use hydrated data and fetch missing records lazily
+with cycle and depth bounds. Bare profiles switch to the posts feed when
+quotes/reposts are requested; own pinned posts are retained. Ordered include,
+replies/video, profile-image and public likes views are described above.
+`depth` emits reply levels of single and liked posts breadth-first. Upstream's
+`username`/`password` login creates an in-memory session on bsky.social (or
+`api-server`), refreshes an expired token once, attaches it only to the API
+origin and enables bookmarks (which fail without a login before any request).
+Not yet: the `metadata` option (`user`/`facets` keywords, which need upstream's
+keyword dictionary and would change default naming), upstream's persistent
+refresh-token cache, DID identifiers as login names, newer multi-item media
+embeds, and authenticated live verification.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook
 selections retain available file dimensions, original dimensions, seconds-based

@@ -1305,6 +1305,11 @@ fn extract_input<'a>(
                                     }
                                     native
                                         .with_api_server(options.api_server.as_deref())?
+                                        .with_credentials(
+                                            options.username.as_deref(),
+                                            options.password.as_deref(),
+                                        )?
+                                        .with_options(options.site_options.as_deref())?
                                         .with_likes_endpoint(
                                             options.bluesky_endpoint.unwrap_or_default(),
                                         )
