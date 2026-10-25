@@ -557,7 +557,17 @@ impl Media {
                 if !crate::booru::valid_id(&post.post_id) {
                     return None;
                 }
-                (category, serde_json::json!([post.post_id]).to_string())
+                // Danbooru media assets have their own ID space (`m{id}`).
+                let identity = if post
+                    .source_defaults
+                    .as_ref()
+                    .is_some_and(|defaults| defaults.subcategory == "media-asset")
+                {
+                    serde_json::json!(["media-asset", post.post_id])
+                } else {
+                    serde_json::json!([post.post_id])
+                };
+                (category, identity.to_string())
             }
             category @ ("instagram" | "twitter" | "facebook") => {
                 let post = self.metadata.as_ref()?;
@@ -933,6 +943,8 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("danbooru.donmai.us", "danbooru"),
         ("e621.net", "e621"),
         ("e926.net", "e621"),
+        ("e621.cc", "e621"),
+        ("e621.anthro.fr", "e621"),
         ("gelbooru.com", "gelbooru"),
         ("safebooru.org", "safebooru"),
         ("imgur.io", "imgur"),

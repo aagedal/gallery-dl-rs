@@ -631,8 +631,16 @@ views and artist discovery. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: other favorites, notes,
-`tags`/`metadata` options, per-category tags and authenticated live verification.
+Danbooru/e621 `tags_<category>` keywords are emitted from the API, and upstream's
+Danbooru `random`/`media-asset`, e621 `/p/` short links, `e621.cc` and `frontend`
+links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
+`metadata` (includes; notes/pools) and Gelbooru/Safebooru `tags`/`notes`
+(per-post HTML) options, e621 hidden-URL reconstruction and Danbooru ugoira WebM
+samples. Upstream has no other favorites classes for these sites. Remaining:
+Danbooru `external` and `ugoira` frame data, the DAPI `url` option, other
+Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
+aliases, per-post laziness of option requests (they run per page), and
+authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,

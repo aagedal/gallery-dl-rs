@@ -502,8 +502,29 @@ key) for HTTP Basic authentication. Gelbooru/Safebooru accept category-scoped
 `user-id` and `api-key`; both must be nonempty to authenticate. Credentials are sent only to the
 API origin, never attached to pool HTML, media requests or public JSON. Redirects
 to another origin are refused. Authentication can expose posts hidden from public
-API requests; posts without usable file URLs are still skipped. Plain CDN file
-links stay direct downloads.
+API requests; posts without usable file URLs are still skipped (e621 posts
+whose API hides `file.url` use upstream's `static1.e621.net/data/MD5` URL).
+Plain CDN file links stay direct downloads.
+
+Upstream's remaining booru classes are supported natively: Danbooru `random`
+(`/posts/random[?tags=...]`, one `/posts/random.json` request, tag-search
+defaults) and `media-asset` (`/media_assets/ID`, the asset's last variant,
+`{category}_ma{id}_{filename}.{extension}` and its own `m{id}` archive space);
+e621 `/p/BASE32` short links and `e621.cc` URLs (requests go to e621.net);
+e621 `frontend` links (`e621.cc/?tags=`, `e621.anthro.fr/?q=`) and Gelbooru
+`redirect` links (`redirect.php?s=BASE64`), which queue the e621 tag search or
+the decoded Gelbooru post as a child job. Danbooru ugoira ZIPs download their
+WebM sample (`large_file_url`, extension `webm`) like upstream's default.
+Category-scoped options: Danbooru `metadata` (true for upstream's default
+`artist_commentary,children,notes,parent,uploader`, or a string/list of
+fields) merges one `only=` request per page (or per single post/media asset);
+e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
+`notes` (when `has_notes`) and replaces `pools` IDs with cached pool objects;
+Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
+`tags_<type>` strings and note lists. These requests happen when a page is
+fetched, before its posts are emitted. Not supported natively: Danbooru
+`external` and `ugoira` (frame data), the DAPI `url` option, and the
+atfbooru/aibooru/booruvar/e6ai instances and Danbooru host aliases.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories

@@ -1874,6 +1874,7 @@ fn extract_input<'a>(
                                         .with_artist_parent_metadata(
                                             options.artist_parent_metadata().cloned(),
                                         )
+                                        .with_options(options.site_options.as_deref())?
                                         .with_threshold(options.booru_threshold.flatten())
                                         .with_favorite_order(options.booru_favorite_order.clone())
                                         .with_pool_order(

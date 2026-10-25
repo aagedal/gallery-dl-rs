@@ -73,6 +73,7 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "danbooru" if format == "fg_{favgroup[id]}_{id}" => true,
         "e621" | "e926" if format == "f_{user_id}_{id}" => true,
         "danbooru" | "e621" | "e926" if format == "P_{scale[0]}_{date}_{id}" => true,
+        "danbooru" if format == "m{id}" => true,
         "danbooru" | "e621" | "e926" => {
             matches!(
                 format,
@@ -275,7 +276,10 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             // matching installed upstream extractor; do not invent a class.
             if match category {
                 "danbooru" => url.host_str() != Some("danbooru.donmai.us"),
-                "e621" => !matches!(url.host_str(), Some("e621.net" | "e926.net")),
+                "e621" => !matches!(
+                    url.host_str(),
+                    Some("e621.net" | "e926.net" | "e621.cc" | "e621.anthro.fr")
+                ),
                 "safebooru" => url.host_str() != Some("safebooru.org"),
                 _ => false,
             } {
@@ -306,9 +310,12 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 crate::booru::Target::Favorites { .. } => "f_{user_id}_{id}",
                 crate::booru::Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
                 crate::booru::Target::Popular { .. } => "P_{scale[0]}_{date}_{id}",
-                crate::booru::Target::Artist { .. } | crate::booru::Target::ArtistSearch { .. } => {
-                    ""
-                }
+                crate::booru::Target::Artist { .. }
+                | crate::booru::Target::ArtistSearch { .. }
+                | crate::booru::Target::Frontend { .. }
+                | crate::booru::Target::Redirect { .. } => "",
+                crate::booru::Target::Random { .. } => "t_{search_tags}_{id}",
+                crate::booru::Target::MediaAsset { .. } => "m{id}",
             };
             return Some(descriptor(category, format));
         }
