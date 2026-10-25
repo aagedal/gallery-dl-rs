@@ -2148,6 +2148,12 @@ impl Reddit {
         }
         if matches!(status.as_u16(), 401 | 403) {
             let root = Url::parse("https://www.reddit.com/").unwrap();
+            if bearer.is_some() {
+                return Err(terminal(
+                    "Reddit refused the OAuth request (private, quarantined or banned content, \
+                     or a client blocked from this network; a registered client-id may help)",
+                ));
+            }
             if self
                 .cookies
                 .lock()
@@ -3483,6 +3489,26 @@ mod tests {
             .to_string();
         assert!(message.contains("invalid_grant"), "{message}");
         assert!(!message.contains("rt-1"), "{message}");
+        server.join().unwrap();
+
+        // Refused OAuth calls do not ask for login cookies.
+        let (root, server) = serve(vec![
+            ok(token("tok-3").as_bytes()),
+            response("403 Forbidden", "Content-Type: text/html\r\n", b"<html>"),
+        ]);
+        let native = with(
+            reddit(root.clone()).with_oauth_root(root),
+            json!({"api": "oauth"}),
+        );
+        let message = native
+            .events(&Url::parse("https://redd.it/abc12").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("refused the OAuth request"), "{message}");
+        assert!(!message.contains("tok-3"), "{message}");
         server.join().unwrap();
     }
 }
