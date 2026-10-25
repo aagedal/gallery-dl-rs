@@ -537,9 +537,6 @@ pub(super) async fn request(
     })
 }
 
-/// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];
-
 #[cfg(test)]
 mod tests {
     use super::*;
