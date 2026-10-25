@@ -7,6 +7,11 @@
 //! ported: the upstream 3-6 s `request_interval`. Upstream requests tag
 //! pages as `https://readcomiconline.li//Artist/…`; this port drops the
 //! duplicate slash.
+//!
+//! Upstream's `ReadcomiconlineTagExtractor` (class subcategory `tag`) takes
+//! the lowercased listing kind as its subcategory, so `artist`, `genre`,
+//! `publisher` and `writer` are separate routes; `tag` itself is used for
+//! the pattern's empty kind (`//NAME`), where upstream's would be empty.
 use super::{Gallery, keywords, text};
 use crate::sites::art::{extr, extract_iter, segment};
 use crate::sites::boorus::{parse_query, unquote};
@@ -22,7 +27,7 @@ pub static SITE: Site = Site {
     name: "ReadComicOnline",
     matches: |url| target(url).is_some(),
     extract,
-    routes: &[&ISSUE, &COMIC, &ARTIST, &GENRE, &PUBLISHER, &WRITER],
+    routes: &[&ISSUE, &COMIC, &TAG, &ARTIST, &GENRE, &PUBLISHER, &WRITER],
     api_key: false,
     cookies: Some("readcomiconline.li"),
 };
@@ -39,6 +44,7 @@ const ARCHIVE: &str = "{issue_id}_{page}";
 
 static ISSUE: Route = Route::new("issue", FILENAME, DIRECTORY, ARCHIVE);
 static COMIC: Route = Route::new("comic", FILENAME, DIRECTORY, ARCHIVE);
+static TAG: Route = Route::new("tag", FILENAME, DIRECTORY, ARCHIVE);
 static ARTIST: Route = Route::new("artist", FILENAME, DIRECTORY, ARCHIVE);
 static GENRE: Route = Route::new("genre", FILENAME, DIRECTORY, ARCHIVE);
 static PUBLISHER: Route = Route::new("publisher", FILENAME, DIRECTORY, ARCHIVE);
@@ -92,10 +98,14 @@ fn target(url: &Url) -> Option<Target> {
             Some(Target::Comic(format!("/{kind}/{name}")))
         }
         [kind, name, rest @ ..] if segment(name) => {
-            let subcategory = [&ARTIST, &GENRE, &PUBLISHER, &WRITER]
-                .iter()
-                .find(|route| route.subcategory.eq_ignore_ascii_case(kind))?
-                .subcategory;
+            let subcategory = if kind.is_empty() {
+                TAG.subcategory
+            } else {
+                [&ARTIST, &GENRE, &PUBLISHER, &WRITER]
+                    .iter()
+                    .find(|route| route.subcategory.eq_ignore_ascii_case(kind))?
+                    .subcategory
+            };
             let sub = rest
                 .first()
                 .filter(|s| segment(s))
@@ -406,6 +416,14 @@ mod tests {
                 name: "Grant-Morrison".into(),
             })
         );
+        assert_eq!(
+            t("https://readcomiconline.li//Batman"),
+            Some(Target::Tag {
+                subcategory: "tag",
+                path: "//Batman".into(),
+                name: "Batman".into(),
+            })
+        );
         assert!(matches!(
             t("https://readcomiconline.li/genre/Action"),
             Some(Target::Tag {
@@ -627,6 +645,21 @@ var pth = ''; var _q9z = ''; _q9z = '{}'; _q9z = '{}';</script>",
                 .to_ascii_lowercase()
                 .contains("cookie: list-view=list")
         );
+    }
+
+    #[tokio::test]
+    async fn empty_tag_kind_uses_the_tag_class() {
+        let (root, requests) = serve(vec![html(r#"<a href="/Comic/Batman">B</a>"#)]);
+        let http = http("ReadComicOnline", root);
+        let children = queued(extract(
+            &http,
+            Url::parse("https://readcomiconline.li//Batman").unwrap(),
+        ))
+        .await;
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].subcategory(), "tag");
+        let requests = requests.join().unwrap();
+        assert!(requests[0].starts_with("GET //Batman?page=1 "));
     }
 
     #[tokio::test]
