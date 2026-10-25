@@ -2472,7 +2472,11 @@ Manganelo mirrors, `mangataro`, `mangoxo`, `weebdex`, `hentai2read`,
 `hentaihere`, `simplyhentai`, IMHentai mirrors, `tmohentai`, `sankaku`,
 `idolcomplex`, `sankakucomplex`, `nozomi`, `sizebooru`, `aryion`, `iwara`
 (direct video files), `foriio`, `kabeuchi`, `comedywildlifephoto`,
-`nekohouse` and Raddle (`postmill`). Gallery-dl's
+`nekohouse` and Raddle (`postmill`). Adult gallery, forum and video-site
+galleries are also native (`8muses`, `luscious`, `erome`, `pornpics`,
+`pornhub`, `xvideos`, `xhamster`, `vipergirls`, `bellazon`, `fansly` with its
+owner `token`, and the other upstream adult modules); sites built around
+leaked private content or celebrity fakes are intentionally not ported. Gallery-dl's
 `shopify:`/`xenforo:` URL prefixes and extra configured instances are not
 supported, and all `*.reactor.cc` subdomains share the `reactor` category.
 Username/password logins and SmugMug OAuth are not ported; pass `--cookies`
