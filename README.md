@@ -259,9 +259,15 @@ listing classes page lazily through the `3` API with the `Client-ID` header
 album (`/a/ID`) or image child job: `user` (`/user/NAME[/posts|/submitted]`),
 `favorite` (`/user/NAME/favorites`), `favorite-folder`
 (`/user/NAME/favorites/folder/ID`, `post/v1`-style paging), `subreddit`
-(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). The
-cookie-only `/user/me` listings are not supported. Compatibility mode sends
-Imgur URLs to the backend.
+(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). Your own
+posts (`me`: `/user/me[/posts]`, or the hidden albums with `/hidden`) page
+`post/v1/accounts/me/all_posts` (or `hidden_albums`) from page 1, newest
+first, like upstream; these requests carry the imgur.com session cookies from
+`--cookies`/`--cookies-from-browser` and an `Origin` header instead of
+`Client-ID`, and fail before any request unless an `accesstoken` cookie is
+available (upstream only logs an error). No OAuth flow is involved; other
+Imgur routes never send cookies. Compatibility mode sends Imgur URLs to the
+backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author

@@ -46,6 +46,7 @@ fn dedicated_extractors_list_their_supported_subcategories() {
     for (category, subcategory) in [
         ("twitter", "event"),
         ("twitter", "notifications"),
+        ("imgur", "me"),
         ("twitter", "image"),
         ("instagram", "stories-tray"),
         ("bluesky", "bookmark"),

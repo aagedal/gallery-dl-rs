@@ -5,7 +5,9 @@
 //! as `https://i.imgur.com/{id}.{ext}` from validated identifiers only.
 //! User submissions, favorites, favorite folders, subreddits, tags and
 //! searches page through the `3` API lazily and queue each post as an album
-//! or image child job, as upstream.
+//! or image child job, as upstream. Your own posts (`/user/me`, upstream
+//! `me`) page the `post/v1/accounts/me` API with the session's imgur.com
+//! cookies, which must include `accesstoken`.
 use crate::{
     Result, error,
     event::{ChildMetadata, ExtractionEvent, child_job, group},
@@ -33,6 +35,18 @@ const API_ROOT: &str = "https://api.imgur.com/";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const MAX_PAGES: u64 = 200;
 
+/// How one API request authenticates.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Auth {
+    /// `client_id` query parameter only (`post/v1`).
+    Anonymous,
+    /// The `3` API's `Client-ID` header.
+    ClientId,
+    /// The session's imgur.com cookies and an `Origin` header (upstream
+    /// `_pagination_v2` for `accounts/me`).
+    Session,
+}
+
 /// Upstream extractor classes supported natively, for `--list-extractors`.
 pub const SUBCATEGORIES: &[&str] = &[
     "album",
@@ -40,6 +54,7 @@ pub const SUBCATEGORIES: &[&str] = &[
     "favorite-folder",
     "gallery",
     "image",
+    "me",
     "search",
     "subreddit",
     "tag",
@@ -63,6 +78,10 @@ pub enum Target {
     Tag(String),
     /// A gallery search for the decoded query (upstream `search`).
     Search(String),
+    /// The logged-in account's posts, or its hidden albums (upstream `me`).
+    Me {
+        hidden: bool,
+    },
 }
 
 impl Target {
@@ -86,6 +105,7 @@ impl Target {
             Self::Subreddit(_) => "subreddit",
             Self::Tag(_) => "tag",
             Self::Search(_) => "search",
+            Self::Me { .. } => "me",
         }
     }
 }
@@ -113,12 +133,12 @@ fn slug_id(segment: &str) -> Option<String> {
     .then(|| id.to_owned())
 }
 
-/// Classify an Imgur URL. Personal (`/user/me`) and other listings are
-/// rejected explicitly rather than guessed.
+/// Classify an Imgur URL. Unknown listings are rejected explicitly rather
+/// than guessed.
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Imgur URL; expected an image, album (/a/ID), gallery (/gallery/ID), /user/NAME[/favorites[/folder/ID]], /r/SUBREDDIT, /t/TAG or /search?q=QUERY link",
+            "unsupported Imgur URL; expected an image, album (/a/ID), gallery (/gallery/ID), /user/NAME[/favorites[/folder/ID]], /user/me[/posts][/hidden], /r/SUBREDDIT, /t/TAG or /search?q=QUERY link",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -158,7 +178,17 @@ pub fn target(url: &Url) -> Result<Target> {
                 .ok_or_else(unsupported)
         }
         _ if direct => Err(unsupported()),
-        ["user", "me", ..] => Err(unsupported()),
+        // Upstream's user class excludes `me`; its favorites classes come
+        // before `me` and still take `/user/me/favorites[...]`.
+        ["user", "me", rest @ ..]
+            if !matches!(rest, ["favorites"] | ["favorites", "folder", ..]) =>
+        {
+            // Upstream `/user/me(?:/posts)?(/hidden)?`, unanchored.
+            let rest = rest.strip_prefix(&["posts"]).unwrap_or(rest);
+            Ok(Target::Me {
+                hidden: rest.first() == Some(&"hidden"),
+            })
+        }
         ["user", name] | ["user", name, "posts" | "submitted"]
             if valid_name(name) && url.query().is_none() =>
         {
@@ -351,6 +381,7 @@ pub fn queue_url(item: &Value) -> Option<Url> {
 
 pub struct Imgur {
     client: Client,
+    cookies: crate::cookies::CookieJar,
     network: NetworkOptions,
     api_root: Url,
     client_id: String,
@@ -365,6 +396,7 @@ impl Imgur {
     pub fn new(timeout: Duration) -> Result<Self> {
         Ok(Self {
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
+            cookies: crate::cookies::CookieJar::default(),
             network: NetworkOptions::default(),
             api_root: Url::parse(API_ROOT).unwrap(),
             client_id: CLIENT_ID.into(),
@@ -396,6 +428,12 @@ impl Imgur {
             Some(_) => return Err(error("Imgur client-id must be an alphanumeric string")),
         }
         Ok(self)
+    }
+
+    /// Session cookies for `/user/me`; only sent with those requests.
+    pub fn with_cookies(mut self, cookies: crate::cookies::CookieJar) -> Self {
+        self.cookies = cookies;
+        self
     }
 
     /// Additional attempts for HTTP 429/5xx and transport failures.
@@ -434,9 +472,8 @@ impl Imgur {
         url
     }
 
-    /// One listing page: the endpoint and whether it uses the `3` API's
-    /// `Client-ID` authorization.
-    fn listing_page(&self, target: &Target, page: u64) -> Option<(Url, bool)> {
+    /// One listing page: the endpoint and how it authenticates.
+    fn listing_page(&self, target: &Target, page: u64) -> Option<(Url, Auth)> {
         let path = match target {
             Target::User(name) => format!("3/account/{name}/submissions/{page}"),
             Target::Favorite(name) => format!("3/account/{name}/gallery_favorites/{page}"),
@@ -452,7 +489,25 @@ impl Imgur {
                     .append_pair("client_id", &self.client_id)
                     .append_pair("page", &page.to_string())
                     .append_pair("sort", "newest");
-                return Some((url, false));
+                return Some((url, Auth::Anonymous));
+            }
+            Target::Me { hidden } => {
+                let kind = if *hidden {
+                    "hidden_albums"
+                } else {
+                    "all_posts"
+                };
+                let mut url = self
+                    .api_root
+                    .join(&format!("post/v1/accounts/me/{kind}"))
+                    .ok()?;
+                // Upstream starts these listings at page 1.
+                url.query_pairs_mut()
+                    .append_pair("include", "media,tags,account")
+                    .append_pair("page", &(page + 1).to_string())
+                    .append_pair("sort", "-created_at")
+                    .append_pair("client_id", &self.client_id);
+                return Some((url, Auth::Session));
             }
             _ => return None,
         };
@@ -460,26 +515,45 @@ impl Imgur {
         if let Target::Search(query) = target {
             url.query_pairs_mut().append_pair("q", query);
         }
-        Some((url, true))
+        Some((url, Auth::ClientId))
+    }
+
+    /// The session cookies for `api.imgur.com`, which must hold `accesstoken`.
+    fn session_cookies(&self) -> Result<String> {
+        let api = Url::parse(API_ROOT).unwrap();
+        self.cookies
+            .value(&api, "accesstoken")
+            .filter(|token| !token.is_empty())
+            .and_then(|_| self.cookies.header(&api))
+            .ok_or_else(|| {
+                error(
+                    "Imgur /user/me requires the imgur.com 'accesstoken' session cookie; pass --cookies or --cookies-from-browser",
+                )
+            })
     }
 
     /// Upstream `_items_queue` over a lazily paginated listing.
     fn listing(&self, target: Target) -> BoxStream<'_, Result<ExtractionEvent>> {
         let subcategory = target.subcategory();
         let tag = matches!(target, Target::Tag(_));
+        if matches!(target, Target::Me { .. })
+            && let Err(e) = self.session_cookies()
+        {
+            // Fail before any request, unlike upstream's logged warning.
+            return crate::sites::fail(e);
+        }
         crate::sites::paginate(Some(0u64), move |page| {
             let target = target.clone();
             async move {
                 let Some(page) = page else {
                     return Ok(None);
                 };
-                let (endpoint, authorized) = self
+                let (endpoint, auth) = self
                     .listing_page(&target, page)
                     .ok_or_else(|| error("invalid Imgur listing"))?;
-                let body =
-                    tokio::time::timeout(self.timeout, self.request_with(&endpoint, authorized))
-                        .await
-                        .map_err(|_| error("native Imgur extraction timed out"))??;
+                let body = tokio::time::timeout(self.timeout, self.request_with(&endpoint, auth))
+                    .await
+                    .map_err(|_| error("native Imgur extraction timed out"))??;
                 let items = parse_listing(&body, tag)?;
                 let more = !items.is_empty() && page + 1 < MAX_PAGES;
                 let children: Vec<BoxStream<'_, Result<ExtractionEvent>>> = items
@@ -516,7 +590,8 @@ impl Imgur {
             | Target::FavoriteFolder(..)
             | Target::Subreddit(_)
             | Target::Tag(_)
-            | Target::Search(_) => {
+            | Target::Search(_)
+            | Target::Me { .. } => {
                 return Err(error("Imgur listings queue posts as child jobs"));
             }
             Target::Image(_) => self.request(&self.endpoint("media", id)).await?,
@@ -563,17 +638,16 @@ impl Imgur {
     }
 
     async fn request(&self, endpoint: &Url) -> std::result::Result<Vec<u8>, Failure> {
-        self.request_with(endpoint, false).await
+        self.request_with(endpoint, Auth::Anonymous).await
     }
 
-    /// `authorized` sends the `Client-ID` header of the `3` API.
     async fn request_with(
         &self,
         endpoint: &Url,
-        authorized: bool,
+        auth: Auth,
     ) -> std::result::Result<Vec<u8>, Failure> {
         for attempt in 0..=self.retries {
-            match self.attempt(endpoint, attempt, authorized).await {
+            match self.attempt(endpoint, attempt, auth).await {
                 Ok(body) => return Ok(body),
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
@@ -588,8 +662,12 @@ impl Imgur {
         &self,
         endpoint: &Url,
         attempt: u8,
-        authorized: bool,
+        auth: Auth,
     ) -> std::result::Result<Vec<u8>, Failure> {
+        let session = match auth {
+            Auth::Session => Some(self.session_cookies()?),
+            _ => None,
+        };
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
@@ -600,12 +678,19 @@ impl Imgur {
                 .timeout(self.request_timeout)
                 .header(header::ACCEPT, "application/json")
                 .header(header::REFERER, "https://imgur.com/");
-            // Only send the client ID to the origin it was meant for.
-            if authorized && target.origin() == endpoint.origin() {
-                request = request.header(
-                    header::AUTHORIZATION,
-                    format!("Client-ID {}", self.client_id),
-                );
+            // Only send credentials to the origin they were meant for.
+            if target.origin() == endpoint.origin() {
+                if auth == Auth::ClientId {
+                    request = request.header(
+                        header::AUTHORIZATION,
+                        format!("Client-ID {}", self.client_id),
+                    );
+                }
+                if let Some(cookies) = &session {
+                    request = request
+                        .header(header::ORIGIN, "https://imgur.com")
+                        .header(header::COOKIE, cookies);
+                }
             }
             let response = request
                 .send()
@@ -642,6 +727,11 @@ impl Imgur {
             });
         }
         if matches!(status.as_u16(), 401 | 403) {
+            if session.is_some() {
+                return Err(
+                    error("Imgur refused the session; refresh the 'accesstoken' cookie").into(),
+                );
+            }
             return Err(error("Imgur refused access to this post").into());
         }
         if !status.is_success() {
@@ -880,13 +970,28 @@ mod tests {
                 "https://imgur.com/search/score?q=red+fox%21&qs=x",
                 Target::Search("red fox!".into()),
             ),
+            ("https://imgur.com/user/me", Target::Me { hidden: false }),
+            (
+                "https://imgur.com/user/me/posts/",
+                Target::Me { hidden: false },
+            ),
+            (
+                "https://m.imgur.com/user/me/posts/hidden",
+                Target::Me { hidden: true },
+            ),
+            (
+                "https://imgur.com/user/me/hidden?sort=x",
+                Target::Me { hidden: true },
+            ),
+            (
+                "https://imgur.com/user/me/favorites",
+                Target::Favorite("me".into()),
+            ),
         ] {
             assert_eq!(t(raw).unwrap(), expected, "{raw}");
             assert!(crate::source_archive::for_url(&Url::parse(raw).unwrap()).is_some());
         }
         for raw in [
-            "https://imgur.com/user/me",
-            "https://imgur.com/user/me/posts/hidden",
             "https://imgur.com/user/someone/favorites/folder/x",
             "https://imgur.com/user/a%2Fb",
             "https://imgur.com/search?x=1&q=x",
@@ -1170,6 +1275,101 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("refused"));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    fn session() -> crate::cookies::CookieJar {
+        crate::cookies::CookieJar::parse(
+            ".imgur.com\tTRUE\t/\tTRUE\t0\taccesstoken\tSECRET\n\
+             .example.com\tTRUE\t/\tFALSE\t0\tother\tLEAK\n",
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn me_pages_the_session_posts_with_cookies_and_queues_them() {
+        let page = |body: Value| response("200 OK", "", body.to_string().as_bytes());
+        let (root, server) = serve(vec![
+            page(json!({"data": [
+                {"id": "AbCdE", "is_album": true, "title": "Mine", "privacy": "hidden"},
+                {"id": "Img0001", "is_album": false}
+            ]})),
+            page(json!([])),
+            page(json!([{"id": "Img0002", "is_album": true}])),
+            page(json!({"data": []})),
+        ]);
+        let native = imgur(root).with_cookies(session());
+        let children = queued(&native, "https://imgur.com/user/me").await;
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].category(), "imgur");
+        assert_eq!(children[0].subcategory(), "me");
+        assert_eq!(children[0].fields()["id"], "AbCdE");
+        assert_eq!(children[1].fields()["id"], "Img0001");
+        let hidden = queued(&native, "https://imgur.com/user/me/posts/hidden").await;
+        assert_eq!(hidden.len(), 1);
+        assert_eq!(hidden[0].fields()["id"], "Img0002");
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(
+            requests[0].starts_with(
+                "GET /post/v1/accounts/me/all_posts?include=media%2Ctags%2Caccount&page=1&sort=-created_at&client_id=546c25a59c58ad7 "
+            ),
+            "{}",
+            requests[0]
+        );
+        assert!(requests[1].contains("&page=2&"));
+        assert!(requests[2].starts_with("GET /post/v1/accounts/me/hidden_albums?"));
+        assert!(requests[2].contains("&page=1&"));
+        for request in &requests {
+            let lower = request.to_ascii_lowercase();
+            assert!(
+                lower.contains("cookie: accesstoken=secret\r\n"),
+                "{request}"
+            );
+            assert!(lower.contains("origin: https://imgur.com\r\n"));
+            assert!(!lower.contains("authorization"));
+            assert!(!request.contains("LEAK"));
+        }
+    }
+
+    #[tokio::test]
+    async fn me_requires_the_accesstoken_cookie_before_any_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let root = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let other =
+            crate::cookies::CookieJar::parse(".imgur.com\tTRUE\t/\tTRUE\t0\tsession\tx\n").unwrap();
+        for native in [imgur(root.clone()), imgur(root.clone()).with_cookies(other)] {
+            let events: Vec<_> = native
+                .events(&Url::parse("https://imgur.com/user/me").unwrap())
+                .collect()
+                .await;
+            assert_eq!(events.len(), 1);
+            let error = events[0].as_ref().err().unwrap().to_string();
+            assert!(error.contains("accesstoken"), "{error}");
+        }
+        assert!(listener.accept().is_err());
+        // Other listings never send the session cookies.
+        let (root, server) = serve(vec![response("200 OK", "", b"{\"data\": []}")]);
+        let native = imgur(root).with_cookies(session());
+        assert!(queued(&native, "https://imgur.com/r/pics").await.is_empty());
+        let requests = server.join().unwrap();
+        assert!(!requests[0].to_ascii_lowercase().contains("cookie"));
+    }
+
+    #[tokio::test]
+    async fn me_reports_a_refused_session() {
+        let (root, server) = serve(vec![response("401 Unauthorized", "", b"{}")]);
+        let events: Vec<_> = imgur(root)
+            .with_cookies(session())
+            .events(&Url::parse("https://imgur.com/user/me").unwrap())
+            .collect()
+            .await;
+        let error = events.last().unwrap().as_ref().err().unwrap().to_string();
+        assert!(
+            error.contains("refresh the 'accesstoken' cookie"),
+            "{error}"
+        );
         assert_eq!(server.join().unwrap().len(), 1);
     }
 }

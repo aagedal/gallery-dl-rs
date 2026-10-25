@@ -1893,3 +1893,10 @@ submission as a `redirect` child like upstream.
 (upstream `notifications`) page the session's REST `device_follow` timeline
 through the shared `globalObjects` conversion, failing before any request
 without `auth_token`/`ct0` cookies. Live verification is outstanding.
+
+**Implemented Imgur `me`:** `/user/me[/posts][/hidden]` pages the session's
+`post/v1/accounts/me` posts or hidden albums with the imgur.com cookies
+(`accesstoken` required, checked before any request) and queues each post
+like the other listings. With Twitter `notifications`, every upstream
+1.32.17 dedicated-extractor class is now listed natively. Live verification
+is outstanding.
