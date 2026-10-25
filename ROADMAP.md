@@ -730,8 +730,8 @@ real captures remain required.
 
 **Implemented experimental configurable registry instances:** upstream's
 `BaseExtractor.update`/`_init_category` for the registry families (2chen,
-blogger, chevereto, foolfuuka, gelbooru_v01, gelbooru_v02, hentaicosplays,
-IMHentai, jschan, lolisafe, lynxchan, manganelo, misskey, moebooru, Nijie,
+blogger, chevereto, foolfuuka, foolslide, gelbooru_v01, gelbooru_v02,
+hentaicosplays, IMHentai, jschan, lolisafe, lynxchan, manganelo, misskey, moebooru, Nijie,
 nitter, philomena, postmill, reactor, shimmie2, shopify, szurubooru,
 urlshortener, vichan, wikimedia, xenforo). `extractor.<basecategory>.<category>`
 objects with a `root` (http(s), no credentials; optional bounded `pattern`
@@ -747,13 +747,25 @@ reads through `config_instance` are honoured where the port has the feature
 (Shimmie2 `file_url`/`quote`/`cookies`, Wikimedia `api-path`/`useragent` with
 API-path probing, Gelbooru v0.2 `root-api`/`request-interval`, Philomena
 `filter_id`, szurubooru `query-all`, URL shortener `headers`); lolisafe gained
-a generic album extractor for configured instances. Remaining: FoOlSlide (no
-port), upstream's `root: null` configured instances (roots are required),
+a generic album extractor and FoOlSlide chapter/manga extractors for
+configured instances. Remaining: upstream's `root: null` configured instances
+(roots are required),
 regex-level backtracking between an instance pattern and the family suffix
 (the pattern must end at a path boundary), xenforo's `cookies` login names,
 lolisafe's `domain` option, ports in embedded-video URLs handed to yt-dlp, and
 host-named settings scopes for prefixed inputs first seen in input files (they
 use the base scope).
+
+**Registry class audit follow-ups (2026-10-25):** added 500px `favorite`
+(session cookies with the echoed `x-csrf-token`), civitai `generated`
+(`api-key` or session cookie), MangaDex `feed`/`following` (password or
+OpenID Connect client login with upstream's cached refresh/access tokens; MDLists
+authenticate when credentials are configured), readcomiconline's `tag` class
+(for the empty listing kind; `artist`/`genre`/`publisher`/`writer` remain the
+instance subcategories, as upstream sets them) and the FoOlSlide family.
+tumblrgallery `gallery` is not an upstream extractor: it is the
+pattern-less base class's inherited `GalleryExtractor` subcategory. The
+account feeds still need authenticated live verification.
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept
