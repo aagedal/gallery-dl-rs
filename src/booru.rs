@@ -3479,6 +3479,10 @@ pub(crate) mod date_selection_tests;
 mod extra_tests;
 
 #[cfg(test)]
+#[path = "booru_instance_tests.rs"]
+mod instance_tests;
+
+#[cfg(test)]
 mod source_raw_keywords_tests {
     use super::*;
     use serde_json::json;
