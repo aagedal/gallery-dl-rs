@@ -2,8 +2,8 @@
 //! gallery_dl/extractor/manganelo.py: chapter pages embed their image list,
 //! a manga's chapters come from `/api/manga/SLUG/chapters`.
 //!
-//! Only upstream's built-in instances are supported; `manganelo:URL` and
-//! configured extra instances are not. Bookmarks need the site's session
+//! Configured `extractor.manganelo.<category>` instances and `manganelo:URL`
+//! inputs go through `crate::sites::instances`. Bookmarks need the session
 //! cookies (`--cookies`).
 use super::{Gallery, get, keywords, text};
 use crate::sites::art::{Scan, extr, extract_iter, json_loads, on_host, segment, split_html};
@@ -57,13 +57,68 @@ enum Target {
     Bookmark,
 }
 
+/// Configured `extractor.manganelo.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "manganelo",
+    builtin: &[&NELOMANGA, &NATOMANGA, &MANGANATO, &MANGAKAKALOT],
+    related: &[],
+    template: &MANGAKAKALOT,
+    matches: |category, url| target_in(instance(category).1, url).is_some(),
+    extract: |category, http, url| {
+        let (site, hosts) = instance(category);
+        extract_in(site, hosts, http, url)
+    },
+};
+
+/// Which URLs an instance accepts.
+#[derive(Clone, Copy)]
+enum Hosts {
+    /// `(?:www\.)?DOMAIN`, with the root `https://www.DOMAIN`.
+    Domain(&'static str),
+    /// A configured instance's root and `host[:port][/path]`.
+    Configured(&'static str, &'static str),
+}
+
+/// The site and hosts of a built-in or configured instance.
+fn instance(category: &str) -> (&'static Site, Hosts) {
+    if let Some(configured) = crate::sites::instances::configured(&FAMILY, category) {
+        return (
+            &configured.site,
+            Hosts::Configured(configured.root, configured.spec),
+        );
+    }
+    let site = FAMILY
+        .builtin
+        .iter()
+        .copied()
+        .find(|site| site.category == category)
+        .unwrap_or(&MANGAKAKALOT);
+    (site, Hosts::Domain(site.cookies.unwrap_or_default()))
+}
+
+fn target(domain: &'static str, url: &Url) -> Option<Target> {
+    target_in(Hosts::Domain(domain), url)
+}
+
 /// `(?:www\.)?DOMAIN` followed by `(/manga/[^/?#]+/chapter-[^/?#]+)`
 /// (unanchored), `(/manga/[^/?#]+)$` or `/bookmark` (unanchored).
-fn target(domain: &str, url: &Url) -> Option<Target> {
-    if !on_host(url, &[domain]) {
-        return None;
-    }
-    let path = url.path();
+fn target_in(hosts: Hosts, url: &Url) -> Option<Target> {
+    let (path, bare) = match hosts {
+        Hosts::Domain(domain) => {
+            if !on_host(url, &[domain]) {
+                return None;
+            }
+            (
+                url.path().to_owned(),
+                url.query().is_none() && url.fragment().is_none(),
+            )
+        }
+        Hosts::Configured(_, spec) => {
+            let rest = crate::sites::instances::below(url, spec)?;
+            let bare = !rest.contains('?') && url.fragment().is_none();
+            (rest.split('?').next().unwrap_or_default().to_owned(), bare)
+        }
+    };
     if path.starts_with("/bookmark") {
         return Some(Target::Bookmark);
     }
@@ -77,16 +132,21 @@ fn target(domain: &str, url: &Url) -> Option<Target> {
             Some(Target::Chapter(format!("/manga/{slug}/{chapter}")))
         }
         // `$`: nothing may follow, not even a query.
-        ["manga", slug] if segment(slug) && url.query().is_none() && url.fragment().is_none() => {
-            Some(Target::Manga(format!("/manga/{slug}")))
-        }
+        ["manga", slug] if segment(slug) && bare => Some(Target::Manga(format!("/manga/{slug}"))),
         _ => None,
     }
 }
 
 fn extract<'a>(site: &'static Site, domain: &'static str, http: &'a Http, url: Url) -> Events<'a> {
-    let root = format!("https://www.{domain}");
-    match target(domain, &url) {
+    extract_in(site, Hosts::Domain(domain), http, url)
+}
+
+fn extract_in<'a>(site: &'static Site, hosts: Hosts, http: &'a Http, url: Url) -> Events<'a> {
+    let root = match hosts {
+        Hosts::Domain(domain) => format!("https://www.{domain}"),
+        Hosts::Configured(root, _) => root.to_owned(),
+    };
+    match target_in(hosts, &url) {
         Some(Target::Chapter(path)) => crate::sites::once(async move {
             let page = page(http, &format!("{root}{path}")).await?;
             let data = metadata(&page);
@@ -340,6 +400,31 @@ var chapter_name = "Vol.2 Chapter 12.5";</script>
 <p>Read Kimi. Author: Some One already has 3 chapters.</p>
 <script>var cdns = ["https:\/\/img.cdn.test\/a","https:\/\/backup.test\/"];
 var chapterImages = ["manga/kimi/1.webp","manga/kimi/2.jpg"];</script>"#;
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root() {
+        crate::sites::instances::define(
+            "manganelo",
+            "manganelo-configured",
+            serde_json::json!({"root": "https://www.nelo.test", "pattern": r"(?:www\.)?nelo\.test"}),
+        );
+        let url = Url::parse("https://nelo.test/manga/kimi/chapter-12-5").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "manganelo-configured");
+        assert_eq!(site.cookies, Some("www.nelo.test"));
+        assert!(
+            crate::sites::find(&Url::parse("https://www.nelo.test/manga/kimi?x=1").unwrap())
+                .is_none()
+        );
+        let (root, requests) = serve(vec![html(CHAPTER_PAGE)]);
+        let http = http("manganelo-configured", root);
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 2);
+        assert_eq!(kw(&files[0])["category"], "manganelo-configured");
+        let requests = requests.join().unwrap();
+        assert!(requests[0].starts_with("GET /manga/kimi/chapter-12-5 "));
+        assert!(requests[0].contains("host: "));
+    }
 
     #[tokio::test]
     async fn extracts_chapter() {

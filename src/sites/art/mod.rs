@@ -532,6 +532,9 @@ pub(crate) fn session_cookies(
     }
 }
 
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[&nijie::FAMILY];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -609,6 +612,3 @@ mod tests {
         assert!(!on_host(&u("https://u:p@x.test/"), &["x.test"]));
     }
 }
-
-/// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

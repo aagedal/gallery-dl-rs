@@ -303,6 +303,10 @@ pub(super) fn option_list(http: &Http, key: &str) -> Option<Vec<String>> {
     }
 }
 
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] =
+    &[&manganelo::FAMILY, &imhentai::FAMILY];
+
 #[cfg(test)]
 pub(super) mod tests {
 
@@ -321,6 +325,3 @@ pub(super) mod tests {
         crate::sites::archive_key(media).unwrap().1
     }
 }
-
-/// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

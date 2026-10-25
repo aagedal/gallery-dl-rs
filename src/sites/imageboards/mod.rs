@@ -242,6 +242,9 @@ pub(super) fn directory_fields(source: &Map<String, Value>, keys: &[&str]) -> Va
     )
 }
 
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +275,3 @@ mod tests {
         assert!(on_root("https://a.test", "//b.test/x.png").is_none());
     }
 }
-
-/// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

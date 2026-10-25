@@ -3,8 +3,8 @@
 //! gallery pages list their images as `$.parseJSON('…')` data; tag and
 //! search listings queue each gallery page by page.
 //!
-//! Only upstream's built-in instances are supported; `IMHentai:URL` and
-//! configured extra instances are not. Galleries without image data get
+//! Configured `extractor.IMHentai.<category>` instances and `IMHentai:URL`
+//! inputs go through `crate::sites::instances`. Galleries without image data get
 //! `.jpg` URLs as upstream does, but without its `_fallback` extensions;
 //! listing pages that link to another host end the listing.
 use super::{Gallery, keywords, set, text};
@@ -56,11 +56,85 @@ enum Target {
 /// `(?:www\.)?DOMAIN` followed by `/(?:gallery|view)/(\d+)`,
 /// `(/(?:artist|category|…|tag)/([^/?#]+))` or
 /// `(/(?:advanced-)?search/?\?[^#]+|/[^/?#]+/?)`, all unanchored.
-fn target(domain: &str, url: &Url) -> Option<Target> {
-    if !on_host(url, &[domain]) {
-        return None;
+fn target(domain: &'static str, url: &Url) -> Option<Target> {
+    target_in(Hosts::Domain(domain), url)
+}
+
+/// Configured `extractor.IMHentai.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "IMHentai",
+    builtin: &[
+        &IMHENTAI,
+        &HENTAIERA,
+        &HENTAIROX,
+        &HENTAIFOX,
+        &HENTAIENVY,
+        &HENTAIZAP,
+    ],
+    related: &[],
+    template: &IMHENTAI,
+    matches: |category, url| target_in(instance(category).1, url).is_some(),
+    extract: |category, http, url| {
+        let (site, hosts) = instance(category);
+        extract_in(site, hosts, http, url)
+    },
+};
+
+/// Which URLs an instance accepts.
+#[derive(Clone, Copy)]
+enum Hosts {
+    /// `(?:www\.)?DOMAIN`, with the root `https://DOMAIN`.
+    Domain(&'static str),
+    /// A configured instance's root and `host[:port][/path]`.
+    Configured(&'static str, &'static str),
+}
+
+impl Hosts {
+    fn root(self) -> String {
+        match self {
+            Hosts::Domain(domain) => format!("https://{domain}"),
+            Hosts::Configured(root, _) => root.to_owned(),
+        }
     }
-    let path = url.path();
+
+    /// The URL's path and query below the instance root.
+    fn below(self, url: &Url) -> Option<(String, Option<String>)> {
+        match self {
+            Hosts::Domain(domain) => on_host(url, &[domain])
+                .then(|| (url.path().to_owned(), url.query().map(str::to_owned))),
+            Hosts::Configured(_, spec) => {
+                let rest = crate::sites::instances::below(url, spec)?;
+                Some(match rest.split_once('?') {
+                    Some((path, query)) => (path.to_owned(), Some(query.to_owned())),
+                    None => (rest, None),
+                })
+            }
+        }
+    }
+}
+
+/// The site and hosts of a built-in or configured instance.
+fn instance(category: &str) -> (&'static Site, Hosts) {
+    if let Some(configured) = crate::sites::instances::configured(&FAMILY, category) {
+        return (
+            &configured.site,
+            Hosts::Configured(configured.root, configured.spec),
+        );
+    }
+    let (site, domain) = match category {
+        "hentaiera" => (&HENTAIERA, "hentaiera.com"),
+        "hentairox" => (&HENTAIROX, "hentairox.com"),
+        "hentaifox" => (&HENTAIFOX, "hentaifox.com"),
+        "hentaienvy" => (&HENTAIENVY, "hentaienvy.com"),
+        "hentaizap" => (&HENTAIZAP, "hentaizap.com"),
+        _ => (&IMHENTAI, "imhentai.xxx"),
+    };
+    (site, Hosts::Domain(domain))
+}
+
+fn target_in(hosts: Hosts, url: &Url) -> Option<Target> {
+    let (path, query) = hosts.below(url)?;
+    let path = path.as_str();
     let raw: Vec<&str> = path.split('/').skip(1).collect();
     if let ["gallery" | "view", id, ..] = raw.as_slice()
         && let Some(id) = crate::sites::art::leading_digits(id)
@@ -76,7 +150,7 @@ fn target(domain: &str, url: &Url) -> Option<Target> {
     {
         return Some(Target::Listing("tag", format!("/{kind}/{name}/")));
     }
-    let query = url.query().filter(|q| !q.is_empty());
+    let query = query.as_deref().filter(|q| !q.is_empty());
     if let ("/search" | "/search/" | "/advanced-search" | "/advanced-search/", Some(query)) =
         (path, query)
     {
@@ -92,8 +166,12 @@ fn target(domain: &str, url: &Url) -> Option<Target> {
 }
 
 fn extract<'a>(site: &'static Site, domain: &'static str, http: &'a Http, url: Url) -> Events<'a> {
-    let root = format!("https://{domain}");
-    match target(domain, &url) {
+    extract_in(site, Hosts::Domain(domain), http, url)
+}
+
+fn extract_in<'a>(site: &'static Site, hosts: Hosts, http: &'a Http, url: Url) -> Events<'a> {
+    let root = hosts.root();
+    match target_in(hosts, &url) {
         Some(Target::Gallery(id)) => crate::sites::once(async move {
             let page = page(http, &format!("{root}/gallery/{id}/")).await?;
             let data = metadata(&page, &id);
@@ -105,7 +183,7 @@ fn extract<'a>(site: &'static Site, domain: &'static str, http: &'a Http, url: U
         }),
         Some(Target::Listing(sub, path)) => {
             let route = if sub == "tag" { &TAG } else { &SEARCH };
-            listing(site, domain, http, route, format!("{root}{path}"))
+            listing(site, hosts, http, route, format!("{root}{path}"))
         }
         None => crate::sites::fail(error(format!("unsupported {} URL", site.name))),
     }
@@ -211,7 +289,7 @@ fn images(page: &str) -> Result<Vec<super::Page>> {
 /// rankings sidebar, following the last `page-link` until it is `#`.
 fn listing<'a>(
     site: &'static Site,
-    domain: &'static str,
+    hosts: Hosts,
     http: &'a Http,
     route: &'static Route,
     url: String,
@@ -220,7 +298,7 @@ fn listing<'a>(
         let Some((url, mut prev, count)) = state else {
             return Ok(None);
         };
-        let root = format!("https://{domain}");
+        let root = hosts.root();
         let mut page = page(http, &url).await?;
         if let Some(pos) = page.find("class=\"ranking_list\"") {
             page.truncate(pos);
@@ -246,7 +324,7 @@ fn listing<'a>(
             href => Some(href.to_owned()),
         };
         let next = next
-            .filter(|next| Url::parse(next).is_ok_and(|next| on_host(&next, &[domain])))
+            .filter(|next| Url::parse(next).is_ok_and(|next| hosts.below(&next).is_some()))
             .filter(|_| count + 1 < MAX_PAGES)
             .map(|next| (next, prev, count + 1));
         Ok(Some((super::queue_urls(http, site, route, children), next)))
@@ -322,6 +400,29 @@ mod tests {
 </ul>
 <img data-src="https://m1.imhentai.xxx/001/abc/cover.jpg">
 <script>var g_th = $.parseJSON('{"1":"j,1280,1810","2":"w,800,600"}');</script>"#;
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root() {
+        crate::sites::instances::define(
+            "IMHentai",
+            "imhentai-configured",
+            json!({"root": "https://im.test", "pattern": r"(?:www\.)?im\.test"}),
+        );
+        let url = Url::parse("https://www.im.test/gallery/12345/").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "imhentai-configured");
+        let (root, requests) = serve(vec![html(GALLERY_PAGE)]);
+        let http = http("imhentai-configured", root);
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 2);
+        assert_eq!(kw(&files[1])["category"], "imhentai-configured");
+        assert_eq!(
+            path(&files[1]),
+            "imhentai-configured/12345 Big & Small/imhentai-configured_12345_002.webp"
+        );
+        let requests = requests.join().unwrap();
+        assert!(requests[0].starts_with("GET /gallery/12345/ "));
+    }
 
     #[tokio::test]
     async fn extracts_gallery() {
