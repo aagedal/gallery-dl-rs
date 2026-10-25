@@ -4,8 +4,10 @@
 //! a time as the consumer reaches it.
 //!
 //! An image that still fails after `retries` (default 4) further attempts
-//! is skipped, as upstream warns and continues. Upstream's `imageProxy.php`
-//! fallback and placeholder-image check are not ported.
+//! is skipped, as upstream warns and continues. When the backend names no
+//! absolute file URL (it now answers with a relative placeholder path),
+//! the file is fetched from upstream's `imageProxy.php` fallback instead;
+//! upstream's placeholder-image check is not ported.
 use crate::sites::art::{Scan, extract_iter, nameext_into, on_host, split_html};
 use crate::sites::manga::{keywords, text};
 use crate::sites::{Events, Http, Item, Route, Site, remove_html, unescape};
@@ -72,8 +74,8 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                         return Ok(None);
                     };
                     let (events, num) = match resolve(http, &image_id, retries).await {
-                        Some(info) => {
-                            let item = item(&data, &image_id, num + 1, &info);
+                        Some((info, spirit)) => {
+                            let item = item(&data, &image_id, &spirit, num + 1, &info);
                             let items = item.into_iter().collect();
                             (crate::sites::post(&SITE, http, &ALBUM, items), num + 1)
                         }
@@ -103,12 +105,12 @@ fn metadata(page: &str, id: &str) -> Map<String, Value> {
     ])
 }
 
-/// The `backend.php` answer for one image, retrying like upstream; the
-/// token is fetched again only while it is missing.
-async fn resolve(http: &Http, image_id: &str, retries: i64) -> Option<Value> {
+/// The `backend.php` answer for one image and its token, retrying like
+/// upstream; the token is fetched again only while it is missing.
+async fn resolve(http: &Http, image_id: &str, retries: i64) -> Option<(Value, String)> {
     let mut spirit: Option<String> = None;
     for _ in 0..=retries {
-        let attempt: Result<Value> = async {
+        let attempt: Result<(Value, String)> = async {
             let token = match &spirit {
                 Some(token) => token.clone(),
                 None => {
@@ -127,11 +129,12 @@ async fn resolve(http: &Http, image_id: &str, retries: i64) -> Option<Value> {
             url.query_pairs_mut()
                 .append_pair("spirit", &token)
                 .append_pair("photo", image_id);
-            http.json_with(&url, &http.browser_headers(&[])).await
+            let info = http.json_with(&url, &http.browser_headers(&[])).await?;
+            Ok((info, token))
         }
         .await;
-        if let Ok(info) = attempt {
-            return Some(info);
+        if let Ok(found) = attempt {
+            return Some(found);
         }
     }
     None
@@ -145,9 +148,24 @@ fn annihilate(value: &str) -> String {
         .collect()
 }
 
-fn item(data: &Map<String, Value>, image_id: &str, num: usize, info: &Value) -> Option<Item> {
+fn item(
+    data: &Map<String, Value>,
+    image_id: &str,
+    spirit: &str,
+    num: usize,
+    info: &Value,
+) -> Option<Item> {
     let raw = info[0].as_str()?;
-    let url = crate::sites::art::file_url(raw, ROOT)?;
+    let url = match raw.starts_with("https://") || raw.starts_with("http://") {
+        true => crate::sites::art::file_url(raw, ROOT)?,
+        false => {
+            let mut url = Url::parse(&format!("{ROOT}/imageProxy.php")).ok()?;
+            url.query_pairs_mut()
+                .append_pair("photoId", image_id)
+                .append_pair("spirit", spirit);
+            url
+        }
+    };
     let mut fields = data.clone();
     fields.insert("num".into(), num.into());
     fields.insert("id".into(), text::parse_int(image_id).into());
@@ -203,7 +221,7 @@ mod tests {
             json(json!(["https://img.test/a/11.jpg", "800", "600"])),
             iframe("def"),
             response("500 Internal Server Error", "text/plain", b""),
-            json(json!(["https://img.test/a/12.png", 640, 480])),
+            json(json!(["/show_img.jpg", 640, 480])),
         ]);
         let http = http("nsfwalbum", root);
         let files = media(extract(
@@ -220,10 +238,14 @@ mod tests {
         assert_eq!(k["id"], 12);
         assert_eq!(k["num"], 2);
         assert_eq!(k["width"], 640);
+        assert_eq!(
+            files[1].url.as_str(),
+            "https://nsfwalbum.com/imageProxy.php?photoId=12&spirit=def"
+        );
         assert_eq!(kw(&files[0])["height"], 600);
         assert_eq!(
             path(&files[1]),
-            "nsfwalbum/401611 Field & Flowers/401611_002_12.png"
+            "nsfwalbum/401611 Field & Flowers/401611_002_12.jpg"
         );
         assert_eq!(archive(&files[1]), r#"["{id}",["12"]]"#);
         let requests = server.join().unwrap();

@@ -5,6 +5,8 @@
 //! Private posts (redirected to the login page) are skipped. Listings skip
 //! posts that fail to load, as upstream logs and continues. Session cookies
 //! from `--cookies` (or set by the site) are sent with every request.
+//! Requests go to the HTTPS site that upstream's `http://` root redirects
+//! to, and post authors are read from links of either scheme.
 use super::checked_page;
 use crate::sites::art::{extract_iter, nameext_into, on_host};
 use crate::sites::filehosts::extract as find_between;
@@ -14,7 +16,7 @@ use futures_util::StreamExt;
 use serde_json::Map;
 use url::Url;
 
-const ROOT: &str = "http://www.poringa.net";
+const ROOT: &str = "https://www.poringa.net";
 const FILENAME: &str = "{post_id}_{title}_{num:>03}_{filename}.{extension}";
 const DIRECTORY: &[&str] = &["{category}", "{user}", "{post_id}"];
 const ARCHIVE: &str = "{post_id}_{num}";
@@ -106,7 +108,21 @@ fn parse_post(page: &str, id: &str, url: &str) -> Vec<Item> {
     let user = page
         .get(pos..)
         .and_then(|rest| rest.find("<div class=\"main-info"))
-        .and_then(|start| find_between(page, "href=\"http://www.poringa.net/", "\"", pos + start))
+        .and_then(|start| {
+            let at = pos + start;
+            let link = |scheme| {
+                find_between(
+                    page,
+                    &format!("href=\"{scheme}://www.poringa.net/"),
+                    "\"",
+                    at,
+                )
+            };
+            [link("http"), link("https")]
+                .into_iter()
+                .flatten()
+                .min_by_key(|(_, end)| *end)
+        })
         .map(|(user, _)| user)
         .filter(|user| !user.is_empty())
         .unwrap_or("poringa");
@@ -211,7 +227,7 @@ mod tests {
     }
 
     const POST_PAGE: &str = r#"<meta property="og:title" content="Beach &amp; Sun">
-<div class="main-info"><a href="http://www.poringa.net/Some%20One">Some One</a></div>
+<div class="main-info"><a href="https://www.poringa.net/Some%20One">Some One</a></div>
 <div property="dc:content" role="main"><img class="imagen" border="0" src="https://img.test/a/1.jpg">
 <img class="imagen" border="0" src="https://img.test/a/2.jpg"></div>"#;
 
@@ -227,7 +243,7 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert_eq!(
             files[1].headers["Referer"],
-            "http://www.poringa.net/posts/imagenes/123"
+            "https://www.poringa.net/posts/imagenes/123"
         );
         let k = keywords(&files[1]);
         assert_eq!(k["title"], "Beach & Sun");

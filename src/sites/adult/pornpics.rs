@@ -233,17 +233,6 @@ fn paginate<'a>(
     };
     let (params, offset) = params.unwrap_or_default();
     let offset = if html.is_some() { 20 } else { offset };
-    let first: Events<'a> = match html {
-        Some(page_url) => crate::sites::once(async move {
-            INTERVAL.wait().await;
-            let page = super::page(http, &page_url, &[]).await?;
-            let children = gallery_links(extract_iter(&page, "class=\"rel-link\" href=\"", "\""));
-            Ok(crate::sites::manga::queue_urls(
-                http, &SITE, route, children,
-            ))
-        }),
-        None => crate::sites::events(Vec::new()),
-    };
     let rest = crate::sites::paginate(Some((offset, 0usize)), move |state| {
         let url = url.clone();
         let params = params.clone();
@@ -289,7 +278,20 @@ fn paginate<'a>(
             )))
         }
     });
-    first.chain(rest).boxed()
+    // The JSON pages follow only once the HTML page was read.
+    match html {
+        Some(page_url) => crate::sites::once(async move {
+            INTERVAL.wait().await;
+            let page = super::page(http, &page_url, &[]).await?;
+            let children = gallery_links(extract_iter(&page, "class=\"rel-link\" href=\"", "\""));
+            Ok(
+                crate::sites::manga::queue_urls(http, &SITE, route, children)
+                    .chain(rest)
+                    .boxed(),
+            )
+        }),
+        None => rest,
+    }
 }
 
 #[cfg(test)]

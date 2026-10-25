@@ -1,6 +1,8 @@
 //! Pictoa images and albums, mirroring gallery_dl/extractor/pictoa.py: an
 //! image page names its file in `og:image`; album pages queue each image
 //! page, following `rel="next"`.
+//!
+//! Requests go to `www.pictoa.com`, where upstream's root redirects.
 use crate::error;
 use crate::sites::art::{extr, extract_iter, nameext_into, split_html};
 use crate::sites::filehosts::rpartition;
@@ -9,7 +11,7 @@ use crate::sites::{Events, Http, Item, Route, Site};
 use serde_json::Value;
 use url::Url;
 
-const ROOT: &str = "https://pictoa.com";
+const ROOT: &str = "https://www.pictoa.com";
 const DIRECTORY: &[&str] = &["{category}", "{album_id} {album_title}"];
 static IMAGE: Route = Route::new("image", "{id}.{extension}", DIRECTORY, "{id}");
 static ALBUM: Route = Route::new("album", "{id}.{extension}", DIRECTORY, "{id}");
