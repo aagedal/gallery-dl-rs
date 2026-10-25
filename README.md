@@ -1215,14 +1215,25 @@ title. Default paths follow upstream: `{id}{title:? //}.{extension}` in
 `furaffinity/{post_id}.{extension}`); archive identity is the submission ID.
 
 Experimental native Weasyl extraction (`--extractor native`, `weasyl`
-category) uses the API: `weasyl.com/~USER/submissions/ID/...` and
-`/submission/ID` read `api/submissions/ID/view`; `/~USER` and `/~USER/gallery`
-page `api/users/USER/gallery?nextid=N` until `nextid` is null (capped at 200
-pages). An optional `extractor.weasyl.api-key` is sent as `X-Weasyl-API-Key`
-(never echoed). Submissions without `media.submission` are skipped; HTTPS on
-`*.weasyl.com` only. `post_id`/`media_id` is `submitid`, `username`
-`owner_login`, caption the title, timestamp `posted_at`. Default filenames are
-`{post_id}.{extension}`; archive identity is the submission ID.
+category) mirrors upstream's classes: `weasyl.com/~USER/submissions/ID/...`,
+`/submission/ID` and `/view/ID` (`submission`, `api/submissions/ID/view`),
+`/~USER`, `/~USER/gallery` and `/submissions/USER` (`submissions`) and
+`/submissions/USER?folderid=N` (`folder`), paging
+`api/users/USER/gallery?nextid=N` until `nextid` is null (capped at 200
+pages); `/journal/ID` and `/journals/USER` (`journal`/`journals`, saved as
+`.html` text from `api/journals/ID/view`); and `/favorites/USER` or
+`/favorites?userid=N` (`favorite`, scraped pages). An optional
+`extractor.weasyl.api-key` is sent as `X-Weasyl-API-Key` (never echoed);
+`extractor.weasyl.metadata: true` fetches every gallery item's full
+submission. Like upstream, submissions without `media.submission` are skipped
+and only its first file is used; HTTPS on `*.weasyl.com` only. Files carry the
+API object as upstream's keywords (`url`, `date`, `filename`, `extension`,
+`folderid`, `folder_name`, `user`); `post_id`/`media_id` is `submitid`
+(journals `jID`), `username` `owner_login`, caption the title. Default paths
+follow upstream: `{submitid} {title}.{extension}` (journals
+`{journalid} {title}.html`) in `weasyl/{owner_login}/` (plus `{folder_name}`,
+or `weasyl/{user}/Favorites/`; previously `weasyl/{post_id}.{extension}`);
+archive identity is the submission ID.
 
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;

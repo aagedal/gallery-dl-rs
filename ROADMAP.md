@@ -1003,10 +1003,18 @@ options. Default paths now follow upstream (`{id}{title:? //}.{extension}` in
 submission ID. Remaining: the missing-cookie warning, 1 s request interval
 and `skip`-based offsets. Upstream has no journal extractor.
 
-**Implemented experimental native Weasyl:** submissions and user galleries via
-the API with an optional `api-key`. Remaining: folders, journals, favorites,
-characters, multi-file/non-visual submissions, and upstream's `metadata`
-option.
+**Implemented experimental native Weasyl:** upstream's `submission`,
+`submissions`, `folder` (`folder_name` from the first submission's full
+object), `journal`/`journals` (saved as `.html` text like upstream's `text:`
+URLs, archived as `jID`) and `favorite` (scraped pages, `user` keyword)
+classes via the API with an optional `api-key` and the `metadata` option.
+Files carry the API object as upstream's keywords (`url`, `date`,
+`filename`, `extension`, `folderid`) with upstream's default
+`{submitid} {title}.{extension}` filenames in `weasyl/{owner_login}/` (plus
+`{folder_name}` or `{user}/Favorites`) instead of `weasyl/ID.ext`; archive
+keys remain the submission ID. Like upstream, submissions without
+`media.submission` are skipped and only its first file is used; upstream has
+no character extractor.
 
 **Implemented experimental native ArtStation:** projects and user portfolios
 via site JSON with browser-like headers. Remaining: Cloudflare challenges,

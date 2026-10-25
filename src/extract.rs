@@ -265,10 +265,10 @@ impl Media {
                 }
                 ("vsco", serde_json::json!([post.media_id]).to_string())
             }
-            // Weasyl files are identified by submission ID.
+            // Weasyl files are identified by submission ID (journals by `jID`).
             "weasyl" => {
                 let post = self.metadata.as_ref()?;
-                if !crate::weasyl::valid_id(&post.media_id) {
+                if !crate::weasyl::valid_media_id(&post.media_id) {
                     return None;
                 }
                 ("weasyl", serde_json::json!([post.media_id]).to_string())

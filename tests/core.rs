@@ -454,6 +454,8 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.weasyl.com/submission/42", Some("weasyl")),
         ("https://www.weasyl.com/~alice", Some("weasyl")),
         ("https://www.weasyl.com/~alice/gallery", Some("weasyl")),
+        ("https://www.weasyl.com/journal/7", Some("weasyl")),
+        ("https://www.weasyl.com/favorites/alice", Some("weasyl")),
         ("https://www.weasyl.com/", None),
         ("https://cdn.weasyl.com/~alice/submissions/42/a/b.png", None),
         ("https://www.weasyl.com.evil.example/submission/42", None),
