@@ -8,8 +8,8 @@ use base64::Engine;
 pub(super) fn capture(site: Site, url: &Url) -> Option<Target> {
     let host = url.host_str()?.trim_start_matches("www.");
     let path = url.path();
-    match site {
-        Site::Danbooru => {
+    match site.dialect() {
+        Dialect::Danbooru => {
             if path == "/posts/random" {
                 // `(?:[^&#]*&)*tags=([^&#]*)`: the greedy prefix picks the last pair.
                 let raw = url
@@ -27,7 +27,7 @@ pub(super) fn capture(site: Site, url: &Url) -> Option<Target> {
             let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
             post_id(&rest[..digits]).map(|id| Target::MediaAsset { id })
         }
-        Site::E621 => {
+        Dialect::E621 => {
             let frontend = match host {
                 "e621.cc" if path == "/" => url.query()?.strip_prefix("tags="),
                 "e621.anthro.fr" if path == "/" => url.query()?.strip_prefix("q="),
@@ -45,7 +45,7 @@ pub(super) fn capture(site: Site, url: &Url) -> Option<Target> {
                 .filter(|id| *id > 0 && short.len() <= 13)
                 .map(|id| Target::Post { id })
         }
-        Site::Gelbooru => {
+        Dialect::Gelbooru => {
             if path != "/redirect.php" {
                 return None;
             }
@@ -54,7 +54,7 @@ pub(super) fn capture(site: Site, url: &Url) -> Option<Target> {
                 encoded: raw.into(),
             })
         }
-        Site::Safebooru => None,
+        Dialect::Safebooru => None,
     }
 }
 

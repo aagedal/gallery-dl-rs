@@ -70,15 +70,18 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "artstation" => format == "{asset[id]}",
         "twitter" => matches!(format, TWITTER | COMMUNITY),
         "kemono" | "coomer" => matches!(format, KEMONO | DISCORD),
-        "danbooru" if format == "fg_{favgroup[id]}_{id}" => true,
-        "e621" | "e926" if format == "f_{user_id}_{id}" => true,
-        "danbooru" | "e621" | "e926" if format == "P_{scale[0]}_{date}_{id}" => true,
-        "danbooru" if format == "m{id}" => true,
-        "danbooru" | "e621" | "e926" => {
-            matches!(
-                format,
-                "{id}" | "t_{search_tags}_{id}" | "p_{pool[id]}_{id}"
-            )
+        category if crate::booru::is_danbooru_family(category) => {
+            let danbooru =
+                crate::booru::category_dialect(category) == Some(crate::booru::Dialect::Danbooru);
+            danbooru && matches!(format, "fg_{favgroup[id]}_{id}" | "m{id}")
+                || !danbooru && format == "f_{user_id}_{id}"
+                || matches!(
+                    format,
+                    "P_{scale[0]}_{date}_{id}"
+                        | "{id}"
+                        | "t_{search_tags}_{id}"
+                        | "p_{pool[id]}_{id}"
+                )
         }
         "gelbooru" | "safebooru" if format == "f_{favorite_id}_{id}" => true,
         "gelbooru" | "safebooru" => {
@@ -269,8 +272,8 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if crate::facebook::photo_id(url).is_ok() || crate::facebook_video::video_id(url).is_ok() {
         return Some(descriptor("facebook", "{id}.{extension}"));
     }
-    for category in ["danbooru", "e621", "gelbooru", "safebooru"] {
-        let site = crate::booru::Site::from_category(category)?;
+    for site in crate::booru::Site::ALL {
+        let category = site.category();
         if let Ok((target, _)) = crate::booru::target(site, url) {
             // The native parser accepts extra host aliases which have no
             // matching installed upstream extractor; do not invent a class.
@@ -298,10 +301,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                     "t_{search_tags}_{id}"
                 }
                 crate::booru::Target::Pool { .. }
-                    if !matches!(
-                        site,
-                        crate::booru::Site::Danbooru | crate::booru::Site::E621
-                    ) =>
+                    if !crate::booru::is_danbooru_family(category) =>
                 {
                     "p_{pool}_{id}"
                 }

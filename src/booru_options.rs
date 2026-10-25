@@ -24,8 +24,8 @@ impl Enrichment {
     pub(super) fn parse(site: Site, options: &Map<String, Value>) -> Result<Self> {
         let truthy = |key: &str| options.get(key).is_some_and(crate::postprocess::truthy);
         let mut enrichment = Self::default();
-        match site {
-            Site::Danbooru => {
+        match site.dialect() {
+            Dialect::Danbooru => {
                 if let Some(value) = options
                     .get("metadata")
                     .filter(|v| crate::postprocess::truthy(v))
@@ -35,7 +35,10 @@ impl Enrichment {
                             .iter()
                             .map(|item| {
                                 item.as_str().ok_or_else(|| {
-                                    error("extractor.danbooru.metadata entries must be strings")
+                                    error(format!(
+                                        "extractor.{}.metadata entries must be strings",
+                                        site.category()
+                                    ))
                                 })
                             })
                             .collect::<Result<Vec<_>>>()?
@@ -44,12 +47,15 @@ impl Enrichment {
                         _ => "artist_commentary,children,notes,parent,uploader".into(),
                     };
                     if includes.len() > 4096 || includes.chars().any(char::is_control) {
-                        return Err(error("extractor.danbooru.metadata is invalid"));
+                        return Err(error(format!(
+                            "extractor.{}.metadata is invalid",
+                            site.category()
+                        )));
                     }
                     enrichment.includes = Some(format!("{includes},id"));
                 }
             }
-            Site::E621 => {
+            Dialect::E621 => {
                 let includes: Vec<String> = match options.get("metadata") {
                     Some(value) if crate::postprocess::truthy(value) => match value {
                         Value::String(text) => text.split(',').map(str::to_owned).collect(),
@@ -65,7 +71,7 @@ impl Enrichment {
                 enrichment.notes = includes.iter().any(|item| item == "notes");
                 enrichment.pools = includes.iter().any(|item| item == "pools");
             }
-            Site::Gelbooru | Site::Safebooru => {
+            Dialect::Gelbooru | Dialect::Safebooru => {
                 enrichment.html_tags = truthy("tags");
                 enrichment.html_notes = truthy("notes");
             }
@@ -318,8 +324,8 @@ impl Booru {
         if !self.enrichment.any() || raw.is_empty() {
             return Ok(());
         }
-        match self.site {
-            Site::Danbooru => {
+        match self.site.dialect() {
+            Dialect::Danbooru => {
                 let Some(includes) = &self.enrichment.includes else {
                     return Ok(());
                 };
@@ -358,7 +364,7 @@ impl Booru {
                     }
                 }
             }
-            Site::E621 => {
+            Dialect::E621 => {
                 for post in raw.iter_mut() {
                     let Some(id) = post_id(post) else {
                         continue;
@@ -392,7 +398,7 @@ impl Booru {
                     }
                 }
             }
-            Site::Gelbooru | Site::Safebooru => {
+            Dialect::Gelbooru | Dialect::Safebooru => {
                 for post in raw.iter_mut() {
                     // Upstream fetches the page only for posts with a file URL.
                     let has_file = post

@@ -20,7 +20,9 @@ impl Scope {
                 Self::Bound
             }
             Self::Root if key == "extractor" => Self::Extractor,
-            Self::Extractor if category(key) => Self::Category(matches!(key, "danbooru" | "e621")),
+            Self::Extractor if category(key) => {
+                Self::Category(crate::booru::is_danbooru_family(key))
+            }
             Self::Category(true) if matches!(key, "artist" | "artist-search" | "tag") => {
                 Self::Options
             }
@@ -65,6 +67,8 @@ fn category(key: &str) -> bool {
             | "vsco"
             | "direct"
     ) || crate::sites::is_category(key)
+        || crate::booru::Site::from_category(key).is_some()
+        || matches!(key, "Danbooru" | "E621")
 }
 
 /// Return repaired bytes only when a date-bound unpaired escape was changed.
