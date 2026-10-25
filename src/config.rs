@@ -27,6 +27,28 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
 /// Upstream extractor settings of dedicated native extractors that are not
 /// typed options; they reach the extractor through `site_options`.
+/// Danbooru/e621 instance scopes; they also accept upstream's per-class
+/// (`tag`, `artist`, `artist-search`) settings.
+const BOORU_CLASS_CATEGORIES: &[&str] = &[
+    "danbooru", "e621", "atfbooru", "aibooru", "booruvar", "e6ai",
+];
+/// Upstream `basecategory` scopes (`extractor.Danbooru`, `extractor.E621`):
+/// every instance of the family falls back to them, after its own scope.
+const BOORU_BASE_CATEGORIES: &[&str] = &["Danbooru", "E621"];
+
+/// The API dialect of a Danbooru/e621 instance or base scope.
+fn booru_scope_dialect(name: &str) -> Option<crate::booru::Dialect> {
+    match name {
+        "Danbooru" => Some(crate::booru::Dialect::Danbooru),
+        "E621" => Some(crate::booru::Dialect::E621),
+        _ if BOORU_CLASS_CATEGORIES.contains(&name) => crate::booru::category_dialect(name),
+        _ => None,
+    }
+}
+fn booru_family_scope(name: &str) -> bool {
+    booru_scope_dialect(name).is_some()
+}
+
 const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     (
         "reddit",
@@ -108,6 +130,12 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("danbooru", &["metadata", "external"]),
     ("e621", &["metadata"]),
+    ("atfbooru", &["metadata", "external"]),
+    ("aibooru", &["metadata", "external"]),
+    ("booruvar", &["metadata", "external"]),
+    ("e6ai", &["metadata"]),
+    ("Danbooru", &["metadata", "external"]),
+    ("E621", &["metadata"]),
     ("gelbooru", &["tags", "notes"]),
     ("safebooru", &["tags", "notes"]),
     ("furaffinity", &["descriptions", "external", "layout"]),
@@ -877,6 +905,15 @@ struct RawExtractor {
     reddit: Box<RawOptions>,
     danbooru: Box<RawOptions>,
     e621: Box<RawOptions>,
+    atfbooru: Box<RawOptions>,
+    aibooru: Box<RawOptions>,
+    booruvar: Box<RawOptions>,
+    e6ai: Box<RawOptions>,
+    /// Upstream `basecategory` scopes shared by every Danbooru/e621 instance.
+    #[serde(rename = "Danbooru")]
+    danbooru_base: Box<RawOptions>,
+    #[serde(rename = "E621")]
+    e621_base: Box<RawOptions>,
     gelbooru: Box<RawOptions>,
     safebooru: Box<RawOptions>,
     mastodon: Box<RawOptions>,
@@ -1199,6 +1236,12 @@ impl Config {
                 "reddit",
                 "danbooru",
                 "e621",
+                "atfbooru",
+                "aibooru",
+                "booruvar",
+                "e6ai",
+                "Danbooru",
+                "E621",
                 "gelbooru",
                 "safebooru",
                 "mastodon",
@@ -1231,7 +1274,7 @@ impl Config {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
-                if !matches!(name, "danbooru" | "e621")
+                if !BOORU_CLASS_CATEGORIES.contains(&name)
                     && extractor
                         .get(name)
                         .and_then(Value::as_object)
@@ -1242,14 +1285,14 @@ impl Config {
                         })
                 {
                     return Err(error(
-                        "native class settings are only supported for danbooru and e621",
+                        "native class settings are only supported for danbooru, e621 and their instances (atfbooru, aibooru, booruvar, e6ai)",
                     ));
                 }
             }
         }
         let mut raw_classes = Vec::new();
         if let Some(extractor) = shape.get_mut("extractor").and_then(Value::as_object_mut) {
-            for category in ["danbooru", "e621"] {
+            for category in BOORU_CLASS_CATEGORIES.iter().copied() {
                 if let Some(settings) = extractor.get_mut(category).and_then(Value::as_object_mut) {
                     for subcategory in ["artist", "artist-search", "tag"] {
                         if let Some(value) = settings.remove(subcategory) {
@@ -1300,7 +1343,11 @@ impl Config {
         parent_keys(&shape, &mut parent_keywords);
         if let Some(extractor) = shape.get("extractor") {
             parent_keys(extractor, &mut parent_keywords);
-            for category in ["danbooru", "e621"] {
+            for category in BOORU_CLASS_CATEGORIES
+                .iter()
+                .chain(BOORU_BASE_CATEGORIES)
+                .copied()
+            {
                 if let Some(settings) = extractor.get(category) {
                     parent_keys(settings, &mut parent_keywords);
                 }
@@ -1600,6 +1647,12 @@ impl Config {
             ("reddit", extractor.reddit),
             ("danbooru", extractor.danbooru),
             ("e621", extractor.e621),
+            ("atfbooru", extractor.atfbooru),
+            ("aibooru", extractor.aibooru),
+            ("booruvar", extractor.booruvar),
+            ("e6ai", extractor.e6ai),
+            ("Danbooru", extractor.danbooru_base),
+            ("E621", extractor.e621_base),
             ("gelbooru", extractor.gelbooru),
             ("safebooru", extractor.safebooru),
             ("mastodon", extractor.mastodon),
@@ -1629,13 +1682,13 @@ impl Config {
         .into_iter()
         .chain(site_scopes)
         {
-            if !matches!(name, "danbooru" | "e621")
+            if !BOORU_CLASS_CATEGORIES.contains(&name)
                 && (settings.tag.is_some()
                     || settings.artist.is_some()
                     || settings.artist_search.is_some())
             {
                 return Err(error(
-                    "native class settings are only supported for danbooru and e621",
+                    "native class settings are only supported for danbooru, e621 and their instances (atfbooru, aibooru, booruvar, e6ai)",
                 ));
             }
             if !matches!(
@@ -1654,18 +1707,18 @@ impl Config {
                     "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain, gelbooru and safebooru",
                 ));
             }
-            if !matches!(name, "danbooru" | "e621") && settings.threshold.0.is_some() {
+            if !booru_family_scope(name) && settings.threshold.0.is_some() {
                 return Err(error(
-                    "native configuration threshold is only supported for danbooru and e621",
+                    "native configuration threshold is only supported for Danbooru and e621 instances",
                 ));
             }
             // Pixiv's username only selects its cached refresh token.
-            if !matches!(name, "danbooru" | "e621" | "bluesky")
+            if !(booru_family_scope(name) || name == "bluesky")
                 && (settings.username.0.is_some() || settings.password.0.is_some())
                 && !(matches!(name, "pixiv" | "pixiv-novel") && settings.password.0.is_none())
             {
                 return Err(error(
-                    "native configuration username/password are only supported for danbooru, e621 and bluesky (and a pixiv username)",
+                    "native configuration username/password are only supported for Danbooru and e621 instances and bluesky (and a pixiv username)",
                 ));
             }
             if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
@@ -1776,19 +1829,20 @@ impl Config {
             } else {
                 None
             };
-            let booru_order_posts = if name == "danbooru" {
-                settings
-                    .order_posts
-                    .0
-                    .take()
-                    .map(danbooru_pool_order)
-                    .transpose()?
-            } else {
-                if name == "e621" {
-                    settings.order_posts.0.take();
-                }
-                None
-            };
+            let booru_order_posts =
+                if booru_scope_dialect(name) == Some(crate::booru::Dialect::Danbooru) {
+                    settings
+                        .order_posts
+                        .0
+                        .take()
+                        .map(danbooru_pool_order)
+                        .transpose()?
+                } else {
+                    if booru_scope_dialect(name) == Some(crate::booru::Dialect::E621) {
+                        settings.order_posts.0.take();
+                    }
+                    None
+                };
             // Boxed: unoptimized builds overflow the stack with inline settings.
             let mut resolved = (*settings).resolve(directory, &parent_keywords)?;
             resolved.bluesky_endpoint = bluesky_endpoint;
@@ -1840,6 +1894,10 @@ impl Config {
                 | "reddit"
                 | "danbooru"
                 | "e621"
+                | "atfbooru"
+                | "aibooru"
+                | "booruvar"
+                | "e6ai"
                 | "gelbooru"
                 | "safebooru"
                 | "mastodon"
@@ -1875,6 +1933,9 @@ impl Config {
         {
             settings = settings.overlay(base);
         }
+        if let Some(base) = self.booru_base(category) {
+            settings = settings.overlay(base);
+        }
         if let Some(specific) = self.categories.get(category) {
             settings = settings.overlay(specific);
         }
@@ -1891,13 +1952,24 @@ impl Config {
     pub fn parent_keywords(&self) -> &[String] {
         &self.parent_keywords
     }
+    /// Upstream's `basecategory` scope of a Danbooru/e621 instance: the
+    /// instance's own scope is consulted first, then `Danbooru`/`E621`.
+    fn booru_base(&self, category: &str) -> Option<&Options> {
+        let base = booru_scope_dialect(category)
+            .filter(|_| BOORU_CLASS_CATEGORIES.contains(&category))?
+            .base_category()?;
+        self.categories.get(base)
+    }
     pub fn resolve_class(&self, category: &str, subcategory: &str) -> Result<Options> {
         let mut resolved = self.resolve(category)?;
         if let Some(class) = self.classes.get(&(category.into(), subcategory.into())) {
             resolved = resolved.overlay(class).overlay(&self.global);
             let category_settings = self.categories.get(category);
             let mut processors = self.extractor.postprocessors.clone();
-            for settings in [category_settings, Some(class)].into_iter().flatten() {
+            for settings in [self.booru_base(category), category_settings, Some(class)]
+                .into_iter()
+                .flatten()
+            {
                 processors = match (processors, &settings.postprocessors) {
                     (Some(base), Some(specific)) => Some(base.overlaid(specific)),
                     (base, specific) => specific.clone().or(base),

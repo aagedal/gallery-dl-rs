@@ -197,7 +197,7 @@ impl ChildMetadata {
         raw: &serde_json::Map<String, serde_json::Value>,
         url: &url::Url,
     ) -> Result<Self> {
-        if !matches!(category, "danbooru" | "e621" | "e926")
+        if !crate::booru::is_danbooru_family(category)
             || !matches!(subcategory, "artist" | "artist-search")
             || url.as_str().len() > 16 * 1024
             || !url.username().is_empty()
@@ -251,7 +251,7 @@ impl ChildMetadata {
         fields.insert("_url".into(), url.as_str().into());
         fields.insert(
             "_extractor".into(),
-            if category == "danbooru" {
+            if crate::booru::category_dialect(category) == Some(crate::booru::Dialect::Danbooru) {
                 "DanbooruTagExtractor"
             } else {
                 "E621TagExtractor"
