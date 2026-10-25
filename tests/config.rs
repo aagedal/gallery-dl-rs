@@ -2089,6 +2089,10 @@ fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
         Some(key)
     );
     assert_eq!(cfg.resolve("catbox").unwrap().api_key, None);
+    let cfg = parse(r#"{"extractor":{"pixeldrain":{"zip":true,"recursive":0}}}"#).unwrap();
+    let options = cfg.resolve("pixeldrain").unwrap().site_options.unwrap();
+    assert_eq!(options["zip"], serde_json::json!(true));
+    assert_eq!(options["recursive"], serde_json::json!(0));
     for value in [
         serde_json::json!(null),
         serde_json::json!(7),
@@ -2100,6 +2104,27 @@ fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
         let error = parse(&body).err().unwrap().to_string();
         assert!(!error.contains("private"));
     }
+}
+
+#[test]
+fn booru_and_kemono_upstream_options_are_site_options() {
+    let cfg = parse(
+        r#"{"extractor":{"danbooru":{"metadata":["notes"]},"e621":{"metadata":"pools"},
+            "gelbooru":{"tags":true,"notes":true},"safebooru":{"tags":1},
+            "kemono":{"dms":true,"comments":true},"coomer":{"announcements":true}}}"#,
+    )
+    .unwrap();
+    let options = |category: &str| cfg.resolve(category).unwrap().site_options.unwrap();
+    assert_eq!(
+        options("danbooru")["metadata"],
+        serde_json::json!(["notes"])
+    );
+    assert_eq!(options("e621")["metadata"], serde_json::json!("pools"));
+    assert_eq!(options("gelbooru")["tags"], serde_json::json!(true));
+    assert_eq!(options("safebooru")["tags"], serde_json::json!(1));
+    assert_eq!(options("kemono")["dms"], serde_json::json!(true));
+    assert_eq!(cfg.resolve("kemono").unwrap().comments, Some(true));
+    assert_eq!(options("coomer")["announcements"], serde_json::json!(true));
 }
 
 #[test]

@@ -1420,6 +1420,8 @@ fn extract_input<'a>(
                                     .with_favorites(options.favorites.unwrap_or_default())
                                     .with_max_posts(options.max_posts)
                                     .with_metadata(options.metadata.unwrap_or(true))
+                                    .with_comments(options.comments.unwrap_or(false))
+                                    .with_options(options.site_options.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1836,6 +1838,7 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_pixeldrain_api_key(options.api_key.as_deref())?
+                                        .with_options(options.site_options.as_deref())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1873,6 +1876,7 @@ fn extract_input<'a>(
                                         .with_artist_parent_metadata(
                                             options.artist_parent_metadata().cloned(),
                                         )
+                                        .with_options(options.site_options.as_deref())?
                                         .with_threshold(options.booru_threshold.flatten())
                                         .with_favorite_order(options.booru_favorite_order.clone())
                                         .with_pool_order(
@@ -1993,7 +1997,7 @@ fn extract_input<'a>(
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
                             sanity: (category == "pixiv").then_some(options.sanity).flatten(),
                             captions: (category == "pixiv").then_some(options.captions).flatten(),
-                            comments: matches!(category, "pixiv" | "pixiv-novel")
+                            comments: matches!(category, "pixiv" | "pixiv-novel" | "kemono" | "coomer")
                                 .then_some(options.comments)
                                 .flatten(),
                             metadata_bookmark: matches!(category, "pixiv" | "pixiv-novel")

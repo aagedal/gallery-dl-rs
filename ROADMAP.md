@@ -631,8 +631,16 @@ views and artist discovery. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: other favorites, notes,
-`tags`/`metadata` options, per-category tags and authenticated live verification.
+Danbooru/e621 `tags_<category>` keywords are emitted from the API, and upstream's
+Danbooru `random`/`media-asset`, e621 `/p/` short links, `e621.cc` and `frontend`
+links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
+`metadata` (includes; notes/pools) and Gelbooru/Safebooru `tags`/`notes`
+(per-post HTML) options, e621 hidden-URL reconstruction and Danbooru ugoira WebM
+samples. Upstream has no other favorites classes for these sites. Remaining:
+Danbooru `external` and `ugoira` frame data, the DAPI `url` option, other
+Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
+aliases, per-post laziness of option requests (they run per page), and
+authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
@@ -668,9 +676,14 @@ no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
 thumbnail job and a Coomer MP4 original job with creator display names; no media
 was downloaded in those inspections. Authenticated verification, wider service
 captures and successful original transfers remain required.
-Remaining: popular views, comments/DMs, archive/link
-extraction from post text, username/password login, additional endpoint behavior
-and full upstream metadata/default naming.
+Upstream's `comments`, `dms` and `announcements` options now attach those API
+values to posts (comments non-fatal per post, DMs/announcements once per
+creator rather than upstream's first-creator reuse), and upstream's
+kemono.st/coomer.cr domains are recognized. Upstream 1.32.17 has no popular
+class, so none is planned. Remaining: the `archives`/`archives-format` options
+(per-hash archive file metadata and the always-present `archives` keyword),
+username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
+upstream extractors) and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
 lookups attach typed immutable IDs and optional display names, public IDs, dates,
@@ -768,9 +781,19 @@ lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
 and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
 and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
 change media selection. Pixeldrain API keys authenticate API requests and file downloads.
-Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
-`/c/` descriptions; imgbox per-image metadata (width/height); Postimg
-JS-paginated gallery pages beyond the server-rendered listing.
+Pixeldrain now covers upstream's `file`, `album` and `folder` classes
+(`/api/file`, `/api/list`, `/d/` and `/api/filesystem` paths, the `zip` and
+`recursive` options, unavailable-file skipping and lazily queued
+subdirectories); Catbox covers `album` (with `description`) and `file`
+(`files`/`litter`/`de.catbox.moe`). Both carry upstream keyword dictionaries
+and default paths, replacing the old `{post_id}_{index:02}.{extension}` /
+`{media_id}.{extension}` names (default-path change, files are not migrated);
+archive keys remain the file ID, so existing archives still match, and
+filesystem files use `{path}_{num}`. Lists and albums no longer drop repeated
+file IDs (upstream keeps them; the archive deduplicates).
+Remaining: imgbox per-image metadata (width/height); Postimg JS-paginated
+gallery pages beyond the server-rendered listing. Upstream only matches
+`pixeldrain.com`, so no other Pixeldrain domains are planned.
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
 tagged listings via API v2 with an overridable `api-key`, original-image token

@@ -509,8 +509,29 @@ key) for HTTP Basic authentication. Gelbooru/Safebooru accept category-scoped
 `user-id` and `api-key`; both must be nonempty to authenticate. Credentials are sent only to the
 API origin, never attached to pool HTML, media requests or public JSON. Redirects
 to another origin are refused. Authentication can expose posts hidden from public
-API requests; posts without usable file URLs are still skipped. Plain CDN file
-links stay direct downloads.
+API requests; posts without usable file URLs are still skipped (e621 posts
+whose API hides `file.url` use upstream's `static1.e621.net/data/MD5` URL).
+Plain CDN file links stay direct downloads.
+
+Upstream's remaining booru classes are supported natively: Danbooru `random`
+(`/posts/random[?tags=...]`, one `/posts/random.json` request, tag-search
+defaults) and `media-asset` (`/media_assets/ID`, the asset's last variant,
+`{category}_ma{id}_{filename}.{extension}` and its own `m{id}` archive space);
+e621 `/p/BASE32` short links and `e621.cc` URLs (requests go to e621.net);
+e621 `frontend` links (`e621.cc/?tags=`, `e621.anthro.fr/?q=`) and Gelbooru
+`redirect` links (`redirect.php?s=BASE64`), which queue the e621 tag search or
+the decoded Gelbooru post as a child job. Danbooru ugoira ZIPs download their
+WebM sample (`large_file_url`, extension `webm`) like upstream's default.
+Category-scoped options: Danbooru `metadata` (true for upstream's default
+`artist_commentary,children,notes,parent,uploader`, or a string/list of
+fields) merges one `only=` request per page (or per single post/media asset);
+e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
+`notes` (when `has_notes`) and replaces `pools` IDs with cached pool objects;
+Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
+`tags_<type>` strings and note lists. These requests happen when a page is
+fetched, before its posts are emitted. Not supported natively: Danbooru
+`external` and `ugoira` (frame data), the DAPI `url` option, and the
+atfbooru/aibooru/booruvar/e6ai instances and Danbooru host aliases.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
@@ -550,7 +571,8 @@ upstream instance labels; existing files are not moved. Stable archive identity
 remains (instance, attachment ID), including for older `mastodon` archive entries.
 
 Experimental native Kemono/Coomer extraction (`--extractor native`) covers
-kemono.cr/.su/.party (`kemono` category) and coomer.st/.su/.party (`coomer`).
+kemono.cr/.st/.su/.party (`kemono` category) and coomer.st/.cr/.su/.party
+(`coomer`), matching upstream's domains.
 Supported: posts (`/SERVICE/user/USER/post/ID`), creator listings
 (`/SERVICE/user/USER`) and global post listings (`/posts`) via the `/api/v1` API
 with `Accept: text/css`. Listings accept search (`q`), tag (`tag`) and initial
@@ -608,6 +630,15 @@ and post/DM/share/chat counts when present. Filters and templates expose these
 fields through `creator` and `user_profile`, plus `creator_id` and `creator_name`.
 Profile renames preserve archive identity. Templates that previously used
 `username` for the numeric ID should use `user` or `creator_id` instead.
+
+Upstream's `comments` option (default false) requests each post's
+`/comments` once (shared by its revisions) and exposes the list as `comments`;
+like upstream, failures and non-list responses yield an empty list.
+Category-scoped `dms` and `announcements` (default false) expose each creator's
+`/dms` and `/announcements` responses on all of its posts; they are fetched once
+per host/service/creator (upstream reuses the first creator's values for an
+entire run) and request failures end extraction. These values reach filters,
+templates and JSON output and are bounded to 8 MiB each.
 
 API responses support gzip with separate 32 MiB encoded and decoded limits,
 complete member/checksum validation and cancellable background decoding.
@@ -690,22 +721,36 @@ public site media may follow CDN redirects with validated post/channel Referers.
 Username/password login is not implemented.
 
 Experimental native image host extraction (`--extractor native`), one category
-per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
-`/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`), including
-zero-based `#item=N` selection with original list numbering (out-of-range
-selection produces no files). Set `extractor.pixeldrain.api-key` to use HTTP
+per site: `pixeldrain` files (`/u/ID` or `/api/file/ID`, via
+`/api/file/ID/info`, downloaded from `/api/file/ID?download`), lists/albums
+(`/l/ID`, `/api/list/ID`), including zero-based `#item=N` selection with
+original list numbering (out-of-range selection produces no files), and
+filesystem paths (`/d/PATH`, `/api/filesystem/PATH`) via the `?stat` API:
+a directory's files (or the single requested file) download from
+`/api/filesystem/PATH?attach` and subdirectories are queued as child jobs
+unless `extractor.pixeldrain.recursive` is false. `extractor.pixeldrain.zip`
+downloads a list as one `/api/list/ID/zip` archive. Set
+`extractor.pixeldrain.api-key` to use HTTP
 Basic authentication for API requests and file downloads; credentials stay in
 private request headers and are omitted from inspection JSON. `catbox` albums
-(`/c/ID`, file links, `<h1>` title and creation date from the page); `imgbox` galleries
+(`/c/ID`, file links, `<h1>` title, creation date and description from the
+page) and direct `files`/`litter`/`de.catbox.moe` file links. Pixeldrain and
+Catbox files carry upstream's keyword dictionaries (`album`, `num`, `date`,
+`path`, `share_url`, `hash_sha256`, `album_id`, `album_name`, …) and default to
+upstream's paths (for example `pixeldrain/{album[date]:%Y-%m-%d} {album[title]}
+({album[id]})/{num:>03} {filename} ({id}).{extension}` and
+`catbox/{album_name} ({album_id})/{filename}.{extension}`); archive identities
+stay the file ID (filesystem files use upstream's `{path}_{num}`); `imgbox` galleries
 (`/g/ID`, thumbnails mapped to `imagesN.imgbox.com/.../ID_o.EXT`) and image pages
 (`/ID`); `postimg` (postimg.cc/postimages.org) image pages (download link, else
 `og:image`) and galleries (thumbnail links, each image page fetched; capped at
 1000). Media must be HTTPS on the site's CDN. `post_id` is the file/list/album/
 gallery ID, `media_id` the file ID, caption the title (or file name), file
-`media_type` the MIME type and description the original name. Filenames are
-`{media_id}.{extension}` for single files and `{post_id}_{index:02}.{extension}`
-otherwise; archive identity is (category, file ID). Plain CDN file links
-(files.catbox.moe, i.postimg.cc, images2.imgbox.com) stay direct downloads.
+`media_type` the MIME type and description the original name. imgbox/Postimg
+filenames are `{media_id}.{extension}` for single files and
+`{post_id}_{index:02}.{extension}` otherwise; archive identity is (category,
+file ID). Plain imgbox/Postimg CDN file links (i.postimg.cc,
+images2.imgbox.com) stay direct downloads.
 
 Experimental native Tumblr extraction (`--extractor native`, `tumblr`
 category) covers blog listings (`BLOG.tumblr.com`, `/posts`,

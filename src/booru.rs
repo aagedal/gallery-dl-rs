@@ -3,10 +3,12 @@
 //!
 //! Mirrors gallery_dl/extractor/danbooru.py (Danbooru and e621 dialects) and
 //! gelbooru.py / gelbooru_v02.py (Gelbooru and Safebooru) through their public
-//! JSON APIs. Single posts, tag searches, pools, favorites, popular views, and
-//! artist child jobs are supported where the source provides them. Posts without a file URL (deleted,
-//! banned or login-restricted) are skipped silently, and media URLs are only
-//! accepted from each site's own CDN hosts.
+//! JSON APIs. Single posts, tag searches, pools, favorites, popular views,
+//! random posts, media assets, artist/frontend/redirect child jobs and the
+//! `metadata`/`tags`/`notes` options are supported where the source provides
+//! them. Posts without a file URL (deleted, banned or login-restricted) are
+//! skipped silently, and media URLs are only accepted from each site's own CDN
+//! hosts.
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordFeedback, KeywordObject, KeywordPolicy, group_with_keywords},
@@ -43,8 +45,12 @@ const MAX_TAGS: usize = 1024;
 mod artist;
 #[path = "booru_dapi_pool.rs"]
 mod dapi_listing;
+#[path = "booru_extra.rs"]
+mod extra;
 #[path = "booru_gel_favorite.rs"]
 mod gel_favorite;
+#[path = "booru_options.rs"]
+mod options;
 #[path = "booru_popular.rs"]
 mod popular;
 #[derive(Clone, Copy, PartialEq)]
@@ -107,7 +113,11 @@ impl Site {
     fn media_host(self, host: &str) -> bool {
         match self {
             Self::Danbooru => host == "cdn.donmai.us" || host.ends_with(".donmai.us"),
-            Self::E621 => host == "static1.e621.net" || host.ends_with(".e621.net"),
+            Self::E621 => {
+                host == "static1.e621.net"
+                    || host.ends_with(".e621.net")
+                    || host.ends_with(".e926.net")
+            }
             Self::Gelbooru => host.ends_with(".gelbooru.com"),
             Self::Safebooru => host == "safebooru.org" || host.ends_with(".safebooru.org"),
         }
@@ -146,6 +156,23 @@ pub enum Target {
     /// Danbooru favorite group with its exact requested ID.
     Favgroup {
         id: String,
+    },
+    /// Danbooru `/posts/random`, with its decoded (possibly empty) search.
+    Random {
+        tags: String,
+    },
+    /// Danbooru `/media_assets/ID`.
+    MediaAsset {
+        id: u64,
+    },
+    /// e621 frontends (`e621.cc/?tags=`, `e621.anthro.fr/?q=`): the raw
+    /// capture queued as an e621.net tag search.
+    Frontend {
+        tags: String,
+    },
+    /// Gelbooru `redirect.php?s=BASE64`, queued as the decoded post URL.
+    Redirect {
+        encoded: String,
     },
 }
 
@@ -268,7 +295,7 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     let host = host.strip_prefix("www.").unwrap_or(host);
     let root = match (site, host) {
         (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => "https://danbooru.donmai.us/",
-        (Site::E621, "e621.net") => "https://e621.net/",
+        (Site::E621, "e621.net" | "e621.cc" | "e621.anthro.fr") => "https://e621.net/",
         (Site::E621, "e926.net") => "https://e926.net/",
         (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/",
         (Site::Safebooru, "safebooru.org") => "https://safebooru.org/",
@@ -286,7 +313,11 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     // A matched invalid capture must fail; falling back could select a
     // different duplicate query and silently change the requested namespace.
     let source_tags = checked_source_search_tags(site, url)?;
-    let target = if let Some(target) = artist::capture(site, url) {
+    let target = if let Some(target) = extra::capture(site, url) {
+        Some(target)
+    } else if host == "e621.anthro.fr" {
+        None
+    } else if let Some(target) = artist::capture(site, url) {
         Some(target)
     } else if let Some(params) = popular::capture(site, url) {
         Some(Target::Popular { params })
@@ -642,16 +673,21 @@ fn defaults(
         site.danbooru_dialect() && matches!(target, Target::Pool { .. } | Target::Favgroup { .. });
     let filename = if collection {
         "{num:>04}_{id}_{filename}.{extension}"
+    } else if matches!(target, Target::MediaAsset { .. }) {
+        "{category}_ma{id}_{filename}.{extension}"
     } else if site.danbooru_dialect() {
         "{category}_{id}_{filename}.{extension}"
     } else {
         "{category}_{id}_{md5}.{extension}"
     };
     let directory: &[&str] = match target {
-        Target::Post { .. } | Target::Artist { .. } | Target::ArtistSearch { .. } => {
-            &["{category}"]
-        }
-        Target::Tags { .. } => &["{category}", "{search_tags}"],
+        Target::Post { .. }
+        | Target::Artist { .. }
+        | Target::ArtistSearch { .. }
+        | Target::MediaAsset { .. }
+        | Target::Frontend { .. }
+        | Target::Redirect { .. } => &["{category}"],
+        Target::Tags { .. } | Target::Random { .. } => &["{category}", "{search_tags}"],
         Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
         Target::Popular { .. } => &["{category}", "popular", "{scale}", "{date}"],
         Target::DapiFavorites { .. } => &["{category}", "favorites", "{favorite_id}"],
@@ -665,8 +701,12 @@ fn defaults(
     };
     let archive = match target {
         Target::Post { .. } => "{id}",
-        Target::Artist { .. } | Target::ArtistSearch { .. } => "",
-        Target::Tags { .. } => "t_{search_tags}_{id}",
+        Target::Artist { .. }
+        | Target::ArtistSearch { .. }
+        | Target::Frontend { .. }
+        | Target::Redirect { .. } => "",
+        Target::Tags { .. } | Target::Random { .. } => "t_{search_tags}_{id}",
+        Target::MediaAsset { .. } => "m{id}",
         Target::Pool { .. } if !site.danbooru_dialect() => "p_{pool}_{id}",
         Target::Pool { .. } => "p_{pool[id]}_{id}",
         Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
@@ -683,6 +723,10 @@ fn defaults(
         Target::Popular { .. } => "popular",
         Target::Artist { .. } => "artist",
         Target::ArtistSearch { .. } => "artist-search",
+        Target::Random { .. } => "random",
+        Target::MediaAsset { .. } => "media-asset",
+        Target::Frontend { .. } => "frontend",
+        Target::Redirect { .. } => "redirect",
     };
     Arc::new(crate::naming::SourceDefaults::new(
         category,
@@ -696,7 +740,7 @@ fn defaults(
 pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDefaults>> {
     let category = match url.host_str()? {
         "danbooru.donmai.us" => "danbooru",
-        "e621.net" => "e621",
+        "e621.net" | "e621.cc" | "e621.anthro.fr" => "e621",
         "e926.net" => "e926",
         "gelbooru.com" => "gelbooru",
         "safebooru.org" => "safebooru",
@@ -714,19 +758,48 @@ pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDef
 /// Parse one post object. Posts without a usable file yield `None`.
 pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     let id = number(post.get("id"))?;
+    // Upstream downloads Danbooru ugoira ZIPs as their WebM sample unless the
+    // `ugoira` option (not supported natively) requests frame data.
+    let ugoira_sample = site == Site::Danbooru
+        && string(post, "file_url").is_some_and(|url| source_nameext(url).1.as_ref() == "zip");
     let (url, md5, ext, width, height, size) = match site {
         Site::Danbooru => (
-            media_url(site, string(post, "file_url")?)?,
+            media_url(
+                site,
+                string(
+                    post,
+                    if ugoira_sample {
+                        "large_file_url"
+                    } else {
+                        "file_url"
+                    },
+                )?,
+            )?,
             string(post, "md5"),
-            string(post, "file_ext"),
+            if ugoira_sample {
+                Some("webm")
+            } else {
+                string(post, "file_ext")
+            },
             number(post.get("image_width")),
             number(post.get("image_height")),
-            number(post.get("file_size")),
+            number(post.get("file_size")).filter(|_| !ugoira_sample),
         ),
         Site::E621 => {
             let file = post.get("file")?;
+            // Upstream builds hidden file URLs from their MD5 and extension.
+            let fallback = string(file, "md5")
+                .filter(|md5| valid_md5(md5))
+                .zip(string(file, "ext").filter(|ext| valid_extension(ext)))
+                .map(|(md5, ext)| {
+                    format!(
+                        "https://static1.e621.net/data/{}/{}/{md5}.{ext}",
+                        &md5[..2],
+                        &md5[2..4]
+                    )
+                });
             (
-                media_url(site, string(file, "url")?)?,
+                media_url(site, string(file, "url").or(fallback.as_deref())?)?,
                 string(file, "md5"),
                 string(file, "ext"),
                 number(file.get("width")),
@@ -795,7 +868,11 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
         "mp4" | "webm" => Some(format!("video/{ext}")),
         _ => None,
     };
-    let booru_keywords = Some(Arc::new(nameext_keywords(site, post, &url)));
+    let mut keywords = nameext_keywords(site, post, &url);
+    if ugoira_sample {
+        keywords.insert("extension".into(), "webm".into());
+    }
+    let booru_keywords = Some(Arc::new(keywords));
     Some(Media {
         url,
         job: MediaJob::DirectHttp,
@@ -931,6 +1008,8 @@ pub struct Booru {
     retries: u8,
     rate_limits: RateLimits,
     threshold: Option<usize>,
+    enrichment: options::Enrichment,
+    pool_cache: tokio::sync::Mutex<HashMap<String, Value>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1069,7 +1148,21 @@ impl Booru {
             retries: 0,
             rate_limits: RateLimits::default(),
             threshold: None,
+            enrichment: options::Enrichment::default(),
+            pool_cache: tokio::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Apply upstream extractor settings: Danbooru/e621 `metadata` and
+    /// Gelbooru/Safebooru `tags`/`notes` (see [`options::Enrichment`]).
+    pub fn with_options(
+        mut self,
+        options: Option<&serde_json::Map<String, Value>>,
+    ) -> Result<Self> {
+        if let Some(options) = options {
+            self.enrichment = options::Enrichment::parse(self.site, options)?;
+        }
+        Ok(self)
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -1402,11 +1495,12 @@ impl Booru {
                     "favorites.json"
                 };
                 let body = self.call(&state.root, path, &query).await?;
-                let raw = if state.popular.is_some() {
+                let mut raw = if state.popular.is_some() {
                     popular::posts(&body)?
                 } else {
                     posts(self.site, &body)?
                 };
+                self.enrich(&state.root, path, false, &mut raw).await?;
                 state.done = raw.len() < self.threshold.unwrap_or(limit - 20);
                 *page = Some(match *page {
                     None => 2,
@@ -1447,6 +1541,8 @@ impl Booru {
                 }
                 let body = self.call(&state.root, "posts.json", &query).await?;
                 let mut raw = posts(self.site, &body)?;
+                self.enrich(&state.root, "posts.json", false, &mut raw)
+                    .await?;
                 if *order == TagOrder::After && page.is_some() {
                     raw.reverse();
                 }
@@ -1470,7 +1566,9 @@ impl Booru {
                     ("pid", &pid_text),
                 ]);
                 let body = self.call(&state.root, "index.php", &query).await?;
-                let raw = posts(self.site, &body)?;
+                let mut raw = posts(self.site, &body)?;
+                self.enrich(&state.root, "index.php", false, &mut raw)
+                    .await?;
                 if raw.len() < limit {
                     state.done = true;
                 }
@@ -1487,7 +1585,13 @@ impl Booru {
     /// Emit one post boundary per booru post; listings paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let defaults = if target(self.site, url).is_ok_and(|(target, _)| {
-            matches!(target, Target::Artist { .. } | Target::ArtistSearch { .. })
+            matches!(
+                target,
+                Target::Artist { .. }
+                    | Target::ArtistSearch { .. }
+                    | Target::Frontend { .. }
+                    | Target::Redirect { .. }
+            )
         }) {
             None
         } else {
@@ -1520,9 +1624,43 @@ impl Booru {
         if matches!(target, Target::Artist { .. } | Target::ArtistSearch { .. }) {
             return artist::events(self, target, root);
         }
+        if matches!(target, Target::Frontend { .. } | Target::Redirect { .. }) {
+            return self.queue_events(target);
+        }
         let root = self.api_root.clone().unwrap_or(root);
         let (tags, cursor) = match target {
-            Target::Artist { .. } | Target::ArtistSearch { .. } => unreachable!(),
+            Target::Artist { .. }
+            | Target::ArtistSearch { .. }
+            | Target::Frontend { .. }
+            | Target::Redirect { .. } => unreachable!(),
+            Target::Random { tags } => {
+                return stream::once(async move {
+                    let raw = self.random(&root, &tags).await?;
+                    let mut state = State {
+                        dapi_listing: None,
+                        popular: None,
+                        favorite_user_id: None,
+                        collection: None,
+                        root,
+                        tags: tags.clone(),
+                        search_tags: Some(Arc::from(tags.as_str())),
+                        cursor: Cursor::Page(0),
+                        pages: 0,
+                        done: true,
+                        pending: VecDeque::new(),
+                        pending_cursor: None,
+                        pending_error: None,
+                    };
+                    self.emit(&mut state, &raw);
+                    Ok::<_, crate::Error>(stream::iter(state.pending.into_iter().map(Ok)))
+                })
+                .map(|result| match result {
+                    Ok(events) => events.boxed(),
+                    Err(e) => stream::once(async move { Err(e) }).boxed(),
+                })
+                .flatten()
+                .boxed();
+            }
             Target::Popular { params } => {
                 return stream::once(async move {
                     let metadata = popular::metadata(&params, self.popular_today)?;
@@ -1617,9 +1755,22 @@ impl Booru {
                     pending_error: None,
                 });
             }
-            Target::Post { id } => {
+            target @ (Target::Post { .. } | Target::MediaAsset { .. }) => {
                 return stream::once(async move {
-                    let raw = self.post(&root, id).await?;
+                    let raw = match target {
+                        Target::MediaAsset { id } => self.media_asset(&root, id).await?,
+                        Target::Post { id } => {
+                            let mut raw = self.post(&root, id).await?;
+                            let endpoint = if self.site.danbooru_dialect() {
+                                format!("posts/{id}.json")
+                            } else {
+                                "index.php".into()
+                            };
+                            self.enrich(&root, &endpoint, true, &mut raw).await?;
+                            raw
+                        }
+                        _ => unreachable!(),
+                    };
                     let mut state = State {
                         dapi_listing: None,
                         popular: None,
@@ -1737,7 +1888,9 @@ impl Booru {
                                 query.push(("page", page));
                             }
                             let body = self.call(&state.root, "posts.json", &query).await?;
-                            let raw = posts(self.site, &body)?;
+                            let mut raw = posts(self.site, &body)?;
+                            self.enrich(&state.root, "posts.json", false, &mut raw)
+                                .await?;
                             let done =
                                 raw.len() < self.threshold.unwrap_or(self.site.page_limit() - 20);
                             page_number += 1;
@@ -2385,8 +2538,25 @@ mod tests {
         for post in [deleted, foreign, plain] {
             assert!(parse_post(Site::Danbooru, &post).is_none());
         }
+        // Upstream rebuilds hidden e621 file URLs from their MD5 and extension.
         let mut e621 = e621_post(4);
         e621["file"]["url"] = Value::Null;
+        let hidden = parse_post(Site::E621, &e621).unwrap();
+        assert_eq!(
+            hidden.url.as_str(),
+            format!("https://static1.e621.net/data/01/23/{MD5}.webm")
+        );
+        assert_eq!(
+            hidden
+                .metadata
+                .as_ref()
+                .unwrap()
+                .booru_keywords
+                .as_ref()
+                .unwrap()["file"]["url"],
+            hidden.url.as_str()
+        );
+        e621["file"]["md5"] = Value::Null;
         assert!(parse_post(Site::E621, &e621).is_none());
         let gel = json!({"id": 5, "file_url": "https://gelbooru.com.evil.test/a.jpg"});
         assert!(parse_post(Site::Gelbooru, &gel).is_none());
@@ -2997,6 +3167,10 @@ mod artist_parent_tests;
 #[cfg(test)]
 #[path = "booru_date_selection_tests.rs"]
 pub(crate) mod date_selection_tests;
+
+#[cfg(test)]
+#[path = "booru_extra_tests.rs"]
+mod extra_tests;
 
 #[cfg(test)]
 mod source_raw_keywords_tests {
