@@ -772,17 +772,24 @@ Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
 `/c/` descriptions; imgbox per-image metadata (width/height); Postimg
 JS-paginated gallery pages beyond the server-rendered listing.
 
-**Implemented experimental native Tumblr:** blog listings, single posts and
-tagged listings via API v2 with an overridable `api-key`, original-image token
-resolution for capped photos and modern inline images, legacy inline `_1280`
-rewriting, GIFV download fallbacks, and `reblogs` (boolean/`same-blog`), `posts`
-(legacy type selection), `inline` (boolean/`reblog`/`original`) and `original`
-settings. Single-post URLs bypass the `posts` filter, matching upstream.
-Failed token lookups fall back to the
-API rendition; upstream's delayed token refresh retries remain unimplemented.
-Remaining: OAuth and private/dashboard blogs, likes/search/day views, NPF posts,
-external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
-and custom-domain blogs.
+**Implemented experimental native Tumblr:** every upstream class via API v2:
+blog posts (`user`), single posts, tags, day views, likes, searches, and
+following/followers queued as `user` child jobs, with upstream keyword
+dictionaries and default paths. Upstream's `tumblr:` prefix selects custom blog
+domains, addressing the API by domain while archive identity keeps the post's
+blog name. OAuth 1.0a signing (`api-key`/`api-secret` defaulting to upstream's
+application plus `access-token`/`access-token-secret`) replaces `api_key` on API
+requests only, retries "no permission" blogs once with `api_key` as upstream, and
+reports dashboard-only blogs with fixed credential hints; HMAC-SHA1 is checked
+against RFC 2202/5849 vectors. Original-image token resolution for capped photos
+and modern inline images retries after `fallback-delay` up to `fallback-retries`,
+with the API rendition as fallback; legacy inline `_1280` rewriting and GIFV
+fallbacks remain. Options: `reblogs` (boolean/`same-blog`), `posts`, `inline`,
+`original`, `external`, `avatar`, `offset`, `pagination` and `ratelimit`. The
+exhausted default key falls back to the web client token (NPF converted).
+Remaining: the interactive `oauth:tumblr` flow and its token cache
+(`access-token: "cache"` means unset), NPF-only fields beyond the converted
+legacy media, and authenticated live verification of dashboard/private blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs

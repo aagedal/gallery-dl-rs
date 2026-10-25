@@ -96,6 +96,9 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
             "fallback-delay",
             "fallback-retries",
             "ratelimit",
+            "api-secret",
+            "access-token",
+            "access-token-secret",
         ],
     ),
 ];
@@ -2893,7 +2896,8 @@ mod site_scope_tests {
                 "furaffinity":{"layout":"old","external":true,"descriptions":"html"},
                 "weasyl":{"metadata":true},
                 "newgrounds":{"flash":false,"format":"720p"},
-                "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
+                "tumblr":{"external":true,"posts":"photo","api-key":"k","api-secret":"s",
+                    "access-token":"t","access-token-secret":"ts"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
         )
@@ -2942,6 +2946,11 @@ mod site_scope_tests {
         let options = tumblr.site_options.unwrap();
         assert_eq!(options["external"], serde_json::json!(true));
         assert!(!options.contains_key("posts"));
+        // Tumblr's OAuth 1.0a keys are site options, not Mastodon bearer tokens.
+        assert_eq!(options["api-secret"], serde_json::json!("s"));
+        assert_eq!(options["access-token"], serde_json::json!("t"));
+        assert_eq!(options["access-token-secret"], serde_json::json!("ts"));
+        assert_eq!(tumblr.access_token, None);
         for bad in [
             &br#"{"extractor":{"4chan":{"retries":1},"4chan":{"retries":2}}}"#[..],
             br#"{"extractor":{"4chan":{"retries":1,"retries":2}}}"#,
