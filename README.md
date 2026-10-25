@@ -182,7 +182,10 @@ and deadlines. Page requests send upstream's navigation headers
 [Facebook fixture notes](tests/fixtures/facebook/README.md).
 
 Profile routes mirror upstream: `facebook.com/NAME` and `NAME/photos[_by]`
-read the profile's photos, `NAME/avatar` its profile picture, and
+read the profile's photos, `NAME/avatar` its profile picture, `NAME/info`
+(upstream `info`) one file-less post carrying the profile object (`id`,
+`user_pfbid`, `username`, `biography`, flattened `profile_tabs`, `set_id`, ...)
+for `-K`/`-j`, filters and metadata postprocessors, and
 `NAME/photos_albums[/TITLE]` each album (or the one titled `TITLE`), paging the
 album list through `ProfileCometAppCollectionAlbumsRendererPaginationQuery`. `profile.php?id=ID` (with `sk=photos` or
 `sk=photos_albums`) and `people/NAME/ID/...` are accepted too. Profile pages

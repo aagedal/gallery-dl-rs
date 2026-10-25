@@ -13,6 +13,8 @@ pub(crate) enum Tab {
     Avatar,
     /// Every album, or only those whose title matches (case-insensitively).
     Albums(Option<String>),
+    /// Upstream `FacebookInfoExtractor`: the profile's own metadata only.
+    Info,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -26,7 +28,7 @@ impl ProfileInput {
     pub(crate) fn page(&self) -> Result<Url> {
         let suffix = match self.tab {
             Tab::Photos => "/photos_by",
-            Tab::Avatar => "",
+            Tab::Avatar | Tab::Info => "",
             Tab::Albums(_) => "/photos_albums",
         };
         Url::parse(&format!(
@@ -107,6 +109,7 @@ pub(crate) fn profile_input(url: &Url) -> Option<ProfileInput> {
             [] => Some(Tab::Photos),
             ["photos" | "photos_by"] => Some(Tab::Photos),
             ["avatar"] => Some(Tab::Avatar),
+            ["info"] => Some(Tab::Info),
             ["photos_albums"] => Some(Tab::Albums(None)),
             ["photos_albums", name] => Some(Tab::Albums(Some(percent_decode(name).to_lowercase()))),
             _ => None,
@@ -284,6 +287,77 @@ fn parse_user(page: &str) -> Option<Value> {
     serde_json::from_str(&format!("{{\"{data}}}")).ok()
 }
 
+/// Upstream `_extract_profile_page` for `FacebookInfoExtractor`: the profile
+/// object with upstream's `user_pfbid`, `username`, flattened `profile_tabs`,
+/// `biography` and `set_id` fields.
+pub(crate) fn parse_info(bytes: &[u8]) -> Result<serde_json::Map<String, Value>> {
+    let page = page_text(bytes)?;
+    let unavailable = || error("Facebook profile information unavailable; login may be required");
+    if page
+        .get(..3000.min(page.len()))
+        .is_some_and(|head| head.contains(">Page Not Found</title>"))
+    {
+        return Err(error("Facebook profile not found"));
+    }
+    let Some(Value::Object(mut user)) = parse_user(page) else {
+        return Err(unavailable());
+    };
+    // JSON string escapes, as upstream's `decode_all` undoes them.
+    let decode = |raw: &str| {
+        serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| raw.to_owned())
+    };
+    if let Some(id) = user.get("id").and_then(Value::as_str)
+        && id.starts_with("pfbid")
+    {
+        user.insert("user_pfbid".into(), id.into());
+        user.insert(
+            "id".into(),
+            extr(page, r#""userID":""#, "\"").unwrap_or_default().into(),
+        );
+    }
+    let username = extr(page, r#""userVanity":""#, "\"")
+        .filter(|name| !name.is_empty())
+        .or_else(|| extr(page, r#""vanity":""#, "\""))
+        .unwrap_or_default();
+    user.insert("username".into(), username.into());
+    if let Some(edges) = user
+        .get("profile_tabs")
+        .and_then(|tabs| tabs.pointer("/profile_user/timeline_nav_app_sections/edges"))
+        .and_then(Value::as_array)
+    {
+        let tabs: Vec<Value> = edges
+            .iter()
+            .filter_map(|edge| edge.get("node").cloned())
+            .collect();
+        user.insert("profile_tabs".into(), tabs.into());
+    }
+    let biography = if let Some(bio) =
+        extr(page, r#""best_description":{"text":""#, "\"").filter(|bio| !bio.is_empty())
+    {
+        Some(decode(bio))
+    } else {
+        page.find(r#""__module_operation_ProfileCometTileView_profileT"#)
+            .and_then(|pos| {
+                // Upstream `text.rextr`: the last `"text":"` before the marker.
+                let start = page[..pos].rfind(r#""text":""#)? + r#""text":""#.len();
+                let len = page[start..].find('"')?;
+                Some(decode(&page[start..start + len]))
+            })
+    };
+    if let Some(biography) = biography {
+        user.insert("biography".into(), biography.into());
+    }
+    let set_id = parse_photos_set(bytes)?.unwrap_or_default();
+    user.insert("set_id".into(), set_id.into());
+    let valid = user.get("id").and_then(Value::as_str).is_some_and(|id| {
+        !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_digit())
+    });
+    if !valid {
+        return Err(unavailable());
+    }
+    Ok(user)
+}
+
 /// The avatar's photo permalink (`profilePhoto.url`), if the profile has one.
 pub(crate) fn parse_avatar(bytes: &[u8]) -> Result<Url> {
     let page = page_text(bytes)?;
@@ -389,6 +463,9 @@ fn album_edges(data: &Value, name: Option<&str>) -> AlbumList {
 mod tests {
     use super::*;
 
+    /// A profile page with upstream's `_extract_profile_user` markers.
+    const INFO_PAGE: &str = r#"<script>{"userVanity":"NASA","userID":"100044561550831","x":{"__typename":"User","user":{"id":"pfbid0abc","name":"NASA","profile_tabs":{"profile_user":{"timeline_nav_app_sections":{"edges":[{"node":{"tab_key":"photos"}}]}}}},"viewer":{"actor":1}},"best_description":{"text":"Explore the universe \ud83d\ude80"},"pageItems":{"url":"https:\/\/www.facebook.com\/NASA\/photos\/a.5\/1"},"page_info":{}}</script>"#;
+
     fn input(raw: &str) -> Option<ProfileInput> {
         profile_input(&Url::parse(raw).unwrap())
     }
@@ -423,6 +500,22 @@ mod tests {
             of("NASA", Tab::Avatar)
         );
         assert_eq!(
+            input("https://www.facebook.com/NASA/info"),
+            of("NASA", Tab::Info)
+        );
+        assert_eq!(
+            input("https://www.facebook.com/people/Some-Name/100012345/info"),
+            of("100012345", Tab::Info)
+        );
+        assert_eq!(
+            input("https://www.facebook.com/NASA/info")
+                .unwrap()
+                .page()
+                .unwrap()
+                .as_str(),
+            "https://www.facebook.com/NASA"
+        );
+        assert_eq!(
             input("https://www.facebook.com/NASA/photos_albums"),
             of("NASA", Tab::Albums(None))
         );
@@ -450,7 +543,7 @@ mod tests {
             "https://www.facebook.com/groups/123",
             "https://www.facebook.com/NASA/posts/123",
             "https://www.facebook.com/NASA/videos/123",
-            "https://www.facebook.com/NASA/info",
+            "https://www.facebook.com/NASA/info/more",
             "https://www.facebook.com/profile.php",
             "https://www.facebook.com/profile.php?id=1&sk=about",
             "https://www.facebook.com:8443/NASA",
@@ -530,6 +623,41 @@ mod tests {
         assert_eq!(
             parse_avatar(profile).unwrap().as_str(),
             "https://www.facebook.com/photo/?fbid=423033359192046&set=a.416661003162615"
+        );
+        let info = parse_info(INFO_PAGE.as_bytes()).unwrap();
+        assert_eq!(
+            (&info["id"], &info["user_pfbid"], &info["username"]),
+            (
+                &Value::from("100044561550831"),
+                &Value::from("pfbid0abc"),
+                &Value::from("NASA")
+            )
+        );
+        assert_eq!(info["biography"], "Explore the universe \u{1F680}");
+        assert_eq!(
+            info["profile_tabs"],
+            serde_json::json!([{"tab_key": "photos"}])
+        );
+        assert_eq!(info["set_id"], "a.5");
+        assert_eq!(info["name"], "NASA");
+        let tile = INFO_PAGE
+            .replace(r#""best_description":{"text":"Explore the universe \ud83d\ude80"},"#, "")
+            .replace("</script>", r#"{"text":"Tile bio"},"__module_operation_ProfileCometTileView_profileTile":1</script>"#);
+        assert_eq!(
+            parse_info(tile.as_bytes()).unwrap()["biography"],
+            "Tile bio"
+        );
+        assert!(
+            parse_info(b"<title>x</title>")
+                .unwrap_err()
+                .to_string()
+                .contains("unavailable")
+        );
+        assert!(
+            parse_info(b"<html><head><title>x</title>>Page Not Found</title>")
+                .unwrap_err()
+                .to_string()
+                .contains("not found")
         );
         let missing = parse_avatar(b"<html></html>").unwrap_err().to_string();
         assert!(missing.contains("no avatar"), "{missing}");

@@ -447,6 +447,8 @@ synthetic parser and local transport tests. Anonymous upstream public album and
 photo checks returned logged-out shells; accepted object nesting and successful
 live authenticated traversal remain unverified. Empty albums, more response
 variants, profile album listings, and upstream jump heuristics remain.
+Profile `NAME/info` (upstream `info`) now emits the parsed profile object as a
+file-less post; upstream's HTML biography fallback is not ported.
 
 **Implemented file selection:** `--range` and scoped native `file-range` strings
 or lists select one-based media positions using comma unions, inclusive hyphen
