@@ -947,7 +947,15 @@ downloads.
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv`, `pixiv-novel` or `deviantart`
 category, never echoed) or one cached by `oauth:pixiv`; without it selected Pixiv jobs fail before any network access,
-except for public Pixiv Sketch feeds and the Pixivision article request described below.
+except for public Pixiv Sketch feeds, the Pixivision article request described below,
+`pixiv.me/NAME` links (resolved by their redirect, then queued as an upstream
+`me` child dispatching the user profile, which needs the token) and unlisted
+works (`artworks/unlisted/KEY`, read from the web AJAX API with the `pixiv.net`
+cookies like upstream's `unlisted` class; files keep the real work ID for
+archives and add `id_unlisted`). Like upstream's `work` class, legacy image
+URLs (`i.pximg.net/.../img-*/img/YYYY/MM/DD/hh/mm/ss/ID_p0.png`,
+`iN.pixiv.net`, `imgN.pixiv.net/img/NAME/ID`, `pixiv.net/i/ID`) and the
+`touch.pixiv.net`/`phixiv.net` hosts resolve to their artwork.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API

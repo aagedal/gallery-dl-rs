@@ -960,7 +960,10 @@ fields beyond the converted legacy media, and authenticated live verification
 of dashboard/private blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
-works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
+works via the App API with a `refresh-token` (upstream `work`, including its
+legacy image-URL and `touch.`/`phixiv.net` forms), `me` (`pixiv.me` redirect
+resolved, then a queued user) and `unlisted` (web AJAX `illust/unlisted`,
+`id_unlisted` keyword, real-ID archives), including lazy ugoira frame ZIPs
 and `ugoira: "original"` individual frames with ordered ZIP member names/delays
 in metadata (`ugoira: false` skips them). Original URL derivation, JPG/PNG/GIF
 probes, empty frame lists, file-only frame indices and exact option truthiness

@@ -78,6 +78,8 @@ mod web;
 use enrichment::WorkFailure;
 #[path = "pixiv_following.rs"]
 mod following;
+#[path = "pixiv_links.rs"]
+mod links;
 
 /// Upstream gallery-dl's public iOS app constants.
 pub(crate) const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
@@ -167,6 +169,96 @@ pub enum Target {
         id: String,
         kind: ProfileKind,
     },
+    /// `pixiv.me/NAME`, resolved by its redirect and queued as a user.
+    Me(String),
+    /// `artworks/unlisted/KEY`, read through the web AJAX API.
+    Unlisted(String),
+}
+
+/// Upstream extractor classes supported natively, for `--list-extractors`
+/// (`pixiv-novel` classes are listed by [`novel::SUBCATEGORIES`]).
+pub const SUBCATEGORIES: &[&str] = &[
+    "artworks",
+    "avatar",
+    "background",
+    "favorite",
+    "followed",
+    "me",
+    "pixivision",
+    "ranking",
+    "search",
+    "series",
+    "sketch",
+    "unlisted",
+    "user",
+    "work",
+];
+
+/// Upstream `BASE_PATTERN` hosts besides `(www.)pixiv.net`.
+const ALIAS_HOSTS: &[&str] = &[
+    "touch.pixiv.net",
+    "phixiv.net",
+    "www.phixiv.net",
+    "touch.phixiv.net",
+];
+
+/// The work ID of upstream `PixivWorkExtractor`'s legacy image URL forms:
+/// `i.pximg.net`/`iN.pixiv.net` `.../img-*/img/YYYY/MM/DD/hh/mm/ss/ID...`
+/// and `iN.pixiv.net/imgN/img/NAME/ID...`, `imgN.pixiv.net/img/NAME/ID...`
+/// and `pixiv.net/i/ID`.
+fn legacy_work_id(url: &Url) -> Option<String> {
+    let host = url.host_str()?;
+    let numbered = |prefix: &str, suffix: &str, min: usize| {
+        host.strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(suffix))
+            .is_some_and(|n| n.len() >= min && n.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let image_host = host == "i.pximg.net" || numbered("i", ".pixiv.net", 1);
+    let parts = segments(url);
+    let leading = |segment: &str| {
+        let end = segment
+            .bytes()
+            .position(|b| !b.is_ascii_digit())
+            .unwrap_or(segment.len());
+        valid_id(&segment[..end]).then(|| segment[..end].to_owned())
+    };
+    let two = |s: &str| s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit());
+    if image_host {
+        // `(?:.*/)?img-[^/]+/img/\d{4}(?:/\d\d){5}/(\d+)`
+        for (at, segment) in parts.iter().enumerate() {
+            if segment.starts_with("img-")
+                && segment.len() > 4
+                && parts.get(at + 1) == Some(&"img")
+                && parts
+                    .get(at + 2)
+                    .is_some_and(|y| y.len() == 4 && y.bytes().all(|b| b.is_ascii_digit()))
+                && parts
+                    .get(at + 3..at + 8)
+                    .is_some_and(|rest| rest.iter().all(|s| two(s)))
+            {
+                return parts.get(at + 8).and_then(|s| leading(s));
+            }
+        }
+    }
+    if numbered("i", ".pixiv.net", 1)
+        && let [img, "img", _, id, ..] = parts.as_slice()
+        && img
+            .strip_prefix("img")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return leading(id);
+    }
+    if numbered("img", ".pixiv.net", 0)
+        && let ["img", _, id, ..] = parts.as_slice()
+    {
+        return leading(id);
+    }
+    if matches!(host, "pixiv.net" | "www.pixiv.net")
+        && let ["i", id, ..] = parts.as_slice()
+    {
+        return leading(id);
+    }
+    None
 }
 
 fn segments(url: &Url) -> Vec<&str> {
@@ -228,8 +320,36 @@ pub fn target(url: &Url) -> Result<Target> {
         || url.port().is_some()
         || !url.username().is_empty()
         || url.password().is_some()
-        || !matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net"))
     {
+        return Err(unsupported());
+    }
+    if let Some(id) = legacy_work_id(url) {
+        return Ok(Target::Illust(id));
+    }
+    if url.host_str() == Some("pixiv.me") {
+        return match segments(url).as_slice() {
+            [name]
+                if name.len() <= 256
+                    && name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) =>
+            {
+                Ok(Target::Me((*name).to_owned()))
+            }
+            _ => Err(unsupported()),
+        };
+    }
+    if url
+        .host_str()
+        .is_some_and(|host| ALIAS_HOSTS.contains(&host))
+    {
+        let mut canonical = url.clone();
+        canonical
+            .set_host(Some("www.pixiv.net"))
+            .map_err(|_| unsupported())?;
+        return target(&canonical);
+    }
+    if !matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net")) {
         return Err(unsupported());
     }
     if url.path() == "/bookmark_new_illust.php" {
@@ -306,6 +426,12 @@ pub fn target(url: &Url) -> Result<Target> {
     };
     match rest {
         ["artworks", raw] => Ok(Target::Illust(id(raw)?)),
+        ["artworks", "unlisted", key]
+            if (1..=64).contains(&key.len())
+                && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') =>
+        {
+            Ok(Target::Unlisted((*key).to_owned()))
+        }
         ["member_illust.php"] if query("illust_id").is_some() => {
             let raw = url
                 .query_pairs()
@@ -823,6 +949,8 @@ pub struct Pixiv {
     api_root: Url,
     oauth_root: Url,
     pixivision_root: Url,
+    /// `https://pixiv.me/`, whose profile links redirect to user pages.
+    me_root: Url,
     sketch_root: Url,
     max_posts: Option<usize>,
     tags: TagMode,
@@ -922,6 +1050,7 @@ impl Pixiv {
             oauth_root: Url::parse("https://oauth.secure.pixiv.net/").expect("static URL"),
             sketch_root: Url::parse("https://sketch.pixiv.net/").expect("static URL"),
             pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
+            me_root: Url::parse("https://pixiv.me/").expect("static URL"),
             max_posts: None,
             tags: TagMode::default(),
             cursor: None,
@@ -1079,6 +1208,11 @@ impl Pixiv {
     }
 
     /// Override the public article origin for bounded local fixtures.
+    pub fn with_me_root(mut self, root: Url) -> Self {
+        self.me_root = root;
+        self
+    }
+
     pub fn with_pixivision_root(mut self, root: Url) -> Self {
         self.pixivision_root = root;
         self
@@ -1256,6 +1390,16 @@ impl Pixiv {
                 .await
                 .map_err(WorkFailure::Files)?,
         };
+        self.enrich_files(illust, &mut media).await?;
+        Ok(media)
+    }
+
+    /// The work-level enrichments upstream applies after `_extract_files`.
+    async fn enrich_files(
+        &self,
+        illust: &mut Value,
+        media: &mut [Media],
+    ) -> std::result::Result<(), WorkFailure> {
         let user_detail = self
             .enrich_user_work(illust)
             .await
@@ -1277,7 +1421,7 @@ impl Pixiv {
             .get("tags_bookmark")
             .and_then(crate::extract::pixiv_bookmark_tags);
         let enriched = illustration_metadata(illust, &id_of(illust).unwrap_or_default());
-        for file in &mut media {
+        for file in media {
             if let Some(metadata) = &mut file.metadata {
                 metadata.pixiv_user_detail = user_detail.clone();
                 metadata.ajax = enriched.ajax;
@@ -1291,7 +1435,7 @@ impl Pixiv {
                 metadata.tags_bookmark = tags_bookmark.clone();
             }
         }
-        Ok(media)
+        Ok(())
     }
 
     fn finish(&self, mut media: Vec<Media>) -> VecDeque<ExtractionEvent> {
@@ -1513,6 +1657,13 @@ impl Pixiv {
         if let Target::Sketch(username) = target {
             return self.sketch_events(username);
         }
+        // Neither resolves through the App API; a queued user still needs it.
+        if let Target::Me(name) = target {
+            return self.me_events(name);
+        }
+        if let Target::Unlisted(key) = target {
+            return self.unlisted_events(key);
+        }
         if self.refresh_token.is_none() {
             return stream::once(async { Err(missing_token()) }).boxed();
         }
@@ -1528,6 +1679,8 @@ impl Pixiv {
             Target::Novel(target) => return self.novel_events(target),
             Target::Followed => return self.followed_events(),
             Target::Pixivision(id) => return self.pixivision_events(id),
+            Target::Me(name) => return self.me_events(name),
+            Target::Unlisted(key) => return self.unlisted_events(key),
             Target::Following { id, private } => return self.following_events(id, private),
             Target::Ranking(options) => return self.ranking_events(options),
             Target::Search(options) => return self.search_events(options),

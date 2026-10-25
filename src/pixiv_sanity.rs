@@ -129,7 +129,11 @@ impl Pixiv {
         }
         Ok(None)
     }
-    async fn recover_ajax_work(&self, work: &mut Value, body: &Value) -> Result<Vec<Media>> {
+    pub(super) async fn recover_ajax_work(
+        &self,
+        work: &mut Value,
+        body: &Value,
+    ) -> Result<Vec<Media>> {
         work["_ajax"] = json!(true);
         let Some(url) = self.ajax_image_url(body).await? else {
             return Ok(Vec::new());
