@@ -40,7 +40,19 @@ pub enum MediaJob {
         #[serde(skip_serializing)]
         inline_data: Option<String>,
     },
+    /// An HTTP POST of URL-encoded form fields (upstream's `_http_method:
+    /// "POST"` with `_http_data`), otherwise downloaded like `DirectHttp`.
+    /// The private form is sent to the requested origin only: 301/302/303
+    /// redirects continue as GET and 307/308 must stay on that origin.
+    FormPost {
+        #[serde(skip_serializing)]
+        form: Vec<(String, String)>,
+    },
 }
+
+/// Bounds for [`MediaJob::FormPost`] forms.
+pub const MAX_FORM_FIELDS: usize = 64;
+pub const MAX_FORM_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -625,9 +637,14 @@ impl Media {
         {
             return self.url.to_string();
         }
+        let form;
         let inline_data = match &self.job {
             MediaJob::Manifest { inline_data, .. } => inline_data.as_deref(),
             MediaJob::InlineText { data } => Some(data.as_str()),
+            MediaJob::FormPost { form: fields } => {
+                form = serde_json::to_string(fields).unwrap_or_default();
+                Some(form.as_str())
+            }
             _ => None,
         };
         serde_json::json!([self.url, self.job, inline_data, self.headers, self.handoff]).to_string()
@@ -709,9 +726,11 @@ pub struct PostMetadata {
     pub creator: Option<crate::kemono::CreatorMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<crate::kemono::RevisionMetadata>,
-    /// Kemono/Coomer `comments`, `dms` and `announcements` API values.
+    /// Raw source keywords of optional site settings: Kemono/Coomer
+    /// `comments`, `dms`, `announcements` and `archives`; Bluesky `metadata`
+    /// (`user`, `hashtags`, `mentions`, `uris`).
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub kemono_extras: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
+    pub extra_keywords: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<crate::file_metadata::FileMetadata>,
     /// Ordered Pixiv ugoira ZIP member names and millisecond frame delays.
@@ -2333,9 +2352,11 @@ fn compatibility_metadata(
         discord: discord.clone(),
         creator,
         revision: compatibility_revision(data, category),
-        kemono_extras: matches!(category, "kemono" | "coomer")
-            .then(|| crate::kemono::extras_from_keywords(data))
-            .flatten(),
+        extra_keywords: match category {
+            "kemono" | "coomer" => crate::kemono::extras_from_keywords(data),
+            "bluesky" => crate::bluesky::extras_from_keywords(data),
+            _ => None,
+        },
         rating: (category == "pixiv-novel"
             || crate::booru::Site::from_category(category).is_some())
         .then(|| string("rating"))

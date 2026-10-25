@@ -1959,6 +1959,7 @@ fn extract_input<'a>(
                                         )
                                         .with_options(options.site_options.as_deref())?
                                         .with_threshold(options.booru_threshold.flatten())
+                                        .with_ugoira(options.ugoira.is_some_and(|mode| mode.enabled()))
                                         .with_favorite_order(options.booru_favorite_order.clone())
                                         .with_pool_order(
                                             options.booru_order_posts.unwrap_or_default(),

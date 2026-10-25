@@ -86,6 +86,54 @@ fn json_body(site: Site, bytes: &[u8]) -> Result<Value> {
     serde_json::from_slice(bytes).map_err(|_| invalid(site))
 }
 
+/// Bound on ugoira frames per post.
+const MAX_FRAMES: usize = 10_000;
+
+/// upstream `_ugoira_frames`: `media_metadata.metadata` frame delays named
+/// `{index:>06}.{ext}`, with the extension from the frame MIME type
+/// (`jpeg` becomes `jpg`) or else the ZIP file name.
+pub(super) fn ugoira_frame_data(body: &Value) -> Option<Value> {
+    let data = body.get("media_metadata")?.get("metadata")?;
+    let ext = match data.get("Ugoira:FrameMimeType") {
+        Some(mime) => mime.as_str()?.rsplit('/').next()?,
+        None => data.get("ZIP:ZipFileName")?.as_str()?.rsplit('.').next()?,
+    };
+    let ext = if ext == "jpeg" { "jpg" } else { ext };
+    if ext.len() > 16 || !ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let delays = data.get("Ugoira:FrameDelays")?.as_array()?;
+    if delays.len() > MAX_FRAMES {
+        return None;
+    }
+    Some(Value::Array(
+        delays
+            .iter()
+            .enumerate()
+            .map(|(index, delay)| {
+                serde_json::json!({"file": format!("{index:06}.{ext}"), "delay": delay})
+            })
+            .collect(),
+    ))
+}
+
+/// Typed frames of `ugoira_frame_data`; `None` for malformed values.
+pub(super) fn parse_frames(value: &Value) -> Option<Arc<[crate::pixiv::UgoiraFrame]>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|frame| {
+            let delay = frame.get("delay")?;
+            Some(crate::pixiv::UgoiraFrame {
+                file: frame.get("file")?.as_str()?.to_owned(),
+                delay: delay
+                    .as_u64()
+                    .or_else(|| delay.as_f64().filter(|d| *d >= 0.0).map(|d| d as u64))?,
+            })
+        })
+        .collect()
+}
+
 /// Merge every field of `extra` into `post` (Python `dict.update`).
 fn update(post: &mut Value, extra: Value) {
     if let (Value::Object(post), Value::Object(extra)) = (post, extra) {
@@ -218,7 +266,49 @@ impl Booru {
     /// Apply upstream option requests to one page (or single post) of raw
     /// posts. `endpoint` is the listing's API path; `single` marks a post
     /// detail response, which Danbooru enriches with its own `only=` request.
+    /// Danbooru ugoira frame data follows, as upstream requests it while
+    /// emitting each post after the page's `only=` merge.
     pub(super) async fn enrich(
+        &self,
+        root: &Url,
+        endpoint: &str,
+        single: bool,
+        raw: &mut [Value],
+    ) -> Result<()> {
+        self.enrich_options(root, endpoint, single, raw).await?;
+        self.ugoira_frames(root, raw).await
+    }
+
+    /// Danbooru `ugoira`: attach `/posts/ID.json?only=media_metadata` frame
+    /// names and delays to each ugoira ZIP post (upstream `_ugoira_frames`).
+    /// Missing or malformed frame metadata ends extraction like upstream.
+    pub(super) async fn ugoira_frames(&self, root: &Url, raw: &mut [Value]) -> Result<()> {
+        if !self.ugoira {
+            return Ok(());
+        }
+        for post in raw.iter_mut() {
+            let zip =
+                string(post, "file_url").is_some_and(|url| source_nameext(url).1.as_ref() == "zip");
+            let Some(id) = post_id(post).filter(|_| zip) else {
+                continue;
+            };
+            let body = self
+                .call(
+                    root,
+                    &format!("posts/{id}.json"),
+                    &[("only", "media_metadata")],
+                )
+                .await?;
+            let frames = ugoira_frame_data(&json_body(self.site, &body)?)
+                .ok_or_else(|| error("Danbooru returned invalid ugoira metadata"))?;
+            if let Value::Object(post) = post {
+                post.insert(UGOIRA_FRAME_DATA.into(), frames);
+            }
+        }
+        Ok(())
+    }
+
+    async fn enrich_options(
         &self,
         root: &Url,
         endpoint: &str,

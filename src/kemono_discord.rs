@@ -1,7 +1,8 @@
 //! Discord server/channel extraction using the site's bounded public API.
 use super::{
-    Kemono, MAX_PAGES, MAX_POST_FILES, MAX_RESPONSE, Selection, archive_extension, category,
-    clean_extension, content_hash, image_extension, safe_file_path, source_file, split_path,
+    Kemono, MAX_PAGES, MAX_POST_FILES, MAX_RESPONSE, Selection, archive_entry, archive_extension,
+    category, clean_extension, content_hash, image_extension, safe_file_path, source_file,
+    split_path,
 };
 use crate::{
     Result, error,
@@ -14,7 +15,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
@@ -303,6 +304,42 @@ fn files(post: &Value, host: &str) -> Vec<File> {
     files
 }
 
+/// Archive file entries of a message for upstream's `archives` keyword:
+/// copies of the attachment or inline file before post fields are assigned.
+fn archive_files(post: &Value, host: &str) -> Vec<Map<String, Value>> {
+    files(post, host)
+        .into_iter()
+        .filter(|file| {
+            let path_ext = file
+                .url
+                .path()
+                .rsplit('/')
+                .next()
+                .and_then(|name| name.rsplit_once('.'))
+                .and_then(|(_, extension)| clean_extension(extension));
+            let name_ext = file
+                .name
+                .as_deref()
+                .and_then(|name| name.rsplit(['/', '\\']).next())
+                .and_then(|name| name.rsplit_once('.'))
+                .filter(|(stem, _)| !stem.is_empty())
+                .and_then(|(_, extension)| clean_extension(extension));
+            path_ext.as_deref().is_some_and(archive_extension)
+                || path_ext.as_deref() == Some("bin")
+                    && name_ext.as_deref().is_some_and(archive_extension)
+        })
+        .map(|file| {
+            archive_entry(
+                file.name.as_deref(),
+                &file.path,
+                content_hash(&file.path).unwrap_or_default(),
+                file.kind,
+                None,
+            )
+        })
+        .collect()
+}
+
 pub fn parse_discord_post(
     post: &Value,
     host: &str,
@@ -498,11 +535,20 @@ pub(super) fn events(
                     .expect("active Discord channel")
                     .channel
                     .metadata;
-                let (mut media, count, base) =
+                let (mut media, count, mut base) =
                     match parse_post(&post, &state.host, discord, &extractor.selection) {
                         Ok(parsed) => parsed,
                         Err(error) => return channel_error(state, error),
                     };
+                let extras = extractor
+                    .with_archives(&state.host, None, archive_files(&post, &state.host))
+                    .await;
+                base.extra_keywords = Some(extras.clone());
+                for item in &mut media {
+                    if let Some(metadata) = &mut item.metadata {
+                        metadata.extra_keywords = Some(extras.clone());
+                    }
+                }
                 for item in &mut media {
                     extractor.network.apply_media(item);
                 }
@@ -992,6 +1038,46 @@ mod tests {
             Some("archive")
         );
         assert_ne!(originals[1].archive_key(), originals[2].archive_key());
+    }
+
+    #[tokio::test]
+    async fn discord_archives_copy_attachment_entries_and_fetch_metadata_when_enabled() {
+        let mut first = message(400, "200");
+        first["attachments"] = json!([
+            {"path":format!("/aa/11/{HASH}.png"),"name":"first.png"},
+            {"path":format!("/aa/11/{HASH}.bin"),"name":"archive.zip"}]);
+        let (root, server) = serve(vec![
+            response(
+                "200 OK",
+                server_payload(&[("200", 2)]).to_string().as_bytes(),
+            ),
+            response(
+                "200 OK",
+                json!([first, message(401, "200")]).to_string().as_bytes(),
+            ),
+            response("200 OK", br#"{"id":5,"size":7}"#),
+        ]);
+        let options = json!({"archives": 1, "archives-format": "dict"});
+        let events: Vec<_> = extractor(root)
+            .with_options(options.as_object())
+            .events(&Url::parse("https://kemono.cr/discord/server/100/channel/200").unwrap())
+            .collect()
+            .await;
+        let archives: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event.as_ref().unwrap() {
+                ExtractionEvent::Post(post) => post.metadata.as_ref(),
+                ExtractionEvent::Media(media) => media.metadata.as_ref(),
+                _ => None,
+            })
+            .map(|metadata| metadata.extra_keywords.as_ref().unwrap()["archives"].clone())
+            .collect();
+        let expected = json!({HASH: {"id": 5, "size": 7, "name": "archive.zip",
+            "path": format!("/aa/11/{HASH}.bin"), "type": "attachment", "hash": HASH}});
+        assert_eq!(archives.first(), Some(&expected), "{events:?}");
+        assert_eq!(archives.last(), Some(&json!({})));
+        let requests = server.join().unwrap();
+        assert!(requests[2].starts_with(&format!("GET /api/v1/file/{HASH} ")));
     }
 
     #[tokio::test]

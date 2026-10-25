@@ -421,3 +421,143 @@ async fn gelbooru_tags_and_notes_fetch_each_post_page() {
             .contains("accept: text/html")
     );
 }
+
+#[tokio::test]
+async fn danbooru_ugoira_option_downloads_zip_with_frame_delays() {
+    let mut post = danbooru_post(5);
+    post["file_url"] = json!(format!("https://cdn.donmai.us/original/01/23/{MD5}.zip"));
+    post["file_ext"] = json!("zip");
+    post["large_file_url"] = json!(format!("https://cdn.donmai.us/sample/01/23/{MD5}.webm"));
+    let metadata = json!({"media_metadata": {"metadata": {
+        "Ugoira:FrameMimeType": "image/jpeg", "Ugoira:FrameDelays": [80, 120]}}});
+    let (root, server) = serve(vec![
+        response("200 OK", "", post.to_string().as_bytes()),
+        response("200 OK", "", metadata.to_string().as_bytes()),
+    ]);
+    let events: Vec<_> = booru(Site::Danbooru, root)
+        .with_ugoira(true)
+        .events(&Url::parse("https://danbooru.donmai.us/posts/5").unwrap())
+        .collect()
+        .await;
+    let files = media(&events);
+    assert_eq!(files.len(), 1, "{events:?}");
+    assert_eq!(
+        files[0].url.as_str(),
+        format!("https://cdn.donmai.us/original/01/23/{MD5}.zip")
+    );
+    assert!(files[0].filename.ends_with(".zip"));
+    assert_eq!(keywords(files[0])["extension"], "zip");
+    let expected = json!([{"file": "000000.jpg", "delay": 80},
+        {"file": "000001.jpg", "delay": 120}]);
+    assert_eq!(keywords(files[0])["frames"], expected);
+    assert!(!keywords(files[0]).contains_key(UGOIRA_FRAME_DATA));
+    let frames = files[0].metadata.as_ref().unwrap().frames.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_value(frames.as_ref()).unwrap(),
+        expected,
+        "typed frames feed ugoira postprocessors"
+    );
+    let requests = server.join().unwrap();
+    assert!(requests[0].starts_with("GET /posts/5.json "));
+    assert!(requests[1].starts_with("GET /posts/5.json?only=media_metadata "));
+
+    // ZIP file names supply the extension without a frame MIME type, and
+    // missing delays end extraction like upstream.
+    let data = frame_data(json!({"ZIP:ZipFileName": "a.png.zip", "Ugoira:FrameDelays": [5]}));
+    assert_eq!(
+        options::parse_frames(&data.unwrap()).unwrap()[0].file,
+        "000000.zip"
+    );
+    assert!(frame_data(json!({"Ugoira:FrameMimeType": "image/png"})).is_none());
+
+    // e621 ignores the Danbooru-only option.
+    let e621 = booru(Site::E621, Url::parse("http://127.0.0.1:9/").unwrap()).with_ugoira(true);
+    assert!(!e621.ugoira);
+}
+
+fn frame_data(metadata: Value) -> Option<Value> {
+    options::ugoira_frame_data(&json!({"media_metadata": {"metadata": metadata}}))
+}
+
+#[tokio::test]
+async fn danbooru_external_queues_sources_of_fileless_posts() {
+    let mut external = danbooru_post(2);
+    external.as_object_mut().unwrap().remove("file_url");
+    external["source"] = json!("https://external.test/art/2");
+    let mut text_source = danbooru_post(3);
+    text_source.as_object_mut().unwrap().remove("file_url");
+    text_source["source"] = json!("not a url");
+    let page = json!([danbooru_post(1), external, text_source]).to_string();
+    let (root, server) = serve(vec![
+        response("200 OK", "", page.as_bytes()),
+        response("200 OK", "", page.as_bytes()),
+    ]);
+    let queued = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = queued.clone();
+    let queue: crate::event::Queue<'_> = Arc::new(move |url: Url| {
+        seen.lock().unwrap().push(url.to_string());
+        let mut child = parse_post(Site::Danbooru, &danbooru_post(99)).unwrap();
+        child.category = "external".into();
+        let events = crate::event::group(vec![child], "external");
+        Some(stream::iter(events.into_iter().map(Ok)).boxed())
+    });
+    let client = booru(Site::Danbooru, root.clone())
+        .with_options(json!({"external": true}).as_object())
+        .unwrap();
+    let url = Url::parse("https://danbooru.donmai.us/posts?tags=a").unwrap();
+    let events: Vec<_> = client.events_with_queue(&url, queue).collect().await;
+    let kinds: Vec<_> = events
+        .iter()
+        .map(|event| match event.as_ref().unwrap() {
+            ExtractionEvent::Post(post) => {
+                format!("post:{}", post.metadata.as_ref().unwrap().post_id)
+            }
+            ExtractionEvent::Media(media) => format!("media:{}", media.category),
+            ExtractionEvent::EndPost => "end".into(),
+            ExtractionEvent::BeginChild(_) => "child".into(),
+            ExtractionEvent::EndChild(_) => "endchild".into(),
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "post:1",
+            "media:danbooru",
+            "end",
+            "post:2",
+            "end",
+            "child",
+            "post:99",
+            "media:external",
+            "end",
+            "endchild",
+            "post:3",
+            "end"
+        ],
+        "{events:?}"
+    );
+    assert_eq!(*queued.lock().unwrap(), ["https://external.test/art/2"]);
+    let ExtractionEvent::Post(boundary) = events[3].as_ref().unwrap() else {
+        panic!("expected external boundary");
+    };
+    let metadata = boundary.metadata.as_ref().unwrap();
+    assert_eq!(boundary.count, Some(0));
+    assert_eq!(metadata.search_tags.as_deref(), Some("a"));
+    assert_eq!(
+        metadata.booru_keywords.as_ref().unwrap()["source"],
+        "https://external.test/art/2"
+    );
+
+    // Without the option file-less posts are skipped silently.
+    let events: Vec<_> = booru(Site::Danbooru, root)
+        .events_with_queue(&url, Arc::new(|_| panic!("external disabled")))
+        .collect()
+        .await;
+    assert_eq!(media(&events).len(), 1);
+    assert_eq!(events.len(), 3);
+    server.join().unwrap();
+    let e621 = booru(Site::E621, Url::parse("http://127.0.0.1:9/").unwrap())
+        .with_options(json!({"external": true}).as_object())
+        .unwrap();
+    assert!(!e621.external);
+}

@@ -273,6 +273,14 @@ authentication failure, credential isolation from media jobs, and preservation o
 the input cookie file. Updates are not persisted and cannot renew an expired
 session. A companion adapter will also need cancellation at its library boundary.
 
+**Implemented form POST media jobs:** `MediaJob::FormPost` sends private,
+bounded (64 fields, 64 KiB) URL-encoded form fields with the first request and
+is otherwise downloaded like direct HTTP (validation, header filtering, size
+limits, atomic publication). 301/302/303 redirects continue as GET without the
+form, 307/308 repeat it only on the requested origin and refuse other origins;
+POST jobs are not resumed, and JSON output omits the form. Uploadir's redirected
+uploads use it; loopback tests cover bodies, redirects and refusals.
+
 **Implemented direct HTTP fallback execution:** the shared downloader consumes
 bounded private `_fallback` arrays in order after remote/request failures and
 configured retries. Invalid/repeated/manifest candidates are skipped. Scoped
@@ -657,11 +665,23 @@ Danbooru `random`/`media-asset`, e621 `/p/` short links, `e621.cc` and `frontend
 links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
 `metadata` (includes; notes/pools) and Gelbooru/Safebooru `tags`/`notes`
 (per-post HTML) options, e621 hidden-URL reconstruction and Danbooru ugoira WebM
-samples. Upstream has no other favorites classes for these sites. Remaining:
-Danbooru `external` and `ugoira` frame data, the DAPI `url` option, other
+samples, plus Danbooru `ugoira` (ZIP originals with `media_metadata` frame
+delays for the ugoira postprocessors) and `external` (sources of file-less posts
+queued through the process-wide router). Upstream has no other favorites
+classes for these sites. Remaining: the DAPI `url` option, other
 Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
 aliases, per-post laziness of option requests (they run per page), and
 authenticated live verification.
+The other instances do not fit the current `booru::Site` model cleanly: `Site`
+is at once the API dialect, the output category, the media-CDN allow-list and
+the key of the per-site extractor/credential caches, and the category strings
+`danbooru`/`e621`/`e926` are special-cased across keyword policies, filter
+contexts, source-archive descriptors, naming defaults and compatibility
+normalization (e926 itself still shares e621's category and credentials).
+Distinct upstream categories need an instance layer (dialect, category, API
+root, CDN hosts such as `cdn.aibooru.download`/`static1.e6ai.net`, aibooru's
+host-dependent root) threaded through those paths with per-instance
+credential scopes, and their own source-oracle coverage.
 
 **Implemented experimental native Mastodon:** every upstream class (statuses,
 ActivityPub `/objects/ID` resolved by redirect, user timelines, followed accounts
@@ -707,9 +727,10 @@ Upstream's `comments`, `dms` and `announcements` options now attach those API
 values to posts (comments non-fatal per post, DMs/announcements once per
 creator rather than upstream's first-creator reuse), and upstream's
 kemono.st/coomer.cr domains are recognized. Upstream 1.32.17 has no popular
-class, so none is planned. Remaining: the `archives`/`archives-format` options
-(per-hash archive file metadata and the always-present `archives` keyword),
-username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
+class, so none is planned. The always-present `archives` keyword and the
+`archives`/`archives-format` options (cached per-hash `/v1/file` metadata,
+list or hash-keyed object) are now native for posts and Discord messages.
+Remaining: username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
 upstream extractors) and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
@@ -1176,8 +1197,10 @@ replies/video, profile-image and public likes views are described above.
 origin and enables bookmarks (which fail without a login before any request).
 As upstream, the session refresh token is kept in the credential cache for 84
 days and later runs refresh it before logging in again.
-Not yet: the `metadata` option (`user`/`facets` keywords, which need upstream's
-keyword dictionary and would change default naming), DID identifiers as login names, newer multi-item media
+The `metadata` option now adds upstream's `user` (actor profile or post author,
+with `instance`) and facet `hashtags`/`mentions`/`uris` keywords without
+switching native default naming to upstream's templates. Not yet: upstream's
+`author` keyword dictionary and default naming, DID identifiers as login names, newer multi-item media
 embeds, and authenticated live verification.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook

@@ -338,6 +338,15 @@ page, skipping deleted or blocked bookmarks. Upstream's mirror hosts
 string up to 1000, default 0) also emits that many reply levels of single posts
 and liked posts, breadth-first after the post itself; unavailable replies are
 skipped, and a thread without selected media is an error.
+`extractor.bluesky.metadata` (default false) mirrors upstream: true selects
+`user` and `facets`, a comma-separated string or list selects either. `user`
+is the URL actor's `app.bsky.actor.getProfile` object (fetched once per DID;
+search, hashtag and bookmark posts use their author object instead), with an
+`instance` from the handle's last two labels; `facets` adds `hashtags`,
+`mentions` (DIDs) and `uris` from each post record's facets (empty lists without
+facets). The keywords reach filters, templates and JSON output; default
+filenames, directories and archive keys are unchanged (native naming does not
+switch to upstream's `{author[handle]}`/`{createdAt[:19]}` templates).
 
 Category-scoped `username` (handle or email; DIDs contain `:` and are not
 accepted) and `password` (preferably an app password) log in lazily with
@@ -546,7 +555,14 @@ e621 `/p/BASE32` short links and `e621.cc` URLs (requests go to e621.net);
 e621 `frontend` links (`e621.cc/?tags=`, `e621.anthro.fr/?q=`) and Gelbooru
 `redirect` links (`redirect.php?s=BASE64`), which queue the e621 tag search or
 the decoded Gelbooru post as a child job. Danbooru ugoira ZIPs download their
-WebM sample (`large_file_url`, extension `webm`) like upstream's default.
+WebM sample (`large_file_url`, extension `webm`) like upstream's default;
+`ugoira: true` (Danbooru only, default false) instead downloads the ZIP and
+requests `/posts/ID.json?only=media_metadata` for its `frames` keyword
+(`{index:06}.{ext}` names with millisecond delays), which also feeds the native
+ugoira postprocessors. Danbooru `external: true` (default false) emits a
+file-less post boundary for posts without a `file_url` field and queues their
+non-empty `source` URL through the program's router as a child job (sources
+that are not http(s) URLs, or that no extractor accepts, are skipped).
 Category-scoped options: Danbooru `metadata` (true for upstream's default
 `artist_commentary,children,notes,parent,uploader`, or a string/list of
 fields) merges one `only=` request per page (or per single post/media asset);
@@ -554,9 +570,9 @@ e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
 `notes` (when `has_notes`) and replaces `pools` IDs with cached pool objects;
 Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
 `tags_<type>` strings and note lists. These requests happen when a page is
-fetched, before its posts are emitted. Not supported natively: Danbooru
-`external` and `ugoira` (frame data), the DAPI `url` option, and the
-atfbooru/aibooru/booruvar/e6ai instances and Danbooru host aliases.
+fetched, before its posts are emitted. Not supported natively: the DAPI `url`
+option, Danbooru host aliases, and upstream's other instances (`atfbooru`,
+`aibooru`, `booruvar`, `e6ai`), whose URLs are not routed natively.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
@@ -677,6 +693,16 @@ Category-scoped `dms` and `announcements` (default false) expose each creator's
 per host/service/creator (upstream reuses the first creator's values for an
 entire run) and request failures end extraction. These values reach filters,
 templates and JSON output and are bounded to 8 MiB each.
+
+Every post (and Discord message) carries upstream's `archives` keyword: the
+file entries (`name`, normalized `path`, `type`, `hash`, plus `url`, `filename`
+and `extension` for creator posts) of its ZIP/RAR/7z/tar/gz/bz2/lzma/xz files,
+also listed in thumbnail mode. Category-scoped `archives` (default false) starts
+each entry from the `/api/v1/file/{hash}` object (file fields win), cached per
+host and hash; failures keep the file fields, as upstream only warns.
+`archives-format: "dict"` or `"object"` keys the entries by hash instead of
+listing them. Discord messages expose their complete archive list on every file
+(upstream grows it as files are yielded). Archive identities are unchanged.
 
 API responses support gzip with separate 32 MiB encoded and decoded limits,
 complete member/checksum validation and cancellable background decoding.
@@ -2731,7 +2757,8 @@ and options: `unsplash`, `pexels`, `tenor`, `imgbb`, `imagechest`, `telegraph`,
 `lexica`, `pixnet`, `listal`, `khinsider`, `audiochan`, `whyp`, the
 `imagehosts` family (imxto, imagetwist, imagevenue, pixhost, vipr and others),
 `koofr`, `cyberfile`, `webmshare`, `mixdrop`, `imgpile`, `imagepond`, `imgth`,
-`lensdump`, `urlgalleries`, `hiperdex`, `mangaread`, `kaliscan`, `rawkuma`,
+`lensdump`, `urlgalleries`, `uploadir` (redirected uploads download through a
+form POST job), `hiperdex`, `mangaread`, `kaliscan`, `rawkuma`,
 `komikcast`, `dandadan`, `dankefuerslesen`, `madokami` (site options
 `username`/`password`), `readcomiconline`, `senmanga`, `keenspot`, `comicvine`,
 `photovogue`, `architizer`, `naver-chzzk`, `bbc`, `tungsten`, `slickpic`,
@@ -2790,8 +2817,11 @@ Their undocumented endpoints may change; fixture tests establish parser and
 transport behavior. Anonymous Facebook video extraction has been checked, but
 complete live downloads and authenticated coverage remain unverified.
 
-Direct HTTP(S) media and inline-text jobs are downloaded. Extraction retains
-typed direct HTTP, inline-text, video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
+Direct HTTP(S) media, form POST (`form_post`, upstream's `_http_method: "POST"`
+with `_http_data`; the form is sent only to the requested origin, other
+redirects continue as GET, and POST jobs are not resumed) and inline-text jobs
+are downloaded. Extraction retains typed direct HTTP, form POST, inline-text,
+video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
 source; `-j` includes the job kind and manifest protocol/base URL. Inline job bodies, headers, cookies, and other private handoff options are omitted
 from their job fields in JSON. Inline-text inspection URLs carry encoded text.
 The JSON output is for inspection, not a lossless job export. Different inline

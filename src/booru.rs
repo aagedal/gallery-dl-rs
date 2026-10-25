@@ -40,6 +40,8 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 /// Bound DAPI listings to 100 pages (10,000 Gelbooru posts).
 const MAX_PAGES: usize = 100;
 const MAX_TAGS: usize = 1024;
+/// Private raw-post key carrying `ugoira` frame data into [`parse_post`].
+const UGOIRA_FRAME_DATA: &str = "_ugoira_frame_data";
 
 #[path = "booru_artist.rs"]
 mod artist;
@@ -664,6 +666,24 @@ fn nameext_keywords(
     keywords
 }
 
+/// Upstream extractor subcategory of a target.
+fn subcategory(target: &Target) -> &'static str {
+    match target {
+        Target::Post { .. } => "post",
+        Target::Tags { .. } => "tag",
+        Target::Pool { .. } => "pool",
+        Target::Favgroup { .. } => "favgroup",
+        Target::Favorites { .. } | Target::DapiFavorites { .. } => "favorite",
+        Target::Popular { .. } => "popular",
+        Target::Artist { .. } => "artist",
+        Target::ArtistSearch { .. } => "artist-search",
+        Target::Random { .. } => "random",
+        Target::MediaAsset { .. } => "media-asset",
+        Target::Frontend { .. } => "frontend",
+        Target::Redirect { .. } => "redirect",
+    }
+}
+
 fn defaults(
     site: Site,
     category: &'static str,
@@ -714,20 +734,7 @@ fn defaults(
         Target::Popular { .. } => "P_{scale[0]}_{date}_{id}",
         Target::DapiFavorites { .. } => "f_{favorite_id}_{id}",
     };
-    let subcategory = match target {
-        Target::Post { .. } => "post",
-        Target::Tags { .. } => "tag",
-        Target::Pool { .. } => "pool",
-        Target::Favgroup { .. } => "favgroup",
-        Target::Favorites { .. } | Target::DapiFavorites { .. } => "favorite",
-        Target::Popular { .. } => "popular",
-        Target::Artist { .. } => "artist",
-        Target::ArtistSearch { .. } => "artist-search",
-        Target::Random { .. } => "random",
-        Target::MediaAsset { .. } => "media-asset",
-        Target::Frontend { .. } => "frontend",
-        Target::Redirect { .. } => "redirect",
-    };
+    let subcategory = subcategory(target);
     Arc::new(crate::naming::SourceDefaults::new(
         category,
         subcategory,
@@ -759,9 +766,19 @@ pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDef
 pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     let id = number(post.get("id"))?;
     // Upstream downloads Danbooru ugoira ZIPs as their WebM sample unless the
-    // `ugoira` option (not supported natively) requests frame data.
-    let ugoira_sample = site == Site::Danbooru
+    // `ugoira` option attached frame data (`_ugoira_frame_data`) to the post.
+    let ugoira_zip = site == Site::Danbooru
         && string(post, "file_url").is_some_and(|url| source_nameext(url).1.as_ref() == "zip");
+    let frames = ugoira_zip
+        .then(|| post.get(UGOIRA_FRAME_DATA))
+        .flatten()
+        .map(options::parse_frames);
+    let frames = match frames {
+        Some(Some(frames)) => Some(frames),
+        Some(None) => return None,
+        None => None,
+    };
+    let ugoira_sample = ugoira_zip && frames.is_none();
     let (url, md5, ext, width, height, size) = match site {
         Site::Danbooru => (
             media_url(
@@ -872,6 +889,9 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     if ugoira_sample {
         keywords.insert("extension".into(), "webm".into());
     }
+    if let Some(data) = keywords.remove(UGOIRA_FRAME_DATA) {
+        keywords.insert("frames".into(), data);
+    }
     let booru_keywords = Some(Arc::new(keywords));
     Some(Media {
         url,
@@ -910,6 +930,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             caption: tags(site, post).map(Arc::from),
             timestamp: timestamp(site, post),
             index: 1,
+            frames,
             ..PostMetadata::default()
         }),
         headers: BTreeMap::new(),
@@ -1010,6 +1031,10 @@ pub struct Booru {
     threshold: Option<usize>,
     enrichment: options::Enrichment,
     pool_cache: tokio::sync::Mutex<HashMap<String, Value>>,
+    /// Danbooru `ugoira`: download ugoira ZIPs with frame delays.
+    ugoira: bool,
+    /// Danbooru `external`: queue the source of posts without a file URL.
+    external: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1150,6 +1175,8 @@ impl Booru {
             threshold: None,
             enrichment: options::Enrichment::default(),
             pool_cache: tokio::sync::Mutex::new(HashMap::new()),
+            ugoira: false,
+            external: false,
         })
     }
 
@@ -1161,8 +1188,18 @@ impl Booru {
     ) -> Result<Self> {
         if let Some(options) = options {
             self.enrichment = options::Enrichment::parse(self.site, options)?;
+            if let Some(value) = options.get("external") {
+                self.external = self.site == Site::Danbooru && crate::postprocess::truthy(value);
+            }
         }
         Ok(self)
+    }
+
+    /// Danbooru `ugoira` (default false): download ugoira ZIPs instead of
+    /// their WebM samples, with frame names and delays for postprocessors.
+    pub fn with_ugoira(mut self, ugoira: bool) -> Self {
+        self.ugoira = self.site == Site::Danbooru && ugoira;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -1447,8 +1484,47 @@ impl Booru {
                     }
                 }
                 state.pending.extend(events);
+            } else if let Some(mut metadata) = self.external_post(post) {
+                // A file-less boundary (count 0) that `events_with_queue`
+                // follows with the queued source child job.
+                metadata.search_tags = state.search_tags.clone();
+                metadata.booru_popular = state.popular.clone();
+                if let Some(collection) = &state.collection {
+                    match collection.kind {
+                        CollectionKind::Pool => metadata.pool = collection_snapshot.clone(),
+                        CollectionKind::Favgroup => metadata.favgroup = collection_snapshot.clone(),
+                    }
+                }
+                state.pending.extend([
+                    ExtractionEvent::Post(Box::new(crate::event::Post {
+                        keywords: KeywordPolicy::default(),
+                        category: self.site.category().into(),
+                        metadata: Some(metadata),
+                        count: Some(0),
+                    })),
+                    ExtractionEvent::EndPost,
+                ]);
             }
         }
+    }
+
+    /// Danbooru `external`: a post without a `file_url` field but with a
+    /// non-empty `source` keeps its raw fields for the queued source URL.
+    fn external_post(&self, post: &Value) -> Option<PostMetadata> {
+        if !self.external || post.get("file_url").is_some() {
+            return None;
+        }
+        string(post, "source")?;
+        let id = number(post.get("id"))?.to_string();
+        Some(PostMetadata {
+            booru_keywords: Some(Arc::new(post.as_object()?.clone())),
+            rating: string(post, "rating").map(Arc::from),
+            username: string(post, "uploader_name").map(Arc::from),
+            caption: tags(self.site, post).map(Arc::from),
+            timestamp: timestamp(self.site, post),
+            post_id: id,
+            ..PostMetadata::default()
+        })
     }
 
     async fn next_page(&self, state: &mut State) -> Result<()> {
@@ -1583,7 +1659,85 @@ impl Booru {
     }
 
     /// Emit one post boundary per booru post; listings paginate lazily.
+    /// Danbooru `external` sources are queued through the process-wide
+    /// router ([`crate::sites::route`]).
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        // The closure shortens the router's `'static` stream lifetime.
+        #[allow(clippy::redundant_closure)]
+        let queue: crate::event::Queue<'_> = Arc::new(|url| crate::sites::route(url));
+        self.events_with_queue(url, queue)
+    }
+
+    /// [`Booru::events`] with `queue` routing Danbooru `external` sources:
+    /// each file-less post boundary is followed by its source child job.
+    /// Sources that are not URLs or that `queue` rejects are skipped.
+    pub fn events_with_queue<'a>(
+        &'a self,
+        url: &Url,
+        queue: crate::event::Queue<'a>,
+    ) -> BoxStream<'a, Result<ExtractionEvent>> {
+        let events = self.events_without_external(url);
+        if !self.external {
+            return events;
+        }
+        let subcategory = target(self.site, url)
+            .map(|(target, _)| subcategory(&target))
+            .unwrap_or("post");
+        let category = self.site.category();
+        type ExternalState<'a> = (
+            BoxStream<'a, Result<ExtractionEvent>>,
+            Option<serde_json::Map<String, Value>>,
+            Option<BoxStream<'a, Result<ExtractionEvent>>>,
+        );
+        stream::unfold(
+            (events, None, None) as ExternalState<'a>,
+            move |(mut events, mut source, mut child)| {
+                let queue = queue.clone();
+                async move {
+                    if let Some(active) = &mut child {
+                        if let Some(event) = active.next().await {
+                            return Some((event, (events, source, child)));
+                        }
+                        child = None;
+                    }
+                    let event = events.next().await?;
+                    match &event {
+                        Ok(ExtractionEvent::Post(post)) if post.count == Some(0) => {
+                            source = post
+                                .metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.booru_keywords.as_deref())
+                                .cloned();
+                        }
+                        Ok(ExtractionEvent::EndPost) => {
+                            if let Some(fields) = source.take()
+                                && let Some(url) = fields
+                                    .get("source")
+                                    .and_then(Value::as_str)
+                                    .and_then(|raw| Url::parse(raw.trim()).ok())
+                                    .filter(|url| matches!(url.scheme(), "http" | "https"))
+                                && let Some(queued) = queue(url)
+                            {
+                                child = Some(crate::event::child_job(
+                                    crate::event::ChildMetadata::from_raw(
+                                        category,
+                                        subcategory,
+                                        &fields,
+                                    ),
+                                    move || queued,
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                    Some((event, (events, source, child)))
+                }
+            },
+        )
+        .boxed()
+    }
+
+    fn events_without_external(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let defaults = if target(self.site, url).is_ok_and(|(target, _)| {
             matches!(
                 target,
@@ -1635,7 +1789,8 @@ impl Booru {
             | Target::Redirect { .. } => unreachable!(),
             Target::Random { tags } => {
                 return stream::once(async move {
-                    let raw = self.random(&root, &tags).await?;
+                    let mut raw = self.random(&root, &tags).await?;
+                    self.ugoira_frames(&root, &mut raw).await?;
                     let mut state = State {
                         dapi_listing: None,
                         popular: None,

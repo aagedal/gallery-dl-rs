@@ -868,7 +868,8 @@ async fn download_media(
                     }
                     headers.insert(name, HeaderValue::from_str(value)?);
                 }
-                partial = if client.resume {
+                // A POST form is not a resumable resource representation.
+                partial = if client.resume && !matches!(candidate.job, MediaJob::FormPost { .. }) {
                     Some(
                         crate::resume::Partial::open(
                             checkpoint_destination.unwrap_or(&path),
@@ -933,6 +934,27 @@ fn validate_job(client: &DownloadClient, media: &Media) -> std::result::Result<(
         }
         MediaJob::InlineText { .. } => Ok(()),
         MediaJob::DirectHttp => crate::extract::http_url(media.url.as_str())
+            .map(|_| ())
+            .map_err(|_| Failure {
+                error: error("invalid direct media URL"),
+                retry: false,
+                fallback: false,
+            }),
+        MediaJob::FormPost { form }
+            if form.len() > crate::extract::MAX_FORM_FIELDS
+                || form
+                    .iter()
+                    .map(|(name, value)| name.len() + value.len())
+                    .sum::<usize>()
+                    > crate::extract::MAX_FORM_BYTES =>
+        {
+            Err(Failure {
+                error: error("media form exceeds the size limit"),
+                retry: false,
+                fallback: false,
+            })
+        }
+        MediaJob::FormPost { .. } => crate::extract::http_url(media.url.as_str())
             .map(|_| ())
             .map_err(|_| Failure {
                 error: error("invalid direct media URL"),
@@ -1227,6 +1249,10 @@ async fn request_media(
         .allow_cross_origin(true);
     let public = public_headers(headers);
     let mut left_origin = false;
+    let mut form = match &media.job {
+        MediaJob::FormPost { form } => Some(form),
+        _ => None,
+    };
     let response = loop {
         client
             .rate_limits
@@ -1237,9 +1263,11 @@ async fn request_media(
                 retry: false,
                 fallback: true,
             })?;
-        let response = client
-            .http
-            .get(target.clone())
+        let request = match form {
+            Some(form) => client.http.post(target.clone()).form(form),
+            None => client.http.get(target.clone()),
+        };
+        let response = request
             // Rate-limited bodies may outlast the attempt limit; the attempt's
             // extended deadline enforces it instead.
             .timeout(if client.rate.is_some() {
@@ -1262,6 +1290,22 @@ async fn request_media(
                 fallback: true,
             })? {
             Some(next) => {
+                if form.is_some() {
+                    match response.status().as_u16() {
+                        // Method-preserving redirects may only repeat the
+                        // private form on the requested origin.
+                        307 | 308 if next.origin() == media.url.origin() => {}
+                        307 | 308 => {
+                            return Err(Failure {
+                                error: error("POST media redirect to another origin refused"),
+                                retry: false,
+                                fallback: true,
+                            });
+                        }
+                        // Like upstream's `requests`, other redirects become GET.
+                        _ => form = None,
+                    }
+                }
                 left_origin |= next.origin() != media.url.origin();
                 target = next;
             }

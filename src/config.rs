@@ -98,16 +98,22 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("wallhaven", &["metadata"]),
     ("pixeldrain", &["zip", "recursive"]),
-    ("kemono", &["dms", "announcements"]),
-    ("coomer", &["dms", "announcements"]),
-    ("danbooru", &["metadata"]),
+    (
+        "kemono",
+        &["dms", "announcements", "archives", "archives-format"],
+    ),
+    (
+        "coomer",
+        &["dms", "announcements", "archives", "archives-format"],
+    ),
+    ("danbooru", &["metadata", "external"]),
     ("e621", &["metadata"]),
     ("gelbooru", &["tags", "notes"]),
     ("safebooru", &["tags", "notes"]),
     ("furaffinity", &["descriptions", "external", "layout"]),
     ("weasyl", &["metadata"]),
     ("newgrounds", &["flash", "format"]),
-    ("bluesky", &["depth"]),
+    ("bluesky", &["depth", "metadata"]),
     (
         "tumblr",
         &[
@@ -3029,6 +3035,8 @@ mod site_scope_tests {
                 "newgrounds":{"flash":false,"format":"720p"},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k","api-secret":"s",
                     "access-token":"t","access-token-secret":"ts"},
+                "danbooru":{"external":true,"ugoira":true,"metadata":"notes"},
+                "kemono":{"archives":true,"archives-format":"dict"},
                 "bluesky":{"depth":2,"username":"alice.bsky.social","password":"pw"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -3087,6 +3095,14 @@ mod site_scope_tests {
         assert_eq!(options["access-token"], serde_json::json!("t"));
         assert_eq!(options["access-token-secret"], serde_json::json!("ts"));
         assert_eq!(tumblr.access_token, None);
+        let danbooru = config.resolve("danbooru").unwrap();
+        assert_eq!(danbooru.ugoira, Some(crate::pixiv::UgoiraMode::Zip));
+        let options = danbooru.site_options.unwrap();
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert!(!options.contains_key("ugoira"));
+        let options = config.resolve("kemono").unwrap().site_options.unwrap();
+        assert_eq!(options["archives"], serde_json::json!(true));
+        assert_eq!(options["archives-format"], serde_json::json!("dict"));
         let bluesky = config.resolve("bluesky").unwrap();
         assert_eq!(bluesky.username.as_deref(), Some("alice.bsky.social"));
         assert_eq!(bluesky.password.as_deref(), Some("pw"));

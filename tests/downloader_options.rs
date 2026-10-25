@@ -60,7 +60,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         rating: None,
         score: None,
         revision: None,
-        kemono_extras: None,
+        extra_keywords: None,
         discord: None,
         creator: None,
         community: None,

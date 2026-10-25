@@ -260,7 +260,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
         rating: None,
         score: None,
         revision: None,
-        kemono_extras: None,
+        extra_keywords: None,
         discord: None,
         creator: None,
         community: None,
