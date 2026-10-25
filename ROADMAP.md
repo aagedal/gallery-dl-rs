@@ -349,14 +349,14 @@ upstream application), `oauth:tumblr`, `oauth:smugmug`, `oauth:flickr` (OAuth
 the request token, and the result prints upstream's messages. Tokens go to an
 SQLite cache with upstream's file location, `cache.file` setting, table,
 keys and (pickle) values, so it is shared with Python gallery-dl; new files are
-0600 on Unix. DeviantArt, Reddit, Pixiv, Tumblr and Mastodon read it for unset
-or `"cache"` token settings, DeviantArt writes rotated refresh tokens back, and
+0600 on Unix. DeviantArt, Reddit, Pixiv, Tumblr, SmugMug, Flickr and Mastodon
+read it for unset or `"cache"` token settings (Tumblr, SmugMug and Flickr sign
+native API requests with the shared OAuth 1.0a helper), DeviantArt writes rotated refresh tokens back, and
 Bluesky keeps session refresh tokens for 84 days. Unit tests cover the cache
 (round trips, expiry, Python pickles, permissions, disabled/unopenable files),
 RFC 2202/5849/7636 vectors, state and token mismatch, and every flow against
 local token servers with a simulated browser. Remaining: access tokens are not
-persisted between runs (upstream caches them for an hour), SmugMug and Flickr
-do not yet sign native API requests with the cached tokens, upstream's
+persisted between runs (upstream caches them for an hour), upstream's
 `host` setting is not supported (loopback only), and the flows have no live
 verification against the real authorization servers.
 
@@ -1158,8 +1158,10 @@ lists queued as child jobs), gallery, group, user, favorite and search classes
 via the REST API with the `/prints` site key (overridable `api-key`), upstream
 keyword dictionaries and default paths, album/gallery/group/search metadata,
 `video.getStreamInfo` videos, `_d` download URLs and the `videos`, `size-max`,
-`metadata`, `info`, `exif`, `contexts` and `profile` settings. Remaining:
-OAuth/private content, upstream's per-class archive formats (the photo ID is
+`metadata`, `info`, `exif`, `contexts` and `profile` settings, and
+upstream's OAuth 1.0a signing of every API call (`api-secret` plus a
+configured or `oauth:flickr`-cached token pair) for private content.
+Remaining: upstream's per-class archive formats (the photo ID is
 the archive identity) and `*.staticflickr.com` image URLs (kept as direct
 downloads).
 

@@ -1510,6 +1510,7 @@ fn extract_input<'a>(
                                 native
                                     .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
+                                    .with_token_cache(extractors.cache.as_ref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1583,6 +1584,7 @@ fn extract_input<'a>(
                                         .with_cookies(jar.unwrap_or_default())
                                         .with_ytdl(&extractors.ytdl)
                                         .with_ytdl_cookies(extractors.ytdl_cookies.clone())
+                                        .with_cache(extractors.cache.clone())
                                         .with_api_key(options.api_key.as_deref())
                                         .with_options(options.site_options.clone())
                                         .with_retries(options.retries.unwrap())

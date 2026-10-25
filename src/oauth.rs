@@ -219,6 +219,234 @@ impl OAuth1<'_> {
 }
 
 // --------------------------------------------------------------------
+// OAuth1API
+
+/// Upstream `OAuth1API`'s user settings: `api-secret`, `access-token` and
+/// `access-token-secret`. Debug output never shows their values.
+#[derive(Clone)]
+pub(crate) struct OAuth1Settings {
+    /// Configured consumer secret; `None` uses the site's default and an
+    /// empty string disables signing.
+    pub api_secret: Option<String>,
+    pub access_token: Option<String>,
+    pub access_token_secret: Option<String>,
+    /// `access-token` is unset or `"cache"`: use the pair `oauth:SITE`
+    /// cached for the API key instead of the configured tokens.
+    pub token_cache: bool,
+}
+
+impl Default for OAuth1Settings {
+    fn default() -> Self {
+        Self {
+            api_secret: None,
+            access_token: None,
+            access_token_secret: None,
+            token_cache: true,
+        }
+    }
+}
+
+impl std::fmt::Debug for OAuth1Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let set = |value: &Option<String>| value.as_ref().map(|_| "<redacted>");
+        f.debug_struct("OAuth1Settings")
+            .field("api_secret", &set(&self.api_secret))
+            .field("access_token", &set(&self.access_token))
+            .field("access_token_secret", &set(&self.access_token_secret))
+            .field("token_cache", &self.token_cache)
+            .finish()
+    }
+}
+
+/// A bounded printable-ASCII credential, as accepted from configuration and
+/// the cache.
+fn credential(value: &str) -> bool {
+    (1..=1024).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_graphic())
+}
+
+impl OAuth1Settings {
+    pub const KEYS: [&'static str; 3] = ["api-secret", "access-token", "access-token-secret"];
+
+    /// Read the settings through `get`; `site` names the site in errors,
+    /// which never include the rejected value.
+    pub fn parse<'v>(site: &str, get: impl Fn(&str) -> Option<&'v Value>) -> Result<Self> {
+        let mut out = Self::default();
+        for key in Self::KEYS {
+            let Some(value) = get(key).filter(|value| !value.is_null()) else {
+                continue;
+            };
+            if key == "access-token" {
+                out.token_cache = value.as_str() == Some("cache");
+            }
+            let value = match value {
+                Value::Bool(false) => None,
+                Value::String(s) if s.is_empty() || s == "cache" => None,
+                Value::String(s) if credential(s) => Some(s.clone()),
+                _ => return Err(error(format!("invalid {site} setting: {key}"))),
+            };
+            match key {
+                // An explicitly empty secret disables OAuth, as upstream.
+                "api-secret" => out.api_secret = Some(value.unwrap_or_default()),
+                "access-token" => out.access_token = value,
+                _ => out.access_token_secret = value,
+            }
+        }
+        Ok(out)
+    }
+
+    /// Upstream `OAuth1API.__init__`: the signing credentials once the API
+    /// key, the secret (else `default_secret`) and a token pair (configured,
+    /// or cached under `('CATEGORY', API_KEY)`) are all non-empty.
+    pub async fn resolve(
+        &self,
+        category: &str,
+        api_key: &str,
+        default_secret: &str,
+        cache: Option<&Cache>,
+    ) -> Option<OAuth1Credentials> {
+        let consumer_secret = self.api_secret.as_deref().unwrap_or(default_secret);
+        let (token, token_secret) = if self.token_cache {
+            match cache {
+                Some(cache) => cached_tokens(cache, category, api_key).await,
+                None => (None, None),
+            }
+        } else {
+            (self.access_token.clone(), self.access_token_secret.clone())
+        };
+        let nonempty = |value: &str| (!value.is_empty()).then(|| value.to_owned());
+        Some(OAuth1Credentials {
+            consumer_key: nonempty(api_key)?,
+            consumer_secret: nonempty(consumer_secret)?,
+            token: token.filter(|t| !t.is_empty())?,
+            token_secret: token_secret.filter(|t| !t.is_empty())?,
+        })
+    }
+}
+
+/// Upstream's `_token_cache-('CATEGORY', 'API_KEY')` cache key, written by
+/// `oauth:CATEGORY`.
+pub(crate) fn token_cache_key(category: &str, api_key: &str) -> String {
+    crate::cache::key(
+        "oauth",
+        "_token_cache",
+        &crate::cache::tuple_repr(&[category, api_key]),
+    )
+}
+
+/// The cached `(token, secret)` pair for `category` and `api_key`; values
+/// that are missing, unreadable or not printable ASCII count as unset.
+pub(crate) async fn cached_tokens(
+    cache: &Cache,
+    category: &str,
+    api_key: &str,
+) -> (Option<String>, Option<String>) {
+    let pair = cache
+        .get(&token_cache_key(category, api_key))
+        .await
+        .ok()
+        .flatten();
+    let valid = |value: &Value| value.as_str().filter(|s| credential(s)).map(str::to_owned);
+    match pair.as_ref().and_then(Value::as_array).map(Vec::as_slice) {
+        Some([token, secret]) => (valid(token), valid(secret)),
+        _ => (None, None),
+    }
+}
+
+/// Complete OAuth 1.0a credentials signing a site's API requests (upstream
+/// `OAuth1Session`). Debug output shows none of them.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct OAuth1Credentials {
+    pub consumer_key: String,
+    pub consumer_secret: String,
+    pub token: String,
+    pub token_secret: String,
+}
+
+impl std::fmt::Debug for OAuth1Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OAuth1Credentials { .. }")
+    }
+}
+
+impl OAuth1Credentials {
+    pub fn signer(&self) -> OAuth1<'_> {
+        OAuth1 {
+            consumer_key: &self.consumer_key,
+            consumer_secret: &self.consumer_secret,
+            token: Some(&self.token),
+            token_secret: &self.token_secret,
+        }
+    }
+
+    /// A sensitive `Authorization` header value signing `method` `url`.
+    pub fn header(&self, method: &str, url: &Url) -> Result<reqwest::header::HeaderValue> {
+        self.signer().header(method, url)
+    }
+}
+
+/// Test support: check the OAuth 1.0a `Authorization` header of a raw HTTP
+/// request against `root` by recomputing its signature; returns the decoded
+/// `oauth_*` fields.
+#[cfg(test)]
+pub(crate) fn verify_signed_request(
+    request: &str,
+    root: &Url,
+    consumer_secret: &str,
+    token_secret: &str,
+) -> BTreeMap<String, String> {
+    fn decode(raw: &str) -> String {
+        let bytes = raw.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' {
+                out.push(u8::from_str_radix(&raw[i + 1..i + 3], 16).unwrap());
+                i += 3;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8(out).unwrap()
+    }
+    let mut lines = request.lines();
+    let mut start = lines.next().unwrap().split(' ');
+    let method = start.next().unwrap();
+    let url = root.join(start.next().unwrap()).unwrap();
+    let header = lines
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("authorization")
+                .then(|| value.trim().to_owned())
+        })
+        .expect("signed request has an Authorization header");
+    let fields: BTreeMap<String, String> = header
+        .strip_prefix("OAuth ")
+        .unwrap()
+        .split(',')
+        .map(|field| {
+            let (key, value) = field.split_once('=').unwrap();
+            let value = value.strip_prefix('"').unwrap().strip_suffix('"').unwrap();
+            (key.to_owned(), decode(value))
+        })
+        .collect();
+    let params: Vec<(&str, String)> = fields
+        .iter()
+        .filter(|(key, _)| key.as_str() != "oauth_signature")
+        .map(|(key, value)| (key.as_str(), value.clone()))
+        .collect();
+    assert_eq!(fields["oauth_signature_method"], "HMAC-SHA1");
+    assert_eq!(fields["oauth_version"], "1.0");
+    assert_eq!(fields["oauth_nonce"].len(), 16);
+    assert_eq!(
+        fields["oauth_signature"],
+        signature(method, &url, &params, consumer_secret, token_secret),
+        "signature mismatch for {url}"
+    );
+    fields
+}
+
+// --------------------------------------------------------------------
 // Settings
 
 /// `extractor.oauth.*` settings plus the raw site credentials the flows use.
@@ -694,11 +922,7 @@ impl Flow {
         let (token, token_secret) = oauth1_tokens(&data)?;
 
         // write to cache
-        let key = crate::cache::key(
-            "oauth",
-            "_token_cache",
-            &crate::cache::tuple_repr(&[site, &api_key]),
-        );
+        let key = token_cache_key(site, &api_key);
         self.store(
             cache,
             &key,

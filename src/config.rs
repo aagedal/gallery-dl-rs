@@ -3025,7 +3025,10 @@ mod site_scope_tests {
             br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3,
                 "api":"oauth","refresh-token":"rt","client-id":"cid","date-min":"2024-01-01"},
                 "pinterest":{"sections":false},
-                "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
+                "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk",
+                    "api-secret":"fs","access-token":"ft","access-token-secret":"fts"},
+                "smugmug":{"api-key":"sk","api-secret":"ss","access-token":"cache",
+                    "access-token-secret":"sts","videos":false},
                 "vsco":{"videos":false,"include":"all"},
                 "artstation":{"external":true,"max-posts":3},
                 "imgur":{"client-id":"abc123","mp4":false},
@@ -3059,6 +3062,19 @@ mod site_scope_tests {
         let options = flickr.site_options.unwrap();
         assert_eq!(options["size-max"], serde_json::json!("k"));
         assert_eq!(options["metadata"], serde_json::json!(["geo"]));
+        // OAuth 1.0a keys reach the native Flickr and SmugMug signers.
+        assert_eq!(options["api-secret"], serde_json::json!("fs"));
+        assert_eq!(options["access-token"], serde_json::json!("ft"));
+        assert_eq!(options["access-token-secret"], serde_json::json!("fts"));
+        assert_eq!(flickr.access_token, None);
+        let smugmug = config.resolve("smugmug").unwrap();
+        assert_eq!(smugmug.api_key.as_deref(), Some("sk"));
+        assert_eq!(smugmug.access_token, None);
+        let options = smugmug.site_options.unwrap();
+        assert_eq!(options["api-secret"], serde_json::json!("ss"));
+        assert_eq!(options["access-token"], serde_json::json!("cache"));
+        assert_eq!(options["access-token-secret"], serde_json::json!("sts"));
+        assert_eq!(options["videos"], serde_json::json!(false));
         let options = config.resolve("vsco").unwrap().site_options.unwrap();
         assert_eq!(options["videos"], serde_json::json!(false));
         assert_eq!(options["include"], serde_json::json!("all"));

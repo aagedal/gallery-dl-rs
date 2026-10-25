@@ -1273,8 +1273,16 @@ largest listed `url_*` size (or the last `getSizes` entry) with upstream's `_d`
 download suffix; videos use `video.getStreamInfo`. Settings: `videos`
 (default true), `size-max`, `metadata` (extra listing fields), `info`, `exif`,
 `contexts` and `profile`. Listings page 500 per page, capped at 200 pages.
-Media must be HTTPS on `*.staticflickr.com` (videos also `*.flickr.com`). API
-`stat: fail` replies map to errors without echoing details. Archive identity is
+As upstream's `FlickrAPI` (an `OAuth1API`), every API call is signed with
+OAuth 1.0a (HMAC-SHA1, no `api_key` parameter) once `api-secret` (upstream
+ships none), `access-token` and `access-token-secret` are set alongside the
+API key (configured or site key); an unset or `"cache"` `access-token` uses
+the pair `oauth:flickr` cached for that key. Signed calls see the private and
+friends-only photos the token's account can see. Signatures go only to
+`api.flickr.com`, never to `/prints` or media, and secrets never appear in
+errors or logs. Media must be HTTPS on `*.staticflickr.com` (videos also
+`*.flickr.com`). API `stat: fail` replies map to errors without echoing
+details. Archive identity is
 the photo ID. Plain `staticflickr.com` links stay direct downloads.
 
 Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
@@ -1853,7 +1861,9 @@ setting is unset or `"cache"`: DeviantArt and Reddit (`api: "oauth"`)
 `refresh-token` per client ID, Pixiv `refresh-token` per
 `extractor.pixiv.username` (upstream's `None` key when unset; `client-id`
 and `client-secret` are honored as upstream), Tumblr `access-token` and
-`access-token-secret` per API key, and Mastodon `access-token` per instance.
+`access-token-secret` per API key (likewise SmugMug and Flickr, which sign
+their API requests with them natively), and Mastodon `access-token` per
+instance.
 DeviantArt rotates refresh tokens: each new one is written back (under the
 client key, or under the configured token itself as upstream does), so a
 token keeps working on later runs. Bluesky logins keep their session refresh
@@ -2786,8 +2796,12 @@ prefix, as upstream does. `recursive:` with local `file://` sources is not
 supported (use `--input-file`). Gallery-dl's
 `shopify:`/`xenforo:` URL prefixes and extra configured instances are not
 supported, and all `*.reactor.cc` subdomains share the `reactor` category.
-Username/password logins and SmugMug OAuth request signing are not ported
-(`oauth:smugmug` still obtains and caches tokens); pass `--cookies`
+SmugMug signs its API v2 requests with OAuth 1.0a like upstream's
+`SmugmugAPI` once `access-token`/`access-token-secret` are set (an unset or
+`"cache"` `access-token` uses the pair `oauth:smugmug` cached for the
+`api-key`; `api-key`/`api-secret` default to upstream's application), which
+reaches private albums; custom-domain `!siteuser` lookups stay unsigned.
+Username/password logins are not ported; pass `--cookies`
 instead where upstream accepts session cookies (Nijie and Horne require
 them). Unsplash, Pexels, Toyhouse, Comick, Lexica and Khinsider answered this
 network with bot challenges; MangaPark, MangaFire, MangaReader, TCB Scans,

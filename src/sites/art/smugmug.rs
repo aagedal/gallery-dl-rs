@@ -1,10 +1,13 @@
 //! SmugMug albums, images and folder paths, mirroring
-//! gallery_dl/extractor/smugmug.py through the API v2 with its public
-//! `APIKey` (the `api-key` setting replaces it).
+//! gallery_dl/extractor/smugmug.py through the API v2.
 //!
-//! Upstream's OAuth 1.0 `access-token`/`access-token-secret` signing is not
-//! supported, so only public content is reachable; `oauth:smugmug` still
-//! obtains (and caches) such tokens for the compatibility backend.
+//! Like upstream's `SmugmugAPI` (an `OAuth1API`), requests are signed with
+//! OAuth 1.0a (HMAC-SHA1) once `api-key`/`api-secret` (upstream's
+//! application by default) and `access-token`/`access-token-secret` are
+//! set; an unset or `"cache"` `access-token` uses the pair `oauth:smugmug`
+//! cached for the API key. Otherwise requests carry the public `APIKey`.
+//! Signatures only go to `api.smugmug.com`: a custom domain's `!siteuser`
+//! lookup stays unsigned, and emitted media never carry credentials.
 use super::{nameext_into, str_of, truthy};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -122,10 +125,11 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     let Some(target) = target(&url) else {
         return crate::sites::fail(error("unsupported SmugMug URL"));
     };
-    let api = Arc::new(Api {
-        http,
-        key: http.api_key().unwrap_or(API_KEY).to_owned(),
-    });
+    crate::sites::once(async move { Ok(dispatch(Arc::new(Api::new(http).await?), target)) })
+}
+
+fn dispatch<'a>(api: Arc<Api<'a>>, target: Target) -> Events<'a> {
+    let http = api.http;
     match target {
         Target::Album(id) => album(api, id),
         Target::Image(id) => crate::sites::once(async move {
@@ -148,27 +152,50 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     }
 }
 
-/// Upstream `SmugmugAPI`: API v2 requests with `APIKey` and `_verbosity=1`.
+/// Upstream `SmugmugAPI`: API v2 requests with `_verbosity=1`, signed with
+/// OAuth 1.0a or carrying the `APIKey`.
 struct Api<'a> {
     http: &'a Http,
     key: String,
+    oauth: Option<crate::oauth::OAuth1Credentials>,
 }
 
 impl<'a> Api<'a> {
+    async fn new(http: &'a Http) -> Result<Self> {
+        let key = http.api_key().unwrap_or(API_KEY).to_owned();
+        let settings = crate::oauth::OAuth1Settings::parse("SmugMug", |key| http.option(key))?;
+        let oauth = settings
+            .resolve("smugmug", &key, API_SECRET, http.cache())
+            .await;
+        Ok(Self { http, key, oauth })
+    }
+
     async fn call(&self, endpoint: &str, params: &[(&str, String)], domain: &str) -> Result<Value> {
         let mut url = self
             .http
             .api(&format!("https://{domain}/api/v2/{endpoint}"))?;
+        // Only the API origin sees OAuth credentials; `!siteuser` on a
+        // custom domain keeps the public form.
+        let oauth = self.oauth.as_ref().filter(|_| domain == API_DOMAIN);
         {
             let mut query = url.query_pairs_mut();
             for (key, value) in params {
                 query.append_pair(key, value);
             }
-            query
-                .append_pair("APIKey", &self.key)
-                .append_pair("_verbosity", "1");
+            if oauth.is_none() && !self.key.is_empty() {
+                query.append_pair("APIKey", &self.key);
+            }
+            query.append_pair("_verbosity", "1");
         }
-        let data = self.http.json_with(&url, HEADERS).await.map_err(|e| {
+        let authorization = match oauth {
+            Some(oauth) => Some(oauth.header("GET", &url)?),
+            None => None,
+        };
+        let mut headers = HEADERS.to_vec();
+        if let Some(value) = &authorization {
+            headers.push(("Authorization", value.to_str().unwrap_or_default()));
+        }
+        let data = self.http.json_with(&url, &headers).await.map_err(|e| {
             match crate::sites::http::refused_status(&e) {
                 Some(_) => e,
                 None if e.to_string().contains("invalid JSON") => {
@@ -711,5 +738,120 @@ mod tests {
         )));
         assert!(requests[0].contains("host: 127.0.0.1"));
         assert!(requests[1].starts_with("GET /api/v2/user/dogs!albums?start=1&count=100&"));
+    }
+
+    fn with_options(http: Http, options: Value) -> Http {
+        http.with_options(Some(Arc::new(options.as_object().unwrap().clone())))
+    }
+
+    #[tokio::test]
+    async fn configured_tokens_sign_api_requests_with_the_default_application() {
+        let album = json!({"Code": 200, "Response": {"Locator": "Album", "Album": {
+            "AlbumKey": "priv", "Name": "Private", "Uris": {}}}});
+        let page = json!({"Code": 200, "Response": {"Locator": "AlbumImage",
+                "AlbumImage": [image("k1")], "Pages": {}},
+            "Expansions": {"/api/v2/image/k1-0!sizedetails": sizes("k1")}});
+        let (root, server) = serve(vec![json(album), json(page)]);
+        let http = with_options(
+            http("smugmug", root.clone()),
+            json!({"access-token": "user-token", "access-token-secret": "token-secret"}),
+        );
+        let files = media(extract(&http, Url::parse("smugmug:album:priv").unwrap())).await;
+        assert_eq!(files.len(), 1);
+        assert!(files[0].headers.is_empty());
+        for request in server.join().unwrap() {
+            assert!(!request.contains("APIKey="), "{request}");
+            assert!(request.contains("_verbosity=1"));
+            let fields =
+                crate::oauth::verify_signed_request(&request, &root, API_SECRET, "token-secret");
+            assert_eq!(fields["oauth_consumer_key"], API_KEY);
+            assert_eq!(fields["oauth_token"], "user-token");
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_tokens_sign_requests_for_the_configured_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        cache
+            .set(
+                "gallery_dl.oauth._token_cache-('smugmug', 'KEY')",
+                &json!(["cached-token", "cached-secret"]),
+                None,
+            )
+            .await
+            .unwrap();
+        let data = json!({"Code": 200, "Response": {"Locator": "Image", "Image": image("k9")},
+            "Expansions": {"/api/v2/image/k9-0!sizedetails": sizes("k9")}});
+        let (root, server) = serve(vec![json(data.clone()), json(data)]);
+        let signed = with_options(
+            http("smugmug", root.clone()),
+            json!({"api-secret": "custom-secret", "access-token": "cache"}),
+        )
+        .with_api_key(Some("KEY"))
+        .with_cache(Some(cache.clone()));
+        let url = Url::parse("https://tdm.smugmug.com/Nature/i-k9").unwrap();
+        assert_eq!(media(extract(&signed, url.clone())).await.len(), 1);
+        // Without a cache (or a cached pair) requests stay public.
+        let public = with_options(
+            http("smugmug", root.clone()),
+            json!({"api-secret": "custom-secret"}),
+        )
+        .with_api_key(Some("KEY"));
+        assert_eq!(media(extract(&public, url)).await.len(), 1);
+        let requests = server.join().unwrap();
+        let fields = crate::oauth::verify_signed_request(
+            &requests[0],
+            &root,
+            "custom-secret",
+            "cached-secret",
+        );
+        assert_eq!(fields["oauth_consumer_key"], "KEY");
+        assert_eq!(fields["oauth_token"], "cached-token");
+        assert!(
+            requests[0].starts_with("GET /api/v2/image/k9?_expand=ImageSizeDetails&_verbosity=1 ")
+        );
+        assert!(
+            requests[1].starts_with(
+                "GET /api/v2/image/k9?_expand=ImageSizeDetails&APIKey=KEY&_verbosity=1 "
+            )
+        );
+        assert!(!requests[1].to_ascii_lowercase().contains("authorization"));
+    }
+
+    #[tokio::test]
+    async fn custom_domain_lookups_stay_unsigned() {
+        let (root, server) = serve(vec![
+            json(json!({"Code": 200, "Response": {"User": {"NickName": "dogs"}}})),
+            json(json!({"Code": 200, "Response": {"Locator": "Album", "Album": [], "Pages": {}}})),
+        ]);
+        let http = with_options(
+            http("smugmug", root.clone()),
+            json!({"access-token": "user-token", "access-token-secret": "token-secret"}),
+        );
+        let queued = queued(extract(
+            &http,
+            Url::parse("smugmug:https://www.example.com/").unwrap(),
+        ))
+        .await;
+        assert!(queued.is_empty());
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with(&format!(
+            "GET /api/v2/!siteuser?APIKey={API_KEY}&_verbosity=1 "
+        )));
+        assert!(!requests[0].to_ascii_lowercase().contains("authorization"));
+        assert!(!requests[0].contains("user-token"));
+        crate::oauth::verify_signed_request(&requests[1], &root, API_SECRET, "token-secret");
+    }
+
+    #[tokio::test]
+    async fn invalid_token_settings_fail_without_echoing_them() {
+        let http = with_options(
+            http("smugmug", Url::parse("http://127.0.0.1:9/").unwrap()),
+            json!({"access-token": "bad value"}),
+        );
+        let mut events = extract(&http, Url::parse("smugmug:album:x").unwrap());
+        let error = events.next().await.unwrap().unwrap_err().to_string();
+        assert_eq!(error, "invalid SmugMug setting: access-token");
     }
 }
