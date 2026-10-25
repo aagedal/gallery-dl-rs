@@ -763,3 +763,146 @@ async fn listener_binds_loopback_and_ignores_malformed_requests() {
     assert_eq!(params["state"], "s");
     assert_eq!(params["code"], "c+1");
 }
+
+#[tokio::test]
+async fn oauth1_settings_resolve_configured_or_cached_tokens() {
+    let parse = |value: Value| {
+        let map = value.as_object().unwrap().clone();
+        OAuth1Settings::parse("Site", |key| map.get(key)).map_err(|e| e.to_string())
+    };
+    let (_directory, cache) = temp_cache();
+    assert_eq!(
+        token_cache_key("smugmug", "KEY"),
+        "gallery_dl.oauth._token_cache-('smugmug', 'KEY')"
+    );
+    cache
+        .set(
+            &token_cache_key("smugmug", "KEY"),
+            &json!(["cached-token", "cached-secret"]),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Unset and "cache" tokens read the pair cached for the API key.
+    for settings in [
+        json!({}),
+        json!({"access-token": "cache", "access-token-secret": "x"}),
+    ] {
+        let resolved = parse(settings)
+            .unwrap()
+            .resolve("smugmug", "KEY", "default-secret", Some(&cache))
+            .await
+            .unwrap();
+        assert_eq!(
+            resolved,
+            OAuth1Credentials {
+                consumer_key: "KEY".into(),
+                consumer_secret: "default-secret".into(),
+                token: "cached-token".into(),
+                token_secret: "cached-secret".into(),
+            }
+        );
+        assert_eq!(format!("{resolved:?}"), "OAuth1Credentials { .. }");
+    }
+    // Another key, another site or no cache: no pair, so no signing.
+    let settings = parse(json!({})).unwrap();
+    assert!(
+        settings
+            .resolve("smugmug", "OTHER", "s", Some(&cache))
+            .await
+            .is_none()
+    );
+    assert!(
+        settings
+            .resolve("flickr", "KEY", "s", Some(&cache))
+            .await
+            .is_none()
+    );
+    assert!(
+        settings
+            .resolve("smugmug", "KEY", "s", None)
+            .await
+            .is_none()
+    );
+    // Configured tokens skip the cache; the configured secret wins.
+    let settings = parse(json!({"api-secret": "custom", "access-token": "tok",
+        "access-token-secret": "tsecret"}))
+    .unwrap();
+    let resolved = settings
+        .resolve("smugmug", "KEY", "default-secret", Some(&cache))
+        .await
+        .unwrap();
+    assert_eq!(
+        (resolved.consumer_secret.as_str(), resolved.token.as_str()),
+        ("custom", "tok")
+    );
+    let debug = format!("{settings:?}");
+    assert!(!debug.contains("custom") && !debug.contains("tok\"") && !debug.contains("tsecret"));
+    assert!(settings.resolve("smugmug", "KEY", "", None).await.is_some());
+    // Any empty part disables signing: an empty key, an empty default or
+    // configured secret, `access-token: false`/"" or a missing secret.
+    assert!(settings.resolve("smugmug", "", "d", None).await.is_none());
+    for value in [
+        json!({"api-secret": "", "access-token": "t", "access-token-secret": "s"}),
+        json!({"access-token": false, "access-token-secret": "s"}),
+        json!({"access-token": "", "access-token-secret": "s"}),
+        json!({"access-token": "t"}),
+    ] {
+        let settings = parse(value).unwrap();
+        assert!(
+            settings
+                .resolve("smugmug", "KEY", "d", Some(&cache))
+                .await
+                .is_none()
+        );
+    }
+    assert!(
+        parse(json!({"access-token": "t", "access-token-secret": "s"}))
+            .unwrap()
+            .resolve("flickr", "KEY", "", None)
+            .await
+            .is_none()
+    );
+    // Invalid values are rejected without echoing them.
+    for bad in [
+        json!(1),
+        json!("has space"),
+        json!(true),
+        json!("x".repeat(1025)),
+    ] {
+        let error = parse(json!({"access-token-secret": bad})).unwrap_err();
+        assert_eq!(error, "invalid Site setting: access-token-secret");
+    }
+    // Malformed cache entries count as empty.
+    cache
+        .set(
+            &token_cache_key("smugmug", "BAD"),
+            &json!(["only-one"]),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(cached_tokens(&cache, "smugmug", "BAD").await, (None, None));
+}
+
+#[test]
+fn signed_request_headers_validate() {
+    let credentials = OAuth1Credentials {
+        consumer_key: "ck".into(),
+        consumer_secret: "c secret".into(),
+        token: "tok".into(),
+        token_secret: "t/secret".into(),
+    };
+    let root = Url::parse("http://127.0.0.1:1/").unwrap();
+    let url = root.join("api/v2/album/x?_expand=User&a=b%20c").unwrap();
+    let header = credentials.header("GET", &url).unwrap();
+    assert!(header.is_sensitive());
+    let request = format!(
+        "GET /api/v2/album/x?_expand=User&a=b%20c HTTP/1.1\r\nauthorization: {}\r\n\r\n",
+        header.to_str().unwrap()
+    );
+    let fields = verify_signed_request(&request, &root, "c secret", "t/secret");
+    assert_eq!(fields["oauth_consumer_key"], "ck");
+    assert_eq!(fields["oauth_token"], "tok");
+}

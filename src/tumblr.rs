@@ -1386,27 +1386,9 @@ impl Tumblr {
         let Some(cache) = cache.filter(|_| self.options.access_token_cache) else {
             return self;
         };
-        let key = crate::cache::key(
-            "oauth",
-            "_token_cache",
-            &crate::cache::tuple_repr(&["tumblr", &self.api_key]),
-        );
-        let pair = cache.get(&key).await.ok().flatten();
-        let valid = |value: &Value| {
-            value
-                .as_str()
-                .filter(|s| {
-                    (1..=1024).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_graphic())
-                })
-                .map(str::to_owned)
-        };
-        match pair.as_ref().and_then(Value::as_array).map(Vec::as_slice) {
-            Some([token, secret]) => {
-                self.options.access_token = valid(token);
-                self.options.access_token_secret = valid(secret);
-            }
-            _ => self.options.access_token = None,
-        }
+        let (token, secret) = crate::oauth::cached_tokens(cache, "tumblr", &self.api_key).await;
+        self.options.access_token = token;
+        self.options.access_token_secret = secret;
         self
     }
 

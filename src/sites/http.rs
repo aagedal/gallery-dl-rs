@@ -41,6 +41,8 @@ pub struct Http {
     cookies: std::sync::Mutex<CookieJar>,
     ytdl: std::path::PathBuf,
     ytdl_cookies: Option<crate::cookies::YtdlCookies>,
+    /// The credential cache, for sites reading tokens `oauth:SITE` stored.
+    cache: Option<crate::cache::Cache>,
 }
 
 /// A request body.
@@ -70,6 +72,7 @@ impl Http {
             cookies: std::sync::Mutex::new(CookieJar::default()),
             ytdl: "yt-dlp".into(),
             ytdl_cookies: None,
+            cache: None,
         })
     }
 
@@ -96,6 +99,16 @@ impl Http {
     pub fn with_api_key(mut self, key: Option<&str>) -> Self {
         self.api_key = key.map(Into::into);
         self
+    }
+
+    /// The credential cache (upstream `extractor.cache`), if enabled.
+    pub fn with_cache(mut self, cache: Option<crate::cache::Cache>) -> Self {
+        self.cache = cache;
+        self
+    }
+
+    pub fn cache(&self) -> Option<&crate::cache::Cache> {
+        self.cache.as_ref()
     }
 
     /// The yt-dlp executable for sites extracted through it.

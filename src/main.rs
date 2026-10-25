@@ -323,22 +323,40 @@ fn booru_subcategory(url: &url::Url) -> Option<&'static str> {
     match gallery_dl_rs::booru::target(site, url).ok()?.0 {
         gallery_dl_rs::booru::Target::Artist { .. } => Some("artist"),
         gallery_dl_rs::booru::Target::ArtistSearch { .. } => Some("artist-search"),
-        gallery_dl_rs::booru::Target::Tags { .. } if matches!(category, "danbooru" | "e621") => {
+        gallery_dl_rs::booru::Target::Tags { .. }
+            if gallery_dl_rs::booru::is_danbooru_family(category) =>
+        {
             Some("tag")
         }
         _ => None,
     }
 }
+/// `CATEGORY.SUBCATEGORY` settings keys of the Danbooru/e621 class scopes.
+const BOORU_CLASS_KEYS: &[&str] = &[
+    "danbooru.artist",
+    "danbooru.artist-search",
+    "danbooru.tag",
+    "e621.artist",
+    "e621.artist-search",
+    "e621.tag",
+    "atfbooru.artist",
+    "atfbooru.artist-search",
+    "atfbooru.tag",
+    "aibooru.artist",
+    "aibooru.artist-search",
+    "aibooru.tag",
+    "booruvar.artist",
+    "booruvar.artist-search",
+    "booruvar.tag",
+    "e6ai.artist",
+    "e6ai.artist-search",
+    "e6ai.tag",
+];
 fn class_key(category: &str, subcategory: &str) -> Option<&'static str> {
-    match (category, subcategory) {
-        ("danbooru", "artist") => Some("danbooru.artist"),
-        ("danbooru", "artist-search") => Some("danbooru.artist-search"),
-        ("danbooru", "tag") => Some("danbooru.tag"),
-        ("e621", "artist") => Some("e621.artist"),
-        ("e621", "artist-search") => Some("e621.artist-search"),
-        ("e621", "tag") => Some("e621.tag"),
-        _ => None,
-    }
+    BOORU_CLASS_KEYS
+        .iter()
+        .copied()
+        .find(|key| key.split_once('.') == Some((category, subcategory)))
 }
 fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
     let category = settings_category(url, extractor);
@@ -699,7 +717,8 @@ async fn run(args: Args) -> Result<()> {
                     | "furaffinity"
                     | "weasyl"
                     | "vsco"
-            ) || gallery_dl_rs::sites::is_category(&item.category))
+            ) || gallery_dl_rs::sites::is_category(&item.category)
+                || gallery_dl_rs::booru::Site::from_category(&item.category).is_some())
                 && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -1011,6 +1030,10 @@ fn list_extractors(detailed: bool) {
         "reddit",
         "danbooru",
         "e621",
+        "atfbooru",
+        "aibooru",
+        "booruvar",
+        "e6ai",
         "gelbooru",
         "safebooru",
         "mastodon.social",
@@ -1073,9 +1096,11 @@ struct Extractors {
     imgur: OnceCell<Result<gallery_dl_rs::imgur::Imgur>>,
     bluesky: OnceCell<Result<gallery_dl_rs::bluesky::Bluesky>>,
     reddit: OnceCell<Result<gallery_dl_rs::reddit::Reddit>>,
-    booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
-    booru_artist: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
-    booru_artist_search: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
+    booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; gallery_dl_rs::booru::Site::COUNT],
+    booru_artist:
+        [OnceCell<Result<gallery_dl_rs::booru::Booru>>; gallery_dl_rs::booru::Site::COUNT],
+    booru_artist_search:
+        [OnceCell<Result<gallery_dl_rs::booru::Booru>>; gallery_dl_rs::booru::Site::COUNT],
     mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 3],
     kemono: [OnceCell<Result<gallery_dl_rs::kemono::Kemono>>; 2],
     imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
@@ -1510,6 +1535,7 @@ fn extract_input<'a>(
                                 native
                                     .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
+                                    .with_token_cache(extractors.cache.as_ref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1583,6 +1609,7 @@ fn extract_input<'a>(
                                         .with_cookies(jar.unwrap_or_default())
                                         .with_ytdl(&extractors.ytdl)
                                         .with_ytdl_cookies(extractors.ytdl_cookies.clone())
+                                        .with_cache(extractors.cache.clone())
                                         .with_api_key(options.api_key.as_deref())
                                         .with_options(options.site_options.clone())
                                         .with_retries(options.retries.unwrap())
@@ -2003,7 +2030,7 @@ fn extract_input<'a>(
                                 .flatten(),
                             parent_metadata: options.parent_metadata.as_deref().cloned(),
                             metadata_parent: options.metadata_parent.as_deref().cloned(),
-                            booru_threshold: matches!(category, "danbooru" | "e621")
+                            booru_threshold: gallery_dl_rs::booru::is_danbooru_family(category)
                                 .then_some(options.booru_threshold)
                                 .flatten(),
                             max_posts: matches!(
@@ -2027,7 +2054,7 @@ fn extract_input<'a>(
                             booru_favorite_order: (category == "gelbooru")
                                 .then(|| options.booru_favorite_order.clone())
                                 .flatten(),
-                            booru_order_posts: (category == "danbooru")
+                            booru_order_posts: (gallery_dl_rs::booru::category_dialect(category) == Some(gallery_dl_rs::booru::Dialect::Danbooru))
                                 .then_some(options.booru_order_posts)
                                 .flatten(),
                             order_posts: matches!(category, "kemono" | "coomer")
@@ -2417,6 +2444,10 @@ async fn resolved_settings(
         "reddit",
         "danbooru",
         "e621",
+        "atfbooru",
+        "aibooru",
+        "booruvar",
+        "e6ai",
         "gelbooru",
         "safebooru",
         "mastodon",
@@ -2442,19 +2473,14 @@ async fn resolved_settings(
         "weasyl",
         "vsco",
         "direct",
-        "danbooru.artist",
-        "danbooru.artist-search",
-        "danbooru.tag",
-        "e621.artist",
-        "e621.artist-search",
-        "e621.tag",
     ]
     .into_iter()
+    .chain(BOORU_CLASS_KEYS.iter().copied())
     .chain(gallery_dl_rs::sites::categories())
     {
         let class = category
             .split_once('.')
-            .filter(|(base, _)| matches!(*base, "danbooru" | "e621"));
+            .filter(|(base, _)| gallery_dl_rs::booru::is_danbooru_family(base));
         let resolved = match class {
             Some((base, class)) => config.resolve_class(base, class)?,
             None => config.resolve(category)?,

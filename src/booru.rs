@@ -62,23 +62,67 @@ enum RequestKind {
     Html,
 }
 
+/// API family a booru instance speaks. Behaviour that upstream implements once
+/// per extractor class family (`DanbooruExtractor`, `E621Extractor`, Gelbooru
+/// and Safebooru) keys on the dialect; output category, API roots, CDN hosts,
+/// credentials and extractor caches key on the [`Site`] instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Site {
+pub enum Dialect {
     Danbooru,
     E621,
     Gelbooru,
     Safebooru,
 }
 
+impl Dialect {
+    /// Upstream `basecategory`: the shared configuration scope of a
+    /// BaseExtractor family (`extractor.Danbooru`, `extractor.E621`).
+    pub fn base_category(self) -> Option<&'static str> {
+        match self {
+            Self::Danbooru => Some("Danbooru"),
+            Self::E621 => Some("E621"),
+            Self::Gelbooru | Self::Safebooru => None,
+        }
+    }
+}
+
+/// A native booru instance with its own output category, API roots, CDN
+/// hosts, credentials and extractor cache slot. e926.net shares `e621`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Site {
+    Danbooru,
+    E621,
+    Gelbooru,
+    Safebooru,
+    /// booru.allthefallen.moe (Danbooru dialect).
+    Atfbooru,
+    /// aibooru.online/aibooru.download and their `safe.`/`general.` hosts.
+    Aibooru,
+    /// booru.borvar.art (Danbooru dialect).
+    Booruvar,
+    /// e6ai.net (e621 dialect).
+    E6ai,
+}
+
 impl Site {
+    /// Every instance, in cache-slot order (`site as usize`).
+    pub const ALL: [Self; 8] = [
+        Self::Danbooru,
+        Self::E621,
+        Self::Gelbooru,
+        Self::Safebooru,
+        Self::Atfbooru,
+        Self::Aibooru,
+        Self::Booruvar,
+        Self::E6ai,
+    ];
+    /// Number of instances, for per-instance extractor caches.
+    pub const COUNT: usize = Self::ALL.len();
+
     pub fn from_category(category: &str) -> Option<Self> {
-        Some(match category {
-            "danbooru" => Self::Danbooru,
-            "e621" => Self::E621,
-            "gelbooru" => Self::Gelbooru,
-            "safebooru" => Self::Safebooru,
-            _ => return None,
-        })
+        Self::ALL
+            .into_iter()
+            .find(|site| site.category() == category)
     }
 
     pub fn category(self) -> &'static str {
@@ -87,7 +131,32 @@ impl Site {
             Self::E621 => "e621",
             Self::Gelbooru => "gelbooru",
             Self::Safebooru => "safebooru",
+            Self::Atfbooru => "atfbooru",
+            Self::Aibooru => "aibooru",
+            Self::Booruvar => "booruvar",
+            Self::E6ai => "e6ai",
         }
+    }
+
+    pub fn dialect(self) -> Dialect {
+        match self {
+            Self::Danbooru | Self::Atfbooru | Self::Aibooru | Self::Booruvar => Dialect::Danbooru,
+            Self::E621 | Self::E6ai => Dialect::E621,
+            Self::Gelbooru => Dialect::Gelbooru,
+            Self::Safebooru => Dialect::Safebooru,
+        }
+    }
+
+    /// The instance serving one of upstream's exact instance hosts for the
+    /// additional Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai).
+    pub fn from_instance_host(host: &str) -> Option<Self> {
+        Some(match host {
+            "booru.allthefallen.moe" => Self::Atfbooru,
+            "booru.borvar.art" => Self::Booruvar,
+            "e6ai.net" => Self::E6ai,
+            host if aibooru_host(host) => Self::Aibooru,
+            _ => return None,
+        })
     }
 
     fn name(self) -> &'static str {
@@ -96,23 +165,28 @@ impl Site {
             Self::E621 => "e621",
             Self::Gelbooru => "Gelbooru",
             Self::Safebooru => "Safebooru",
+            Self::Atfbooru => "ATFBooru",
+            Self::Aibooru => "AIBooru",
+            Self::Booruvar => "Booruvar",
+            Self::E6ai => "e6AI",
         }
     }
 
     fn danbooru_dialect(self) -> bool {
-        matches!(self, Self::Danbooru | Self::E621)
+        matches!(self.dialect(), Dialect::Danbooru | Dialect::E621)
     }
 
     fn page_limit(self) -> usize {
-        match self {
-            Self::Danbooru => 200,
-            Self::E621 => 320,
-            Self::Gelbooru | Self::Safebooru => 100,
+        match self.dialect() {
+            Dialect::Danbooru => 200,
+            Dialect::E621 => 320,
+            Dialect::Gelbooru | Dialect::Safebooru => 100,
         }
     }
 
     /// HTTPS CDN hosts that may serve this site's files.
     fn media_host(self, host: &str) -> bool {
+        let within = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
         match self {
             Self::Danbooru => host == "cdn.donmai.us" || host.ends_with(".donmai.us"),
             Self::E621 => {
@@ -122,8 +196,59 @@ impl Site {
             }
             Self::Gelbooru => host.ends_with(".gelbooru.com"),
             Self::Safebooru => host == "safebooru.org" || host.ends_with(".safebooru.org"),
+            Self::Atfbooru => within("allthefallen.moe"),
+            Self::Aibooru => within("aibooru.online") || within("aibooru.download"),
+            Self::Booruvar => within("borvar.art"),
+            Self::E6ai => within("e6ai.net"),
         }
     }
+
+    /// The fixed public root of a Danbooru-dialect instance, against which
+    /// upstream resolves root-relative file URLs. Only applied to the
+    /// additional instances; the original sites keep their behaviour.
+    fn relative_file_root(self) -> Option<&'static str> {
+        match self {
+            Self::Atfbooru => Some("https://booru.allthefallen.moe"),
+            Self::Booruvar => Some("https://booru.borvar.art"),
+            _ => None,
+        }
+    }
+
+    /// Host that hidden e621-dialect file URLs are rebuilt on
+    /// (upstream `static1.{root host}`).
+    fn static_host(self) -> &'static str {
+        match self {
+            Self::E6ai => "static1.e6ai.net",
+            _ => "static1.e621.net",
+        }
+    }
+}
+
+/// aibooru's upstream pattern `(?:safe\.|general\.)?aibooru\.(?:online|download)`;
+/// upstream derives its root from the matched host.
+fn aibooru_host(host: &str) -> bool {
+    let host = host
+        .strip_prefix("safe.")
+        .or_else(|| host.strip_prefix("general."))
+        .unwrap_or(host);
+    matches!(host, "aibooru.online" | "aibooru.download")
+}
+
+/// The dialect of a native booru output category; `e926` is e621's.
+pub fn category_dialect(category: &str) -> Option<Dialect> {
+    if category == "e926" {
+        return Some(Dialect::E621);
+    }
+    Site::from_category(category).map(Site::dialect)
+}
+
+/// Whether `category` belongs to a native Danbooru- or e621-dialect
+/// instance (including e621's `e926` label).
+pub fn is_danbooru_family(category: &str) -> bool {
+    matches!(
+        category_dialect(category),
+        Some(Dialect::Danbooru | Dialect::E621)
+    )
 }
 
 /// A supported booru input.
@@ -213,24 +338,26 @@ fn source_search_tags_raw(site: Site, url: &Url) -> Option<&str> {
         return None;
     }
     let query = url.query()?;
-    Some(match site {
-        Site::Danbooru
-            if url.host_str() == Some("danbooru.donmai.us") && url.path() == "/posts" =>
-        {
+    // Upstream instance patterns: the original hosts, or each additional
+    // instance's exact hosts.
+    let instance_host = url.host_str().is_some_and(|host| match site {
+        Site::Danbooru => host == "danbooru.donmai.us",
+        Site::E621 => matches!(host, "e621.net" | "e926.net"),
+        _ => Site::from_instance_host(host) == Some(site),
+    });
+    Some(match site.dialect() {
+        Dialect::Danbooru if instance_host && url.path() == "/posts" => {
             // The source's greedy repeated query prefix selects the last pair.
             query
                 .split('&')
                 .filter_map(|pair| pair.strip_prefix("tags="))
                 .next_back()?
         }
-        Site::E621
-            if matches!(url.host_str(), Some("e621.net" | "e926.net"))
-                && matches!(url.path(), "/post" | "/posts") =>
-        {
+        Dialect::E621 if instance_host && matches!(url.path(), "/post" | "/posts") => {
             // Its lazy regex accepts the first literal substring, even notags=.
             query.get(query.find("tags=")? + 5..)?.split('&').next()?
         }
-        Site::Gelbooru
+        Dialect::Gelbooru
             if matches!(url.host_str(), Some("gelbooru.com" | "www.gelbooru.com"))
                 && matches!(url.path(), "/" | "/index.php") =>
         {
@@ -239,7 +366,7 @@ fn source_search_tags_raw(site: Site, url: &Url) -> Option<&str> {
                 .split('&')
                 .next()?
         }
-        Site::Safebooru
+        Dialect::Safebooru
             if url.host_str() == Some("safebooru.org") && url.path() == "/index.php" =>
         {
             query
@@ -274,14 +401,14 @@ fn checked_source_search_tags(site: Site, url: &Url) -> Result<Option<String>> {
 /// Classify a booru URL for `site`, returning the target and API origin.
 pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     let unsupported = || {
-        error(match site {
-            Site::Danbooru => {
+        error(match site.dialect() {
+            Dialect::Danbooru => {
                 "unsupported booru URL; expected a post, tag search, pool or favorite-group link"
             }
-            Site::E621 => {
+            Dialect::E621 => {
                 "unsupported booru URL; expected a post (/posts/ID), tag search (/posts?tags=...), pool (/pools/ID), or favorites link"
             }
-            Site::Gelbooru | Site::Safebooru => {
+            Dialect::Gelbooru | Dialect::Safebooru => {
                 "unsupported booru URL; expected index.php?page=post&s=view&id=ID or index.php?page=post&s=list&tags=..."
             }
         })
@@ -293,14 +420,21 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     {
         return Err(unsupported());
     }
-    let host = url.host_str().ok_or_else(unsupported)?;
-    let host = host.strip_prefix("www.").unwrap_or(host);
-    let root = match (site, host) {
-        (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => "https://danbooru.donmai.us/",
-        (Site::E621, "e621.net" | "e621.cc" | "e621.anthro.fr") => "https://e621.net/",
-        (Site::E621, "e926.net") => "https://e926.net/",
-        (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/",
-        (Site::Safebooru, "safebooru.org") => "https://safebooru.org/",
+    let exact_host = url.host_str().ok_or_else(unsupported)?;
+    let host = exact_host.strip_prefix("www.").unwrap_or(exact_host);
+    let root: std::borrow::Cow<'static, str> = match (site, host) {
+        (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => {
+            "https://danbooru.donmai.us/".into()
+        }
+        (Site::E621, "e621.net" | "e621.cc" | "e621.anthro.fr") => "https://e621.net/".into(),
+        (Site::E621, "e926.net") => "https://e926.net/".into(),
+        (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/".into(),
+        (Site::Safebooru, "safebooru.org") => "https://safebooru.org/".into(),
+        // Additional instances match only upstream's exact hosts; aibooru's
+        // root is the matched host, as upstream's `root: None`.
+        _ if Site::from_instance_host(exact_host) == Some(site) => {
+            format!("https://{exact_host}/").into()
+        }
         _ => return Err(unsupported()),
     };
     let query = |key: &str| {
@@ -327,7 +461,7 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         Some(Target::DapiFavorites { id })
     } else if let Some(id) = dapi_listing::capture(site, url) {
         Some(Target::Pool { id })
-    } else if site == Site::E621 && url.path().starts_with("/favorites") {
+    } else if site.dialect() == Dialect::E621 && url.path().starts_with("/favorites") {
         let mut params = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         if url.path() == "/favorites" {
@@ -377,7 +511,7 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
             _ => None,
         }
     };
-    Ok((target.ok_or_else(unsupported)?, Url::parse(root).unwrap()))
+    Ok((target.ok_or_else(unsupported)?, Url::parse(&root).unwrap()))
 }
 
 fn string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -415,6 +549,17 @@ fn media_url(site: Site, raw: &str) -> Option<Url> {
     .then_some(url)
 }
 
+/// Upstream resolves Danbooru-dialect file URLs that start with `//` or `/`
+/// against `https:` or the instance root. Only the additional fixed-root
+/// instances do so natively; other URLs are returned unchanged.
+fn relative_file_url(site: Site, raw: &str) -> std::borrow::Cow<'_, str> {
+    match site.relative_file_root() {
+        Some(_) if raw.starts_with("//") => format!("https:{raw}").into(),
+        Some(root) if raw.starts_with('/') => format!("{root}{raw}").into(),
+        _ => raw.into(),
+    }
+}
+
 fn url_extension(url: &Url) -> Option<String> {
     let name = url.path_segments()?.next_back()?;
     let (_, ext) = name.rsplit_once('.')?;
@@ -449,8 +594,8 @@ fn timestamp(site: Site, post: &Value) -> Option<i64> {
 
 /// Space-separated tags; e621 groups them by category.
 fn tags(site: Site, post: &Value) -> Option<String> {
-    let tags = match site {
-        Site::E621 => {
+    let tags = match site.dialect() {
+        Dialect::E621 => {
             let groups = post.get("tags")?.as_object()?;
             let all: Vec<_> = groups
                 .values()
@@ -460,8 +605,8 @@ fn tags(site: Site, post: &Value) -> Option<String> {
                 .collect();
             all.join(" ")
         }
-        Site::Danbooru => string(post, "tag_string")?.to_owned(),
-        Site::Gelbooru | Site::Safebooru => string(post, "tags")?
+        Dialect::Danbooru => string(post, "tag_string")?.to_owned(),
+        Dialect::Gelbooru | Dialect::Safebooru => string(post, "tags")?
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" "),
@@ -551,54 +696,55 @@ fn nameext_keywords(
     post: &Value,
     fallback_url: &Url,
 ) -> serde_json::Map<String, Value> {
-    let fields = if site == Site::E621 {
+    let fields = if site.dialect() == Dialect::E621 {
         post.get("file").unwrap_or(&Value::Null)
     } else {
         post
     };
-    let normalized_nameext: serde_json::Map<String, Value> =
-        if site == Site::E621 || (!site.danbooru_dialect() && post.get("extension").is_some()) {
-            [
-                (
-                    "filename",
-                    if site == Site::E621 {
-                        "md5"
-                    } else {
-                        "filename"
-                    },
-                ),
-                (
-                    "extension",
-                    if site == Site::E621 {
-                        "ext"
-                    } else {
-                        "extension"
-                    },
-                ),
-            ]
-            .into_iter()
-            .filter_map(|(key, source)| {
-                fields
-                    .get(source)
-                    .map(|value| (key.to_owned(), value.clone()))
-            })
-            .collect()
-        } else {
-            let raw = post
-                .get("file_url")
-                .and_then(Value::as_str)
-                .unwrap_or(fallback_url.as_str());
-            let (filename, extension) = source_nameext(raw);
-            serde_json::Map::from_iter([
-                ("filename".into(), filename.as_ref().into()),
-                ("extension".into(), extension.as_ref().into()),
-            ])
-        };
+    let normalized_nameext: serde_json::Map<String, Value> = if site.dialect() == Dialect::E621
+        || (!site.danbooru_dialect() && post.get("extension").is_some())
+    {
+        [
+            (
+                "filename",
+                if site.dialect() == Dialect::E621 {
+                    "md5"
+                } else {
+                    "filename"
+                },
+            ),
+            (
+                "extension",
+                if site.dialect() == Dialect::E621 {
+                    "ext"
+                } else {
+                    "extension"
+                },
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(key, source)| {
+            fields
+                .get(source)
+                .map(|value| (key.to_owned(), value.clone()))
+        })
+        .collect()
+    } else {
+        let raw = post
+            .get("file_url")
+            .and_then(Value::as_str)
+            .unwrap_or(fallback_url.as_str());
+        let (filename, extension) = source_nameext(raw);
+        serde_json::Map::from_iter([
+            ("filename".into(), filename.as_ref().into()),
+            ("extension".into(), extension.as_ref().into()),
+        ])
+    };
     // Source extractors mutate and emit the complete API dictionary. Retain
     // arbitrary public fields without exposing native transport credentials.
     let mut keywords = post.as_object().cloned().unwrap_or_default();
     keywords.extend(normalized_nameext);
-    if site == Site::E621 {
+    if site.dialect() == Dialect::E621 {
         if let Some(file) = keywords.get_mut("file").and_then(Value::as_object_mut)
             && file
                 .get("url")
@@ -611,7 +757,7 @@ fn nameext_keywords(
                 keywords.insert(format!("tags_{category}"), tags.clone());
             }
         }
-    } else if site == Site::Danbooru {
+    } else if site.dialect() == Dialect::Danbooru {
         for category in ["artist", "character", "copyright", "general", "meta"] {
             if let Some(tags) = post
                 .get(format!("tag_string_{category}"))
@@ -630,8 +776,8 @@ fn nameext_keywords(
             }
         }
     }
-    let source_tags = match site {
-        Site::Danbooru => post.get("tag_string").and_then(Value::as_str).map(|tags| {
+    let source_tags = match site.dialect() {
+        Dialect::Danbooru => post.get("tag_string").and_then(Value::as_str).map(|tags| {
             Value::Array(if tags.is_empty() {
                 Vec::new()
             } else {
@@ -640,7 +786,7 @@ fn nameext_keywords(
                     .collect()
             })
         }),
-        Site::E621 => post
+        Dialect::E621 => post
             .get("tags")
             .and_then(Value::as_object)
             .and_then(|groups| {
@@ -751,7 +897,7 @@ pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDef
         "e926.net" => "e926",
         "gelbooru.com" => "gelbooru",
         "safebooru.org" => "safebooru",
-        _ => return None,
+        host => Site::from_instance_host(host)?.category(),
     };
     let site = if category == "e926" {
         Site::E621
@@ -767,7 +913,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     let id = number(post.get("id"))?;
     // Upstream downloads Danbooru ugoira ZIPs as their WebM sample unless the
     // `ugoira` option attached frame data (`_ugoira_frame_data`) to the post.
-    let ugoira_zip = site == Site::Danbooru
+    let ugoira_zip = site.dialect() == Dialect::Danbooru
         && string(post, "file_url").is_some_and(|url| source_nameext(url).1.as_ref() == "zip");
     let frames = ugoira_zip
         .then(|| post.get(UGOIRA_FRAME_DATA))
@@ -779,18 +925,21 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
         None => None,
     };
     let ugoira_sample = ugoira_zip && frames.is_none();
-    let (url, md5, ext, width, height, size) = match site {
-        Site::Danbooru => (
+    let (url, md5, ext, width, height, size) = match site.dialect() {
+        Dialect::Danbooru => (
             media_url(
                 site,
-                string(
-                    post,
-                    if ugoira_sample {
-                        "large_file_url"
-                    } else {
-                        "file_url"
-                    },
-                )?,
+                &relative_file_url(
+                    site,
+                    string(
+                        post,
+                        if ugoira_sample {
+                            "large_file_url"
+                        } else {
+                            "file_url"
+                        },
+                    )?,
+                ),
             )?,
             string(post, "md5"),
             if ugoira_sample {
@@ -802,7 +951,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             number(post.get("image_height")),
             number(post.get("file_size")).filter(|_| !ugoira_sample),
         ),
-        Site::E621 => {
+        Dialect::E621 => {
             let file = post.get("file")?;
             // Upstream builds hidden file URLs from their MD5 and extension.
             let fallback = string(file, "md5")
@@ -810,7 +959,8 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
                 .zip(string(file, "ext").filter(|ext| valid_extension(ext)))
                 .map(|(md5, ext)| {
                     format!(
-                        "https://static1.e621.net/data/{}/{}/{md5}.{ext}",
+                        "https://{}/data/{}/{}/{md5}.{ext}",
+                        site.static_host(),
                         &md5[..2],
                         &md5[2..4]
                     )
@@ -824,7 +974,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
                 number(file.get("size")),
             )
         }
-        Site::Gelbooru => (
+        Dialect::Gelbooru => (
             media_url(site, string(post, "file_url")?)?,
             string(post, "md5"),
             None,
@@ -832,7 +982,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             number(post.get("height")),
             None,
         ),
-        Site::Safebooru => {
+        Dialect::Safebooru => {
             let url = if let Some(raw) = post.get("file_url").and_then(Value::as_str) {
                 media_url(site, raw)?
             } else {
@@ -873,9 +1023,9 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
     let id = id.to_string();
     let media_id = md5.clone().unwrap_or_else(|| id.clone());
     let category = site.category();
-    let username = match site {
-        Site::Danbooru | Site::E621 => string(post, "uploader_name"),
-        Site::Gelbooru | Site::Safebooru => string(post, "owner"),
+    let username = match site.dialect() {
+        Dialect::Danbooru | Dialect::E621 => string(post, "uploader_name"),
+        Dialect::Gelbooru | Dialect::Safebooru => string(post, "owner"),
     }
     .map(Arc::from);
     let media_type = match ext.as_str() {
@@ -916,7 +1066,7 @@ pub fn parse_post(site: Site, post: &Value) -> Option<Media> {
             rating: string(post, "rating").map(Arc::from),
             score: {
                 let score = post.get("score").and_then(|score| {
-                    if site == Site::E621 {
+                    if site.dialect() == Dialect::E621 {
                         score.get("total")
                     } else {
                         Some(score)
@@ -949,17 +1099,17 @@ pub fn posts(site: Site, bytes: &[u8]) -> Result<Vec<Value>> {
         return Ok(Vec::new());
     }
     let body: Value = serde_json::from_slice(bytes).map_err(|_| invalid(site))?;
-    let list = match (site, body) {
-        (Site::Danbooru | Site::Safebooru, Value::Array(list)) => list,
-        (Site::Danbooru, post @ Value::Object(_)) => vec![post],
-        (Site::E621, Value::Object(mut body)) => {
+    let list = match (site.dialect(), body) {
+        (Dialect::Danbooru | Dialect::Safebooru, Value::Array(list)) => list,
+        (Dialect::Danbooru, post @ Value::Object(_)) => vec![post],
+        (Dialect::E621, Value::Object(mut body)) => {
             match (body.remove("posts"), body.remove("post")) {
                 (Some(Value::Array(list)), _) => list,
                 (_, Some(post @ Value::Object(_))) => vec![post],
                 _ => return Err(invalid(site)),
             }
         }
-        (Site::Gelbooru, Value::Object(mut body)) => match body.remove("post") {
+        (Dialect::Gelbooru, Value::Object(mut body)) => match body.remove("post") {
             Some(Value::Array(list)) => list,
             Some(post @ Value::Object(_)) => vec![post],
             None => Vec::new(),
@@ -1120,7 +1270,7 @@ fn collection_capture(site: Site, url: &Url) -> Option<(CollectionKind, &str)> {
         ("/favorite_groups/", CollectionKind::Favgroup),
         ("/favorite_group/show/", CollectionKind::Favgroup),
     ] {
-        if matches!(kind, CollectionKind::Favgroup) && site != Site::Danbooru {
+        if matches!(kind, CollectionKind::Favgroup) && site.dialect() != Dialect::Danbooru {
             continue;
         }
         if let Some(rest) = path.strip_prefix(prefix) {
@@ -1189,7 +1339,8 @@ impl Booru {
         if let Some(options) = options {
             self.enrichment = options::Enrichment::parse(self.site, options)?;
             if let Some(value) = options.get("external") {
-                self.external = self.site == Site::Danbooru && crate::postprocess::truthy(value);
+                self.external =
+                    self.site.dialect() == Dialect::Danbooru && crate::postprocess::truthy(value);
             }
         }
         Ok(self)
@@ -1198,7 +1349,7 @@ impl Booru {
     /// Danbooru `ugoira` (default false): download ugoira ZIPs instead of
     /// their WebM samples, with frame names and delays for postprocessors.
     pub fn with_ugoira(mut self, ugoira: bool) -> Self {
-        self.ugoira = self.site == Site::Danbooru && ugoira;
+        self.ugoira = self.site.dialect() == Dialect::Danbooru && ugoira;
         self
     }
 
@@ -1562,7 +1713,7 @@ impl Booru {
                     query.push(("page", page));
                 }
                 let path = if state.popular.is_some() {
-                    if self.site == Site::Danbooru {
+                    if self.site.dialect() == Dialect::Danbooru {
                         "explore/posts/popular.json"
                     } else {
                         "popular.json"
@@ -1990,7 +2141,7 @@ impl Booru {
                         root,
                         tags: format!(
                             "{}{}:{id}",
-                            if self.site == Site::Danbooru
+                            if self.site.dialect() == Dialect::Danbooru
                                 && matches!(
                                     self.pool_order,
                                     PoolOrder::Pool | PoolOrder::PoolReverse
@@ -2005,7 +2156,7 @@ impl Booru {
                         search_tags: None,
                         done: false,
                         cursor: Cursor::Tags {
-                            order: if self.site == Site::Danbooru
+                            order: if self.site.dialect() == Dialect::Danbooru
                                 && matches!(
                                     self.pool_order,
                                     PoolOrder::Pool
@@ -2023,7 +2174,7 @@ impl Booru {
                         pending_cursor: None,
                         pending_error: None,
                     };
-                    if self.site == Site::E621
+                    if self.site.dialect() == Dialect::E621
                         || matches!(
                             self.pool_order,
                             PoolOrder::PoolReverse | PoolOrder::IdAscending
@@ -2051,7 +2202,7 @@ impl Booru {
                             page_number += 1;
                             page = Some(page_number.to_string());
                             for post in raw {
-                                if self.site == Site::E621 {
+                                if self.site.dialect() == Dialect::E621 {
                                     if let Some(id) = number(post.get("id")) {
                                         by_id.insert(id, post);
                                     }
@@ -2064,7 +2215,7 @@ impl Booru {
                             }
                         }
                         let mut duplicate = false;
-                        let ordered: Vec<_> = if self.site == Site::E621 {
+                        let ordered: Vec<_> = if self.site.dialect() == Dialect::E621 {
                             let mut seen = std::collections::HashSet::new();
                             ids.iter()
                                 .filter_map(|id| by_id.get(id).map(|post| (*id, post)))
@@ -2082,7 +2233,7 @@ impl Booru {
                             all.reverse();
                             all
                         };
-                        if self.site == Site::Danbooru
+                        if self.site.dialect() == Dialect::Danbooru
                             && ordered.iter().any(|post| {
                                 !number(post.get("id")).is_some_and(|id| {
                                     state
@@ -2867,17 +3018,17 @@ mod tests {
     #[tokio::test]
     async fn search_tags_survive_pages_and_requests_stay_lazy_and_isolated() {
         for site in [Site::Danbooru, Site::E621] {
-            let raw = if site == Site::Danbooru {
+            let raw = if site.dialect() == Dialect::Danbooru {
                 danbooru_post(42)
             } else {
                 e621_post(42)
             };
-            let page = if site == Site::Danbooru {
+            let page = if site.dialect() == Dialect::Danbooru {
                 json!([raw])
             } else {
                 json!({"posts":[raw]})
             };
-            let empty = if site == Site::Danbooru {
+            let empty = if site.dialect() == Dialect::Danbooru {
                 "[]"
             } else {
                 "{\"posts\":[]}"
@@ -2889,14 +3040,14 @@ mod tests {
             let client = booru(site, root).with_threshold(Some(1));
             let url = Url::parse(&format!(
                 "https://{}/posts?tags=First&tags=Last",
-                if site == Site::Danbooru {
+                if site.dialect() == Dialect::Danbooru {
                     "danbooru.donmai.us"
                 } else {
                     "e621.net"
                 }
             ))
             .unwrap();
-            let expected = if site == Site::Danbooru {
+            let expected = if site.dialect() == Dialect::Danbooru {
                 "Last"
             } else {
                 "First"
@@ -3089,7 +3240,7 @@ mod tests {
     async fn basic_auth_is_api_only_and_survives_retries() {
         use base64::Engine;
         for site in [Site::Danbooru, Site::E621] {
-            let post = if site == Site::Danbooru {
+            let post = if site.dialect() == Dialect::Danbooru {
                 danbooru_post(5)
             } else {
                 json!({"post": e621_post(5)})
@@ -3104,7 +3255,7 @@ mod tests {
                 .with_retries(1);
             let input = Url::parse(&format!(
                 "https://{}/posts/5",
-                if site == Site::Danbooru {
+                if site.dialect() == Dialect::Danbooru {
                     "danbooru.donmai.us"
                 } else {
                     "e621.net"
@@ -3134,7 +3285,7 @@ mod tests {
     async fn basic_auth_is_reattached_on_same_origin_redirects_only_to_api() {
         use base64::Engine;
         for site in [Site::Danbooru, Site::E621] {
-            let post = if site == Site::Danbooru {
+            let post = if site.dialect() == Dialect::Danbooru {
                 danbooru_post(5)
             } else {
                 json!({"post": e621_post(5)})
@@ -3150,7 +3301,7 @@ mod tests {
             let client = booru(site, root)
                 .with_credentials(Some("redirect-user"), Some("redirect-key"))
                 .unwrap();
-            let input = Url::parse(if site == Site::Danbooru {
+            let input = Url::parse(if site.dialect() == Dialect::Danbooru {
                 "https://danbooru.donmai.us/posts/5"
             } else {
                 "https://e621.net/posts/5"
@@ -3214,7 +3365,7 @@ mod tests {
                 .unwrap()
                 .with_api_credentials(Some("456"), Some("secret-key"))
                 .unwrap();
-            let input = Url::parse(if site == Site::Danbooru {
+            let input = Url::parse(if site.dialect() == Dialect::Danbooru {
                 "https://danbooru.donmai.us/posts/1"
             } else {
                 "https://gelbooru.com/index.php?page=post&s=view&id=1"
@@ -3326,6 +3477,10 @@ pub(crate) mod date_selection_tests;
 #[cfg(test)]
 #[path = "booru_extra_tests.rs"]
 mod extra_tests;
+
+#[cfg(test)]
+#[path = "booru_instance_tests.rs"]
+mod instance_tests;
 
 #[cfg(test)]
 mod source_raw_keywords_tests {

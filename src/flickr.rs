@@ -10,8 +10,16 @@
 //! `flickr.photos.getSizes`; listings request `url_*` extras and only call
 //! `getSizes` when no listed size fits. Videos use `flickr.video.getStreamInfo`
 //! unless the `videos` setting is false. Media must be served over HTTPS from
-//! `*.staticflickr.com` or, for video streams, `*.flickr.com`. OAuth and
-//! private content are not supported.
+//! `*.staticflickr.com` or, for video streams, `*.flickr.com`.
+//!
+//! Like upstream's `FlickrAPI` (an `OAuth1API`), every API call is signed
+//! with OAuth 1.0a (HMAC-SHA1) instead of carrying `api_key` once the
+//! `api-key` (else the public site key), `api-secret` (no default) and
+//! `access-token`/`access-token-secret` are all set; an unset or `"cache"`
+//! `access-token` uses the pair `oauth:flickr` cached for the API key. This
+//! reaches private and friends-only content the token's account can see.
+//! Signatures only go to the API origin, never to the `/prints` key page
+//! or emitted media.
 use crate::{
     Result, error,
     event::{ChildMetadata, ExtractionEvent, KeywordPolicy, child_job, group_with_keywords},
@@ -418,7 +426,10 @@ fn check(bytes: &[u8]) -> Result<Value> {
         return Err(error(match code {
             1 => "Flickr photo, album, gallery, group or user not found".to_owned(),
             2 | 99 => "Flickr refused access to private content".to_owned(),
-            98 => "Flickr requires authentication for this content".to_owned(),
+            96 | 97 => {
+                "Flickr rejected the OAuth signature; check the api-key, api-secret, access-token and access-token-secret settings".to_owned()
+            }
+            98 => "Flickr requires authentication for this content; check the access-token and access-token-secret settings".to_owned(),
             100 => "Flickr rejected the API key; check the api-key setting".to_owned(),
             105 => "Flickr API is temporarily unavailable".to_owned(),
             _ => format!("Flickr API error {code}"),
@@ -555,6 +566,8 @@ pub struct Options {
     pub metadata: Option<String>,
     /// Maximum width/height (`size-max`).
     pub max_size: Option<u64>,
+    /// `api-secret`, `access-token` and `access-token-secret`.
+    pub(crate) oauth: crate::oauth::OAuth1Settings,
 }
 
 impl Default for Options {
@@ -567,6 +580,7 @@ impl Default for Options {
             profile: false,
             metadata: None,
             max_size: None,
+            oauth: crate::oauth::OAuth1Settings::default(),
         }
     }
 }
@@ -586,6 +600,7 @@ impl Options {
         options.info = boolean("info", false)?;
         options.contexts = boolean("contexts", false)?;
         options.profile = boolean("profile", false)?;
+        options.oauth = crate::oauth::OAuth1Settings::parse("Flickr", |key| map.get(key))?;
         let extra = |text: &str| {
             text.len() <= 1024
                 && text
@@ -708,6 +723,10 @@ pub struct Flickr {
     /// Configured `api-key`; otherwise the site key is fetched once.
     api_key: Option<String>,
     site_key: tokio::sync::OnceCell<String>,
+    /// The credential cache holding `oauth:flickr` token pairs.
+    cache: Option<crate::cache::Cache>,
+    /// OAuth 1.0a credentials, resolved with the API key on first use.
+    oauth: tokio::sync::OnceCell<Option<crate::oauth::OAuth1Credentials>>,
     options: Options,
     timeout: Duration,
     request_timeout: Duration,
@@ -743,6 +762,8 @@ impl Flickr {
             web_root: Url::parse("https://www.flickr.com/").expect("static URL"),
             api_key: None,
             site_key: tokio::sync::OnceCell::new(),
+            cache: None,
+            oauth: tokio::sync::OnceCell::new(),
             options: Options::default(),
             timeout,
             request_timeout: timeout,
@@ -763,6 +784,13 @@ impl Flickr {
         if let Some(key) = key {
             self.api_key = Some(key.into());
         }
+        self
+    }
+
+    /// The credential cache for `access-token` unset or `"cache"`
+    /// (upstream `OAuth1API`); unreadable caches count as empty.
+    pub fn with_token_cache(mut self, cache: Option<&crate::cache::Cache>) -> Self {
+        self.cache = cache.cloned();
         self
     }
 
@@ -806,7 +834,7 @@ impl Flickr {
             .get_or_try_init(|| async {
                 let page = self.web_root.join("prints").expect("static Flickr path");
                 // The page carries the key even though it answers HTTP 404.
-                let body = tokio::time::timeout(self.timeout, self.request_with(&page, true))
+                let body = tokio::time::timeout(self.timeout, self.request_with(&page, true, None))
                     .await
                     .map_err(|_| error("native Flickr extraction timed out"))??;
                 parse_site_key(&String::from_utf8_lossy(&body)).ok_or_else(|| {
@@ -817,20 +845,39 @@ impl Flickr {
             .map(String::as_str)
     }
 
+    /// Upstream `OAuth1API.__init__`: signing credentials for the API key,
+    /// if complete.
+    async fn oauth(&self, key: &str) -> Option<&crate::oauth::OAuth1Credentials> {
+        self.oauth
+            .get_or_init(|| {
+                self.options
+                    .oauth
+                    .resolve("flickr", key, "", self.cache.as_ref())
+            })
+            .await
+            .as_ref()
+    }
+
     async fn call(&self, method: &str, query: &[(&str, &str)]) -> Result<Vec<u8>> {
         let key = self.key().await?;
+        let oauth = self.oauth(key).await;
         let mut endpoint = self
             .api_root
             .join("services/rest/")
             .expect("static Flickr path");
-        endpoint
-            .query_pairs_mut()
-            .append_pair("method", method)
-            .append_pair("api_key", key)
-            .append_pair("format", "json")
-            .append_pair("nojsoncallback", "1")
-            .extend_pairs(query);
-        tokio::time::timeout(self.timeout, self.request(&endpoint))
+        {
+            let mut pairs = endpoint.query_pairs_mut();
+            pairs.append_pair("method", method);
+            // Signed requests identify the application by the signature.
+            if oauth.is_none() {
+                pairs.append_pair("api_key", key);
+            }
+            pairs
+                .append_pair("format", "json")
+                .append_pair("nojsoncallback", "1")
+                .extend_pairs(query);
+        }
+        tokio::time::timeout(self.timeout, self.request_with(&endpoint, false, oauth))
             .await
             .map_err(|_| error("native Flickr extraction timed out"))?
     }
@@ -1399,14 +1446,16 @@ impl Flickr {
         }
     }
 
-    async fn request(&self, endpoint: &Url) -> Result<Vec<u8>> {
-        self.request_with(endpoint, false).await
-    }
-
-    /// `missing_ok` reads the body of 404/410 replies instead of failing.
-    async fn request_with(&self, endpoint: &Url, missing_ok: bool) -> Result<Vec<u8>> {
+    /// `missing_ok` reads the body of 404/410 replies instead of failing;
+    /// `oauth` signs each request to the API origin.
+    async fn request_with(
+        &self,
+        endpoint: &Url,
+        missing_ok: bool,
+        oauth: Option<&crate::oauth::OAuth1Credentials>,
+    ) -> Result<Vec<u8>> {
         for attempt in 0..=self.retries {
-            match self.attempt(endpoint, attempt, missing_ok).await {
+            match self.attempt(endpoint, attempt, missing_ok, oauth).await {
                 Ok(body) => return Ok(body),
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
@@ -1422,14 +1471,23 @@ impl Flickr {
         endpoint: &Url,
         attempt: u8,
         missing_ok: bool,
+        oauth: Option<&crate::oauth::OAuth1Credentials>,
     ) -> std::result::Result<Vec<u8>, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let response = self
-                .client
-                .get(target.clone())
+            let mut request = self.client.get(target.clone());
+            // Upstream `OAuth1Session.rebuild_auth`: every hop is signed
+            // afresh, but only while it stays on the API origin.
+            if let Some(oauth) = oauth.filter(|_| target.origin() == self.api_root.origin()) {
+                let header = oauth.header("GET", &target).map_err(|e| Failure {
+                    error: e,
+                    retry: false,
+                })?;
+                request = request.header(reqwest::header::AUTHORIZATION, header);
+            }
+            let response = request
                 .timeout(self.request_timeout)
                 .send()
                 .await
@@ -2262,5 +2320,126 @@ mod tests {
         assert!(!error.contains("secret-key") && !error.contains("127.0.0.1"));
         let requests = server.join().unwrap();
         assert!(requests[0].contains("method=flickr.urls.lookupUser&"));
+    }
+
+    #[tokio::test]
+    async fn configured_tokens_sign_every_api_call_without_api_key() {
+        let (root, server) = serve(vec![ok(info_body()), ok(sizes_body())]);
+        let native = with(
+            root.clone(),
+            json!({"api-secret": "consumer-secret", "access-token": "user-token",
+                "access-token-secret": "token-secret"}),
+        );
+        assert!(!format!("{:?}", native.options).contains("secret\""));
+        let media = collect(&native, "https://www.flickr.com/photos/alice/123").await;
+        assert_eq!(media.len(), 1);
+        assert!(media[0].headers.is_empty());
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with(
+            "GET /services/rest/?method=flickr.photos.getInfo&format=json&nojsoncallback=1&photo_id=123 "
+        ), "{}", requests[0]);
+        for request in &requests {
+            assert!(!request.contains("api_key="), "{request}");
+            let fields = crate::oauth::verify_signed_request(
+                request,
+                &root,
+                "consumer-secret",
+                "token-secret",
+            );
+            assert_eq!(fields["oauth_consumer_key"], "k");
+            assert_eq!(fields["oauth_token"], "user-token");
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_tokens_pair_with_the_public_site_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        cache
+            .set(
+                "gallery_dl.oauth._token_cache-('flickr', '0123abcdef4567')",
+                &json!(["cached-token", "cached-secret"]),
+                None,
+            )
+            .await
+            .unwrap();
+        let (root, server) = serve(vec![
+            response(
+                "404 Not Found",
+                b"<script>root.flickr.api.site_key = \"0123abcdef4567\";</script>",
+            ),
+            ok(info_body()),
+            ok(sizes_body()),
+        ]);
+        let native = public(root.clone())
+            .with_options(Some(
+                json!({"api-secret": "consumer-secret"})
+                    .as_object()
+                    .unwrap(),
+            ))
+            .unwrap()
+            .with_token_cache(Some(&cache));
+        let media = collect(&native, "https://www.flickr.com/photos/alice/123").await;
+        assert_eq!(media.len(), 1);
+        let requests = server.join().unwrap();
+        // The key page never sees credentials.
+        assert!(requests[0].starts_with("GET /prints "));
+        assert!(!requests[0].to_ascii_lowercase().contains("authorization"));
+        for request in &requests[1..] {
+            assert!(!request.contains("api_key="), "{request}");
+            let fields = crate::oauth::verify_signed_request(
+                request,
+                &root,
+                "consumer-secret",
+                "cached-secret",
+            );
+            assert_eq!(fields["oauth_consumer_key"], "0123abcdef4567");
+            assert_eq!(fields["oauth_token"], "cached-token");
+        }
+    }
+
+    #[tokio::test]
+    async fn tokens_without_an_api_secret_keep_the_public_api_key() {
+        // Upstream ships no Flickr consumer secret, so tokens alone do not
+        // sign requests; neither does a cache without a pair.
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        let (root, server) = serve(vec![
+            ok(info_body()),
+            ok(sizes_body()),
+            ok(info_body()),
+            ok(sizes_body()),
+        ]);
+        let unsigned = with(
+            root.clone(),
+            json!({"access-token": "user-token", "access-token-secret": "token-secret"}),
+        );
+        assert_eq!(
+            collect(&unsigned, "https://www.flickr.com/photos/alice/123")
+                .await
+                .len(),
+            1
+        );
+        let uncached =
+            with(root, json!({"api-secret": "consumer-secret"})).with_token_cache(Some(&cache));
+        assert_eq!(
+            collect(&uncached, "https://www.flickr.com/photos/alice/123")
+                .await
+                .len(),
+            1
+        );
+        for request in server.join().unwrap() {
+            assert!(request.contains("&api_key=k&"), "{request}");
+            assert!(!request.to_ascii_lowercase().contains("authorization"));
+            assert!(!request.contains("user-token"));
+        }
+    }
+
+    #[test]
+    fn invalid_token_settings_are_rejected_without_their_value() {
+        let error = Options::parse(json!({"access-token": "bad value"}).as_object().unwrap())
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "invalid Flickr setting: access-token");
     }
 }

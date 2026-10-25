@@ -349,14 +349,14 @@ upstream application), `oauth:tumblr`, `oauth:smugmug`, `oauth:flickr` (OAuth
 the request token, and the result prints upstream's messages. Tokens go to an
 SQLite cache with upstream's file location, `cache.file` setting, table,
 keys and (pickle) values, so it is shared with Python gallery-dl; new files are
-0600 on Unix. DeviantArt, Reddit, Pixiv, Tumblr and Mastodon read it for unset
-or `"cache"` token settings, DeviantArt writes rotated refresh tokens back, and
+0600 on Unix. DeviantArt, Reddit, Pixiv, Tumblr, SmugMug, Flickr and Mastodon
+read it for unset or `"cache"` token settings (Tumblr, SmugMug and Flickr sign
+native API requests with the shared OAuth 1.0a helper), DeviantArt writes rotated refresh tokens back, and
 Bluesky keeps session refresh tokens for 84 days. Unit tests cover the cache
 (round trips, expiry, Python pickles, permissions, disabled/unopenable files),
 RFC 2202/5849/7636 vectors, state and token mismatch, and every flow against
 local token servers with a simulated browser. Remaining: access tokens are not
-persisted between runs (upstream caches them for an hour), SmugMug and Flickr
-do not yet sign native API requests with the cached tokens, upstream's
+persisted between runs (upstream caches them for an hour), upstream's
 `host` setting is not supported (loopback only), and the flows have no live
 verification against the real authorization servers.
 
@@ -668,20 +668,25 @@ links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
 samples, plus Danbooru `ugoira` (ZIP originals with `media_metadata` frame
 delays for the ugoira postprocessors) and `external` (sources of file-less posts
 queued through the process-wide router). Upstream has no other favorites
-classes for these sites. Remaining: the DAPI `url` option, other
-Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
-aliases, per-post laziness of option requests (they run per page), and
-authenticated live verification.
-The other instances do not fit the current `booru::Site` model cleanly: `Site`
-is at once the API dialect, the output category, the media-CDN allow-list and
-the key of the per-site extractor/credential caches, and the category strings
-`danbooru`/`e621`/`e926` are special-cased across keyword policies, filter
-contexts, source-archive descriptors, naming defaults and compatibility
-normalization (e926 itself still shares e621's category and credentials).
-Distinct upstream categories need an instance layer (dialect, category, API
-root, CDN hosts such as `cdn.aibooru.download`/`static1.e6ai.net`, aibooru's
-host-dependent root) threaded through those paths with per-instance
-credential scopes, and their own source-oracle coverage.
+classes for these sites.
+Upstream's other Danbooru instances (atfbooru, aibooru, booruvar) and the e621
+instance e6ai are native too. `booru::Site` is now the instance (output
+category, exact upstream hosts and API root, including aibooru's
+host-dependent root, CDN allow-list, credentials and extractor cache slot) and
+`booru::Dialect` the API family; behaviour upstream implements per extractor
+base class keys on the dialect, while configuration scope, archive category and
+output key on the instance. Instance scopes inherit upstream's `basecategory`
+scopes `extractor.Danbooru`/`extractor.E621` (also consulted by danbooru and
+e621), credentials are instance-scoped, and atfbooru/booruvar resolve
+root-relative file URLs like upstream. Existing danbooru, e621/e926, gelbooru
+and safebooru output, archive identities and paths are unchanged.
+Remaining: the DAPI `url` option, Danbooru host aliases (hijiribe, sonohara,
+safebooru.donmai.us, donmai.moe), upstream's separate `e926` category (e926
+still shares e621's category and credentials natively), user-configured
+instances and the `Danbooru:URL`/`E621:URL` prefixes, class scopes under the
+base scopes, recorded source-oracle fixtures for the new instances, per-post
+laziness of option requests (they run per page), and authenticated live
+verification.
 
 **Implemented experimental native Mastodon:** every upstream class (statuses,
 ActivityPub `/objects/ID` resolved by redirect, user timelines, followed accounts
@@ -1158,8 +1163,10 @@ lists queued as child jobs), gallery, group, user, favorite and search classes
 via the REST API with the `/prints` site key (overridable `api-key`), upstream
 keyword dictionaries and default paths, album/gallery/group/search metadata,
 `video.getStreamInfo` videos, `_d` download URLs and the `videos`, `size-max`,
-`metadata`, `info`, `exif`, `contexts` and `profile` settings. Remaining:
-OAuth/private content, upstream's per-class archive formats (the photo ID is
+`metadata`, `info`, `exif`, `contexts` and `profile` settings, and
+upstream's OAuth 1.0a signing of every API call (`api-secret` plus a
+configured or `oauth:flickr`-cached token pair) for private content.
+Remaining: upstream's per-class archive formats (the photo ID is
 the archive identity) and `*.staticflickr.com` image URLs (kept as direct
 downloads).
 

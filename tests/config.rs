@@ -3873,6 +3873,198 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
 }
 
 #[test]
+fn booru_instances_consult_their_own_scope_then_the_upstream_basecategory() {
+    use gallery_dl_rs::booru::PoolOrder;
+    let cfg = parse(
+        r#"{"extractor":{"threshold":40,"metadata":"global",
+            "Danbooru":{"username":"base","password":"base-key","threshold":12,
+                "metadata":true,"external":true,"order-posts":"id","retries":2},
+            "aibooru":{"username":"ai","password":"ai-key","metadata":["notes"],
+                "tag":{"metadata-parent":"tagged"}},
+            "atfbooru":{"retries":5,"order-posts":"pool"},
+            "E621":{"metadata":"notes","threshold":30},
+            "e6ai":{"username":"six","password":"six-key","artist":{"metadata-parent":true}},
+            "gelbooru":{"retries":1}}}"#,
+    )
+    .unwrap();
+    let ai = cfg.resolve("aibooru").unwrap();
+    // The instance scope wins; unset keys fall back to `extractor.Danbooru`.
+    assert_eq!(ai.username.as_deref(), Some("ai"));
+    assert_eq!(ai.password.as_deref(), Some("ai-key"));
+    assert_eq!(ai.booru_threshold, Some(Some(12)));
+    assert_eq!(ai.retries, Some(2));
+    assert_eq!(ai.booru_order_posts, Some(PoolOrder::IdDescending));
+    let options = ai.site_options.unwrap();
+    assert_eq!(options["metadata"], serde_json::json!(["notes"]));
+    assert_eq!(options["external"], serde_json::json!(true));
+    let atf = cfg.resolve("atfbooru").unwrap();
+    assert_eq!(atf.username.as_deref(), Some("base"));
+    assert_eq!(atf.retries, Some(5));
+    assert_eq!(atf.booru_order_posts, Some(PoolOrder::Pool));
+    assert_eq!(
+        atf.site_options.unwrap()["metadata"],
+        serde_json::json!(true)
+    );
+    // Like upstream, danbooru itself also falls back to its basecategory.
+    let danbooru = cfg.resolve("danbooru").unwrap();
+    assert_eq!(danbooru.username.as_deref(), Some("base"));
+    assert_eq!(danbooru.booru_threshold, Some(Some(12)));
+    let booruvar = cfg.resolve("booruvar").unwrap();
+    assert_eq!(booruvar.username.as_deref(), Some("base"));
+    // Instance credentials stay in their instance.
+    for category in ["danbooru", "atfbooru", "booruvar", "e621", "e6ai"] {
+        let options = cfg.resolve(category).unwrap();
+        assert_ne!(options.username.as_deref(), Some("ai"), "{category}");
+    }
+    // The e621 family uses `extractor.E621`, never `extractor.Danbooru`.
+    let six = cfg.resolve("e6ai").unwrap();
+    assert_eq!(six.username.as_deref(), Some("six"));
+    assert_eq!(six.booru_threshold, Some(Some(30)));
+    assert_eq!(six.retries, None);
+    assert_eq!(six.booru_order_posts, None);
+    assert_eq!(six.site_options.unwrap()["metadata"], "notes");
+    let e621 = cfg.resolve("e621").unwrap();
+    assert_eq!(e621.username, None);
+    assert_eq!(e621.booru_threshold, Some(Some(30)));
+    assert_eq!(e621.site_options.unwrap()["metadata"], "notes");
+    let gelbooru = cfg.resolve("gelbooru").unwrap();
+    assert_eq!(gelbooru.retries, Some(1));
+    assert_eq!(gelbooru.username, None);
+    // Instance class scopes layer over the instance settings.
+    let tag = cfg.resolve_class("aibooru", "tag").unwrap();
+    assert_eq!(tag.username.as_deref(), Some("ai"));
+    assert_eq!(
+        tag.artist_parent_metadata(),
+        Some(&serde_json::json!("tagged"))
+    );
+    assert_eq!(
+        cfg.resolve_class("e6ai", "artist")
+            .unwrap()
+            .artist_parent_metadata(),
+        Some(&serde_json::json!(true))
+    );
+    assert_eq!(
+        cfg.resolve_class("atfbooru", "tag")
+            .unwrap()
+            .username
+            .as_deref(),
+        Some("base")
+    );
+    // The base scopes are configuration-only; they are not categories.
+    assert!(cfg.resolve("Danbooru").is_err());
+    assert!(cfg.resolve("E621").is_err());
+}
+
+#[test]
+fn booru_instance_and_base_scopes_validate_like_their_family() {
+    for document in [
+        // Base scopes accept no class settings.
+        serde_json::json!({"extractor":{"Danbooru":{"tag":{"filename":"x"}}}}),
+        serde_json::json!({"extractor":{"E621":{"artist":{}}}}),
+        // Family-specific options stay with their family.
+        serde_json::json!({"extractor":{"aibooru":{"user-id":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"e6ai":{"api-key":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"booruvar":{"username":"PRIVATE:VALUE"}}}),
+        serde_json::json!({"extractor":{"Danbooru":{"password":"PRIVATE\nVALUE"}}}),
+        serde_json::json!({"extractor":{"atfbooru":{"order-posts":"PRIVATE_VALUE"}}}),
+        serde_json::json!({"extractor":{"aibooru":"PRIVATE_VALUE"}}),
+        serde_json::json!({"extractor":{"E621":["PRIVATE_VALUE"]}}),
+        // Scopes are case-sensitive, as upstream's configuration keys.
+        serde_json::json!({"extractor":{"AIBooru":{"retries":1}}}),
+        serde_json::json!({"extractor":{"danbooru-base":{"retries":1}}}),
+    ] {
+        let error = parse(&document.to_string()).err().unwrap().to_string();
+        assert!(!error.contains("PRIVATE"), "{error}");
+    }
+    // e621-family instances ignore order-posts like upstream e621.
+    let cfg = parse(r#"{"extractor":{"e6ai":{"order-posts":"PRIVATE"}}}"#).unwrap();
+    assert_eq!(cfg.resolve("e6ai").unwrap().booru_order_posts, None);
+    let cfg = parse(r#"{"extractor":{"Danbooru":{"threshold":null},"atfbooru":{"threshold":0}}}"#)
+        .unwrap();
+    assert_eq!(
+        cfg.resolve("atfbooru").unwrap().booru_threshold,
+        Some(Some(1))
+    );
+    assert_eq!(cfg.resolve("aibooru").unwrap().booru_threshold, Some(None));
+}
+
+#[cfg(unix)]
+#[test]
+fn booru_instance_urls_route_to_their_instance_settings() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let backend = root.path().join("backend");
+    let log = root.path().join("arguments");
+    let config = root.path().join("native.json");
+    std::fs::write(
+        &backend,
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "$BOORU_INSTANCE_ARGUMENTS"
+printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extension":"jpg"}]]'
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(
+        &config,
+        r#"{"extractor":{"Danbooru":{"threshold":17},"E621":{"threshold":19},
+            "aibooru":{"threshold":21}}}"#,
+    )
+    .unwrap();
+    for (url, expected) in [
+        (
+            "https://aibooru.online/posts?tags=cat",
+            Some("threshold=21"),
+        ),
+        (
+            "https://safe.aibooru.online/posts?tags=cat",
+            Some("threshold=21"),
+        ),
+        (
+            "https://booru.allthefallen.moe/posts?tags=cat",
+            Some("threshold=17"),
+        ),
+        (
+            "https://booru.borvar.art/posts?tags=cat",
+            Some("threshold=17"),
+        ),
+        (
+            "https://danbooru.donmai.us/posts?tags=cat",
+            Some("threshold=17"),
+        ),
+        ("https://e6ai.net/posts?tags=cat", Some("threshold=19")),
+        ("https://e621.net/posts?tags=cat", Some("threshold=19")),
+        (
+            "https://gelbooru.com/index.php?page=post&s=list&tags=cat",
+            None,
+        ),
+    ] {
+        let output = common::binary_command()
+            .env("BOORU_INSTANCE_ARGUMENTS", &log)
+            .arg("--native-config")
+            .arg(&config)
+            .arg("--extractor-command")
+            .arg(&backend)
+            .args(["--extractor", "compatibility", "-g", url])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let arguments = std::fs::read_to_string(&log).unwrap();
+        let args: Vec<_> = arguments.lines().collect();
+        let forwarded: Vec<_> = args
+            .windows(2)
+            .filter(|pair| pair[0] == "--option" && pair[1].starts_with("threshold="))
+            .map(|pair| pair[1])
+            .collect();
+        assert_eq!(forwarded, expected.into_iter().collect::<Vec<_>>(), "{url}");
+    }
+}
+
+#[test]
 fn danbooru_pool_order_aliases_and_falsy_resets_are_independent_of_kemono() {
     use gallery_dl_rs::{booru::PoolOrder, kemono::PostOrder};
     for (values, expected) in [

@@ -23,7 +23,7 @@ pub(super) fn capture(site: Site, url: &Url) -> Option<Vec<(String, String)>> {
     }
     let prefix = if url.path().starts_with("/explore/posts/popular") {
         "/explore/posts/popular"
-    } else if site == Site::Danbooru && url.path().starts_with("/popular") {
+    } else if site.dialect() == Dialect::Danbooru && url.path().starts_with("/popular") {
         "/popular"
     } else {
         return None;

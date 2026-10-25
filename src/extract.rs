@@ -564,7 +564,7 @@ impl Media {
                 )
             }
             // Booru files are identified by their site and post ID.
-            category @ ("danbooru" | "e621" | "gelbooru" | "safebooru") => {
+            category if crate::booru::Site::from_category(category).is_some() => {
                 let post = self.metadata.as_ref()?;
                 if !crate::booru::valid_id(&post.post_id) {
                     return None;
@@ -958,6 +958,10 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         return Some("twitter");
     }
     if let Some(site) = crate::imagehosts::Site::from_host(host) {
+        return Some(site.category());
+    }
+    // Upstream's additional Danbooru/e621 instances, by their exact hosts.
+    if let Some(site) = crate::booru::Site::from_instance_host(host) {
         return Some(site.category());
     }
     if crate::bluesky::is_host(host) {
@@ -1865,6 +1869,10 @@ const DEDICATED_CATEGORIES: &[&str] = &[
     "danbooru",
     "e621",
     "e926",
+    "atfbooru",
+    "aibooru",
+    "booruvar",
+    "e6ai",
     "gelbooru",
     "safebooru",
     "mastodon",
@@ -2076,7 +2084,7 @@ fn compatibility_metadata(
                 },
             )
         }
-        "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru" => {
+        booru if crate::booru::category_dialect(booru).is_some() => {
             let post_id = id("id");
             (
                 post_id.clone(),
@@ -2210,7 +2218,9 @@ fn compatibility_metadata(
         tags_bookmark: matches!(category, "pixiv" | "pixiv-novel")
             .then(|| data.get("tags_bookmark").and_then(pixiv_bookmark_tags))
             .flatten(),
-        favgroup: if category == "danbooru" {
+        favgroup: if crate::booru::category_dialect(category)
+            == Some(crate::booru::Dialect::Danbooru)
+        {
             data.get("favgroup")
                 .filter(|value| value.is_object())
                 .cloned()
@@ -2218,7 +2228,7 @@ fn compatibility_metadata(
         } else {
             None
         },
-        pool: if matches!(category, "danbooru" | "e621" | "e926") {
+        pool: if crate::booru::is_danbooru_family(category) {
             data.get("pool")
                 .filter(|value| value.is_object())
                 .cloned()
@@ -2228,14 +2238,13 @@ fn compatibility_metadata(
         } else {
             None
         },
-        search_tags: crate::booru::Site::from_category(category)
-            .or_else(|| (category == "e926").then_some(crate::booru::Site::E621))
+        search_tags: crate::booru::category_dialect(category)
             .and_then(|_| data.get("search_tags").and_then(Value::as_str))
             .filter(|tags| tags.len() <= 1024)
             .map(std::sync::Arc::from),
         source_defaults: None,
         booru_artist_parent: None,
-        booru_popular: matches!(category, "danbooru" | "e621" | "e926")
+        booru_popular: crate::booru::is_danbooru_family(category)
             .then(|| {
                 data.get("scale").map(|_| {
                     std::sync::Arc::new(
@@ -2253,15 +2262,14 @@ fn compatibility_metadata(
         booru_pool_name: matches!(category, "gelbooru" | "safebooru")
             .then(|| data.get("pool_name").cloned())
             .flatten(),
-        booru_user_id: matches!(category, "e621" | "e926")
-            .then(|| data.get("user_id").cloned())
-            .flatten(),
-        booru_keywords: (matches!(
-            category,
-            "danbooru" | "e621" | "e926" | "gelbooru" | "safebooru"
-        ) && (data.contains_key("filename")
-            || data.contains_key("extension")
-            || data.contains_key("md5")))
+        booru_user_id: (crate::booru::category_dialect(category)
+            == Some(crate::booru::Dialect::E621))
+        .then(|| data.get("user_id").cloned())
+        .flatten(),
+        booru_keywords: (crate::booru::category_dialect(category).is_some()
+            && (data.contains_key("filename")
+                || data.contains_key("extension")
+                || data.contains_key("md5")))
         .then(|| {
             std::sync::Arc::new(
                 ["filename", "extension", "md5"]
