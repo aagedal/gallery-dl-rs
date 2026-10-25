@@ -1,3 +1,4 @@
+mod common;
 use gallery_dl_rs::{
     download::{self, Outcome},
     extract::{self, Media, PostMetadata},
@@ -59,7 +60,7 @@ fn item(url: &str, timestamp: Option<i64>) -> Media {
         rating: None,
         score: None,
         revision: None,
-        kemono_extras: None,
+        extra_keywords: None,
         discord: None,
         creator: None,
         community: None,
@@ -237,7 +238,7 @@ fn exec_runs_after_downloaded_files_and_once_after_all() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("log.txt");
     let (url, handle) = server();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .arg("-d")
         .arg(root.path().join("out"))
         .arg("--exec")
@@ -257,7 +258,7 @@ fn exec_runs_after_downloaded_files_and_once_after_all() {
     let lines: Vec<_> = log_text.lines().map(str::trim).collect();
     assert_eq!(lines, ["4", "done"]);
     // A failing command fails the run.
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .arg("--exec-after")
         .arg("exit 3")
         .args(["-d", root.path().join("empty").to_str().unwrap()])

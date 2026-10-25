@@ -10,7 +10,7 @@ pub mod http;
 
 mod adult;
 mod adult_video;
-mod art;
+pub(crate) mod art;
 mod boorus;
 mod filehosts;
 mod imageboards;
@@ -278,6 +278,16 @@ pub(crate) fn supported(url: &Url) -> bool {
     find(url).is_some()
         || media::is_direct_link(url)
         || ROUTER.get().is_some_and(|router| (router.supports)(url))
+}
+
+/// Route a queued URL through the installed program router alone, for
+/// dedicated native extractors outside the registry. `None` when no router
+/// is installed or it does not accept the URL.
+pub fn route(url: Url) -> Option<Events<'static>> {
+    ROUTER
+        .get()
+        .filter(|router| (router.supports)(&url))
+        .and_then(|router| (router.extract)(url))
 }
 
 /// Extract any registry URL, for child jobs that cross site boundaries.

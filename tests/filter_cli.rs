@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 
 use serde_json::{Value, json};
 use std::{
@@ -43,7 +44,7 @@ fn fixture(root: &Path, first: &[Value], second: &[Value]) -> PathBuf {
     )
 }
 fn binary(root: &Path, backend: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+    let mut command = Command::from(common::binary_command());
     command
         .current_dir(root)
         .kill_on_drop(true)

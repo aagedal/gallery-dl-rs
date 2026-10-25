@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 
 use futures_util::{FutureExt, StreamExt};
 use gallery_dl_rs::extract::Backend;
@@ -137,7 +138,7 @@ async fn cli_listing_preserves_items_and_continues_after_late_failure() {
             &format!("printf '%s' '[{ROW}'\n{trailer}"),
             Duration::from_secs(5),
         );
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+        let mut command = tokio::process::Command::from(common::binary_command());
         command
             .arg("--extractor-command")
             .arg(backend.executable)

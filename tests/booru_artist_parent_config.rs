@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use futures_util::StreamExt;
 use gallery_dl_rs::{
     config::{Config, Options},
@@ -171,7 +172,7 @@ fn cli_loads_class_scoped_templates_with_a_parent_key_declared_in_another_scope(
         .unwrap(),
     )
     .unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .args(["--extractor", "native", "--get-urls", "--native-config"])
         .arg(&config)
         .arg("https://example.invalid/file.jpg")

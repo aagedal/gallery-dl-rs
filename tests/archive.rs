@@ -1,3 +1,4 @@
+mod common;
 use gallery_dl_rs::{
     archive::{Archive, ArchiveOutcome},
     download::{self, DownloadOptions, Outcome},
@@ -8,7 +9,6 @@ use std::{
     io::{Read, Write},
     net::TcpListener,
     path::Path,
-    process::Command,
     thread,
     time::{Duration, Instant},
 };
@@ -61,7 +61,7 @@ fn item(url: &str) -> Media {
         rating: None,
         score: None,
         revision: None,
-        kemono_extras: None,
+        extra_keywords: None,
         discord: None,
         creator: None,
         community: None,
@@ -363,7 +363,7 @@ fn cli_archive_is_opt_in_persistent_and_conflicts_with_inspection() {
     std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
     std::fs::write(&saved, b"existing").unwrap();
     let run = || {
-        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        common::binary_command()
             .arg("--download-archive")
             .arg(&path)
             .arg("-d")
@@ -384,7 +384,7 @@ fn cli_archive_is_opt_in_persistent_and_conflicts_with_inspection() {
     assert!(second.status.success());
     assert!(String::from_utf8_lossy(&second.stderr).contains("skipped archived media"));
     for mode in ["-j", "-g"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        let output = common::binary_command()
             .arg("--download-archive")
             .arg(root.path().join("must-not-exist.sqlite3"))
             .args([mode, url])
@@ -461,7 +461,7 @@ fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
     let script = root.path().join("backend");
     std::fs::write(&script, format!("#!/bin/sh\ncat '{}'\n", fixture.display())).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .arg("--download-archive")
         .arg(&path)
         .arg("--extractor-command")
@@ -562,7 +562,7 @@ fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
     let saved = root.path().join("direct/picture.jpg");
     std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
     std::fs::write(&saved, b"keep existing").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .arg("-d")
         .arg(root.path())
         .args([
@@ -581,7 +581,7 @@ fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
     assert_eq!(std::fs::read(&saved).unwrap(), b"keep existing");
     assert!(saved.with_extension("jpg.json").is_file());
     let invalid_archive = root.path().join("must-not-exist.sqlite3");
-    let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+    let output = common::binary_command()
         .arg("--download-archive")
         .arg(&invalid_archive)
         .args(["-f", "../{filename}", "http://127.0.0.1:1/picture.jpg"])
@@ -590,7 +590,7 @@ fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
     assert_eq!(output.status.code(), Some(1));
     assert!(!invalid_archive.exists());
     for mode in ["-j", "-g"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        let output = common::binary_command()
             .args([mode, "-f", "{filename}", "https://example.com/a.jpg"])
             .output()
             .unwrap();
@@ -694,7 +694,7 @@ fn terminate_stops_after_consecutive_skipped_files() {
         std::fs::write(&saved, b"existing").unwrap();
     }
     let run = |extra: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        common::binary_command()
             .args(["--jobs", "1", "--retries", "0"])
             .args(extra)
             .arg("-d")
@@ -723,7 +723,7 @@ fn abort_stops_only_the_input_with_consecutive_skips() {
     std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
     std::fs::write(&saved, b"existing").unwrap();
     let run = |flag: &str| {
-        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+        common::binary_command()
             .args(["--jobs", "1", "--retries", "0", flag, "1", "-d"])
             .arg(root.path())
             .args([existing, "http://127.0.0.1:1/missing.jpg"])

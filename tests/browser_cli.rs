@@ -1,9 +1,10 @@
+mod common;
 use std::{path::Path, process::Output, time::Duration};
 
 use tokio::{io::AsyncWriteExt, process::Command};
 
 fn binary(cwd: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+    let mut command = Command::from(common::binary_command());
     command.current_dir(cwd).kill_on_drop(true);
     command
 }

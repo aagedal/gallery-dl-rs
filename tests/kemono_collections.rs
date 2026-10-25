@@ -124,10 +124,13 @@ async fn favorite_post_children_keep_direct_archive_identity_and_ignore_queue_di
     let selected = selected[0].as_ref().unwrap();
     let direct = kemono::parse_post(&post("7"), "kemono.cr", "patreon", "42").remove(0);
     assert_eq!(selected.archive_key(), direct.archive_key());
+    // Extraction adds upstream's always-present `archives` keyword.
+    let mut metadata = serde_json::to_value(&selected.metadata).unwrap();
     assert_eq!(
-        serde_json::to_value(&selected.metadata).unwrap(),
-        serde_json::to_value(&direct.metadata).unwrap()
+        metadata.as_object_mut().unwrap().remove("archives"),
+        Some(json!([]))
     );
+    assert_eq!(metadata, serde_json::to_value(&direct.metadata).unwrap());
     assert!(
         !serde_json::to_string(selected)
             .unwrap()

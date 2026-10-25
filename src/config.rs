@@ -67,7 +67,16 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     (
         "flickr",
         &[
-            "videos", "exif", "info", "contexts", "profile", "metadata", "size-max",
+            "videos",
+            "exif",
+            "info",
+            "contexts",
+            "profile",
+            "metadata",
+            "size-max",
+            "api-secret",
+            "access-token",
+            "access-token-secret",
         ],
     ),
     (
@@ -89,16 +98,22 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("wallhaven", &["metadata"]),
     ("pixeldrain", &["zip", "recursive"]),
-    ("kemono", &["dms", "announcements"]),
-    ("coomer", &["dms", "announcements"]),
-    ("danbooru", &["metadata"]),
+    (
+        "kemono",
+        &["dms", "announcements", "archives", "archives-format"],
+    ),
+    (
+        "coomer",
+        &["dms", "announcements", "archives", "archives-format"],
+    ),
+    ("danbooru", &["metadata", "external"]),
     ("e621", &["metadata"]),
     ("gelbooru", &["tags", "notes"]),
     ("safebooru", &["tags", "notes"]),
     ("furaffinity", &["descriptions", "external", "layout"]),
     ("weasyl", &["metadata"]),
     ("newgrounds", &["flash", "format"]),
-    ("bluesky", &["depth"]),
+    ("bluesky", &["depth", "metadata"]),
     (
         "tumblr",
         &[
@@ -607,6 +622,87 @@ pub struct Config {
     categories: BTreeMap<String, Options>,
     classes: BTreeMap<(String, String), Options>,
     parent_keywords: Vec<String>,
+    cache: crate::cache::Location,
+    oauth: crate::oauth::Settings,
+}
+
+/// Upstream `cache`: an object whose `file` is a path or null (disabled).
+fn cache_location(value: Value, directory: &Path) -> Result<crate::cache::Location> {
+    let invalid = || error("native configuration cache must be an object with a file path or null");
+    let Value::Object(mut fields) = value else {
+        return Err(invalid());
+    };
+    let location = match fields.remove("file") {
+        None => crate::cache::Location::Default,
+        Some(Value::Null) => crate::cache::Location::Disabled,
+        Some(file) => crate::cache::Location::File(
+            path(Field(Some(file)), directory, "cache.file")?.ok_or_else(invalid)?,
+        ),
+    };
+    if !fields.is_empty() {
+        return Err(invalid());
+    }
+    Ok(location)
+}
+
+/// Remove and validate `extractor.oauth` (`cache`, `browser`, `port`), and
+/// capture the site credentials upstream's `oauth:SITE` reads.
+fn oauth_settings(root: &mut Value) -> Result<crate::oauth::Settings> {
+    let mut settings = crate::oauth::Settings::default();
+    let Some(extractor) = root.get_mut("extractor").and_then(Value::as_object_mut) else {
+        return Ok(settings);
+    };
+    for category in [
+        "deviantart",
+        "flickr",
+        "mastodon",
+        "mastodon.social",
+        "pawoo",
+        "baraag",
+        "pixiv",
+        "reddit",
+        "smugmug",
+        "tumblr",
+    ] {
+        if let Some(fields) = extractor.get(category).and_then(Value::as_object) {
+            for key in crate::oauth::CREDENTIAL_KEYS {
+                if let Some(value) = fields.get(*key) {
+                    settings
+                        .values
+                        .insert((category.to_owned(), (*key).to_owned()), value.clone());
+                }
+            }
+        }
+    }
+    let Some(value) = extractor.remove("oauth") else {
+        return Ok(settings);
+    };
+    let Value::Object(fields) = value else {
+        return Err(error(
+            "native configuration oauth settings must be a JSON object",
+        ));
+    };
+    for (key, value) in fields {
+        match (key.as_str(), value) {
+            ("cache", Value::Bool(value)) => settings.cache = value,
+            ("browser", Value::Bool(value)) => settings.browser = value,
+            ("port", Value::Number(port)) => {
+                settings.port = port
+                    .as_u64()
+                    .and_then(|port| u16::try_from(port).ok())
+                    .filter(|port| *port > 0)
+                    .ok_or_else(|| error("native configuration oauth port must be 1-65535"))?;
+            }
+            ("cache" | "browser", _) => {
+                return Err(error(
+                    "native configuration oauth cache and browser must be booleans",
+                ));
+            }
+            ("port", _) => return Err(error("native configuration oauth port must be 1-65535")),
+            _ => return Err(error("unsupported native oauth setting")),
+        }
+    }
+    Ok(settings)
 }
 
 // Separate structs deliberately avoid serde flatten: duplicate and unknown
@@ -1228,6 +1324,15 @@ impl Config {
         let mut site_options = BTreeMap::new();
         let mut original: Value = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
+        // `cache.file` and `extractor.oauth` are process-wide settings.
+        let cache = match original
+            .as_object_mut()
+            .and_then(|root| root.remove("cache"))
+        {
+            None => crate::cache::Location::Default,
+            Some(value) => cache_location(value, directory)?,
+        };
+        let oauth = oauth_settings(&mut original)?;
         if let Some(extractor) = original.get_mut("extractor").and_then(Value::as_object_mut) {
             // Shared job options keep their typed meaning; all other keys
             // belong to the site, even where another site uses the name.
@@ -1554,11 +1659,13 @@ impl Config {
                     "native configuration threshold is only supported for danbooru and e621",
                 ));
             }
+            // Pixiv's username only selects its cached refresh token.
             if !matches!(name, "danbooru" | "e621" | "bluesky")
                 && (settings.username.0.is_some() || settings.password.0.is_some())
+                && !(matches!(name, "pixiv" | "pixiv-novel") && settings.password.0.is_none())
             {
                 return Err(error(
-                    "native configuration username/password are only supported for danbooru, e621 and bluesky",
+                    "native configuration username/password are only supported for danbooru, e621 and bluesky (and a pixiv username)",
                 ));
             }
             if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
@@ -1624,12 +1731,28 @@ impl Config {
                     "native configuration refresh-token is only supported for pixiv, pixiv-novel or deviantart",
                 ));
             }
-            if name != "deviantart"
+            if !matches!(name, "pixiv" | "pixiv-novel" | "deviantart")
                 && (settings.client_id.0.is_some() || settings.client_secret.0.is_some())
             {
                 return Err(error(
-                    "native configuration client-id and client-secret are only supported for deviantart",
+                    "native configuration client-id and client-secret are only supported for pixiv, pixiv-novel or deviantart",
                 ));
+            }
+            // DeviantArt client IDs are numeric; upstream also accepts integers.
+            if name == "deviantart"
+                && let Some(id) = &mut settings.client_id.0
+            {
+                if let Some(number) = id.as_u64() {
+                    *id = Value::String(number.to_string());
+                }
+                if !id
+                    .as_str()
+                    .is_some_and(|id| id.bytes().all(|b| b.is_ascii_digit()))
+                {
+                    return Err(error(
+                        "native configuration client-id must be 1-128 ASCII digits",
+                    ));
+                }
             }
             let opaque_key = if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
                 match settings.api_key.0.take() {
@@ -1691,7 +1814,19 @@ impl Config {
             categories,
             classes,
             parent_keywords,
+            cache,
+            oauth,
         })
+    }
+
+    /// The credential cache file (upstream `cache.file`).
+    pub fn cache_location(&self) -> &crate::cache::Location {
+        &self.cache
+    }
+
+    /// `extractor.oauth` settings and the site credentials `oauth:SITE` uses.
+    pub fn oauth_settings(&self) -> &crate::oauth::Settings {
+        &self.oauth
     }
 
     pub fn resolve(&self, category: &str) -> Result<Options> {
@@ -1969,8 +2104,7 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(false)) => Some(String::new()),
             Some(Value::String(value))
-                if value != "cache"
-                    && value.len() <= 4096
+                if value.len() <= 4096
                     && value
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b)) =>
@@ -1979,7 +2113,7 @@ impl RawOptions {
             }
             Some(_) => {
                 return Err(error(
-                    "native configuration Mastodon access-token must be a bearer token string or false; OAuth cache discovery is not implemented",
+                    "native configuration Mastodon access-token must be a bearer token string, \"cache\" or false",
                 ));
             }
         };
@@ -2234,31 +2368,20 @@ impl RawOptions {
                 ));
             }
         };
-        let credential = |field: Field, name: &str, digits: bool| match field.0 {
+        let credential = |field: Field, name: &str| match field.0 {
             None => Ok(None),
             Some(Value::String(value))
                 if (1..=128).contains(&value.len())
-                    && value.bytes().all(|b| {
-                        if digits {
-                            b.is_ascii_digit()
-                        } else {
-                            b.is_ascii_alphanumeric()
-                        }
-                    }) =>
+                    && value.bytes().all(|b| b.is_ascii_alphanumeric()) =>
             {
                 Ok(Some(value))
             }
             Some(_) => Err(error(format!(
-                "native configuration {name} must be 1-128 ASCII {}",
-                if digits {
-                    "digits"
-                } else {
-                    "letters or digits"
-                }
+                "native configuration {name} must be 1-128 ASCII letters or digits"
             ))),
         };
-        let client_id = credential(self.client_id, "client-id", true)?;
-        let client_secret = credential(self.client_secret, "client-secret", false)?;
+        let client_id = credential(self.client_id, "client-id")?;
+        let client_secret = credential(self.client_secret, "client-secret")?;
         let file_range = range_spec(self.file_range, "file-range")?;
         let (filename, filename_conditions) = match self.filename.0 {
             None => (None, None),
@@ -2912,6 +3035,8 @@ mod site_scope_tests {
                 "newgrounds":{"flash":false,"format":"720p"},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k","api-secret":"s",
                     "access-token":"t","access-token-secret":"ts"},
+                "danbooru":{"external":true,"ugoira":true,"metadata":"notes"},
+                "kemono":{"archives":true,"archives-format":"dict"},
                 "bluesky":{"depth":2,"username":"alice.bsky.social","password":"pw"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -2970,6 +3095,14 @@ mod site_scope_tests {
         assert_eq!(options["access-token"], serde_json::json!("t"));
         assert_eq!(options["access-token-secret"], serde_json::json!("ts"));
         assert_eq!(tumblr.access_token, None);
+        let danbooru = config.resolve("danbooru").unwrap();
+        assert_eq!(danbooru.ugoira, Some(crate::pixiv::UgoiraMode::Zip));
+        let options = danbooru.site_options.unwrap();
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert!(!options.contains_key("ugoira"));
+        let options = config.resolve("kemono").unwrap().site_options.unwrap();
+        assert_eq!(options["archives"], serde_json::json!(true));
+        assert_eq!(options["archives-format"], serde_json::json!("dict"));
         let bluesky = config.resolve("bluesky").unwrap();
         assert_eq!(bluesky.username.as_deref(), Some("alice.bsky.social"));
         assert_eq!(bluesky.password.as_deref(), Some("pw"));
@@ -2988,6 +3121,90 @@ mod site_scope_tests {
             br#"{"retries":1,"retries":2}"#,
         ] {
             assert!(super::Config::parse(bad, &dir).is_err());
+        }
+    }
+
+    #[test]
+    fn cache_file_and_oauth_settings() {
+        use crate::cache::Location;
+        let dir = std::env::temp_dir();
+        let parse = |json: &str| super::Config::parse(json.as_bytes(), &dir);
+        let config = parse("{}").unwrap();
+        assert_eq!(config.cache_location(), &Location::Default);
+        let settings = config.oauth_settings();
+        assert!(settings.cache && settings.browser);
+        assert_eq!(settings.port, 6414);
+        assert_eq!(
+            parse(r#"{"cache":{"file":null}}"#)
+                .unwrap()
+                .cache_location(),
+            &Location::Disabled
+        );
+        assert_eq!(
+            parse(r#"{"cache":{"file":"tokens.sqlite3"}}"#)
+                .unwrap()
+                .cache_location(),
+            &Location::File(dir.join("tokens.sqlite3"))
+        );
+        // `-o cache.file=...` reaches the same setting.
+        let config = super::Config::parse_with_options(
+            b"{}",
+            &dir,
+            &[super::parse_option("cache.file=null").unwrap()],
+        )
+        .unwrap();
+        assert_eq!(config.cache_location(), &Location::Disabled);
+
+        let config = parse(
+            r#"{"extractor":{"oauth":{"cache":false,"browser":false,"port":8080},
+                "deviantart":{"client-id":"123","client-secret":"abc","refresh-token":"cache"},
+                "pixiv":{"username":"alice","client-id":"pixivApp","client-secret":"s3cret"},
+                "pawoo":{"access-token":"cache"},
+                "flickr":{"api-key":"k","api-secret":"s","access-token":"cache"},
+                "smugmug":{"api-key":"k2","api-secret":"s2"}}}"#,
+        )
+        .unwrap();
+        let settings = config.oauth_settings();
+        assert!(!settings.cache && !settings.browser);
+        assert_eq!(settings.port, 8080);
+        for (category, key, value) in [
+            ("deviantart", "client-id", "123"),
+            ("pixiv", "username", "alice"),
+            ("flickr", "api-secret", "s"),
+            ("smugmug", "api-key", "k2"),
+            ("pawoo", "access-token", "cache"),
+        ] {
+            assert_eq!(
+                settings.values[&(category.to_owned(), key.to_owned())],
+                serde_json::json!(value)
+            );
+        }
+        let pixiv = config.resolve("pixiv").unwrap();
+        assert_eq!(pixiv.username.as_deref(), Some("alice"));
+        assert_eq!(pixiv.client_id.as_deref(), Some("pixivApp"));
+        assert_eq!(
+            config.resolve("pawoo").unwrap().access_token.as_deref(),
+            Some("cache")
+        );
+        assert_eq!(
+            config.resolve("deviantart").unwrap().client_id.as_deref(),
+            Some("123")
+        );
+        for bad in [
+            r#"{"cache":"x"}"#,
+            r#"{"cache":{"file":""}}"#,
+            r#"{"cache":{"file":"~/x"}}"#,
+            r#"{"cache":{"file":null,"other":1}}"#,
+            r#"{"extractor":{"oauth":{"port":0}}}"#,
+            r#"{"extractor":{"oauth":{"port":70000}}}"#,
+            r#"{"extractor":{"oauth":{"browser":"yes"}}}"#,
+            r#"{"extractor":{"oauth":{"host":"0.0.0.0"}}}"#,
+            r#"{"extractor":{"oauth":[]}}"#,
+            r#"{"extractor":{"pixiv":{"password":"p"}}}"#,
+            r#"{"extractor":{"deviantart":{"client-id":"abc"}}}"#,
+            r#"{"extractor":{"tumblr":{"client-id":"1"}}}"#,
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
         }
     }
 }

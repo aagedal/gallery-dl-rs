@@ -285,7 +285,7 @@ mod tests {
                 rating: None,
                 score: None,
                 revision: None,
-                kemono_extras: None,
+                extra_keywords: None,
                 discord: None,
                 creator: None,
                 community: None,

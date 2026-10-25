@@ -1,9 +1,12 @@
 //! Native Bluesky login (`username`/`password`), upstream's `BlueskyAPI.authenticate`,
-//! plus extractor options that are not typed configuration fields (`depth`).
+//! plus extractor options that are not typed configuration fields (`depth`,
+//! `metadata`).
 //!
 //! Sessions are created lazily with `com.atproto.server.createSession` on the
-//! configured API root (`https://bsky.social` unless `api-server` is set) and
-//! kept in memory only. An expired access token is refreshed once through
+//! configured API root (`https://bsky.social` unless `api-server` is set).
+//! As upstream, the refresh token is kept in the credential cache for 84 days
+//! (per `username`), and a later run refreshes that session before logging in
+//! again. An expired access token is refreshed once through
 //! `com.atproto.server.refreshSession`, falling back to a new login. Access
 //! tokens are attached only to requests on the API root's origin; DID
 //! discovery, repository reads and blob downloads never carry them.
@@ -14,6 +17,8 @@ use serde_json::{Map, Value};
 
 /// Upper bound for upstream's `depth` (reply levels of a post thread).
 const MAX_DEPTH: u64 = 1000;
+/// Upstream keeps cached refresh tokens for 84 days.
+const REFRESH_LIFETIME: std::time::Duration = std::time::Duration::from_secs(84 * 86400);
 
 pub(super) struct Credentials {
     identifier: String,
@@ -62,7 +67,8 @@ impl Bluesky {
         Ok(self)
     }
 
-    /// Apply upstream settings without typed configuration fields: `depth`.
+    /// Apply upstream settings without typed configuration fields: `depth`
+    /// and `metadata`.
     pub fn with_options(mut self, options: Option<&Map<String, Value>>) -> Result<Self> {
         for (key, value) in options.into_iter().flatten() {
             let invalid = || error(format!("invalid Bluesky setting: {key}"));
@@ -79,6 +85,28 @@ impl Bluesky {
                     if self.depth > MAX_DEPTH {
                         return Err(invalid());
                     }
+                }
+                // Upstream: a comma-separated string (spaces removed) or a
+                // list selects `user`/`facets`; any other truthy value both.
+                "metadata" => {
+                    let selected: Vec<String> = match value {
+                        Value::String(text) => text
+                            .replace(' ', "")
+                            .split(',')
+                            .map(str::to_owned)
+                            .collect(),
+                        Value::Array(items) => items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect(),
+                        value if crate::postprocess::truthy(value) => {
+                            vec!["user".into(), "facets".into()]
+                        }
+                        _ => Vec::new(),
+                    };
+                    self.metadata_user = selected.iter().any(|item| item == "user");
+                    self.metadata_facets = selected.iter().any(|item| item == "facets");
                 }
                 _ => return Err(error(format!("unsupported Bluesky setting: {key}"))),
             }
@@ -100,9 +128,56 @@ impl Bluesky {
         }
         let mut session = self.session.lock().await;
         if session.is_none() {
-            *session = Some(self.create_session().await?);
+            *session = Some(self.start_session().await?);
         }
         Ok(session.as_ref().map(|session| session.access.clone()))
+    }
+
+    /// Persist refresh tokens in the credential cache, like upstream (84
+    /// days, keyed by `username`), so later runs refresh instead of logging
+    /// in again.
+    pub fn with_token_cache(mut self, cache: Option<&crate::cache::Cache>) -> Self {
+        self.token_cache = cache.cloned();
+        self
+    }
+
+    fn cache_key(&self) -> Option<(&crate::cache::Cache, String)> {
+        let cache = self.token_cache.as_ref()?;
+        let username = &self.credentials.as_ref()?.identifier;
+        Some((
+            cache,
+            crate::cache::key("extractor.bluesky", "_refresh_token_cache", username),
+        ))
+    }
+
+    /// Upstream `_authenticate_impl`: refresh a cached session, else log in.
+    async fn start_session(&self) -> Result<Session> {
+        if let Some((cache, key)) = self.cache_key()
+            && let Ok(Some(refresh)) = cache.get_str(&key).await
+            && valid_jwt(&refresh)
+            && let Ok(session) = self
+                .session_call("com.atproto.server.refreshSession", Some(&refresh), None)
+                .await
+        {
+            self.remember(&session).await;
+            return Ok(session);
+        }
+        let session = self.create_session().await?;
+        self.remember(&session).await;
+        Ok(session)
+    }
+
+    async fn remember(&self, session: &Session) {
+        if let Some((cache, key)) = self.cache_key() {
+            let value = Value::from(session.refresh.as_str());
+            if cache
+                .set(&key, &value, Some(REFRESH_LIFETIME))
+                .await
+                .is_err()
+            {
+                eprintln!("could not store the Bluesky refresh token in the cache");
+            }
+        }
     }
 
     /// Replace an expired access token (unless another request already did).
@@ -123,6 +198,7 @@ impl Bluesky {
             },
             None => self.create_session().await?,
         };
+        self.remember(&renewed).await;
         *session = Some(renewed);
         Ok(())
     }
@@ -477,6 +553,72 @@ mod tests {
             );
             assert!(!request.contains(PASSWORD));
         }
+    }
+
+    #[tokio::test]
+    async fn cached_refresh_tokens_resume_sessions_across_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        let key = "gallery_dl.extractor.bluesky._refresh_token_cache-alice.bsky.social";
+        let empty = json!({"bookmarks": []});
+        let run = |root: Url| {
+            let cache = cache.clone();
+            async move {
+                let native = bluesky()
+                    .with_credentials(Some("alice.bsky.social"), Some(PASSWORD))
+                    .unwrap()
+                    .with_token_cache(Some(&cache))
+                    .with_api_root(root);
+                let events: Vec<_> = native
+                    .events(&Url::parse("https://bsky.app/saved").unwrap())
+                    .collect()
+                    .await;
+                assert!(events.iter().all(Result::is_ok), "{events:?}");
+            }
+        };
+
+        // A first run logs in and stores the refresh token for 84 days.
+        let (root, server) = serve(vec![
+            response("200 OK", &session("access.one", "refresh.one")),
+            response("200 OK", &empty),
+        ]);
+        run(root).await;
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /xrpc/com.atproto.server.createSession "));
+        assert_eq!(
+            cache.get_str(key).await.unwrap().as_deref(),
+            Some("refresh.one")
+        );
+
+        // The next run refreshes that session instead of sending the password.
+        let (root, server) = serve(vec![
+            response("200 OK", &session("access.two", "refresh.two")),
+            response("200 OK", &empty),
+        ]);
+        run(root).await;
+        let requests = server.join().unwrap();
+        let refresh = requests[0].to_ascii_lowercase();
+        assert!(refresh.starts_with("post /xrpc/com.atproto.server.refreshsession "));
+        assert!(refresh.contains("authorization: bearer refresh.one\r\n"));
+        assert!(!requests[0].contains(PASSWORD));
+        assert_eq!(
+            cache.get_str(key).await.unwrap().as_deref(),
+            Some("refresh.two")
+        );
+
+        // A rejected cached session falls back to a login.
+        let (root, server) = serve(vec![
+            response("400 Bad Request", &json!({"error": "ExpiredToken"})),
+            response("200 OK", &session("access.three", "refresh.three")),
+            response("200 OK", &empty),
+        ]);
+        run(root).await;
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("POST /xrpc/com.atproto.server.createSession "));
+        assert_eq!(
+            cache.get_str(key).await.unwrap().as_deref(),
+            Some("refresh.three")
+        );
     }
 
     #[tokio::test]

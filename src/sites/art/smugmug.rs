@@ -3,7 +3,8 @@
 //! `APIKey` (the `api-key` setting replaces it).
 //!
 //! Upstream's OAuth 1.0 `access-token`/`access-token-secret` signing is not
-//! supported, so only public content is reachable.
+//! supported, so only public content is reachable; `oauth:smugmug` still
+//! obtains (and caches) such tokens for the compatibility backend.
 use super::{nameext_into, str_of, truthy};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -13,7 +14,10 @@ use std::sync::Arc;
 use url::Url;
 
 const API_DOMAIN: &str = "api.smugmug.com";
-const API_KEY: &str = "RCVHDGjcbc4Fhzq4qzqLdZmvwmwB6LM2";
+pub(crate) const API_KEY: &str = "RCVHDGjcbc4Fhzq4qzqLdZmvwmwB6LM2";
+/// Upstream's OAuth consumer secret, used by `oauth:smugmug`.
+pub(crate) const API_SECRET: &str =
+    "jGrdndvJqhTx8XSNs7TFTSSthhZHq92ddMpbpDpkDVNM7TDgnvLFMtfB5Mg5kH73";
 const HEADERS: &[(&str, &str)] = &[("Accept", "application/json")];
 
 pub static SITE: Site = Site {

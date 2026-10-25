@@ -443,11 +443,14 @@ async fn run(args: Args) -> Result<()> {
     }
     // Settings, extractors and the backend live for the rest of the process,
     // so registry sites can route child URLs through them.
-    let settings: &'static _ = Box::leak(Box::new(resolved_settings(&args).await?));
+    let (settings, cache, oauth) = resolved_settings(&args).await?;
+    let settings: &'static _ = Box::leak(Box::new(settings));
     let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
     let extractors: &'static Extractors = Box::leak(Box::new(Extractors {
         ytdl: args.ytdl_command.clone(),
         ytdl_cookies: ytdl_cookies(&args),
+        cache: cache.cache(),
+        oauth,
         ..Extractors::default()
     }));
     let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
@@ -1033,6 +1036,11 @@ fn list_extractors(detailed: bool) {
         "vsco",
     ];
     let mut lines: Vec<String> = dedicated.iter().map(|c| (*c).to_owned()).collect();
+    lines.push(if detailed {
+        format!("oauth: {}", gallery_dl_rs::oauth::SITES.join(", "))
+    } else {
+        "oauth".to_owned()
+    });
     for site in gallery_dl_rs::sites::sites() {
         if detailed {
             // Per-URL subcategories (generic, directlink) have no fixed name.
@@ -1089,6 +1097,10 @@ struct Extractors {
     ytdl: PathBuf,
     /// Session cookies forwarded to yt-dlp.
     ytdl_cookies: Option<gallery_dl_rs::cookies::YtdlCookies>,
+    /// Persistent credential cache (upstream `cache.file`); None if disabled.
+    cache: Option<gallery_dl_rs::cache::Cache>,
+    /// `extractor.oauth` settings and site credentials for `oauth:` inputs.
+    oauth: gallery_dl_rs::oauth::Settings,
 }
 
 /// The command-line session cookies, forwarded to yt-dlp as given.
@@ -1160,6 +1172,27 @@ fn extract_input<'a>(
 ) -> BoxStream<'a, Result<ExtractionEvent>> {
     let input = stream::once(async move {
         let url = extract::input_url(&source)?;
+        // `oauth:SITE` links an account and yields nothing, in either mode.
+        if url.scheme() == "oauth" {
+            let target = gallery_dl_rs::oauth::target(url.path())?;
+            let configured = settings
+                .get(match &target {
+                    gallery_dl_rs::oauth::Target::Mastodon(instance) => {
+                        gallery_dl_rs::mastodon::instance_category(instance).unwrap_or("mastodon")
+                    }
+                    target => target.site(),
+                })
+                .unwrap_or(&settings["direct"]);
+            gallery_dl_rs::oauth::Flow::new(
+                extractors.oauth.clone(),
+                extractors.cache.clone(),
+                &configured.network,
+                configured.options.timeout.unwrap(),
+            )?
+            .run(url.path())
+            .await?;
+            return Ok(stream::empty().boxed());
+        }
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
         {
@@ -1310,6 +1343,7 @@ fn extract_input<'a>(
                                             options.username.as_deref(),
                                             options.password.as_deref(),
                                         )?
+                                        .with_token_cache(extractors.cache.as_ref())
                                         .with_options(options.site_options.as_deref())?
                                         .with_likes_endpoint(
                                             options.bluesky_endpoint.unwrap_or_default(),
@@ -1337,14 +1371,16 @@ fn extract_input<'a>(
                         .reddit
                         .get_or_init(|| async {
                             let jar = extractors.cookie_jar(configured, "reddit.com").await?;
-                            gallery_dl_rs::reddit::Reddit::new(backend.timeout).and_then(|native| {
-                                native
-                                    .with_cookies(jar)
-                                    .with_options(options.site_options.as_deref())?
-                                    .with_retries(options.retries.unwrap())
-                                    .with_request_timeout(options.timeout.unwrap())
-                                    .with_network(&configured.network)
-                            })
+                            let native = gallery_dl_rs::reddit::Reddit::new(backend.timeout)
+                                .and_then(|native| {
+                                    native
+                                        .with_cookies(jar)
+                                        .with_options(options.site_options.as_deref())?
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                })?;
+                            Ok(native.with_token_cache(extractors.cache.as_ref()).await)
                         })
                         .await
                         .as_ref()
@@ -1362,7 +1398,7 @@ fn extract_input<'a>(
                         .expect("supported instance");
                     let native = extractors.mastodon[slot]
                         .get_or_init(|| async {
-                            gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
+                            let native = gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
                                 |native| {
                                     if options.replies
                                         == Some(gallery_dl_rs::twitter::ReplyMode::SelfOnly)
@@ -1394,7 +1430,8 @@ fn extract_input<'a>(
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
                                 },
-                            )
+                            )?;
+                            Ok(native.with_token_cache(extractors.cache.as_ref()).await)
                         })
                         .await
                         .as_ref()
@@ -1445,15 +1482,17 @@ fn extract_input<'a>(
                     let native = extractors
                         .tumblr
                         .get_or_init(|| async {
-                            gallery_dl_rs::tumblr::Tumblr::new(backend.timeout).and_then(|native| {
-                                native
-                                    .with_selection(options.tumblr_selection())
-                                    .with_options(options.site_options.as_deref())?
-                                    .with_api_key(options.api_key.as_deref())
-                                    .with_retries(options.retries.unwrap())
-                                    .with_request_timeout(options.timeout.unwrap())
-                                    .with_network(&configured.network)
-                            })
+                            let native = gallery_dl_rs::tumblr::Tumblr::new(backend.timeout)
+                                .and_then(|native| {
+                                    native
+                                        .with_selection(options.tumblr_selection())
+                                        .with_options(options.site_options.as_deref())?
+                                        .with_api_key(options.api_key.as_deref())
+                                        .with_retries(options.retries.unwrap())
+                                        .with_request_timeout(options.timeout.unwrap())
+                                        .with_network(&configured.network)
+                                })?;
+                            Ok(native.with_token_cache(extractors.cache.as_ref()).await)
                         })
                         .await
                         .as_ref()
@@ -1677,20 +1716,22 @@ fn extract_input<'a>(
                     let native = extractors
                         .deviantart
                         .get_or_init(|| async {
-                            gallery_dl_rs::deviantart::DeviantArt::new(backend.timeout).and_then(
-                                |native| {
-                                    native
-                                        .with_options(options.site_options.as_deref())?
-                                        .with_credentials(
-                                            options.client_id.as_deref(),
-                                            options.client_secret.as_deref(),
-                                        )
-                                        .with_refresh_token(options.refresh_token.as_deref())
-                                        .with_retries(options.retries.unwrap())
-                                        .with_request_timeout(options.timeout.unwrap())
-                                        .with_network(&configured.network)
-                                },
+                            let native = gallery_dl_rs::deviantart::DeviantArt::new(
+                                backend.timeout,
                             )
+                            .and_then(|native| {
+                                native
+                                    .with_options(options.site_options.as_deref())?
+                                    .with_credentials(
+                                        options.client_id.as_deref(),
+                                        options.client_secret.as_deref(),
+                                    )
+                                    .with_refresh_token(options.refresh_token.as_deref())
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })?;
+                            Ok(native.with_token_cache(extractors.cache.as_ref()).await)
                         })
                         .await
                         .as_ref()
@@ -1712,8 +1753,8 @@ fn extract_input<'a>(
                                     let jar = extractors
                                         .cookie_jar(artwork_settings, "pixiv.net")
                                         .await?;
-                                    gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
-                                        |native| {
+                                    let native = gallery_dl_rs::pixiv::Pixiv::new(backend.timeout)
+                                        .and_then(|native| {
                                             native
                                                 .with_cookies(jar)
                                                 .with_captions(
@@ -1740,14 +1781,24 @@ fn extract_input<'a>(
                                                 .with_refresh_token(
                                                     artwork_options.refresh_token.as_deref(),
                                                 )
+                                                .with_credentials(
+                                                    artwork_options.client_id.as_deref(),
+                                                    artwork_options.client_secret.as_deref(),
+                                                )
                                                 .with_retries(artwork_options.retries.unwrap())
                                                 .with_request_timeout(
                                                     artwork_options.timeout.unwrap(),
                                                 )
                                                 .with_network(&artwork_settings.network)
-                                                .map(Arc::new)
-                                        },
-                                    )
+                                        })?;
+                                    Ok(Arc::new(
+                                        native
+                                            .with_token_cache(
+                                                extractors.cache.as_ref(),
+                                                artwork_options.username.as_deref(),
+                                            )
+                                            .await,
+                                    ))
                                 })
                                 .await
                                 .as_ref()
@@ -1764,7 +1815,7 @@ fn extract_input<'a>(
                         .pixiv_novel
                         .get_or_init(|| async {
                             let jar = extractors.cookie_jar(novel_settings, "pixiv.net").await?;
-                            gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
+                            let native = gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(|native| {
                                 let native = native.with_cookies(jar);
                                 let native = match artwork {
                                     Some(artwork) => {
@@ -1787,11 +1838,22 @@ fn extract_input<'a>(
                                     .with_tags(novel_options.tags.unwrap_or_default())
                                     .with_cursor(novel_options.cursor.clone())
                                     .with_refresh_token(novel_options.refresh_token.as_deref())
+                                    .with_credentials(
+                                        novel_options.client_id.as_deref(),
+                                        novel_options.client_secret.as_deref(),
+                                    )
                                     .with_retries(novel_options.retries.unwrap())
                                     .with_request_timeout(novel_options.timeout.unwrap())
                                     .with_network(&novel_settings.network)
-                                    .map(Arc::new)
-                            })
+                            })?;
+                            Ok(Arc::new(
+                                native
+                                    .with_token_cache(
+                                        extractors.cache.as_ref(),
+                                        novel_options.username.as_deref(),
+                                    )
+                                    .await,
+                            ))
                         })
                         .await
                         .as_ref()
@@ -1805,7 +1867,7 @@ fn extract_input<'a>(
                             .pixiv
                             .get_or_init(|| async {
                                 let jar = extractors.cookie_jar(configured, "pixiv.net").await?;
-                                gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
+                                let native = gallery_dl_rs::pixiv::Pixiv::new(backend.timeout).and_then(
                                     |native| {
                                         native
                                             .with_cookies(jar)
@@ -1823,11 +1885,21 @@ fn extract_input<'a>(
                                             .with_tags(options.tags.unwrap_or_default())
                                             .with_cursor(options.cursor.clone())
                                             .with_refresh_token(options.refresh_token.as_deref())
+                                            .with_credentials(
+                                                options.client_id.as_deref(),
+                                                options.client_secret.as_deref(),
+                                            )
                                             .with_retries(options.retries.unwrap())
                                             .with_request_timeout(options.timeout.unwrap())
                                             .with_network(&configured.network)
                                     },
-                                )
+                                )?;
+                                Ok(native
+                                    .with_token_cache(
+                                        extractors.cache.as_ref(),
+                                        options.username.as_deref(),
+                                    )
+                                    .await)
                             })
                             .await
                             .as_ref()
@@ -1887,6 +1959,7 @@ fn extract_input<'a>(
                                         )
                                         .with_options(options.site_options.as_deref())?
                                         .with_threshold(options.booru_threshold.flatten())
+                                        .with_ugoira(options.ugoira.is_some_and(|mode| mode.enabled()))
                                         .with_favorite_order(options.booru_favorite_order.clone())
                                         .with_pool_order(
                                             options.booru_order_posts.unwrap_or_default(),
@@ -2169,7 +2242,14 @@ impl Settings {
     }
 }
 
-async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
+/// Per-category settings, the credential cache location and `oauth:` settings.
+async fn resolved_settings(
+    args: &Args,
+) -> Result<(
+    BTreeMap<&'static str, Settings>,
+    gallery_dl_rs::cache::Location,
+    gallery_dl_rs::oauth::Settings,
+)> {
     let discovered = if args.native_config.is_none() && !args.native_config_ignore {
         default_native_config()
     } else {
@@ -2484,5 +2564,9 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             },
         );
     }
-    Ok(settings)
+    Ok((
+        settings,
+        config.cache_location().clone(),
+        config.oauth_settings().clone(),
+    ))
 }

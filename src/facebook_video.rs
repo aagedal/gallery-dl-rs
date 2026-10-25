@@ -138,7 +138,7 @@ pub fn parse_video(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                         rating: None,
                         score: None,
                         revision: None,
-                        kemono_extras: None,
+                        extra_keywords: None,
                         discord: None,
                         creator: None,
                         community: None,

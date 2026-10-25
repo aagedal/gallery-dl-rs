@@ -1,3 +1,4 @@
+mod common;
 use gallery_dl_rs::{
     archive::{Archive, ArchiveOutcome},
     download::{self, DownloadOptions, Outcome},
@@ -259,7 +260,7 @@ async fn filtered_media_does_not_enter_archive_and_can_be_downloaded_later() {
         rating: None,
         score: None,
         revision: None,
-        kemono_extras: None,
+        extra_keywords: None,
         discord: None,
         creator: None,
         community: None,
@@ -320,7 +321,7 @@ async fn existing_files_are_preserved_when_size_limits_change() {
 }
 
 fn binary(cwd: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
+    let mut command = Command::from(common::binary_command());
     command.current_dir(cwd).kill_on_drop(true);
     command
 }

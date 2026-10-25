@@ -2,6 +2,7 @@
 //!
 //! Mirrors gallery_dl/extractor/pixiv.py using the iOS App API. Requests are
 //! authorized with an access token obtained from the `refresh-token` setting
+//! (or the one `oauth:pixiv` cached)
 //! through the OAuth refresh-token grant; the token is cached in memory for the
 //! run and refreshed once when the API reports `invalid_grant`. Single-page
 //! works yield `meta_single_page.original_image_url`, multi-page works
@@ -79,8 +80,8 @@ use enrichment::WorkFailure;
 mod following;
 
 /// Upstream gallery-dl's public iOS app constants.
-const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
-const CLIENT_SECRET: &str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj";
+pub(crate) const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
+pub(crate) const CLIENT_SECRET: &str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj";
 const HASH_SECRET: &str = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c";
 const APP_USER_AGENT: &str = "PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)";
 const APP_OS_VERSION: &str = "14.6";
@@ -835,6 +836,10 @@ pub struct Pixiv {
     comments: bool,
     metadata_bookmark: bool,
     refresh_token: Option<String>,
+    /// `refresh-token` is unset or `"cache"`: see `with_token_cache`.
+    refresh_token_cache: bool,
+    /// App client credentials (upstream `client-id`/`client-secret`).
+    app_client: (String, String),
     access_token: tokio::sync::Mutex<Option<String>>,
     authenticated_user: tokio::sync::Mutex<Option<String>>,
     authenticated_profile: tokio::sync::Mutex<Option<Arc<FollowedUserMetadata>>>,
@@ -931,6 +936,8 @@ impl Pixiv {
             comments: false,
             metadata_bookmark: false,
             refresh_token: None,
+            refresh_token_cache: true,
+            app_client: (CLIENT_ID.into(), CLIENT_SECRET.into()),
             access_token: tokio::sync::Mutex::new(None),
             authenticated_user: tokio::sync::Mutex::new(None),
             authenticated_profile: tokio::sync::Mutex::new(None),
@@ -954,8 +961,52 @@ impl Pixiv {
         Ok(self)
     }
 
+    /// Upstream `refresh-token`; unset or `"cache"` defers to
+    /// [`Self::with_token_cache`].
     pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
-        self.refresh_token = token.map(str::to_owned);
+        self.refresh_token_cache = token.is_none_or(|token| token == "cache");
+        self.refresh_token = token
+            .filter(|token| !token.is_empty() && *token != "cache")
+            .map(str::to_owned);
+        self
+    }
+
+    /// Override upstream's App API client (`client-id`/`client-secret`).
+    pub fn with_credentials(mut self, id: Option<&str>, secret: Option<&str>) -> Self {
+        if let Some(id) = id {
+            self.app_client.0 = id.into();
+        }
+        if let Some(secret) = secret {
+            self.app_client.1 = secret.into();
+        }
+        self
+    }
+
+    /// Upstream `_refresh_token_cache`: without a configured token, use the
+    /// one `oauth:pixiv` cached for `username` (upstream's key `None` when
+    /// unset). Call after `with_refresh_token`; unreadable caches count as
+    /// empty.
+    pub async fn with_token_cache(
+        mut self,
+        cache: Option<&crate::cache::Cache>,
+        username: Option<&str>,
+    ) -> Self {
+        if let Some(cache) = cache
+            && self.refresh_token_cache
+            && self.refresh_token.is_none()
+        {
+            let key = crate::cache::key(
+                "extractor.pixiv",
+                "_refresh_token_cache",
+                username.unwrap_or("None"),
+            );
+            if let Ok(Some(token)) = cache.get_str(&key).await
+                && (1..=4096).contains(&token.len())
+                && token.bytes().all(|b| b.is_ascii_graphic())
+            {
+                self.refresh_token = Some(token);
+            }
+        }
         self
     }
 
@@ -1085,8 +1136,8 @@ impl Pixiv {
         let token = self.refresh_token.as_deref().ok_or_else(missing_token)?;
         let endpoint = self.oauth_root.join("auth/token").expect("static path");
         let body = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("client_id", CLIENT_ID)
-            .append_pair("client_secret", CLIENT_SECRET)
+            .append_pair("client_id", &self.app_client.0)
+            .append_pair("client_secret", &self.app_client.1)
             .append_pair("grant_type", "refresh_token")
             .append_pair("refresh_token", token)
             .append_pair("get_secure_url", "1")
@@ -1762,7 +1813,7 @@ enum Reply {
 
 fn missing_token() -> crate::Error {
     error(
-        "native Pixiv extraction requires the pixiv refresh-token setting in --native-config; or use --extractor compatibility",
+        "native Pixiv extraction requires the pixiv refresh-token setting in --native-config (or run `oauth:pixiv`); or use --extractor compatibility",
     )
 }
 
@@ -2489,6 +2540,49 @@ mod tests {
 
     pub(super) fn bookmark_owner_reply(id: u64) -> Vec<u8> {
         response("200 OK",json!({"user":{"id":id,"name":"Bookmark Owner","account":"bookmark-owner","email":"PRIVATE_EMAIL","access_token":"PRIVATE_PROFILE_TOKEN"}}).to_string().as_bytes())
+    }
+
+    #[tokio::test]
+    async fn cached_refresh_tokens_and_custom_clients_authenticate() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        for (username, token) in [("None", "cached-anon"), ("alice", "cached-alice")] {
+            cache
+                .set(
+                    &format!("gallery_dl.extractor.pixiv._refresh_token_cache-{username}"),
+                    &json!(token),
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+        for (setting, username, expected) in [
+            (None, None, "cached-anon"),
+            (Some("cache"), Some("alice"), "cached-alice"),
+            (Some("own-token"), Some("alice"), "own-token"),
+        ] {
+            let detail = json!({"illust": illust(42, 1)}).to_string();
+            let (root, server) = serve(vec![token("first"), response("200 OK", detail.as_bytes())]);
+            let events: Vec<_> = pixiv(root)
+                .with_refresh_token(setting)
+                .with_credentials(Some("custom-id"), Some("custom-secret"))
+                .with_token_cache(Some(&cache), username)
+                .await
+                .events(&Url::parse("https://www.pixiv.net/en/artworks/42").unwrap())
+                .collect()
+                .await;
+            assert!(events.iter().all(Result::is_ok), "{events:?}");
+            let requests = server.join().unwrap();
+            assert!(requests[0].contains(&format!(
+                "client_id=custom-id&client_secret=custom-secret&grant_type=refresh_token&refresh_token={expected}&"
+            )));
+        }
+        // Without a cached entry the token stays missing.
+        let native = pixiv(Url::parse("http://127.0.0.1:9/").unwrap())
+            .with_refresh_token(None)
+            .with_token_cache(Some(&cache), Some("bob"))
+            .await;
+        assert!(native.refresh_token.is_none());
     }
 
     #[tokio::test]

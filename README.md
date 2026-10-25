@@ -338,6 +338,15 @@ page, skipping deleted or blocked bookmarks. Upstream's mirror hosts
 string up to 1000, default 0) also emits that many reply levels of single posts
 and liked posts, breadth-first after the post itself; unavailable replies are
 skipped, and a thread without selected media is an error.
+`extractor.bluesky.metadata` (default false) mirrors upstream: true selects
+`user` and `facets`, a comma-separated string or list selects either. `user`
+is the URL actor's `app.bsky.actor.getProfile` object (fetched once per DID;
+search, hashtag and bookmark posts use their author object instead), with an
+`instance` from the handle's last two labels; `facets` adds `hashtags`,
+`mentions` (DIDs) and `uris` from each post record's facets (empty lists without
+facets). The keywords reach filters, templates and JSON output; default
+filenames, directories and archive keys are unchanged (native naming does not
+switch to upstream's `{author[handle]}`/`{createdAt[:19]}` templates).
 
 Category-scoped `username` (handle or email; DIDs contain `:` and are not
 accepted) and `password` (preferably an app password) log in lazily with
@@ -364,8 +373,10 @@ submissions are followed per `recursion`. Upstream's `comments`,
 `morecomments`, `selftext`, `videos`, `embeds`, `previews`, `only`,
 `id-min`/`id-max`, `date-min`/`date-max` and `limit` options apply, and
 `api: "oauth"` uses `oauth.reddit.com` with a bearer token from
-`refresh-token` and `client-id` (or a public token); tokens stay in memory and
-are sent only to the OAuth API, never with media. Plain `i.redd.it` file links
+`refresh-token` (or the one `oauth:reddit` cached for the `client-id`; see
+[OAuth and the credential cache](#oauth-and-the-credential-cache)), else a
+public token; access tokens stay in memory and are sent only to the OAuth API,
+never with media. Plain `i.redd.it` file links
 stay direct downloads in both modes.
 
 Experimental native booru extraction (`--extractor native`) covers categories
@@ -544,7 +555,14 @@ e621 `/p/BASE32` short links and `e621.cc` URLs (requests go to e621.net);
 e621 `frontend` links (`e621.cc/?tags=`, `e621.anthro.fr/?q=`) and Gelbooru
 `redirect` links (`redirect.php?s=BASE64`), which queue the e621 tag search or
 the decoded Gelbooru post as a child job. Danbooru ugoira ZIPs download their
-WebM sample (`large_file_url`, extension `webm`) like upstream's default.
+WebM sample (`large_file_url`, extension `webm`) like upstream's default;
+`ugoira: true` (Danbooru only, default false) instead downloads the ZIP and
+requests `/posts/ID.json?only=media_metadata` for its `frames` keyword
+(`{index:06}.{ext}` names with millisecond delays), which also feeds the native
+ugoira postprocessors. Danbooru `external: true` (default false) emits a
+file-less post boundary for posts without a `file_url` field and queues their
+non-empty `source` URL through the program's router as a child job (sources
+that are not http(s) URLs, or that no extractor accepts, are skipped).
 Category-scoped options: Danbooru `metadata` (true for upstream's default
 `artist_commentary,children,notes,parent,uploader`, or a string/list of
 fields) merges one `only=` request per page (or per single post/media asset);
@@ -552,9 +570,9 @@ e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
 `notes` (when `has_notes`) and replaces `pools` IDs with cached pool objects;
 Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
 `tags_<type>` strings and note lists. These requests happen when a page is
-fetched, before its posts are emitted. Not supported natively: Danbooru
-`external` and `ugoira` (frame data), the DAPI `url` option, and the
-atfbooru/aibooru/booruvar/e6ai instances and Danbooru host aliases.
+fetched, before its posts are emitted. Not supported natively: the DAPI `url`
+option, Danbooru host aliases, and upstream's other instances (`atfbooru`,
+`aibooru`, `booruvar`, `e6ai`), whose URLs are not routed natively.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
@@ -580,10 +598,11 @@ Shared options belong under `extractor.mastodon`; instance settings under
 `extractor["mastodon.social"]`, `extractor.pawoo`, and `extractor.baraag` override
 them. Set `access-token` only in an instance scope; the token is bound to that
 instance's HTTPS API origin and never attached to media or other instances.
-An empty string or false disables the native token. OAuth login/cache discovery
-is not implemented, and upstream's built-in per-instance application tokens are
-not embedded, so endpoints an instance restricts to authenticated clients (for
-example baraag.net hashtag timelines) need a configured `access-token`. Explicit
+An empty string or false disables the native token; unset or `"cache"` uses
+the token `oauth:mastodon:INSTANCE` cached. Upstream's built-in per-instance
+access tokens are not embedded, so endpoints an instance restricts to
+authenticated clients (for example baraag.net hashtag timelines) need a
+configured or cached `access-token`. Explicit
 credentials and selection options also forward to the compatibility backend for
 their input instance.
 
@@ -674,6 +693,16 @@ Category-scoped `dms` and `announcements` (default false) expose each creator's
 per host/service/creator (upstream reuses the first creator's values for an
 entire run) and request failures end extraction. These values reach filters,
 templates and JSON output and are bounded to 8 MiB each.
+
+Every post (and Discord message) carries upstream's `archives` keyword: the
+file entries (`name`, normalized `path`, `type`, `hash`, plus `url`, `filename`
+and `extension` for creator posts) of its ZIP/RAR/7z/tar/gz/bz2/lzma/xz files,
+also listed in thumbnail mode. Category-scoped `archives` (default false) starts
+each entry from the `/api/v1/file/{hash}` object (file fields win), cached per
+host and hash; failures keep the file fields, as upstream only warns.
+`archives-format: "dict"` or `"object"` keys the entries by hash instead of
+listing them. Discord messages expose their complete archive list on every file
+(upstream grows it as files are yielded). Archive identities are unchanged.
 
 API responses support gzip with separate 32 MiB encoded and decoded limits,
 complete member/checksum validation and cancellable background decoding.
@@ -808,9 +837,9 @@ upstream's application) signs API requests with OAuth 1.0a (HMAC-SHA1) instead
 of sending `api_key`, which can reach dashboard-only and private blogs the
 account may view. As upstream, a blog that refuses OAuth access ("You do not have
 permission to view this blog") is retried once with `api_key` authentication, and
-dashboard-only blogs report which credentials to configure. `access-token:
-"cache"` means unset (no OAuth token cache or interactive `oauth:tumblr` flow
-exists natively); an empty or false `api-secret` disables signing. Credentials
+dashboard-only blogs report which credentials to configure. Unset or
+`access-token: "cache"` uses the pair `oauth:tumblr` cached for the API key;
+an empty or false `api-secret` disables signing. Credentials
 are sent only to the API origin, never to media or token pages, and errors never
 echo them. When the shared default key hits its daily limit (and OAuth is not
 configured), the web client's public token is used and its NPF posts are
@@ -844,7 +873,7 @@ downloads.
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv`, `pixiv-novel` or `deviantart`
-category, never echoed); without it selected Pixiv jobs fail before any network access,
+category, never echoed) or one cached by `oauth:pixiv`; without it selected Pixiv jobs fail before any network access,
 except for public Pixiv Sketch feeds and the Pixivision article request described below.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
@@ -1200,12 +1229,13 @@ clients, archives, cancellation and failure boundaries.
 
 Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
 category) uses the OAuth2 API with a client-credentials token (upstream's public
-client unless `extractor.deviantart.client-id`/`client-secret` are set; accepted
-only in the `deviantart` category, never echoed), cached for the run and
-refreshed once on HTTP 401. `extractor.deviantart.refresh-token` enables
-upstream's private token where upstream uses one (short or mature listing
-pages, mature deviations, downloads, `public: false`); DeviantArt may rotate
-it, and the rotated token is kept only in memory for the run. Supported:
+client unless `extractor.deviantart.client-id`/`client-secret` are set; never
+echoed), cached for the run and refreshed once on HTTP 401.
+`extractor.deviantart.refresh-token` (or, when unset or `"cache"`, the token
+`oauth:deviantart` cached) enables upstream's private token where upstream
+uses one (short or mature listing pages, mature deviations, downloads,
+`public: false`); DeviantArt rotates it, and each rotated token is written
+back to the credential cache so it keeps working on later runs. Supported:
 deviations (`USER/art|journal/SLUG-ID`, `view/ID`, `fav.me/dID`), user profiles
 (`include` children; default `gallery`), galleries, folders (by name or UUID,
 subfolders as child jobs), scraps and gallery searches (web "Eclipse"
@@ -1774,6 +1804,62 @@ responses, retries, per-origin cooldowns, cancellation, per-request timeout, and
 overall extraction deadline as the native pipeline. Parser/reference/local HTTP
 tests and the [Twitter fixture notes](tests/fixtures/twitter/README.md) describe
 what is verified and the remaining real-response/manual authenticated gates.
+
+## OAuth and the credential cache
+
+Upstream's `oauth:SITE` inputs link an account and print the resulting
+token(s); they extract nothing and work in both extractor modes:
+
+```sh
+gallery-dl-rs oauth:deviantart     # OAuth 2.0 refresh-token
+gallery-dl-rs oauth:reddit         # OAuth 2.0 refresh-token (api: "oauth")
+gallery-dl-rs oauth:mastodon:pawoo.net   # OAuth 2.0 access-token
+gallery-dl-rs oauth:tumblr         # OAuth 1.0a access-token pair
+gallery-dl-rs oauth:smugmug        # OAuth 1.0a access-token pair
+gallery-dl-rs oauth:flickr         # OAuth 1.0a; needs api-key and api-secret
+gallery-dl-rs oauth:pixiv          # PKCE login; paste the code when asked
+```
+
+The authorization URL is printed (and opened in a browser via `open`,
+`xdg-open` or the Windows URL handler unless `extractor.oauth.browser` is
+false). The redirect is received on `127.0.0.1` at `extractor.oauth.port`
+(default 6414; the redirect URI itself stays upstream's
+`http://localhost:6414/` or its GitHub Pages forwarder, which the default
+applications are registered with). Only a request carrying the expected
+parameters is answered, the OAuth 2.0 `state` must match and the OAuth 1.0a
+request token must be the one issued. The code is then exchanged and the token
+printed with upstream's instructions. Upstream's public applications are used
+unless `client-id`/`client-secret` (deviantart, reddit, pixiv) or
+`api-key`/`api-secret` (tumblr, smugmug, flickr) are set in the site's
+scope; Mastodon uses upstream's application for mastodon.social, pawoo.net and
+baraag.net and registers (and caches) one for other instances.
+`oauth:pixiv` prints upstream's instructions for copying the `code` from the
+browser's developer tools and reads it from an interactive terminal.
+
+With `extractor.oauth.cache` (default true) tokens are also written to the
+credential cache, an SQLite file with upstream's layout and keys
+(`gallery_dl.extractor.deviantart._refresh_token_cache-#CLIENT_ID`,
+`gallery_dl.oauth._token_cache-('tumblr', 'API_KEY')`, ...) and Python
+pickle values, so the file is interchangeable with Python gallery-dl. Its
+default location is upstream's: `%APPDATA%\gallery-dl\cache.sqlite3` on
+Windows, else `$XDG_CACHE_HOME/gallery-dl/cache.sqlite3` (default
+`~/.cache`); `cache.file` selects another literal path (relative to the
+configuration file) and `"cache": {"file": null}` disables it. New files are
+created with mode 0600 on Unix. Entries are read lazily; an unreadable cache
+counts as empty.
+
+Native extractors read the cache where upstream does, when their token
+setting is unset or `"cache"`: DeviantArt and Reddit (`api: "oauth"`)
+`refresh-token` per client ID, Pixiv `refresh-token` per
+`extractor.pixiv.username` (upstream's `None` key when unset; `client-id`
+and `client-secret` are honored as upstream), Tumblr `access-token` and
+`access-token-secret` per API key, and Mastodon `access-token` per instance.
+DeviantArt rotates refresh tokens: each new one is written back (under the
+client key, or under the configured token itself as upstream does), so a
+token keeps working on later runs. Bluesky logins keep their session refresh
+token for 84 days per `username` and refresh it before logging in again.
+Tokens never appear in errors or logs; only the `oauth:` result prints them,
+as upstream does.
 
 ## Browser sessions
 
@@ -2671,7 +2757,8 @@ and options: `unsplash`, `pexels`, `tenor`, `imgbb`, `imagechest`, `telegraph`,
 `lexica`, `pixnet`, `listal`, `khinsider`, `audiochan`, `whyp`, the
 `imagehosts` family (imxto, imagetwist, imagevenue, pixhost, vipr and others),
 `koofr`, `cyberfile`, `webmshare`, `mixdrop`, `imgpile`, `imagepond`, `imgth`,
-`lensdump`, `urlgalleries`, `hiperdex`, `mangaread`, `kaliscan`, `rawkuma`,
+`lensdump`, `urlgalleries`, `uploadir` (redirected uploads download through a
+form POST job), `hiperdex`, `mangaread`, `kaliscan`, `rawkuma`,
 `komikcast`, `dandadan`, `dankefuerslesen`, `madokami` (site options
 `username`/`password`), `readcomiconline`, `senmanga`, `keenspot`, `comicvine`,
 `photovogue`, `architizer`, `naver-chzzk`, `bbc`, `tungsten`, `slickpic`,
@@ -2699,7 +2786,8 @@ prefix, as upstream does. `recursive:` with local `file://` sources is not
 supported (use `--input-file`). Gallery-dl's
 `shopify:`/`xenforo:` URL prefixes and extra configured instances are not
 supported, and all `*.reactor.cc` subdomains share the `reactor` category.
-Username/password logins and SmugMug OAuth are not ported; pass `--cookies`
+Username/password logins and SmugMug OAuth request signing are not ported
+(`oauth:smugmug` still obtains and caches tokens); pass `--cookies`
 instead where upstream accepts session cookies (Nijie and Horne require
 them). Unsplash, Pexels, Toyhouse, Comick, Lexica and Khinsider answered this
 network with bot challenges; MangaPark, MangaFire, MangaReader, TCB Scans,
@@ -2729,8 +2817,11 @@ Their undocumented endpoints may change; fixture tests establish parser and
 transport behavior. Anonymous Facebook video extraction has been checked, but
 complete live downloads and authenticated coverage remain unverified.
 
-Direct HTTP(S) media and inline-text jobs are downloaded. Extraction retains
-typed direct HTTP, inline-text, video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
+Direct HTTP(S) media, form POST (`form_post`, upstream's `_http_method: "POST"`
+with `_http_data`; the form is sent only to the requested origin, other
+redirects continue as GET, and POST jobs are not resumed) and inline-text jobs
+are downloaded. Extraction retains typed direct HTTP, form POST, inline-text,
+video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
 source; `-j` includes the job kind and manifest protocol/base URL. Inline job bodies, headers, cookies, and other private handoff options are omitted
 from their job fields in JSON. Inline-text inspection URLs carry encoded text.
 The JSON output is for inspection, not a lossless job export. Different inline

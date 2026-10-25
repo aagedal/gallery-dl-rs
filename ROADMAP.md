@@ -273,6 +273,14 @@ authentication failure, credential isolation from media jobs, and preservation o
 the input cookie file. Updates are not persisted and cannot renew an expired
 session. A companion adapter will also need cancellation at its library boundary.
 
+**Implemented form POST media jobs:** `MediaJob::FormPost` sends private,
+bounded (64 fields, 64 KiB) URL-encoded form fields with the first request and
+is otherwise downloaded like direct HTTP (validation, header filtering, size
+limits, atomic publication). 301/302/303 redirects continue as GET without the
+form, 307/308 repeat it only on the requested origin and refuse other origins;
+POST jobs are not resumed, and JSON output omits the form. Uploadir's redirected
+uploads use it; loopback tests cover bodies, redirects and refusals.
+
 **Implemented direct HTTP fallback execution:** the shared downloader consumes
 bounded private `_fallback` arrays in order after remote/request failures and
 configured retries. Invalid/repeated/manifest candidates are skipped. Scoped
@@ -330,6 +338,27 @@ before starting and interrupt active SQLite scans, including nonmatching-row
 scans beyond output limits. Virtual-clock tests cover accounting and filtered
 errors; local HTTP tests cover later-page cancellation/connection closure, and
 browser tests cover queued, active and idle-interrupt-race cleanup.
+
+**Implemented OAuth inputs and credential cache (gallery-dl 1.32.17):**
+`oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE` (OAuth 2.0
+authorization codes, with application registration for instances without an
+upstream application), `oauth:tumblr`, `oauth:smugmug`, `oauth:flickr` (OAuth
+1.0a, one shared HMAC-SHA1 signer also used by Tumblr) and `oauth:pixiv`
+(PKCE, pasted code) run in either extractor mode. A loopback-only listener on
+`extractor.oauth.port` answers only the expected redirect, checks `state` and
+the request token, and the result prints upstream's messages. Tokens go to an
+SQLite cache with upstream's file location, `cache.file` setting, table,
+keys and (pickle) values, so it is shared with Python gallery-dl; new files are
+0600 on Unix. DeviantArt, Reddit, Pixiv, Tumblr and Mastodon read it for unset
+or `"cache"` token settings, DeviantArt writes rotated refresh tokens back, and
+Bluesky keeps session refresh tokens for 84 days. Unit tests cover the cache
+(round trips, expiry, Python pickles, permissions, disabled/unopenable files),
+RFC 2202/5849/7636 vectors, state and token mismatch, and every flow against
+local token servers with a simulated browser. Remaining: access tokens are not
+persisted between runs (upstream caches them for an hour), SmugMug and Flickr
+do not yet sign native API requests with the cached tokens, upstream's
+`host` setting is not supported (loopback only), and the flows have no live
+verification against the real authorization servers.
 
 ## 3. Large collections and reliable archives
 
@@ -636,11 +665,23 @@ Danbooru `random`/`media-asset`, e621 `/p/` short links, `e621.cc` and `frontend
 links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
 `metadata` (includes; notes/pools) and Gelbooru/Safebooru `tags`/`notes`
 (per-post HTML) options, e621 hidden-URL reconstruction and Danbooru ugoira WebM
-samples. Upstream has no other favorites classes for these sites. Remaining:
-Danbooru `external` and `ugoira` frame data, the DAPI `url` option, other
+samples, plus Danbooru `ugoira` (ZIP originals with `media_metadata` frame
+delays for the ugoira postprocessors) and `external` (sources of file-less posts
+queued through the process-wide router). Upstream has no other favorites
+classes for these sites. Remaining: the DAPI `url` option, other
 Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
 aliases, per-post laziness of option requests (they run per page), and
 authenticated live verification.
+The other instances do not fit the current `booru::Site` model cleanly: `Site`
+is at once the API dialect, the output category, the media-CDN allow-list and
+the key of the per-site extractor/credential caches, and the category strings
+`danbooru`/`e621`/`e926` are special-cased across keyword policies, filter
+contexts, source-archive descriptors, naming defaults and compatibility
+normalization (e926 itself still shares e621's category and credentials).
+Distinct upstream categories need an instance layer (dialect, category, API
+root, CDN hosts such as `cdn.aibooru.download`/`static1.e6ai.net`, aibooru's
+host-dependent root) threaded through those paths with per-instance
+credential scopes, and their own source-oracle coverage.
 
 **Implemented experimental native Mastodon:** every upstream class (statuses,
 ActivityPub `/objects/ID` resolved by redirect, user timelines, followed accounts
@@ -658,9 +699,10 @@ fields, detect cycles, and stop lazily; collection dates are non-terminating.
 and empty post boundaries. Optional card images append outer-post previews with
 upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
 Scoped config, compatibility forwarding, header privacy, split Link fields, date
-ordering and cancellation have local coverage. Remaining: OAuth/cache discovery,
-upstream's built-in per-instance application tokens (not embedded natively; some
-instances need a configured `access-token`, e.g. baraag.net hashtags),
+ordering and cancellation have local coverage. Unset or `"cache"`
+`access-token` reads the token `oauth:mastodon:INSTANCE` cached. Remaining:
+upstream's built-in per-instance access tokens (not embedded natively; some
+instances need a configured or cached `access-token`, e.g. baraag.net hashtags),
 user-configured instances and the `mastodon:URL` prefix, the moved-account
 warning, and fuller metadata/default naming. Authenticated live verification and
 real captures remain required.
@@ -685,9 +727,10 @@ Upstream's `comments`, `dms` and `announcements` options now attach those API
 values to posts (comments non-fatal per post, DMs/announcements once per
 creator rather than upstream's first-creator reuse), and upstream's
 kemono.st/coomer.cr domains are recognized. Upstream 1.32.17 has no popular
-class, so none is planned. Remaining: the `archives`/`archives-format` options
-(per-hash archive file metadata and the always-present `archives` keyword),
-username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
+class, so none is planned. The always-present `archives` keyword and the
+`archives`/`archives-format` options (cached per-hash `/v1/file` metadata,
+list or hash-keyed object) are now native for posts and Discord messages.
+Remaining: username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
 upstream extractors) and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
@@ -815,9 +858,10 @@ with the API rendition as fallback; legacy inline `_1280` rewriting and GIFV
 fallbacks remain. Options: `reblogs` (boolean/`same-blog`), `posts`, `inline`,
 `original`, `external`, `avatar`, `offset`, `pagination` and `ratelimit`. The
 exhausted default key falls back to the web client token (NPF converted).
-Remaining: the interactive `oauth:tumblr` flow and its token cache
-(`access-token: "cache"` means unset), NPF-only fields beyond the converted
-legacy media, and authenticated live verification of dashboard/private blogs.
+Unset or `"cache"` `access-token` reads the pair `oauth:tumblr` cached per API
+key (the signing helper is shared with `oauth:` flows). Remaining: NPF-only
+fields beyond the converted legacy media, and authenticated live verification
+of dashboard/private blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
@@ -998,7 +1042,9 @@ API with front-page CSRF token and session cookies), `favorite`, `collection`,
 `journal`, `status`, `avatar`, `background`, `tag`, `search` (logged-out HTML
 results) and `stash` classes over the OAuth2 API (client credentials,
 overridable `client-id`/`client-secret`, and `refresh-token` for upstream's
-private-token switching; rotated refresh tokens are kept only for the run).
+private-token switching; the token `oauth:deviantart` cached is used when the
+setting is unset or `"cache"`, and rotated refresh tokens are written back to
+the credential cache so they survive across runs).
 Files carry upstream's keyword dictionary and default filename/directory
 formats; literature, journals and statuses are written as HTML or text per
 `journals`. Options: `include`, `journals`, `original` (incl. `"images"`),
@@ -1128,9 +1174,9 @@ linked submissions, `previews` (a failed child job is followed by the
 submission's preview rendition), `embeds`, `id-min`/`id-max`,
 `date-min`/`date-max`, `limit`, and `api: "oauth"` with `client-id` and
 `refresh-token` (or a public token) on `oauth.reddit.com`. A public Atom-feed
-fallback covers logged-out networks behind Reddit's login wall. Remaining:
-the `oauth:reddit` token flow and its `refresh-token: "cache"`, preview
-fallbacks after child *download* failures (only extraction failures are
+fallback covers logged-out networks behind Reddit's login wall. Unset or
+`"cache"` `refresh-token` reads the token `oauth:reddit` cached per client ID.
+Remaining: preview fallbacks after child *download* failures (only extraction failures are
 seen), and `parent-directory`'s shared directory for child jobs.
 
 **Implemented experimental native Bluesky:** every upstream class: single posts,
@@ -1146,12 +1192,15 @@ with cycle and depth bounds. Bare profiles switch to the posts feed when
 quotes/reposts are requested; own pinned posts are retained. Ordered include,
 replies/video, profile-image and public likes views are described above.
 `depth` emits reply levels of single and liked posts breadth-first. Upstream's
-`username`/`password` login creates an in-memory session on bsky.social (or
+`username`/`password` login creates a session on bsky.social (or
 `api-server`), refreshes an expired token once, attaches it only to the API
 origin and enables bookmarks (which fail without a login before any request).
-Not yet: the `metadata` option (`user`/`facets` keywords, which need upstream's
-keyword dictionary and would change default naming), upstream's persistent
-refresh-token cache, DID identifiers as login names, newer multi-item media
+As upstream, the session refresh token is kept in the credential cache for 84
+days and later runs refresh it before logging in again.
+The `metadata` option now adds upstream's `user` (actor profile or post author,
+with `instance`) and facet `hashtags`/`mentions`/`uris` keywords without
+switching native default naming to upstream's templates. Not yet: upstream's
+`author` keyword dictionary and default naming, DID identifiers as login names, newer multi-item media
 embeds, and authenticated live verification.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook

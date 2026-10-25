@@ -5,7 +5,11 @@
 //! public client unless `client-id`/`client-secret` are configured), or a
 //! private token from the `refresh-token` grant where upstream switches to
 //! one. Tokens are cached for the run, refreshed once on HTTP 401, never
-//! included in errors and never sent with media requests. Scraps, gallery
+//! included in errors and never sent with media requests. Without a
+//! configured `refresh-token` (or with `"cache"`), one stored by
+//! `oauth:deviantart` in the credential cache is used; DeviantArt rotates
+//! refresh tokens, so each new one is written back to the cache (keyed by the
+//! configured token, as upstream does) and keeps working on later runs. Scraps, gallery
 //! searches and search results go through the web ("Eclipse") endpoints with
 //! a CSRF token from the front page, as upstream does when not logged in.
 //!
@@ -40,8 +44,8 @@ use std::{
 use url::Url;
 
 /// Upstream gallery-dl's public OAuth client.
-const CLIENT_ID: &str = "5388";
-const CLIENT_SECRET: &str = "76b08c69cfb27f26d6161f9ab6d061a1";
+pub(crate) const CLIENT_ID: &str = "5388";
+pub(crate) const CLIENT_SECRET: &str = "76b08c69cfb27f26d6161f9ab6d061a1";
 const USER_AGENT: &str = "gallery-dl-rs";
 /// Canonical site origin used in keywords and journal markup.
 const ROOT: &str = "https://www.deviantart.com";
@@ -1022,6 +1026,8 @@ pub struct DeviantArt {
     /// Current refresh token; DeviantArt may rotate it on every refresh.
     refresh_token: std::sync::Mutex<Option<String>>,
     has_refresh: bool,
+    /// The credential cache entry receiving rotated refresh tokens.
+    token_cache: Option<(crate::cache::Cache, String)>,
     access_token: tokio::sync::Mutex<Option<String>>,
     private_token: tokio::sync::Mutex<Option<String>>,
     options: Options,
@@ -1036,6 +1042,11 @@ pub struct DeviantArt {
     csrf: tokio::sync::Mutex<Option<String>>,
     profiles: tokio::sync::Mutex<HashMap<String, Option<Arc<Value>>>>,
     folders: tokio::sync::Mutex<HashMap<FolderKey, Arc<Vec<Value>>>>,
+}
+
+/// OAuth tokens are bounded printable ASCII.
+fn valid_token(token: &str) -> bool {
+    !token.is_empty() && token.len() <= 4096 && token.bytes().all(|b| b.is_ascii_graphic())
 }
 
 fn fail<'a>(e: crate::Error) -> Events<'a> {
@@ -1063,6 +1074,7 @@ impl DeviantArt {
             client_secret: CLIENT_SECRET.into(),
             refresh_token: std::sync::Mutex::new(None),
             has_refresh: false,
+            token_cache: None,
             access_token: tokio::sync::Mutex::new(None),
             private_token: tokio::sync::Mutex::new(None),
             options: Options::default(),
@@ -1098,12 +1110,37 @@ impl DeviantArt {
     }
 
     /// Upstream `refresh-token`: grants a private access token where upstream
-    /// uses one. `"cache"` refers to upstream's OAuth cache, which does not
-    /// exist here, so it leaves public access only.
+    /// uses one. Unset or `"cache"` defers to [`Self::with_token_cache`].
     pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
         let token = token.filter(|t| !t.is_empty() && *t != "cache");
         self.has_refresh = token.is_some();
         self.refresh_token = std::sync::Mutex::new(token.map(str::to_owned));
+        self
+    }
+
+    /// Upstream `_refresh_token_cache`: the entry is keyed `#CLIENT_ID`
+    /// (filled by `oauth:deviantart`) without a configured token, else by the
+    /// configured token. A cached token takes precedence, and every token
+    /// the refresh grant returns is stored there. Call after the client and
+    /// refresh-token settings; unreadable caches count as empty.
+    pub async fn with_token_cache(mut self, cache: Option<&crate::cache::Cache>) -> Self {
+        let Some(cache) = cache else {
+            return self;
+        };
+        let configured = self
+            .refresh_token
+            .lock()
+            .expect("refresh token lock")
+            .clone();
+        let argument = configured.unwrap_or_else(|| format!("#{}", self.client_id));
+        let key = crate::cache::key("extractor.deviantart", "_refresh_token_cache", &argument);
+        if let Ok(Some(token)) = cache.get_str(&key).await
+            && valid_token(&token)
+        {
+            self.has_refresh = true;
+            *self.refresh_token.lock().expect("refresh token lock") = Some(token);
+        }
+        self.token_cache = Some((cache.clone(), key));
         self
     }
 
@@ -1214,13 +1251,24 @@ impl DeviantArt {
                 let token = |key: &str| {
                     data.get(key)
                         .and_then(Value::as_str)
-                        .filter(|t| !t.is_empty() && t.len() <= 4096)
-                        .filter(|t| t.bytes().all(|b| b.is_ascii_graphic()))
+                        .filter(|t| valid_token(t))
                         .map(str::to_owned)
                 };
                 if refresh.is_some()
                     && let Some(rotated) = token("refresh_token")
                 {
+                    // The previous token may already be invalid: persist the
+                    // new one so later runs can still refresh.
+                    if let Some((cache, key)) = &self.token_cache
+                        && cache
+                            .set(key, &Value::from(rotated.as_str()), None)
+                            .await
+                            .is_err()
+                    {
+                        eprintln!(
+                            "could not store the rotated DeviantArt refresh token in the cache"
+                        );
+                    }
                     *self.refresh_token.lock().expect("refresh token lock") = Some(rotated);
                 }
                 token("access_token")
