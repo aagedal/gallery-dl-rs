@@ -1,7 +1,7 @@
 //! 2chen boards (sturdychan, schan), mirroring gallery_dl/extractor/2chen.py
 //! by parsing HTML pages.
 use super::{
-    Extr, NO_DATE, component, datetime_string, digits, extract_iter, host_in, rest, set_nameext,
+    Extr, NO_DATE, component, datetime_string, digits, extract_iter, instance_rest, set_nameext,
 };
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -32,7 +32,20 @@ macro_rules! instance {
 instance!(STURDYCHAN, "sturdychan", "sturdychan");
 instance!(SCHAN, "schan", "schan");
 
+/// Configured `extractor.2chen.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "2chen",
+    builtin: &[&STURDYCHAN, &SCHAN],
+    related: &[],
+    template: &STURDYCHAN,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return &instance.site;
+    }
     match category {
         "sturdychan" => &STURDYCHAN,
         _ => &SCHAN,
@@ -47,6 +60,9 @@ fn hosts(category: &str) -> &'static [&'static str] {
 }
 
 fn root(category: &str) -> &'static str {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return instance.root;
+    }
     match category {
         "sturdychan" => "https://sturdychan.help",
         _ => "https://schan.help",
@@ -60,10 +76,7 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !host_in(url, hosts(category)) {
-        return None;
-    }
-    let (board, tail) = component(rest(url))?;
+    let (board, tail) = component(instance_rest(&FAMILY, category, url, || hosts(category))?)?;
     if let Some((thread, _)) = tail.strip_prefix('/').and_then(digits) {
         return Some(Target::Thread {
             board,
@@ -118,7 +131,10 @@ fn parse_thread(root: &str, page: &str, thread: &str) -> Result<Vec<Item>> {
             None => link.to_owned(),
         };
         let link = link.split('?').next().unwrap_or_default().to_owned();
-        let Some(url) = Url::parse(&link).ok().filter(crate::sites::plain) else {
+        let Some(url) = Url::parse(&link)
+            .ok()
+            .filter(|url| crate::sites::instances::plain_or_root(url, root))
+        else {
             continue;
         };
         let time = post.get("date").and_then(Value::as_i64).unwrap_or(NO_DATE);
@@ -208,6 +224,38 @@ fn parse_date(text: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+
+    #[test]
+    fn routes_configured_instances() {
+        crate::sites::instances::define(
+            "2chen",
+            "2chen-configured",
+            serde_json::json!({"root": "https://chen.test", "pattern": r"(?:www\.)?chen\.test"}),
+        );
+        let find = |raw: &str| crate::sites::find(&Url::parse(raw).unwrap()).map(|s| s.category);
+        assert_eq!(
+            find("https://www.chen.test/b/123#p1"),
+            Some("2chen-configured")
+        );
+        assert_eq!(
+            find("https://chen.test/b/catalog"),
+            Some("2chen-configured")
+        );
+        assert_eq!(find("https://chen.test.evil/b/123"), None);
+        assert_eq!(
+            target(
+                "2chen-configured",
+                &Url::parse("https://chen.test/b/9").unwrap()
+            ),
+            Some(Target::Thread {
+                board: "b".into(),
+                thread: "9".into()
+            })
+        );
+        assert_eq!(site("2chen-configured").category, "2chen-configured");
+        assert_eq!(root("2chen-configured"), "https://chen.test");
+        assert_eq!(root("sturdychan"), "https://sturdychan.help");
+    }
 
     #[test]
     fn classifies_urls() {

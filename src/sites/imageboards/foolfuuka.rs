@@ -1,6 +1,6 @@
 //! FoolFuuka 4chan archives, mirroring gallery_dl/extractor/foolfuuka.py
 //! through the `/_/api/chan/` JSON API.
-use super::{DIRECTORY, component, digits, host_in, parse_int, rest};
+use super::{DIRECTORY, component, digits, instance_rest, parse_int};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -62,7 +62,30 @@ instance!(PALANQ, "palanq", "Palanq");
 instance!(RBT, "rbt", "RebeccaBlackTech");
 instance!(THEBARCHIVE, "thebarchive", "The /b/ Archive");
 
+/// Configured `extractor.foolfuuka.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "foolfuuka",
+    builtin: &[
+        &FOURPLEBS,
+        &ARCHIVEDMOE,
+        &ARCHIVEOFSINS,
+        &B4K,
+        &DESUARCHIVE,
+        &FIREDEN,
+        &PALANQ,
+        &RBT,
+        &THEBARCHIVE,
+    ],
+    related: &[],
+    template: &DESUARCHIVE,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return &instance.site;
+    }
     match category {
         "4plebs" => &FOURPLEBS,
         "archivedmoe" => &ARCHIVEDMOE,
@@ -77,6 +100,9 @@ fn site(category: &str) -> &'static Site {
 }
 
 fn root(category: &str) -> &'static str {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return instance.root;
+    }
     match category {
         "4plebs" => "https://archive.4plebs.org",
         "archivedmoe" => "https://archived.moe",
@@ -129,10 +155,7 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !host_in(url, hosts(category)) {
-        return None;
-    }
-    let (board, tail) = component(rest(url))?;
+    let (board, tail) = component(instance_rest(&FAMILY, category, url, || hosts(category))?)?;
     // `/thread/(\d+)`
     if let Some((thread, _)) = tail.strip_prefix("/thread/").and_then(digits) {
         return Some(Target::Thread {
@@ -420,7 +443,10 @@ async fn files(
         if url.starts_with('/') {
             url = format!("{base}{url}");
         }
-        let Some(url) = Url::parse(&url).ok().filter(crate::sites::plain) else {
+        let Some(url) = Url::parse(&url)
+            .ok()
+            .filter(|url| crate::sites::instances::plain_or_root(url, base))
+        else {
             continue;
         };
         let text = |key: &str| {
@@ -489,11 +515,11 @@ async fn remote(category: &str, http: &Http, board: &str, media: &Value) -> Resu
         return Ok(format!("https://i.4cdn.org/{board}/{orig}"));
     }
     // Only follow redirect pages on the archive itself.
-    let base = Url::parse(root(category)).map_err(|_| error("invalid FoolFuuka root"))?;
-    let Some(page_url) = Url::parse(link)
-        .ok()
-        .filter(|u| crate::sites::plain(u) && u.host_str() == base.host_str())
-    else {
+    let root = root(category);
+    let base = Url::parse(root).map_err(|_| error("invalid FoolFuuka root"))?;
+    let Some(page_url) = Url::parse(link).ok().filter(|u| {
+        crate::sites::instances::plain_or_root(u, root) && u.host_str() == base.host_str()
+    }) else {
         return Ok(String::new());
     };
     let page = http.text(&http.api(page_url.as_str())?).await?;
@@ -723,6 +749,51 @@ mod tests {
             redirect_target("fireden", "jp", "https://i.4cdn.org/jp/1.jpg"),
             "https://i.4cdn.org/jp/1.jpg"
         );
+    }
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        let instance = crate::sites::instances::define(
+            "foolfuuka",
+            "foolfuuka-configured",
+            json!({"root": "https://archive.fuuka.test", "pattern": r"(?:archive\.)?fuuka\.test"}),
+        );
+        let url = Url::parse("https://fuuka.test/a/thread/100/").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "foolfuuka-configured");
+        assert!(std::ptr::eq(site, &instance.site));
+        let mut op = post(100, 1500000000, file("1500000000123.jpg"));
+        op["media"]["media_link"] = "/a/image/1500000000123.jpg".into();
+        let reply = post(
+            101,
+            1500000100,
+            json!({"media": "1500000100789.gif",
+            "media_filename": "r.gif", "media_orig": "1500000100789.gif", "media_link": null,
+            "remote_media_link": "https://archive.fuuka.test/a/redirect/1500000100789.gif"}),
+        );
+        let body = json!({"100": {"op": op, "posts": {"101": reply}}});
+        let redirect =
+            r#"<meta http-equiv="Refresh" content="0; url=https://i.4cdn.test/a/1.gif">"#;
+        let (origin, server) = serve(vec![json(body), html(redirect)]);
+        let http = http("foolfuuka-configured", origin);
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 2);
+        assert_eq!(
+            files[0].url.as_str(),
+            "https://archive.fuuka.test/a/image/1500000000123.jpg"
+        );
+        assert_eq!(files[1].url.as_str(), "https://i.4cdn.test/a/1.gif");
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "foolfuuka-configured");
+        assert_eq!(k["subcategory"], "thread");
+        assert_eq!(k["filename_media"], "orig name");
+        assert_eq!(
+            files[0].headers.get("Referer").map(String::as_str),
+            Some("https://archive.fuuka.test/")
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /_/api/chan/thread/?board=a&num=100 "));
+        assert!(requests[1].starts_with("GET /a/redirect/1500000100789.gif "));
     }
 
     #[tokio::test]

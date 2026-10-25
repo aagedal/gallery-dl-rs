@@ -30,7 +30,20 @@ instance!(JPGFISH, "jpgfish", "JPG Fish");
 instance!(IMGLIKE, "imglike", "IMG Like");
 instance!(PUTMEGA, "putmega", "PutMega");
 
+/// Configured `extractor.chevereto.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "chevereto",
+    builtin: &[&JPGFISH, &IMGLIKE, &PUTMEGA],
+    related: &["imagepond"],
+    template: &IMGLIKE,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return &instance.site;
+    }
     match category {
         "jpgfish" => &JPGFISH,
         "imglike" => &IMGLIKE,
@@ -39,6 +52,9 @@ fn site(category: &str) -> &'static Site {
 }
 
 fn root(category: &str) -> &'static str {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return instance.root;
+    }
     match category {
         "jpgfish" => "https://jpg7.cr",
         "imglike" => "https://imglike.com",
@@ -74,12 +90,36 @@ enum Target {
     User(String),
 }
 
-fn target(category: &str, url: &Url) -> Option<Target> {
-    if !crate::sites::plain(url) || !host_matches(category, url.host_str()?) {
-        return None;
+/// Whether a URL is on the instance: a configured instance's root, else the
+/// built-in host patterns.
+fn on_instance(category: &str, url: &Url) -> bool {
+    match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => crate::sites::instances::below(url, instance.spec).is_some(),
+        None => {
+            crate::sites::plain(url) && url.host_str().is_some_and(|h| host_matches(category, h))
+        }
     }
-    let parts = crate::sites::segments(url);
-    let raw: Vec<&str> = url.path().split('/').skip(1).collect();
+}
+
+/// The URL's path below the instance root.
+fn path_below(category: &str, url: &Url) -> Option<String> {
+    match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => {
+            let rest = crate::sites::instances::below(url, instance.spec)?;
+            Some(rest.split('?').next().unwrap_or_default().to_owned())
+        }
+        None => on_instance(category, url).then(|| url.path().to_owned()),
+    }
+}
+
+fn target(category: &str, url: &Url) -> Option<Target> {
+    let path = path_below(category, url)?;
+    let parts: Vec<String> = path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(crate::sites::percent_decode)
+        .collect();
+    let raw: Vec<&str> = path.split('/').skip(1).collect();
     let segment = |i: usize| raw.get(i).copied().filter(|s| !s.is_empty());
     match parts.first().map(String::as_str) {
         Some("img" | "image" | "video" | "i") if segment(1).is_some() => {
@@ -169,9 +209,7 @@ fn parse_listing(category: &str, page: &str) -> (Vec<String>, Option<String>) {
                 .join(&crate::sites::unescape(href))
                 .ok()
         })
-        .filter(|url| {
-            url.host_str().is_some_and(|h| host_matches(category, h)) && crate::sites::plain(url)
-        })
+        .filter(|url| on_instance(category, url))
         .map(String::from)
         .collect();
     let next = crate::sites::extr(page, "data-pagination=\"next\" href=\"", "\"")
@@ -261,12 +299,7 @@ fn pagination<'a>(
             }
             let page = fetch_page(http, &url, &mut cookie).await?;
             let (urls, next) = parse_listing(category, &page);
-            let next = next.filter(|n| {
-                Url::parse(n).is_ok_and(|n| {
-                    crate::sites::plain(&n)
-                        && n.host_str().is_some_and(|h| host_matches(category, h))
-                })
-            });
+            let next = next.filter(|n| Url::parse(n).is_ok_and(|n| on_instance(category, &n)));
             Ok(Some(((urls, page), (next, cookie, count + 1))))
         },
     ))
@@ -438,6 +471,47 @@ fn parse_file(page: &str, path: &str) -> Result<Item> {
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+
+    #[test]
+    fn routes_configured_instances() {
+        crate::sites::instances::define(
+            "chevereto",
+            "chevereto-configured",
+            serde_json::json!({"root": "https://chev.test/gallery", "pattern": r"(?:www\.)?chev\.test/gallery"}),
+        );
+        let find = |raw: &str| crate::sites::find(&Url::parse(raw).unwrap()).map(|s| s.category);
+        assert_eq!(
+            find("https://www.chev.test/gallery/img/a.b"),
+            Some("chevereto-configured")
+        );
+        assert_eq!(find("https://chev.test/img/a.b"), None);
+        let t = |raw: &str| target("chevereto-configured", &Url::parse(raw).unwrap());
+        assert_eq!(
+            t("https://chev.test/gallery/img/a.b"),
+            Some(Target::File("/img/a.b".into()))
+        );
+        assert_eq!(
+            t("https://chev.test/gallery/album/x.y/sub"),
+            Some(Target::Album("/album/x.y/sub".into()))
+        );
+        assert_eq!(
+            t("https://chev.test/gallery/someone/albums"),
+            Some(Target::User("/someone/albums".into()))
+        );
+        assert_eq!(t("https://jpg7.cr/img/a.b"), None);
+        assert!(on_instance(
+            "chevereto-configured",
+            &Url::parse("https://chev.test/gallery/a/b").unwrap()
+        ));
+        assert!(!on_instance(
+            "chevereto-configured",
+            &Url::parse("https://chev.test/other").unwrap()
+        ));
+        assert_eq!(
+            crate::sites::instances::basecategory("imagepond"),
+            Some("chevereto")
+        );
+    }
 
     #[test]
     fn classifies_urls() {

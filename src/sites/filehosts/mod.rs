@@ -23,11 +23,16 @@ mod imgpile;
 mod imgth;
 mod koofr;
 mod lensdump;
+mod lolisafe;
 mod mixdrop;
 mod turbo;
 mod uploadir;
 mod urlgalleries;
 mod webmshare;
+
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] =
+    &[&chevereto::FAMILY, &lolisafe::FAMILY];
 
 pub(super) static SITES: &[&Site] = &[
     &gofile::SITE,
@@ -597,6 +602,3 @@ mod tests {
         );
     }
 }
-
-/// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

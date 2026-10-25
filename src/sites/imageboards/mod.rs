@@ -16,6 +16,15 @@ mod twochen;
 mod vichan;
 mod warosu;
 
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[
+    &twochen::FAMILY,
+    &foolfuuka::FAMILY,
+    &jschan::FAMILY,
+    &lynxchan::FAMILY,
+    &vichan::FAMILY,
+];
+
 pub(super) static SITES: &[&Site] = &[
     &fourchan::SITE,
     &vichan::EIGHTKUN,
@@ -57,6 +66,45 @@ pub(super) fn host_in(url: &Url, hosts: &[&str]) -> bool {
 /// Path, query and fragment, as matched by upstream patterns after the host.
 pub(super) fn rest(url: &Url) -> &str {
     &url[url::Position::BeforePath..]
+}
+
+/// [`rest`] below a configured instance's `host[:port][/prefix]` spec, for
+/// credential-free HTTP(S) URLs on exactly that authority.
+pub(super) fn below_spec<'u>(url: &'u Url, spec: &str) -> Option<&'u str> {
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    let (authority, prefix) = match spec.find('/') {
+        Some(i) => spec.split_at(i),
+        None => (spec, ""),
+    };
+    let host = url.host_str()?;
+    let matches = match url.port() {
+        Some(port) => authority.eq_ignore_ascii_case(&format!("{host}:{port}")),
+        None => authority.eq_ignore_ascii_case(host),
+    };
+    if !matches {
+        return None;
+    }
+    let tail = rest(url).strip_prefix(prefix)?;
+    (tail.is_empty() || tail.starts_with(['/', '?', '#'])).then_some(tail)
+}
+
+/// The URL's [`rest`] below a configured instance of `family` named
+/// `category`, else below one of the built-in `hosts`.
+pub(super) fn instance_rest<'u>(
+    family: &crate::sites::instances::Family,
+    category: &str,
+    url: &'u Url,
+    hosts: impl FnOnce() -> &'static [&'static str],
+) -> Option<&'u str> {
+    match crate::sites::instances::configured(family, category) {
+        Some(instance) => below_spec(url, instance.spec),
+        None => host_in(url, hosts()).then(|| rest(url)),
+    }
 }
 
 /// Match `/` followed by a non-empty run of characters outside `stop`;
@@ -180,7 +228,8 @@ pub(super) fn on_root(root: &str, path: &str) -> Option<Url> {
     }
     let base = Url::parse(root).ok()?;
     let url = Url::parse(&format!("{root}{path}")).ok()?;
-    (crate::sites::plain(&url) && url.origin() == base.origin()).then_some(url)
+    (crate::sites::instances::plain_or_root(&url, root) && url.origin() == base.origin())
+        .then_some(url)
 }
 
 /// Queue child URLs lazily, in order.
@@ -272,6 +321,3 @@ mod tests {
         assert!(on_root("https://a.test", "//b.test/x.png").is_none());
     }
 }
-
-/// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];
