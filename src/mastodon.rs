@@ -35,6 +35,17 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (native Mastodon extractor)"
 );
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "bookmark",
+    "favorite",
+    "following",
+    "hashtag",
+    "list",
+    "status",
+    "user",
+];
+
 /// Hosts recognized by upstream's built-in Mastodon instances.
 pub const INSTANCES: [&str; 3] = ["mastodon.social", "pawoo.net", "baraag.net"];
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;

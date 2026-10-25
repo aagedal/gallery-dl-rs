@@ -44,6 +44,26 @@ const PAGE_LIMIT: &str = "100";
 const MAX_PAGES: usize = 1000;
 const MAX_QUOTES: usize = 32;
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "avatar",
+    "background",
+    "bookmark",
+    "feed",
+    "following",
+    "hashtag",
+    "info",
+    "likes",
+    "list",
+    "media",
+    "post",
+    "posts",
+    "replies",
+    "search",
+    "user",
+    "video",
+];
+
 /// Upstream author-feed and media selection defaults.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Selection {

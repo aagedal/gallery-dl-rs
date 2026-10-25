@@ -55,6 +55,17 @@ const USER_AGENT: &str = concat!(
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const PAGE_SIZE: usize = 50;
 const MAX_PAGES: usize = 200;
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "artists",
+    "discord",
+    "discord-server",
+    "favorite",
+    "post",
+    "posts",
+    "user",
+];
+
 /// Site domains (without optional `www.`/`beta.` prefixes) and categories.
 /// Upstream matches `(kemono|coomer).(cr|st|su|party)`.
 pub const HOSTS: [(&str, &str); 8] = [

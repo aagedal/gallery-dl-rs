@@ -45,6 +45,18 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (native Tumblr extractor)"
 );
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "day",
+    "followers",
+    "following",
+    "likes",
+    "post",
+    "search",
+    "tag",
+    "user",
+];
+
 /// Upstream gallery-dl's default public API key.
 pub const DEFAULT_API_KEY: &str = "O3hU2tMi5e4Qs5t3vezEi6L0qRORJ5y9oUpSGsrWu8iA3UCc3B";
 /// Upstream gallery-dl's default OAuth consumer secret (`TumblrAPI.API_SECRET`).

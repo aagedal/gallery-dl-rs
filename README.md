@@ -28,6 +28,10 @@ cargo build --release --locked
 ./target/release/gallery-dl-rs -C cookies.txt 'https://www.facebook.com/photo/?fbid=PHOTO_ID'
 ./target/release/gallery-dl-rs -C cookies.txt 'https://x.com/USERNAME/status/POST_ID'
 
+# List native extractors with the upstream classes (subcategories) each
+# supports, one `category: sub1, sub2` line per site (`--list-modules`: names only)
+./target/release/gallery-dl-rs --list-extractors
+
 # Native direct media downloads need no Python or gallery-dl installation
 ./target/release/gallery-dl-rs --jobs 4 -d downloads 'https://example.com/photo.jpg'
 

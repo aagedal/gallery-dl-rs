@@ -33,6 +33,11 @@ use url::Url;
 pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "albums", "avatar", "info", "photo", "photos", "set", "user", "video",
+];
+
 pub struct Facebook {
     client: Client,
     network: NetworkOptions,

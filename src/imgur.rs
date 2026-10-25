@@ -33,6 +33,19 @@ const API_ROOT: &str = "https://api.imgur.com/";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const MAX_PAGES: u64 = 200;
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "album",
+    "favorite",
+    "favorite-folder",
+    "gallery",
+    "image",
+    "search",
+    "subreddit",
+    "tag",
+    "user",
+];
+
 /// A supported Imgur input: a post holding a validated 5- or 7-character ID,
 /// or one of upstream's queue-only listings.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -49,6 +49,26 @@ fn truncated_profile() -> crate::Error {
 const SHORTCODE_ALPHABET: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "avatar",
+    "collection",
+    "followers",
+    "following",
+    "guide",
+    "highlights",
+    "info",
+    "post",
+    "posts",
+    "reels",
+    "saved",
+    "stories",
+    "stories-tray",
+    "tag",
+    "tagged",
+    "user",
+];
+
 pub struct Instagram {
     client: Client,
     network: NetworkOptions,

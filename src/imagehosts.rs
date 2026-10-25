@@ -73,6 +73,16 @@ impl Site {
         }
     }
 
+    /// Upstream extractor classes supported natively, for `--list-extractors`.
+    pub fn subcategories(self) -> &'static [&'static str] {
+        match self {
+            Self::Pixeldrain => &["album", "file", "folder"],
+            Self::Catbox => &["album", "file"],
+            Self::Imgbox => &["gallery", "image"],
+            Self::Postimg => &["gallery", "image"],
+        }
+    }
+
     pub fn from_category(category: &str) -> Option<Self> {
         Some(match category {
             "pixeldrain" => Self::Pixeldrain,

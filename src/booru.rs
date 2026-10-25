@@ -175,6 +175,45 @@ impl Site {
         }
     }
 
+    /// Upstream extractor classes supported natively, for `--list-extractors`.
+    /// Only `e621` itself serves upstream's `frontend` hosts.
+    pub fn subcategories(self) -> &'static [&'static str] {
+        match self.dialect() {
+            Dialect::Danbooru => &[
+                "artist",
+                "artist-search",
+                "favgroup",
+                "media-asset",
+                "pool",
+                "popular",
+                "post",
+                "random",
+                "tag",
+            ],
+            Dialect::E621 if self == Self::E621 => &[
+                "artist",
+                "artist-search",
+                "favorite",
+                "frontend",
+                "pool",
+                "popular",
+                "post",
+                "tag",
+            ],
+            Dialect::E621 => &[
+                "artist",
+                "artist-search",
+                "favorite",
+                "pool",
+                "popular",
+                "post",
+                "tag",
+            ],
+            Dialect::Gelbooru => &["favorite", "pool", "post", "redirect", "tag"],
+            Dialect::Safebooru => &["favorite", "pool", "post", "tag"],
+        }
+    }
+
     /// The instance serving one of upstream's exact instance hosts for the
     /// additional Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai).
     pub fn from_instance_host(host: &str) -> Option<Self> {

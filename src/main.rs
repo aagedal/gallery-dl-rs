@@ -1074,6 +1074,42 @@ fn python_text(value: &serde_json::Value) -> String {
     }
 }
 
+/// The upstream extractor classes a dedicated native category supports, as
+/// each module lists them, so `--list-extractors` can be diffed against
+/// upstream's subcategories mechanically.
+fn dedicated_subcategories(category: &str) -> &'static [&'static str] {
+    use gallery_dl_rs as g;
+    if let Some(site) = g::booru::Site::from_category(category) {
+        return site.subcategories();
+    }
+    if let Some(site) = g::imagehosts::Site::from_category(category) {
+        return site.subcategories();
+    }
+    match category {
+        "instagram" => g::instagram::SUBCATEGORIES,
+        "twitter" => g::twitter::SUBCATEGORIES,
+        "facebook" => g::facebook::SUBCATEGORIES,
+        "imgur" => g::imgur::SUBCATEGORIES,
+        "bluesky" => g::bluesky::SUBCATEGORIES,
+        "reddit" => g::reddit::SUBCATEGORIES,
+        "mastodon.social" | "pawoo" | "baraag" => g::mastodon::SUBCATEGORIES,
+        "kemono" | "coomer" => g::kemono::SUBCATEGORIES,
+        "tumblr" => g::tumblr::SUBCATEGORIES,
+        "pixiv" => g::pixiv::SUBCATEGORIES,
+        "pixiv-novel" => g::pixiv::novel::SUBCATEGORIES,
+        "deviantart" => g::deviantart::SUBCATEGORIES,
+        "flickr" => g::flickr::SUBCATEGORIES,
+        "wallhaven" => g::wallhaven::SUBCATEGORIES,
+        "artstation" => g::artstation::SUBCATEGORIES,
+        "pinterest" => g::pinterest::SUBCATEGORIES,
+        "newgrounds" => g::newgrounds::SUBCATEGORIES,
+        "furaffinity" => g::furaffinity::SUBCATEGORIES,
+        "weasyl" => g::weasyl::SUBCATEGORIES,
+        "vsco" => g::vsco::SUBCATEGORIES,
+        _ => &[],
+    }
+}
+
 /// `--list-extractors` / `--list-modules`.
 fn list_extractors(detailed: bool) {
     let dedicated = [
@@ -1114,7 +1150,17 @@ fn list_extractors(detailed: bool) {
         "weasyl",
         "vsco",
     ];
-    let mut lines: Vec<String> = dedicated.iter().map(|c| (*c).to_owned()).collect();
+    let mut lines: Vec<String> = dedicated
+        .iter()
+        .map(|category| {
+            let subcategories = dedicated_subcategories(category);
+            if detailed && !subcategories.is_empty() {
+                format!("{category}: {}", subcategories.join(", "))
+            } else {
+                (*category).to_owned()
+            }
+        })
+        .collect();
     lines.push(if detailed {
         format!("oauth: {}", gallery_dl_rs::oauth::SITES.join(", "))
     } else {

@@ -78,6 +78,16 @@ static FAVORITE: Route = Route::new(
     "{submitid}",
 );
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "favorite",
+    "folder",
+    "journal",
+    "journals",
+    "submission",
+    "submissions",
+];
+
 /// Submission IDs are decimal.
 pub fn valid_id(id: &str) -> bool {
     (1..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())

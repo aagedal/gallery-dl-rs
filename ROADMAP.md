@@ -1880,3 +1880,11 @@ different concrete type. Global default headers cannot replace the required
 scoped request boundary. Do not discard inline manifests or flatten cookies
 to make a preview adapter appear complete. No companion dependency or runtime
 delegation is enabled yet; gallery-owned integration/publication tests remain.
+
+**Implemented subcategory listing for dedicated extractors:** `--list-extractors`
+now prints `category: sub1, sub2` for the dedicated native extractors as well,
+from per-module `SUBCATEGORIES` lists (booru dialects and image hosts per
+category), so upstream class coverage can be diffed mechanically. Diffing
+against upstream 1.32.17 leaves only imgur `me` and twitter `notifications`
+unported among the dedicated extractors. Reddit share links now queue their
+submission as a `redirect` child like upstream.

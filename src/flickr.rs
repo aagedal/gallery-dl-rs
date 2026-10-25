@@ -116,6 +116,11 @@ fn license_name(id: &str) -> Option<&'static str> {
 
 const FILENAME: &str = "{category}_{id}.{extension}";
 const USER_DIRECTORY: &[&str] = &["{category}", "{user[username]}"];
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "album", "favorite", "gallery", "group", "image", "search", "user",
+];
+
 pub static IMAGE: Route = Route::new("image", FILENAME, USER_DIRECTORY, "{id}");
 pub static ALBUM: Route = Route::new(
     "album",
