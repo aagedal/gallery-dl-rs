@@ -1164,14 +1164,21 @@ archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
 
 Experimental native VSCO extraction (`--extractor native`, `vsco` category)
 reads the page-embedded `window.__PRELOADED_STATE__` JSON, which is
-undocumented and fragile. `vsco.co/USER/media/ID` uses `medias.byId`;
-`vsco.co/USER` and `/USER/gallery` take the site ID and anonymous `tkn` bearer
-token from that state and page `api/3.0/medias/profile` by cursor (capped at
-200 pages). Images use `responsiveUrl` with an `https://` prefix; videos are
-kept only as progressive MP4 (HLS is skipped). HTTPS on `*.vsco.co` only.
-`post_id`/`media_id` is the media ID, `username` the `permaSubdomain`, caption
-the description, timestamp `uploadDate`, with width/height. Default filenames
-are `{media_id}.{extension}`; archive identity is the media ID.
+undocumented and fragile, plus the APIs authorized by its anonymous `tkn`
+bearer token. Upstream classes: `user` (`vsco.co/USER`, queues the `include`
+extractors: `avatar`, `gallery`, `spaces`, `collection`; default `gallery`),
+`gallery` (`/USER/gallery`, `api/3.0/medias/profile` by cursor), `collection`
+(`/USER/collection/1`, page state then `api/2.0/collections/ID/medias`),
+`space` (`vsco.co/spaces/ID`, `grpc/spaces/ID/posts` by post cursor), `spaces`
+(`/USER/spaces`, queues each space), `avatar` (the `im.vsco.co` profile image
+redirect), `image` (`/USER/media/ID`) and `video` (`/USER/video/ID`). Listings
+are capped at 200 pages. Images use upstream's `image-CDN.vsco.co` URLs; HLS
+videos go to the manifest downloader (`_ytdl_manifest: hls`, extension
+`mp4`), and `videos: false` skips videos. Files carry upstream's keywords
+(`id`, `user`, `grid`, `meta`, `tags`, `date`, `video`, `width`, `height`,
+`description`) and default formats (`vsco/{user}/{id}.{extension}`,
+`vsco/{user}/collection`, `vsco/space/{user}`). HTTPS on `*.vsco.co` only;
+archive identity is the media ID.
 
 Experimental native Newgrounds extraction (`--extractor native`, `newgrounds`
 category) scrapes art pages `www.newgrounds.com/art/view/USER/SLUG` (main

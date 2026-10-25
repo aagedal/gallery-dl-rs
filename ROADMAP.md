@@ -969,10 +969,15 @@ board sections, secret boards, search, related pins, created/saved/all-pins
 listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
 `videos` and `domain` options.
 
-**Implemented experimental native VSCO:** single media and user galleries via
-the page preloaded state and `medias/profile` API. Remaining: HLS videos
-(upstream ytdl), collections, journals, spaces, avatars, and upstream's
-`videos` option.
+**Implemented experimental native VSCO:** upstream's user (`include`
+dispatch), gallery, collection, space, spaces, avatar, image and video classes
+via the page preloaded state and the `medias/profile`, `collections` and
+`grpc/spaces` APIs, with upstream keywords and default paths, `image-CDN`
+URLs, HLS videos handed to the manifest downloader and the `videos` option.
+Remaining: journals (upstream has no journal extractor; journal entries are
+skipped), browser TLS impersonation for VSCO's Cloudflare front (plain
+requests currently get HTTP 403), and upstream's per-class archive formats
+(the media ID is the archive identity).
 
 **Implemented experimental native Newgrounds:** art posts and user art
 listings via page scraping and XHR listing pages. Remaining: login/cookies

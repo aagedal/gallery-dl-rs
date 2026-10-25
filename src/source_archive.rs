@@ -234,8 +234,13 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if crate::weasyl::target(url).is_ok() {
         return Some(descriptor("weasyl", "{submitid}"));
     }
-    if crate::vsco::target(url).is_ok() {
-        return Some(descriptor("vsco", "{id}"));
+    if let Ok(target) = crate::vsco::target(url) {
+        let format = match target {
+            crate::vsco::Target::Collection { .. } => "c_{user}_{id}",
+            crate::vsco::Target::Space { .. } => "s_{user}_{id}",
+            _ => "{id}",
+        };
+        return Some(descriptor("vsco", format));
     }
     if let Ok(target) = crate::imagehosts::target(url) {
         use crate::imagehosts::Target;
