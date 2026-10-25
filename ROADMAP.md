@@ -273,6 +273,14 @@ authentication failure, credential isolation from media jobs, and preservation o
 the input cookie file. Updates are not persisted and cannot renew an expired
 session. A companion adapter will also need cancellation at its library boundary.
 
+**Implemented form POST media jobs:** `MediaJob::FormPost` sends private,
+bounded (64 fields, 64 KiB) URL-encoded form fields with the first request and
+is otherwise downloaded like direct HTTP (validation, header filtering, size
+limits, atomic publication). 301/302/303 redirects continue as GET without the
+form, 307/308 repeat it only on the requested origin and refuse other origins;
+POST jobs are not resumed, and JSON output omits the form. Uploadir's redirected
+uploads use it; loopback tests cover bodies, redirects and refusals.
+
 **Implemented direct HTTP fallback execution:** the shared downloader consumes
 bounded private `_fallback` arrays in order after remote/request failures and
 configured retries. Invalid/repeated/manifest candidates are skipped. Scoped

@@ -25,6 +25,7 @@ mod koofr;
 mod lensdump;
 mod mixdrop;
 mod turbo;
+mod uploadir;
 mod urlgalleries;
 mod webmshare;
 
@@ -46,6 +47,7 @@ pub(super) static SITES: &[&Site] = &[
     &imgth::SITE,
     &lensdump::SITE,
     &urlgalleries::SITE,
+    &uploadir::SITE,
     &imagehosts::IMXTO,
     &imagehosts::ACIDIMG,
     &imagehosts::IMAGEVENUE,
@@ -411,6 +413,7 @@ pub(super) struct Response {
     pub status: u16,
     pub location: Option<String>,
     pub cookies: Vec<String>,
+    pub headers: reqwest::header::HeaderMap,
     pub body: Vec<u8>,
 }
 
@@ -524,6 +527,7 @@ pub(super) async fn request(
         status: status.as_u16(),
         location,
         cookies,
+        headers,
         body,
     })
 }

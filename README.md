@@ -2697,7 +2697,8 @@ and options: `unsplash`, `pexels`, `tenor`, `imgbb`, `imagechest`, `telegraph`,
 `lexica`, `pixnet`, `listal`, `khinsider`, `audiochan`, `whyp`, the
 `imagehosts` family (imxto, imagetwist, imagevenue, pixhost, vipr and others),
 `koofr`, `cyberfile`, `webmshare`, `mixdrop`, `imgpile`, `imagepond`, `imgth`,
-`lensdump`, `urlgalleries`, `hiperdex`, `mangaread`, `kaliscan`, `rawkuma`,
+`lensdump`, `urlgalleries`, `uploadir` (redirected uploads download through a
+form POST job), `hiperdex`, `mangaread`, `kaliscan`, `rawkuma`,
 `komikcast`, `dandadan`, `dankefuerslesen`, `madokami` (site options
 `username`/`password`), `readcomiconline`, `senmanga`, `keenspot`, `comicvine`,
 `photovogue`, `architizer`, `naver-chzzk`, `bbc`, `tungsten`, `slickpic`,
@@ -2755,8 +2756,11 @@ Their undocumented endpoints may change; fixture tests establish parser and
 transport behavior. Anonymous Facebook video extraction has been checked, but
 complete live downloads and authenticated coverage remain unverified.
 
-Direct HTTP(S) media and inline-text jobs are downloaded. Extraction retains
-typed direct HTTP, inline-text, video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
+Direct HTTP(S) media, form POST (`form_post`, upstream's `_http_method: "POST"`
+with `_http_data`; the form is sent only to the requested origin, other
+redirects continue as GET, and POST jobs are not resumed) and inline-text jobs
+are downloaded. Extraction retains typed direct HTTP, form POST, inline-text,
+video-page, and HLS/DASH jobs in input order. `-g` preserves the original `ytdl:`
 source; `-j` includes the job kind and manifest protocol/base URL. Inline job bodies, headers, cookies, and other private handoff options are omitted
 from their job fields in JSON. Inline-text inspection URLs carry encoded text.
 The JSON output is for inspection, not a lossless job export. Different inline
