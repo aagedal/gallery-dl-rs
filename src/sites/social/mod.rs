@@ -84,4 +84,10 @@ pub(crate) fn ytdl_item(page: &str, keywords: Map<String, Value>) -> Option<crat
 }
 
 /// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[
+    &urlshortener::FAMILY,
+    &nitter::FAMILY,
+    &postmill::FAMILY,
+    &blogger::FAMILY,
+    &reactor::FAMILY,
+];

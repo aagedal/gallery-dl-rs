@@ -51,6 +51,19 @@ pub static RADDLE_SITE: Site = Site {
     cookies: Some("raddle.me"),
 };
 
+/// Configured `extractor.postmill.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "postmill",
+    builtin: &[&RADDLE_SITE],
+    related: &[],
+    template: &RADDLE_SITE,
+    matches: |category, url| target_for(category, url).is_some(),
+    extract: |category, http, url| match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => run(&instance.site, http, url),
+        None => crate::sites::fail(error("unsupported Postmill URL")),
+    },
+};
+
 const SORTINGS: &[&str] = &[
     "hot",
     "new",
@@ -75,12 +88,31 @@ fn word(text: &str) -> bool {
 
 /// The instance root (`text.root_from_url`) and the extractor's target.
 fn target(url: &Url) -> Option<(String, Target)> {
-    if !crate::sites::plain(url) || !RADDLE.contains(&url.host_str()?) {
-        return None;
-    }
-    let root = url[..Position::BeforePath].to_owned();
-    let path = url.path();
-    let query = url.query();
+    target_for(RADDLE_SITE.category, url)
+}
+
+/// [`target`] for a built-in or configured instance category.
+fn target_for(category: &str, url: &Url) -> Option<(String, Target)> {
+    let (root, rest) = match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => (
+            instance.root.to_owned(),
+            crate::sites::instances::below(url, instance.spec)?,
+        ),
+        None if category == RADDLE_SITE.category => {
+            if !crate::sites::plain(url) || !RADDLE.contains(&url.host_str()?) {
+                return None;
+            }
+            (
+                url[..Position::BeforePath].to_owned(),
+                url[Position::BeforePath..Position::AfterQuery].to_owned(),
+            )
+        }
+        None => return None,
+    };
+    let (path, query) = match rest.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (rest.as_str(), None),
+    };
     let segments: Vec<&str> = path.split('/').skip(1).collect();
     // Upstream's `$`-anchored patterns: nothing may follow but the query.
     let anchored = url.fragment().is_none();
@@ -129,7 +161,12 @@ fn target(url: &Url) -> Option<(String, Target)> {
 }
 
 fn extract(http: &Http, url: Url) -> Events<'_> {
-    let Some((root, kind)) = target(&url) else {
+    run(&RADDLE_SITE, http, url)
+}
+
+fn run<'a>(site: &'static Site, http: &'a Http, url: Url) -> Events<'a> {
+    let category = site.category;
+    let Some((root, kind)) = target_for(category, &url) else {
         return crate::sites::fail(error("unsupported Raddle URL"));
     };
     match kind {
@@ -139,10 +176,10 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             let instance = root.split_once("://").map_or("", |(_, host)| host);
             let save_body = http.option_bool("save-link-post-body", false);
             let (items, link) = parse_post(&page, instance, save_body, &root)?;
-            let files = crate::sites::events(crate::sites::post(&RADDLE_SITE, http, &POST, items));
+            let files = crate::sites::events(crate::sites::post(site, http, &POST, items));
             Ok(match link {
                 Some((child, data)) => files
-                    .chain(crate::sites::queue(http, "raddle", "post", child, &data))
+                    .chain(crate::sites::queue(http, category, "post", child, &data))
                     .boxed(),
                 None => files,
             })
@@ -161,13 +198,13 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             } else {
                 location
             };
-            Ok(match target(&full) {
-                Some(_) => crate::sites::queue(http, "raddle", "shorturl", full, &Map::new()),
+            Ok(match target_for(category, &full) {
+                Some(_) => crate::sites::queue(http, category, "shorturl", full, &Map::new()),
                 None => crate::sites::events(Vec::new()),
             })
         }),
         Target::Submissions(subcategory, base, sorting, query) => {
-            submissions(http, root, subcategory, base, sorting, &query)
+            submissions(http, category, root, subcategory, base, sorting, &query)
         }
     }
 }
@@ -176,6 +213,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 /// submission, following `rel="next"` links.
 fn submissions<'a>(
     http: &'a Http,
+    category: &'static str,
     root: String,
     subcategory: &'static str,
     base: String,
@@ -211,7 +249,9 @@ fn submissions<'a>(
                 extract_iter(&page, "<nav class=\"submission__nav\">", "</nav>")
                     .into_iter()
                     .filter_map(|nav| base.join(&unescape(extr(nav, "<a href=\"", "\""))).ok())
-                    .filter(|child| matches!(target(child), Some((_, Target::Post(..)))))
+                    .filter(|child| {
+                        matches!(target_for(category, child), Some((_, Target::Post(..))))
+                    })
                     .collect();
             let next = unescape(extr(&page, "<link rel=\"next\" href=\"", "\">"));
             let next = (!next.is_empty())
@@ -221,7 +261,7 @@ fn submissions<'a>(
                 .map(String::from);
             let events = stream::iter(children)
                 .map(move |child| {
-                    crate::sites::queue(http, "raddle", subcategory, child, &Map::new())
+                    crate::sites::queue(http, category, subcategory, child, &Map::new())
                 })
                 .flatten()
                 .boxed();
@@ -349,6 +389,40 @@ pub(crate) fn parse_post(
 mod tests {
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, queued, serve};
+
+    #[test]
+    fn routes_configured_instances() {
+        crate::sites::instances::define(
+            "postmill",
+            "postmill-configured",
+            serde_json::json!({
+                "root": "http://postmill.test:8080/forum",
+                "pattern": r"postmill\.test:8080/forum|postmill-alias\.test",
+            }),
+        );
+        let find = |raw: &str| crate::sites::find(&Url::parse(raw).unwrap()).map(|s| s.category);
+        assert_eq!(
+            find("https://postmill-alias.test/f/Art/12/title"),
+            Some("postmill-configured")
+        );
+        assert_eq!(
+            find("http://postmill.test:8080/forum/search?q=x"),
+            Some("postmill-configured")
+        );
+        assert_ne!(
+            find("http://postmill.test:8080/forum/wiki"),
+            Some("postmill-configured")
+        );
+        let url = Url::parse("http://postmill.test:8080/forum/f/Art/new?t=day").unwrap();
+        assert_eq!(
+            target_for("postmill-configured", &url),
+            Some((
+                "http://postmill.test:8080/forum".into(),
+                Target::Submissions("forum", "/f/Art".into(), "/new".into(), "t=day".into())
+            ))
+        );
+        assert_eq!(target_for("raddle", &url), None);
+    }
 
     #[test]
     fn classifies_urls() {
