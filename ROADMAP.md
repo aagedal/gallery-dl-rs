@@ -1074,9 +1074,21 @@ OAuth/private content, upstream's per-class archive formats (the photo ID is
 the archive identity) and `*.staticflickr.com` image URLs (kept as direct
 downloads).
 
-**Implemented experimental native Reddit:** submissions, galleries, subreddit
-and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
-DASH audio, comment scanning, external-site recursion, and reddit options.
+**Implemented experimental native Reddit:** every upstream class (submission,
+subreddit and its sub-listings/search, home and its listings, user and its
+sub-listings with `only`, image, share redirect) with upstream keywords and
+default paths; galleries, `media_metadata` embeds, v.redd.it videos per
+`videos` (DASH manifest with audio, falling back to the MP4; `ytdl` page or
+plain URL), comment scanning (`comments`, `morecomments`), self text links
+(`selftext`), external links queued to the site router, `recursion` into
+linked submissions, `previews` (a failed child job is followed by the
+submission's preview rendition), `embeds`, `id-min`/`id-max`,
+`date-min`/`date-max`, `limit`, and `api: "oauth"` with `client-id` and
+`refresh-token` (or a public token) on `oauth.reddit.com`. A public Atom-feed
+fallback covers logged-out networks behind Reddit's login wall. Remaining:
+the `oauth:reddit` token flow and its `refresh-token: "cache"`, preview
+fallbacks after child *download* failures (only extraction failures are
+seen), and `parent-directory`'s shared directory for child jobs.
 
 **Implemented experimental native Bluesky:** single posts, author media/posts
 feeds, public custom feeds and list feeds via the public AppView, with full-size

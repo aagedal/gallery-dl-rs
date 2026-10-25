@@ -43,6 +43,11 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
             "id-max",
             "limit",
             "parent-directory",
+            "date-min",
+            "date-max",
+            "api",
+            "client-id",
+            "refresh-token",
         ],
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
@@ -2883,7 +2888,8 @@ mod site_scope_tests {
         assert_eq!(options["lang"], serde_json::json!("en"));
         assert!(super::Config::parse_with_options(br#"{"a":1,"a":2}"#, &dir, &cli).is_err());
         let config = super::Config::parse_with_options(
-            br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3},
+            br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3,
+                "api":"oauth","refresh-token":"rt","client-id":"cid","date-min":"2024-01-01"},
                 "pinterest":{"sections":false},
                 "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
                 "vsco":{"videos":false,"include":"all"},
@@ -2904,6 +2910,10 @@ mod site_scope_tests {
         assert_eq!(options["comments"], serde_json::json!(500));
         assert_eq!(options["videos"], serde_json::json!("ytdl"));
         assert_eq!(options["recursion"], serde_json::json!(2));
+        assert_eq!(options["refresh-token"], serde_json::json!("rt"));
+        assert_eq!(options["client-id"], serde_json::json!("cid"));
+        assert_eq!(options["api"], serde_json::json!("oauth"));
+        assert_eq!(options["date-min"], serde_json::json!("2024-01-01"));
         let options = config.resolve("pinterest").unwrap().site_options.unwrap();
         assert_eq!(options["sections"], serde_json::json!(false));
         let flickr = config.resolve("flickr").unwrap();

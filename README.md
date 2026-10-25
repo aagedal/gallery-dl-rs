@@ -328,15 +328,22 @@ and repository reads use their authors' DID service roots independently of this
 override; no API credentials are copied to blob jobs.
 
 Experimental native Reddit extraction (`--extractor native`, category `reddit`)
-accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),
-subreddit listings (hot/new/top/rising/controversial, `?t=` kept), and user
-submissions (`/user/NAME`, `/u/NAME`) via the public `.json` endpoints, paging
-with `after` up to 100 pages. It downloads `i.redd.it` images, galleries in
-`gallery_data` order, `v.redd.it` fallback MP4s (video only: Reddit serves audio
-as separate DASH), and external links to direct media files; self posts,
-crossposts, deleted posts, and other external sites are skipped. Plain `i.redd.it`
-file links stay direct downloads in both modes. OAuth, comment/selftext link
-scanning, searches, multireddits, and upstream's reddit options are not implemented.
+accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`,
+`/gallery/ID`), subreddit listings and searches (`/r/SUB/top/?t=week`,
+`/r/SUB/search?q=..`), the home feed and its listings, user listings
+(`/user/NAME[/submitted|comments|saved|..]`), `i.redd.it`/`preview.redd.it`
+files and mobile share links via the `.json` endpoints, paging with `after`
+up to 100 pages. Files are `i.redd.it` images, galleries in `gallery_data`
+order, `media_metadata` embeds and `v.redd.it` videos (DASH manifest with
+audio by default, MP4 fallback). Other links from the submission, its self
+text and its comments are queued to the matching extractor; links to other
+submissions are followed per `recursion`. Upstream's `comments`,
+`morecomments`, `selftext`, `videos`, `embeds`, `previews`, `only`,
+`id-min`/`id-max`, `date-min`/`date-max` and `limit` options apply, and
+`api: "oauth"` uses `oauth.reddit.com` with a bearer token from
+`refresh-token` and `client-id` (or a public token); tokens stay in memory and
+are sent only to the OAuth API, never with media. Plain `i.redd.it` file links
+stay direct downloads in both modes.
 
 Experimental native booru extraction (`--extractor native`) covers categories
 `danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and
