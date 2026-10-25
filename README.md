@@ -1192,17 +1192,21 @@ Experimental native Pinterest extraction (`--extractor native`, `pinterest`
 category) uses the web resource API (`resource/NAME/get/?source_url=..&data=..`
 with upstream's XHR headers, including a pinned `X-APP-VERSION` that Pinterest
 may eventually reject). Supported on `pinterest.com` and an explicit list of
-country domains/subdomains: `/pin/ID/` (`PinResource`), `/USER/BOARD/`
-(`BoardResource` then `BoardFeedResource`), `/USER/pins/` (`UserPinsResource`)
-and `pin.it/CODE` (resolved via the `url_shortener` redirect). Feeds follow the
-bookmark until `-end-`, capped at 200 pages. Media are story-pin image/video
-blocks, else the largest MP4 in `videos.video_list` (HLS-only videos are
-skipped), else `images.orig`; HTTPS on `i.pinimg.com`/`v*.pinimg.com` only.
-Promoted pins and pins without media are skipped. `post_id`/`id` is the pin
-ID, `media_id` the pin ID (`ID_N` for multi-block story pins), `username` the
-pinner, caption title/grid title/description, timestamp `created_at`, index
-1-based, with width/height. Default filenames are `{post_id}_{index}.{extension}`;
-archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
+country domains/subdomains, covering every upstream class: `/pin/ID/`,
+`/pin/ID/#related`, `/USER/BOARD/` (its sections are queued as `section`
+children unless `sections` is false), `/USER/BOARD/#related`,
+`/USER/BOARD/SECTION` (or `id:SECTION_ID`), `/USER/` and `/USER/_saved/`
+(boards queued), `/USER/pins/`, `/USER/_created/`, `/search/pins/?q=..` and
+`pin.it/CODE`. Feeds follow the bookmark until `-end-`, capped at 200 pages.
+Files follow upstream: story-pin blocks (images, videos, audio, paragraphs as
+text files), carousels, videos (HLS manifest preferred with an MP4 fallback)
+and `images.orig`; HTTPS on `i.pinimg.com`/`v*.pinimg.com` only. Keywords,
+default paths (`pinterest_{id}{_media_id}.{extension}` in each class's
+directory) and archive formats are upstream's; `stories`, `videos`,
+`sections` and `domain` apply. Session cookies from `--cookies` are sent with
+resource calls (secret boards, private pins) together with the session's own
+`csrftoken`, else a random one, mirrored in `X-CSRFToken`. Plain `pinimg.com`
+links stay direct.
 
 Experimental native VSCO extraction (`--extractor native`, `vsco` category)
 reads the page-embedded `window.__PRELOADED_STATE__` JSON, which is

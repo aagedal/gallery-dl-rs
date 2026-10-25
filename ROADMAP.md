@@ -990,11 +990,19 @@ searches starting at the URL's `page`. Default paths now follow upstream
 remain the wallpaper ID, so existing archives still match. Remaining:
 upstream's default API key and 1.4 s request interval.
 
-**Implemented experimental native Pinterest:** pins, boards, user pins and
-`pin.it` links via the resource API. Remaining: login/cookies and CSRF token,
-board sections, secret boards, search, related pins, created/saved/all-pins
-listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
-`videos` and `domain` options.
+**Implemented experimental native Pinterest:** every upstream class (pin,
+board with its sections queued, section by slug or `id:`, user boards
+(`/USER/`, `/_saved/`), all pins, created pins, search, related pins and
+related board pins, `pin.it` links) via the resource API with upstream's
+keywords, default paths and per-class archive formats; story pins, carousels,
+videos (HLS manifest preferred, MP4 fallback; HLS-only videos as manifests)
+and `images.orig`; the `sections`, `stories`, `videos` and `domain` options;
+session cookies from `--cookies` (secret boards, private pins) with the
+session's own `csrftoken` (else upstream's random one) mirrored in
+`X-CSRFToken`. Upstream has no external/embedded (ytdl) pin handling, so none
+is ported. Remaining: switching the API root after a cross-domain redirect
+(upstream follows `response.history`), interactive login and refreshing the
+pinned `X-APP-VERSION`.
 
 **Implemented experimental native VSCO:** upstream's user (`include`
 dispatch), gallery, collection, space, spaces, avatar, image and video classes
