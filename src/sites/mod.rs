@@ -280,6 +280,16 @@ pub(crate) fn supported(url: &Url) -> bool {
         || ROUTER.get().is_some_and(|router| (router.supports)(url))
 }
 
+/// Route a queued URL through the installed program router alone, for
+/// dedicated native extractors outside the registry. `None` when no router
+/// is installed or it does not accept the URL.
+pub fn route(url: Url) -> Option<Events<'static>> {
+    ROUTER
+        .get()
+        .filter(|router| (router.supports)(&url))
+        .and_then(|router| (router.extract)(url))
+}
+
 /// Extract any registry URL, for child jobs that cross site boundaries.
 /// Direct links to media files no other site claims become single files;
 /// other URLs go to the installed router.

@@ -636,8 +636,10 @@ Danbooru `random`/`media-asset`, e621 `/p/` short links, `e621.cc` and `frontend
 links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
 `metadata` (includes; notes/pools) and Gelbooru/Safebooru `tags`/`notes`
 (per-post HTML) options, e621 hidden-URL reconstruction and Danbooru ugoira WebM
-samples. Upstream has no other favorites classes for these sites. Remaining:
-Danbooru `external` and `ugoira` frame data, the DAPI `url` option, other
+samples, plus Danbooru `ugoira` (ZIP originals with `media_metadata` frame
+delays for the ugoira postprocessors) and `external` (sources of file-less posts
+queued through the process-wide router). Upstream has no other favorites
+classes for these sites. Remaining: the DAPI `url` option, other
 Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
 aliases, per-post laziness of option requests (they run per page), and
 authenticated live verification.

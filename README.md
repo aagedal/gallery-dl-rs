@@ -544,7 +544,14 @@ e621 `/p/BASE32` short links and `e621.cc` URLs (requests go to e621.net);
 e621 `frontend` links (`e621.cc/?tags=`, `e621.anthro.fr/?q=`) and Gelbooru
 `redirect` links (`redirect.php?s=BASE64`), which queue the e621 tag search or
 the decoded Gelbooru post as a child job. Danbooru ugoira ZIPs download their
-WebM sample (`large_file_url`, extension `webm`) like upstream's default.
+WebM sample (`large_file_url`, extension `webm`) like upstream's default;
+`ugoira: true` (Danbooru only, default false) instead downloads the ZIP and
+requests `/posts/ID.json?only=media_metadata` for its `frames` keyword
+(`{index:06}.{ext}` names with millisecond delays), which also feeds the native
+ugoira postprocessors. Danbooru `external: true` (default false) emits a
+file-less post boundary for posts without a `file_url` field and queues their
+non-empty `source` URL through the program's router as a child job (sources
+that are not http(s) URLs, or that no extractor accepts, are skipped).
 Category-scoped options: Danbooru `metadata` (true for upstream's default
 `artist_commentary,children,notes,parent,uploader`, or a string/list of
 fields) merges one `only=` request per page (or per single post/media asset);
@@ -552,8 +559,8 @@ e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
 `notes` (when `has_notes`) and replaces `pools` IDs with cached pool objects;
 Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
 `tags_<type>` strings and note lists. These requests happen when a page is
-fetched, before its posts are emitted. Not supported natively: Danbooru
-`external` and `ugoira` (frame data), the DAPI `url` option, and the
+fetched, before its posts are emitted. Not supported natively: the DAPI `url`
+option, and the
 atfbooru/aibooru/booruvar/e6ai instances and Danbooru host aliases.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
