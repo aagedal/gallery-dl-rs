@@ -40,7 +40,19 @@ pub enum MediaJob {
         #[serde(skip_serializing)]
         inline_data: Option<String>,
     },
+    /// An HTTP POST of URL-encoded form fields (upstream's `_http_method:
+    /// "POST"` with `_http_data`), otherwise downloaded like `DirectHttp`.
+    /// The private form is sent to the requested origin only: 301/302/303
+    /// redirects continue as GET and 307/308 must stay on that origin.
+    FormPost {
+        #[serde(skip_serializing)]
+        form: Vec<(String, String)>,
+    },
 }
+
+/// Bounds for [`MediaJob::FormPost`] forms.
+pub const MAX_FORM_FIELDS: usize = 64;
+pub const MAX_FORM_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -625,9 +637,14 @@ impl Media {
         {
             return self.url.to_string();
         }
+        let form;
         let inline_data = match &self.job {
             MediaJob::Manifest { inline_data, .. } => inline_data.as_deref(),
             MediaJob::InlineText { data } => Some(data.as_str()),
+            MediaJob::FormPost { form: fields } => {
+                form = serde_json::to_string(fields).unwrap_or_default();
+                Some(form.as_str())
+            }
             _ => None,
         };
         serde_json::json!([self.url, self.job, inline_data, self.headers, self.handoff]).to_string()
