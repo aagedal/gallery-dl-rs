@@ -239,6 +239,7 @@ async fn blog_by_url(http: &Http, host: &str) -> Result<Map<String, Value>> {
 }
 
 /// `_pagination` over `nextPageToken`, one API page at a time.
+#[allow(clippy::too_many_arguments)]
 fn pagination<'a>(
     site: &'static Site,
     http: &'a Http,

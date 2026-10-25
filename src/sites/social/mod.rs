@@ -90,4 +90,5 @@ pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[
     &postmill::FAMILY,
     &blogger::FAMILY,
     &reactor::FAMILY,
+    &xenforo::FAMILY,
 ];
