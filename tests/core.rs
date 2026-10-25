@@ -436,7 +436,15 @@ fn routes_social_hosts_without_lookalike_domains() {
             "https://www.furaffinity.net/scraps/alice/2/",
             Some("furaffinity"),
         ),
-        ("https://www.furaffinity.net/user/alice/", None),
+        (
+            "https://www.furaffinity.net/user/alice/",
+            Some("furaffinity"),
+        ),
+        (
+            "https://www.furaffinity.net/favorites/alice/",
+            Some("furaffinity"),
+        ),
+        ("https://www.furaffinity.net/", None),
         ("https://d.furaffinity.net/art/alice/1/1.alice_a.png", None),
         ("https://www.furaffinity.net.evil.example/view/42/", None),
         (

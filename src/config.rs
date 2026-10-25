@@ -47,6 +47,7 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
     ("wallhaven", &["metadata"]),
+    ("furaffinity", &["descriptions", "external", "layout"]),
     (
         "tumblr",
         &[

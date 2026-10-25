@@ -1570,6 +1570,8 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_options(options.site_options.as_deref())?
+                                    .with_include(options.include.clone())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1580,7 +1582,10 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Fur Affinity initialization failed: {e}"))
                         })?;
-                    native.events(&url)
+                    native.events_with_queue(
+                        &url,
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if category == "newgrounds" => {
                     let native = extractors

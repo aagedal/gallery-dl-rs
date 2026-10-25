@@ -1188,16 +1188,31 @@ skipped. HTTPS on `*.ngfiles.com` only. `post_id` is the image's numeric ID,
 filenames are `{post_id}_{index}.{extension}`; archive identity is `media_id`.
 
 Experimental native Fur Affinity extraction (`--extractor native`,
-`furaffinity` category) scrapes `www.furaffinity.net/view/ID/` and `/full/ID/`
-(the `Download` link, title, `/user/` artist, `popup_date` and rating).
-`/gallery/USER/` and `/scraps/USER/` page `/gallery/USER/N/` `<figure
-id="sid-ID">` items until a page adds no new IDs (capped at 200 pages) and
-fetch every submission. Session cookies `a`/`b` from `--cookies` or
+`furaffinity` category) mirrors upstream's classes on `furaffinity.net` and its
+`fx`/`xfu`/`fxfu` mirrors: `/view/ID/` and `/full/ID/` (`post`),
+`/gallery/USER/` and `/scraps/USER/` (`/PATH/USER/N/`), `/gallery/USER/folder/
+ID[/NAME]` (`folder`), `/favorites/USER/[ID/next]` (`favorite`, with
+`favorite_id`), `/search/?q=...` (`search`, POSTed like upstream),
+`/msg/submissions` (`submissions`, needs cookies), `/watchlist/by/USER/`
+(`following`, queued profiles) and `/user/USER/` (`user`, `include` of
+`gallery` (default), `scraps`, `favorite`). Listings page until a page adds no
+new IDs (capped at 200) and fetch every submission. Submission pages are
+parsed like upstream's `_parse_post` for the new and old layouts
+(`extractor.furaffinity.layout`: `auto`, `new` or `old`; `auto` also reads
+the current page layout, which upstream's markers no longer match, and skips
+`d.furaffinity.net` stylesheet links before the file): file URL, title,
+artist, tags, description (text, or HTML with
+`extractor.furaffinity.descriptions: "html"`), views/favorites/comments,
+rating, category/theme, species, gender, size, folders and thumbnail;
+`extractor.furaffinity.external: true` queues description links to other
+extractors. Session cookies `a`/`b` from `--cookies` or
 `--cookies-from-browser` are sent to the site only; without them mature
 submissions are skipped. HTTPS on `d.furaffinity.net`/`*.facdn.net` only.
-`post_id`/`media_id` is the submission ID, `username` the artist, caption the
-title. Default filenames are `{post_id}.{extension}`; archive identity is the
-submission ID.
+`post_id`/`media_id` is the submission ID, `username` the user, caption the
+title. Default paths follow upstream: `{id}{title:? //}.{extension}` in
+`furaffinity/{user!l}/` (plus `Scraps`, `Favorites`, `Folders/{folder_id}
+{folder_name}` or `furaffinity/Search/{search}/`; previously
+`furaffinity/{post_id}.{extension}`); archive identity is the submission ID.
 
 Experimental native Weasyl extraction (`--extractor native`, `weasyl`
 category) uses the API: `weasyl.com/~USER/submissions/ID/...` and

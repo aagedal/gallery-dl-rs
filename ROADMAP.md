@@ -987,11 +987,21 @@ listings via page scraping and XHR listing pages. Remaining: login/cookies
 overview, upstream's `flash`, `format` and `include` options, and tags/rating/
 score metadata.
 
-**Implemented experimental native Fur Affinity:** submissions, galleries and
-scraps via page scraping with optional `a`/`b` session cookies. Remaining:
-favorites, search, user profile/journals, followed users, upstream's
-`descriptions`, `external`, `include` and `layout` options, and tags/
-description metadata.
+**Implemented experimental native Fur Affinity:** upstream's `post`,
+`gallery`, `scraps`, `folder`, `favorite` (with `favorite_id`), `search`
+(POSTed form pagination), `submissions` (`/msg/submissions`, needs cookies),
+`following` (queued profiles) and `user` (`include` dispatch) classes via
+page scraping with optional `a`/`b` session cookies, including the
+`fxraffinity`/`xfuraffinity`/`fxfuraffinity` mirrors. Files carry
+`_parse_post`'s keywords for the new and old layouts, plus the current page
+layout those markers no longer match (tags, title, artist,
+description, statistics, rating, category/theme, species, gender, size,
+folders, thumbnail) with upstream's `descriptions`, `external` and `layout`
+options. Default paths now follow upstream (`{id}{title:? //}.{extension}` in
+`furaffinity/{user!l}/`, plus `Scraps`, `Favorites`, `Folders/...` or
+`Search/{search}`) instead of `furaffinity/ID.ext`; archive keys remain the
+submission ID. Remaining: the missing-cookie warning, 1 s request interval
+and `skip`-based offsets. Upstream has no journal extractor.
 
 **Implemented experimental native Weasyl:** submissions and user galleries via
 the API with an optional `api-key`. Remaining: folders, journals, favorites,
