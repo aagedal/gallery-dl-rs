@@ -2,7 +2,8 @@
 //!
 //! Mirrors gallery_dl/extractor/reddit.py with the REST API
 //! (`https://www.reddit.com/....json?raw_json=1`), or with `api: "oauth"`
-//! `oauth.reddit.com` and a bearer token from the `refresh-token` (else a
+//! `oauth.reddit.com` and a bearer token from the `refresh-token` (or the one
+//! `oauth:reddit` cached for the client ID; else a
 //! public `installed_client` token; tokens are cached in memory, sent only
 //! to the OAuth origin and never logged): the submission,
 //! subreddit (any listing such as `/top` or `/search`), home, user (any
@@ -48,7 +49,7 @@ use std::{
 use url::Url;
 
 /// Reddit asks API clients for a unique, descriptive User-Agent.
-const USER_AGENT: &str = concat!(
+pub(crate) const USER_AGENT: &str = concat!(
     "gallery-dl-rs/",
     env!("CARGO_PKG_VERSION"),
     " (native Reddit extractor)"
@@ -56,7 +57,7 @@ const USER_AGENT: &str = concat!(
 const API_ROOT: &str = "https://www.reddit.com/";
 /// Upstream `RedditAPI.ROOT` and public OAuth application.
 const OAUTH_ROOT: &str = "https://oauth.reddit.com/";
-const CLIENT_ID: &str = "6N9uN0krSDE-ig";
+pub(crate) const CLIENT_ID: &str = "6N9uN0krSDE-ig";
 /// Upstream caches access tokens for an hour.
 const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
 /// Upstream lets public OAuth clients see quarantined subreddits.
@@ -323,6 +324,8 @@ pub struct Options {
     pub client_id: Option<String>,
     /// OAuth refresh token for private access; a public token otherwise.
     pub refresh_token: Option<Secret>,
+    /// `refresh-token` is unset or `"cache"`: use one cached by `oauth:reddit`.
+    pub refresh_token_cache: bool,
 }
 
 /// A credential that never appears in debug output or error messages.
@@ -361,6 +364,7 @@ impl Default for Options {
             oauth: false,
             client_id: None,
             refresh_token: None,
+            refresh_token_cache: true,
         }
     }
 }
@@ -500,8 +504,11 @@ impl Options {
                 ));
             }
         };
-        // `"cache"` names upstream's token cache filled by `oauth:reddit`,
-        // which is not supported; like an empty cache, a public token is used.
+        // Unset or `"cache"` selects the credential cache filled by
+        // `oauth:reddit` (see `with_token_cache`); an empty cache, like an
+        // empty string, leaves a public token.
+        options.refresh_token_cache = matches!(map.get("refresh-token"), None | Some(Value::Null))
+            || map.get("refresh-token").and_then(Value::as_str) == Some("cache");
         options.refresh_token = match map.get("refresh-token") {
             None | Some(Value::Null) => None,
             Some(Value::String(token)) if token.is_empty() || token == "cache" => None,
@@ -1304,6 +1311,31 @@ impl Reddit {
             self.options = Options::parse(options)?;
         }
         Ok(self)
+    }
+
+    /// Upstream `_refresh_token_cache`: with `api: "oauth"` and no configured
+    /// `refresh-token` (or `"cache"`), use the token `oauth:reddit` cached
+    /// for the client ID (`#CLIENT_ID`). Call after `with_options`.
+    pub async fn with_token_cache(mut self, cache: Option<&crate::cache::Cache>) -> Self {
+        if let Some(cache) = cache
+            && self.options.oauth
+            && self.options.refresh_token.is_none()
+            && self.options.refresh_token_cache
+        {
+            let client_id = self.options.client_id.as_deref().unwrap_or(CLIENT_ID);
+            let key = crate::cache::key(
+                "extractor.reddit",
+                "_refresh_token_cache",
+                &format!("#{client_id}"),
+            );
+            if let Ok(Some(token)) = cache.get_str(&key).await
+                && (1..=4096).contains(&token.len())
+                && token.bytes().all(|b| b.is_ascii_graphic())
+            {
+                self.options.refresh_token = Some(Secret(token));
+            }
+        }
+        self
     }
 
     /// Additional attempts for HTTP 429/5xx and transport failures.
@@ -3437,6 +3469,53 @@ mod tests {
             let lower = request.to_ascii_lowercase();
             assert!(lower.contains("authorization: bearer tok-1"), "{request}");
             assert!(lower.contains("pref_quarantine_optin"), "{request}");
+        }
+    }
+
+    #[tokio::test]
+    async fn oauth_reads_refresh_tokens_cached_for_the_client_id() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        cache
+            .set(
+                "gallery_dl.extractor.reddit._refresh_token_cache-#myapp",
+                &json!("cached-rt"),
+                None,
+            )
+            .await
+            .unwrap();
+        let (root, server) = serve(vec![
+            ok(json!({"access_token": "tok"}).to_string().as_bytes()),
+            ok(&submission(image_post("abc12"))),
+        ]);
+        let native = with(
+            reddit(root.clone()).with_oauth_root(root),
+            json!({"api": "oauth", "client-id": "myapp", "refresh-token": "cache"}),
+        )
+        .with_token_cache(Some(&cache))
+        .await;
+        let events: Vec<_> = native
+            .events(&Url::parse("https://redd.it/abc12").unwrap())
+            .collect()
+            .await;
+        assert_eq!(files(&events).len(), 1, "{events:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].ends_with("grant_type=refresh_token&refresh_token=cached-rt"));
+
+        // Another client ID, REST mode or an explicit token ignore the entry.
+        for settings in [
+            json!({"api": "oauth"}),
+            json!({"api": "rest", "client-id": "myapp"}),
+            json!({"api": "oauth", "client-id": "myapp", "refresh-token": "own"}),
+            json!({"api": "oauth", "client-id": "myapp", "refresh-token": ""}),
+        ] {
+            let native = with(reddit(Url::parse("http://127.0.0.1:9/").unwrap()), settings)
+                .with_token_cache(Some(&cache))
+                .await;
+            assert_ne!(
+                native.options.refresh_token.as_ref().map(Secret::expose),
+                Some("cached-rt")
+            );
         }
     }
 

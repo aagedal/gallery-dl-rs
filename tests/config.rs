@@ -2012,7 +2012,7 @@ fn novel_settings_and_credentials_are_separate_from_illustrations() {
 }
 
 #[test]
-fn client_credentials_are_deviantart_only_and_never_echoed() {
+fn client_credentials_are_scoped_and_never_echoed() {
     let config =
         parse(r#"{"extractor":{"deviantart":{"client-id":"123","client-secret":"abcdef0"}}}"#)
             .unwrap();
@@ -2020,6 +2020,14 @@ fn client_credentials_are_deviantart_only_and_never_echoed() {
     assert_eq!(resolved.client_id.as_deref(), Some("123"));
     assert_eq!(resolved.client_secret.as_deref(), Some("abcdef0"));
     assert_eq!(config.resolve("pixiv").unwrap().client_secret, None);
+    // Pixiv's App API client is configurable too, as upstream.
+    let config =
+        parse(r#"{"extractor":{"pixiv":{"client-id":"pixivApp","client-secret":"abc123"}}}"#)
+            .unwrap();
+    assert_eq!(
+        config.resolve("pixiv").unwrap().client_id.as_deref(),
+        Some("pixivApp")
+    );
     let config = parse(
         r#"{"extractor":{"deviantart":{"refresh-token":"0a1b2c","include":"all","journals":"text","folder":{"subfolders":false}}}}"#,
     )
@@ -2033,7 +2041,7 @@ fn client_credentials_are_deviantart_only_and_never_echoed() {
     for json in [
         r#"{"client-secret":"abc123"}"#,
         r#"{"extractor":{"client-id":"123"}}"#,
-        r#"{"extractor":{"pixiv":{"client-secret":"abc123"}}}"#,
+        r#"{"extractor":{"tumblr":{"client-secret":"abc123"}}}"#,
         r#"{"extractor":{"deviantart":{"client-id":"abc1"}}}"#,
         r#"{"extractor":{"deviantart":{"client-secret":"abc 123!"}}}"#,
         r#"{"extractor":{"deviantart":{"client-secret":7}}}"#,
@@ -2191,7 +2199,6 @@ fn mastodon_instance_credentials_are_separate_and_inherit_shared_settings() {
         serde_json::json!(7),
         serde_json::json!("private token"),
         serde_json::json!("private\r\ntoken"),
-        serde_json::json!("cache"),
         serde_json::json!("x".repeat(4097)),
     ] {
         let error =
@@ -2201,6 +2208,12 @@ fn mastodon_instance_credentials_are_separate_and_inherit_shared_settings() {
                 .to_string();
         assert!(!error.contains("private"));
     }
+    // "cache" selects the token `oauth:mastodon:INSTANCE` cached.
+    let cached = parse(r#"{"extractor":{"pawoo":{"access-token":"cache"}}}"#).unwrap();
+    assert_eq!(
+        cached.resolve("pawoo").unwrap().access_token.as_deref(),
+        Some("cache")
+    );
     for text in [
         r#"{"access-token":"private-token"}"#,
         r#"{"extractor":{"access-token":"private-token"}}"#,

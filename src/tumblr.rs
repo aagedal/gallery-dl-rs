@@ -4,7 +4,8 @@
 //! `api_key` query parameter (upstream's default public key unless the
 //! `api-key` setting overrides it) and the legacy (non-NPF) post format, or
 //! OAuth 1.0a signed requests once `access-token`/`access-token-secret` are
-//! set. Upstream's `tumblr:` prefix selects custom blog domains.
+//! set (or cached by `oauth:tumblr`). Upstream's `tumblr:` prefix selects
+//! custom blog domains.
 //! Every upstream class is supported: blog posts (`user`), single posts,
 //! tagged posts, posts of one day, likes, followed blogs and followers
 //! (queued as child jobs) and searches. Files carry upstream's keyword
@@ -1094,6 +1095,9 @@ struct Options {
     /// OAuth 1.0a user token (`access-token`) and its secret.
     access_token: Option<String>,
     access_token_secret: Option<String>,
+    /// `access-token` is unset or `"cache"`: use the pair `oauth:tumblr`
+    /// cached for the API key.
+    access_token_cache: bool,
 }
 
 impl Default for Options {
@@ -1109,6 +1113,7 @@ impl Default for Options {
             api_secret: None,
             access_token: None,
             access_token_secret: None,
+            access_token_cache: true,
         }
     }
 }
@@ -1163,10 +1168,14 @@ impl Options {
                     }
                 }
                 "api-secret" | "access-token" | "access-token-secret" => {
+                    if key == "access-token" {
+                        out.access_token_cache =
+                            matches!(value, Value::Null) || value.as_str() == Some("cache");
+                    }
                     let value = match value {
-                        Value::Bool(false) => None,
-                        // Upstream's "cache" reads a stored OAuth token; no
-                        // token cache exists natively, so it means unset.
+                        Value::Bool(false) | Value::Null => None,
+                        // Upstream's "cache" reads the pair stored by
+                        // `oauth:tumblr` (see `Tumblr::with_token_cache`).
                         Value::String(s) if s.is_empty() || s == "cache" => None,
                         Value::String(s)
                             if s.len() <= 1024 && s.bytes().all(|b| b.is_ascii_graphic()) =>
@@ -1208,127 +1217,6 @@ pub struct Tumblr {
     web_root: Option<Url>,
     /// Set once a blog refused OAuth access; later calls use `api_key`.
     oauth_disabled: std::sync::atomic::AtomicBool,
-}
-
-/// OAuth 1.0a credentials signing API requests (upstream `OAuth1Client`).
-struct OAuth1<'a> {
-    consumer_key: &'a str,
-    consumer_secret: &'a str,
-    token: &'a str,
-    token_secret: &'a str,
-}
-
-/// RFC 3986 percent-encoding of everything but unreserved characters, as
-/// upstream's `oauth.quote`.
-fn oauth_quote(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
-fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
-    use sha1::{Digest, Sha1};
-    let mut block = [0u8; 64];
-    if key.len() > block.len() {
-        block[..20].copy_from_slice(&Sha1::digest(key));
-    } else {
-        block[..key.len()].copy_from_slice(key);
-    }
-    let pad = |byte: u8| block.map(|b| b ^ byte);
-    let inner = Sha1::new()
-        .chain_update(pad(0x36))
-        .chain_update(message)
-        .finalize();
-    Sha1::new()
-        .chain_update(pad(0x5c))
-        .chain_update(inner)
-        .finalize()
-        .into()
-}
-
-/// HMAC-SHA1 `oauth_signature` (unquoted base64) over the request method,
-/// query-less URL and the sorted, encoded OAuth and query parameters.
-fn oauth_signature(
-    method: &str,
-    url: &Url,
-    oauth: &[(&str, String)],
-    consumer_secret: &str,
-    token_secret: &str,
-) -> String {
-    use base64::Engine;
-    let mut base = url.clone();
-    base.set_query(None);
-    base.set_fragment(None);
-    let mut params: Vec<(String, String)> = oauth
-        .iter()
-        .map(|(key, value)| (oauth_quote(key), oauth_quote(value)))
-        .chain(
-            url.query_pairs()
-                .map(|(key, value)| (oauth_quote(&key), oauth_quote(&value))),
-        )
-        .collect();
-    params.sort();
-    let query = params
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join("&");
-    let message = [method, base.as_str(), &query].map(oauth_quote).join("&");
-    let key = format!(
-        "{}&{}",
-        oauth_quote(consumer_secret),
-        oauth_quote(token_secret)
-    );
-    base64::engine::general_purpose::STANDARD.encode(hmac_sha1(key.as_bytes(), message.as_bytes()))
-}
-
-/// A per-request nonce of 16 ASCII letters.
-fn oauth_nonce() -> String {
-    use sha1::{Digest, Sha1};
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let digest = Sha1::new()
-        .chain_update(now.as_nanos().to_le_bytes())
-        .chain_update(COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes())
-        .chain_update(std::process::id().to_le_bytes())
-        .finalize();
-    const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    digest[..16]
-        .iter()
-        .map(|b| LETTERS[*b as usize % LETTERS.len()] as char)
-        .collect()
-}
-
-impl OAuth1<'_> {
-    /// The `Authorization` header value for a GET request of `url`.
-    fn authorization(&self, url: &Url, nonce: &str, timestamp: u64) -> String {
-        let mut params = vec![
-            ("oauth_consumer_key", self.consumer_key.to_owned()),
-            ("oauth_nonce", nonce.to_owned()),
-            ("oauth_signature_method", "HMAC-SHA1".to_owned()),
-            ("oauth_timestamp", timestamp.to_string()),
-            ("oauth_version", "1.0".to_owned()),
-            ("oauth_token", self.token.to_owned()),
-        ];
-        let signature =
-            oauth_signature("GET", url, &params, self.consumer_secret, self.token_secret);
-        params.push(("oauth_signature", signature));
-        let fields = params
-            .iter()
-            .map(|(key, value)| format!("{key}=\"{}\"", oauth_quote(value)))
-            .collect::<Vec<_>>()
-            .join(",");
-        format!("OAuth {fields}")
-    }
 }
 
 /// How a listing advances between pages.
@@ -1422,7 +1310,7 @@ impl Tumblr {
     /// Upstream signs API requests with OAuth 1.0a once `api-key`,
     /// `api-secret` (both defaulting to upstream's application),
     /// `access-token` and `access-token-secret` are all set.
-    fn oauth(&self) -> Option<OAuth1<'_>> {
+    fn oauth(&self) -> Option<crate::oauth::OAuth1<'_>> {
         if self
             .oauth_disabled
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -1433,10 +1321,10 @@ impl Tumblr {
             Some(secret) => secret.as_str(),
             None => DEFAULT_API_SECRET,
         };
-        Some(OAuth1 {
+        Some(crate::oauth::OAuth1 {
             consumer_key: Some(self.api_key.as_str()).filter(|key| !key.is_empty())?,
             consumer_secret: Some(consumer_secret).filter(|secret| !secret.is_empty())?,
-            token: self.options.access_token.as_deref()?,
+            token: Some(self.options.access_token.as_deref()?),
             token_secret: self.options.access_token_secret.as_deref()?,
         })
     }
@@ -1486,6 +1374,38 @@ impl Tumblr {
     pub fn with_api_key(mut self, key: Option<&str>) -> Self {
         if let Some(key) = key {
             self.api_key = key.into();
+        }
+        self
+    }
+
+    /// Upstream `OAuth1API`: without a configured `access-token` (or with
+    /// `"cache"`), use the token pair `oauth:tumblr` cached for the API key,
+    /// replacing any configured `access-token-secret`. Call after the API key
+    /// and options; unreadable caches count as empty.
+    pub async fn with_token_cache(mut self, cache: Option<&crate::cache::Cache>) -> Self {
+        let Some(cache) = cache.filter(|_| self.options.access_token_cache) else {
+            return self;
+        };
+        let key = crate::cache::key(
+            "oauth",
+            "_token_cache",
+            &crate::cache::tuple_repr(&["tumblr", &self.api_key]),
+        );
+        let pair = cache.get(&key).await.ok().flatten();
+        let valid = |value: &Value| {
+            value
+                .as_str()
+                .filter(|s| {
+                    (1..=1024).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_graphic())
+                })
+                .map(str::to_owned)
+        };
+        match pair.as_ref().and_then(Value::as_array).map(Vec::as_slice) {
+            Some([token, secret]) => {
+                self.options.access_token = valid(token);
+                self.options.access_token_secret = valid(secret);
+            }
+            _ => self.options.access_token = None,
         }
         self
     }
@@ -2253,16 +2173,9 @@ impl Tumblr {
                     .header(reqwest::header::ORIGIN, "https://www.tumblr.com");
             }
             if let Some(oauth) = &oauth {
-                let timestamp = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map_or(0, |now| now.as_secs());
-                let mut value = reqwest::header::HeaderValue::from_str(&oauth.authorization(
-                    &target,
-                    &oauth_nonce(),
-                    timestamp,
-                ))
-                .map_err(|_| error("invalid Tumblr OAuth credentials"))?;
-                value.set_sensitive(true);
+                let value = oauth
+                    .header("GET", &target)
+                    .map_err(|_| error("invalid Tumblr OAuth credentials"))?;
                 request = request.header(reqwest::header::AUTHORIZATION, value);
             }
             if let Some(accept) = accept {
@@ -4324,41 +4237,72 @@ mod tests {
             percent_decode(value).unwrap()
         }
 
-        #[test]
-        fn hmac_and_signature_match_reference_vectors() {
-            // RFC 2202 test cases 1 and 6 (key longer than one block).
-            let hex = |bytes: [u8; 20]| bytes.map(|b| format!("{b:02x}")).concat();
-            assert_eq!(
-                hex(hmac_sha1(&[0x0b; 20], b"Hi There")),
-                "b617318655057264e28bc0b6fb378c8ef146be00"
-            );
-            assert_eq!(
-                hex(hmac_sha1(
-                    &[0xaa; 80],
-                    b"Test Using Larger Than Block-Size Key - Hash Key First"
-                )),
-                "aa4ae5e15272d00e95705637ce8a3b55ed402112"
-            );
-            // RFC 5849 section 1.2 (with its errata-corrected signature).
-            let url =
-                Url::parse("http://photos.example.net/photos?file=vacation.jpg&size=original")
-                    .unwrap();
+        #[tokio::test]
+        async fn cached_token_pairs_sign_requests_unless_tokens_are_configured() {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+            cache
+                .set(
+                    "gallery_dl.oauth._token_cache-('tumblr', 'consumer-key')",
+                    &json!(["cached-token", "cached-secret"]),
+                    None,
+                )
+                .await
+                .unwrap();
+            let body = json!({"response": {"posts": [post(123)]}}).to_string();
+            let (root, server) = serve(vec![response("200 OK", body.as_bytes())]);
+            let native = tumblr(root.clone())
+                .with_options(Some(&options(json!({"api-secret": "consumer-secret",
+                    "access-token": "cache", "access-token-secret": "ignored"}))))
+                .unwrap()
+                .with_api_key(Some("consumer-key"))
+                .with_token_cache(Some(&cache))
+                .await;
+            let events: Vec<_> = native
+                .events(&Url::parse("https://www.tumblr.com/alice/123").unwrap())
+                .collect()
+                .await;
+            assert!(events.iter().all(Result::is_ok), "{events:?}");
+            let request = &server.join().unwrap()[0];
+            assert_eq!(header_field(request, "oauth_token"), "cached-token");
+            let url = root
+                .join("v2/blog/alice.tumblr.com/posts?npf=false&reblog_info=true&id=123")
+                .unwrap();
             let params = [
-                ("oauth_consumer_key", "dpf43f3p2l4k3l03".to_owned()),
-                ("oauth_token", "nnch734d00sl2jdk".to_owned()),
+                ("oauth_consumer_key", "consumer-key".to_owned()),
+                (
+                    "oauth_nonce",
+                    header_field(request, "oauth_nonce").to_owned(),
+                ),
                 ("oauth_signature_method", "HMAC-SHA1".to_owned()),
-                ("oauth_timestamp", "137131202".to_owned()),
-                ("oauth_nonce", "chapoH".to_owned()),
+                (
+                    "oauth_timestamp",
+                    header_field(request, "oauth_timestamp").to_owned(),
+                ),
+                ("oauth_version", "1.0".to_owned()),
+                ("oauth_token", "cached-token".to_owned()),
             ];
             assert_eq!(
-                oauth_signature("GET", &url, &params, "kd94hf93k423kf44", "pfkkdhi9sl3r4s00"),
-                "MdpQcU8iPSUjWoN/UDMsK2sui9I="
+                unquote(header_field(request, "oauth_signature")),
+                crate::oauth::signature("GET", &url, &params, "consumer-secret", "cached-secret")
             );
-            assert_eq!(oauth_quote("a b/~+="), "a%20b%2F~%2B%3D");
-            let nonce = oauth_nonce();
-            assert_eq!(nonce.len(), 16);
-            assert!(nonce.bytes().all(|b| b.is_ascii_alphabetic()));
-            assert_ne!(nonce, oauth_nonce());
+
+            // Configured tokens win; another API key has no cached pair.
+            let configured = tumblr(root.clone())
+                .with_options(Some(&credentials()))
+                .unwrap()
+                .with_api_key(Some("consumer-key"))
+                .with_token_cache(Some(&cache))
+                .await;
+            assert_eq!(
+                configured.options.access_token.as_deref(),
+                Some("user-token")
+            );
+            let other = tumblr(root)
+                .with_api_key(Some("other-key"))
+                .with_token_cache(Some(&cache))
+                .await;
+            assert!(other.oauth().is_none());
         }
 
         #[tokio::test]
@@ -4404,7 +4348,7 @@ mod tests {
             ];
             assert_eq!(
                 unquote(header_field(request, "oauth_signature")),
-                oauth_signature("GET", &url, &params, "consumer-secret", "tsecret-value")
+                crate::oauth::signature("GET", &url, &params, "consumer-secret", "tsecret-value")
             );
         }
 

@@ -733,6 +733,8 @@ pub struct Bluesky {
     api_server_configured: bool,
     credentials: Option<session::Credentials>,
     session: tokio::sync::Mutex<Option<session::Session>>,
+    /// Persists the session refresh token per login (upstream `_refresh_token_cache`).
+    token_cache: Option<crate::cache::Cache>,
     #[cfg(test)]
     blob_root_override: Option<Url>,
 }
@@ -793,6 +795,7 @@ impl Bluesky {
             api_server_configured: false,
             credentials: None,
             session: tokio::sync::Mutex::new(None),
+            token_cache: None,
             #[cfg(test)]
             blob_root_override: None,
         })

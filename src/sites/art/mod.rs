@@ -42,7 +42,7 @@ mod poipiku;
 mod seiga;
 mod skeb;
 mod slideshare;
-mod smugmug;
+pub(crate) mod smugmug;
 mod speakerdeck;
 mod steamgriddb;
 mod subscribestar;

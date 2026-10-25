@@ -10,7 +10,7 @@ pub mod http;
 
 mod adult;
 mod adult_video;
-mod art;
+pub(crate) mod art;
 mod boorus;
 mod filehosts;
 mod imageboards;

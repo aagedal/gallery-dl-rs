@@ -49,6 +49,43 @@ pub fn instance_category(host: &str) -> Option<&'static str> {
     }
 }
 
+/// A sensitive `Authorization` value for a bearer token.
+fn bearer(token: &str) -> Result<header::HeaderValue> {
+    if token.is_empty()
+        || token.len() > 4096
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b))
+    {
+        return Err(error("invalid Mastodon access token"));
+    }
+    let mut value = header::HeaderValue::from_str(&format!("Bearer {token}"))
+        .map_err(|_| error("invalid Mastodon access token"))?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+/// Upstream's registered OAuth application (client ID and secret) for a
+/// built-in instance, used by `oauth:mastodon:INSTANCE`. Upstream's shared
+/// access tokens are deliberately not embedded.
+pub fn application(host: &str) -> Option<(&'static str, &'static str)> {
+    match host {
+        "mastodon.social" => Some((
+            "dBSHdpsnOUZgxOnjKSQrWEPakO3ctM7HmsyoOd4FcRo",
+            "DdrODTHs_XoeOsNVXnILTMabtdpWrWOAtrmw91wU1zI",
+        )),
+        "pawoo.net" => Some((
+            "978a25f843ec01e53d09be2c290cd75c782bc3b7fdbd7ea4164b9f3c3780c8ff",
+            "9208e3d4a7997032cf4f1b0e12e5df388428ef1fadb446dcfeb4f5ed6872d97b",
+        )),
+        "baraag.net" => Some((
+            "czxx2qilLElYHQ_sm-lO8yXuGwOHxLX9RYYaD0-nq1o",
+            "haMaFdMBgK_-BIxufakmI2gFgkYjqmgXGEO2tB-R2xY",
+        )),
+        _ => None,
+    }
+}
+
 /// Upstream Mastodon status selection defaults.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SelectionOptions {
@@ -536,6 +573,8 @@ pub struct Mastodon {
     rate_limits: RateLimits,
     selection: SelectionOptions,
     access_token: Option<(String, header::HeaderValue)>,
+    /// The instance whose cached access token applies, until looked up.
+    cached_token_instance: Option<String>,
 }
 
 struct TimelineState {
@@ -562,6 +601,7 @@ impl Mastodon {
             rate_limits: RateLimits::default(),
             selection: SelectionOptions::default(),
             access_token: None,
+            cached_token_instance: None,
         })
     }
 
@@ -570,27 +610,32 @@ impl Mastodon {
         if instance_category(instance).is_none() {
             return Err(error("unsupported Mastodon credential instance"));
         }
-        self.access_token = match token.filter(|token| !token.is_empty()) {
+        // Unset or "cache" defers to the credential cache (`with_token_cache`).
+        self.cached_token_instance = token
+            .is_none_or(|token| token == "cache")
+            .then(|| instance.to_owned());
+        self.access_token = match token.filter(|token| !token.is_empty() && *token != "cache") {
             None => None,
-            Some(token)
-                if token != "cache"
-                    && token.len() <= 4096
-                    && token
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b)) =>
-            {
-                let mut value = header::HeaderValue::from_str(&format!("Bearer {token}"))
-                    .map_err(|_| error("invalid Mastodon access token"))?;
-                value.set_sensitive(true);
-                Some((instance.into(), value))
-            }
-            Some(_) => {
-                return Err(error(
-                    "invalid Mastodon access token; OAuth cache discovery is not implemented",
-                ));
-            }
+            Some(token) => Some((instance.into(), bearer(token)?)),
         };
         Ok(self)
+    }
+
+    /// Upstream `_access_token_cache`: without a configured `access-token`
+    /// (or with `"cache"`), use the one `oauth:mastodon:INSTANCE` cached.
+    /// Call after `with_access_token_for`; unreadable caches count as empty.
+    pub async fn with_token_cache(mut self, cache: Option<&crate::cache::Cache>) -> Self {
+        if let Some(cache) = cache
+            && let Some(instance) = self.cached_token_instance.take()
+        {
+            let key = crate::cache::key("extractor.mastodon", "_access_token_cache", &instance);
+            if let Ok(Some(token)) = cache.get_str(&key).await
+                && let Ok(value) = bearer(&token)
+            {
+                self.access_token = Some((instance, value));
+            }
+        }
+        self
     }
 
     pub fn with_selection(mut self, selection: SelectionOptions) -> Self {
@@ -1683,7 +1728,7 @@ mod tests {
         assert!(error.contains("access-token"));
         assert!(!error.contains("private-token"));
         assert_eq!(server.join().unwrap().len(), 1);
-        for token in ["cache", "private token", "private\r\ntoken", "秘密"] {
+        for token in ["private token", "private\r\ntoken", "秘密"] {
             let error = mastodon(Url::parse("http://127.0.0.1:9/").unwrap())
                 .with_access_token_for("mastodon.social", Some(token))
                 .err()
@@ -1691,6 +1736,60 @@ mod tests {
                 .to_string();
             assert!(!error.contains("private"));
         }
+    }
+
+    #[tokio::test]
+    async fn unset_or_cache_tokens_come_from_the_credential_cache() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+        cache
+            .set(
+                "gallery_dl.extractor.mastodon._access_token_cache-mastodon.social",
+                &serde_json::json!("cached-token"),
+                None,
+            )
+            .await
+            .unwrap();
+        let api = Url::parse("https://mastodon.social/api/v1/bookmarks").unwrap();
+        for setting in [None, Some("cache")] {
+            let native = Mastodon::new(Duration::from_secs(1))
+                .unwrap()
+                .with_access_token_for("mastodon.social", setting)
+                .unwrap();
+            assert!(native.authorization(&api).is_none());
+            let native = native.with_token_cache(Some(&cache)).await;
+            let value = native.authorization(&api).unwrap();
+            assert!(value.is_sensitive());
+            assert_eq!(value.to_str().unwrap(), "Bearer cached-token");
+        }
+        // Explicit and disabled tokens never consult the cache.
+        for (setting, expected) in [(Some("own"), Some("Bearer own")), (Some(""), None)] {
+            let native = Mastodon::new(Duration::from_secs(1))
+                .unwrap()
+                .with_access_token_for("mastodon.social", setting)
+                .unwrap()
+                .with_token_cache(Some(&cache))
+                .await;
+            assert_eq!(
+                native
+                    .authorization(&api)
+                    .map(|value| value.to_str().unwrap().to_owned())
+                    .as_deref(),
+                expected
+            );
+        }
+        // Another instance's cached token is not used.
+        let native = Mastodon::new(Duration::from_secs(1))
+            .unwrap()
+            .with_access_token_for("pawoo.net", None)
+            .unwrap()
+            .with_token_cache(Some(&cache))
+            .await;
+        assert!(
+            native
+                .authorization(&Url::parse("https://pawoo.net/api/v1/bookmarks").unwrap())
+                .is_none()
+        );
     }
 
     #[test]

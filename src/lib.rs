@@ -34,6 +34,7 @@ mod messages;
 pub mod naming;
 pub mod network;
 pub mod newgrounds;
+pub mod oauth;
 pub mod pinterest;
 pub mod pixiv;
 pub mod post_selection;

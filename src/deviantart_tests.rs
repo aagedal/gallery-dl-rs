@@ -1046,6 +1046,76 @@ async fn refresh_tokens_switch_to_private_access_and_stay_secret() {
 }
 
 #[tokio::test]
+async fn cached_refresh_tokens_are_used_and_rotations_persist_across_runs() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+    let key = "gallery_dl.extractor.deviantart._refresh_token_cache-#5388";
+    cache.set(key, &json!("cached-1"), None).await.unwrap();
+
+    // Without a configured token, the `oauth:deviantart` entry is used and
+    // each rotated token replaces it, so a second run starts from the new one.
+    for (expected, rotated) in [("cached-1", "cached-2"), ("cached-2", "cached-3")] {
+        let (root, server) = serve(vec![
+            ok(json!({"access_token": "priv", "refresh_token": rotated})),
+            page(vec![deviation(&uuid(1), 900000001, false)], None),
+        ]);
+        let client = with(root, json!({"group": false, "public": false}))
+            .with_refresh_token(Some("cache"))
+            .with_token_cache(Some(&cache))
+            .await;
+        let events = run(&client, "https://www.deviantart.com/alice/gallery").await;
+        assert_eq!(files(&events).len(), 1);
+        let requests = server.join().unwrap();
+        assert!(requests[0].ends_with(&format!("&refresh_token={expected}")));
+        assert_eq!(cache.get_str(key).await.unwrap().as_deref(), Some(rotated));
+    }
+
+    // A configured token keys its own entry, holding its latest rotation.
+    let (root, server) = serve(vec![
+        ok(json!({"access_token": "priv", "refresh_token": "rotated"})),
+        page(vec![deviation(&uuid(1), 900000001, false)], None),
+        ok(json!({"access_token": "priv", "refresh_token": "rotated-2"})),
+        page(vec![deviation(&uuid(1), 900000001, false)], None),
+    ]);
+    for expected in ["configured", "rotated"] {
+        let client = with(root.clone(), json!({"group": false, "public": false}))
+            .with_refresh_token(Some("configured"))
+            .with_token_cache(Some(&cache))
+            .await;
+        let events = run(&client, "https://www.deviantart.com/alice/gallery").await;
+        assert_eq!(files(&events).len(), 1, "{expected}");
+    }
+    let requests = server.join().unwrap();
+    assert!(requests[0].ends_with("&refresh_token=configured"));
+    assert!(requests[2].ends_with("&refresh_token=rotated"));
+    assert_eq!(
+        cache
+            .get_str("gallery_dl.extractor.deviantart._refresh_token_cache-configured")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("rotated-2")
+    );
+    assert_eq!(
+        cache.get_str(key).await.unwrap().as_deref(),
+        Some("cached-3")
+    );
+
+    // An empty cache leaves public access.
+    let (root, server) = serve(vec![
+        token("pub"),
+        page(vec![deviation(&uuid(1), 900000001, false)], None),
+    ]);
+    let empty = crate::cache::Cache::at(directory.path().join("empty.sqlite3"));
+    let client = with(root, json!({"group": false}))
+        .with_refresh_token(None)
+        .with_token_cache(Some(&empty))
+        .await;
+    run(&client, "https://www.deviantart.com/alice/gallery").await;
+    assert!(server.join().unwrap()[0].contains("grant_type=client_credentials"));
+}
+
+#[tokio::test]
 async fn rejected_credentials_are_not_echoed() {
     let (root, server) = serve(vec![response("401 Unauthorized", b"{\"error\":\"x\"}")]);
     let error = with(root, json!({"group": false}))

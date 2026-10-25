@@ -806,7 +806,13 @@ pub struct Backend {
 /// `generic:` or `recursive:` URL around the HTTP(S) target. A target
 /// without a scheme gets `https://`, as upstream does. Local `file://`
 /// sources for `recursive:` are not supported; `--input-file` reads them.
+/// `oauth:SITE` inputs are kept as `oauth:` URLs.
 pub fn input_url(value: &str) -> Result<Url> {
+    // Upstream's `oauth:SITE` account-linking inputs; see `crate::oauth`.
+    if let Some(target) = value.strip_prefix("oauth:") {
+        crate::oauth::target(target)?;
+        return Url::parse(value).map_err(|_| error("invalid oauth: input"));
+    }
     let prefixed = |value: &str| -> Option<(&'static str, String)> {
         let (prefix, rest) = value.split_once(':')?;
         let scheme = if prefix.eq_ignore_ascii_case("g") || prefix.eq_ignore_ascii_case("generic") {
