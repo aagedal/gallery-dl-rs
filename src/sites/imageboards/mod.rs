@@ -272,3 +272,6 @@ mod tests {
         assert!(on_root("https://a.test", "//b.test/x.png").is_none());
     }
 }
+
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

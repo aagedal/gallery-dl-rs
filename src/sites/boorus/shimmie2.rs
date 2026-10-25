@@ -33,54 +33,106 @@ instance!(NOZRIP, "nozrip", "noz.rip");
 instance!(THECOLLECTIONS, "thecollectionS", "co.llection.pics");
 instance!(SOYBOORU, "soybooru", "soybooru");
 
+/// Configured `extractor.shimmie2.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "shimmie2",
+    builtin: &[
+        &CAVEMANON,
+        &RULE34HENTAI,
+        &VIDYAPICS,
+        &NOZRIP,
+        &THECOLLECTIONS,
+        &SOYBOORU,
+    ],
+    related: &["paheal"],
+    template: &VIDYAPICS,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
+/// The default `file_url_fmt` over root, md5, id, quoted tags and extension.
+const FILE_URL: &str = "{0}/_images/{1}/{2}%20-%20{3}.{4}";
+
 /// Per-instance settings from the upstream instance table.
 struct Instance {
     site: &'static Site,
     root: &'static str,
     /// The `pattern` entry as `host[/prefix]`.
     pattern: &'static str,
-    /// Whether the instance uses the `{0}/index.php?q=image/{2}.{4}` file URL.
-    index_file_url: bool,
+    /// Upstream `file_url` instance option: a `str.format` template over
+    /// root, md5, id, quoted tags and extension.
+    file_url: &'static str,
     /// Fixed quoting character (`quote` instance option).
     quote: Option<&'static str>,
+    /// Upstream `cookies` instance option: name/value pairs for the root.
+    cookies: Option<&'static Map<String, Value>>,
 }
 
 fn instance(category: &str) -> Instance {
-    let (site, root, pattern, index_file_url, quote): (&'static Site, _, _, _, _) = match category {
+    let builtin = builtin(category);
+    let Some(configured) = crate::sites::instances::configured(&FAMILY, category) else {
+        return builtin;
+    };
+    // A configured instance replacing a built-in one keeps its options.
+    let replaces = builtin.site.category == category;
+    let text = |key| {
+        configured
+            .config(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    Instance {
+        site: &configured.site,
+        root: configured.root,
+        pattern: configured.spec,
+        file_url: text("file_url").unwrap_or(if replaces { builtin.file_url } else { FILE_URL }),
+        quote: text("quote").or(builtin.quote.filter(|_| replaces)),
+        cookies: configured.config("cookies").and_then(Value::as_object),
+    }
+}
+
+fn builtin(category: &str) -> Instance {
+    let (site, root, pattern, file_url, quote): (&'static Site, _, _, _, _) = match category {
         "cavemanon" => (
             &CAVEMANON,
             "https://booru.cavemanon.xyz",
             "booru.cavemanon.xyz",
-            true,
+            "{0}/index.php?q=image/{2}.{4}",
             None,
         ),
         "rule34hentai" => (
             &RULE34HENTAI,
             "https://rule34hentai.net",
             "rule34hentai.net",
-            false,
+            FILE_URL,
             None,
         ),
-        "vidyapics" => (&VIDYAPICS, "https://vidya.pics", "vidya.pics", false, None),
+        "vidyapics" => (
+            &VIDYAPICS,
+            "https://vidya.pics",
+            "vidya.pics",
+            FILE_URL,
+            None,
+        ),
         "nozrip" => (
             &NOZRIP,
             "https://noz.rip/booru",
             "noz.rip/booru",
-            false,
+            FILE_URL,
             None,
         ),
         "thecollectionS" => (
             &THECOLLECTIONS,
             "https://co.llection.pics",
             "co.llection.pics",
-            false,
+            FILE_URL,
             None,
         ),
         _ => (
             &SOYBOORU,
             "https://soybooru.com",
             "soybooru.com",
-            false,
+            FILE_URL,
             Some("'"),
         ),
     };
@@ -88,8 +140,59 @@ fn instance(category: &str) -> Instance {
         site,
         root,
         pattern,
-        index_file_url,
+        file_url,
         quote,
+        cookies: None,
+    }
+}
+
+/// Python `str.format` with positional `{N}`/`{}` fields only.
+fn format_positional(template: &str, args: &[&str]) -> String {
+    let mut out = String::with_capacity(template.len() + 64);
+    let mut next = 0;
+    let mut rest = template;
+    while let Some(start) = rest.find(['{', '}']) {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start..];
+        if let Some(after) = tail.strip_prefix("{{") {
+            out.push('{');
+            rest = after;
+        } else if let Some(after) = tail.strip_prefix("}}") {
+            out.push('}');
+            rest = after;
+        } else if let Some(end) = tail.find('}').filter(|_| tail.starts_with('{')) {
+            let field = &tail[1..end];
+            let index = if field.is_empty() {
+                next += 1;
+                next - 1
+            } else {
+                field.parse().unwrap_or(usize::MAX)
+            };
+            out.push_str(args.get(index).copied().unwrap_or_default());
+            rest = &tail[end + 1..];
+        } else {
+            out.push_str(&tail[..1]);
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Upstream `_init`: the `cookies` instance option, set for the root.
+fn init_cookies(inst: &Instance, http: &Http) {
+    let (Some(cookies), Ok(root)) = (inst.cookies, Url::parse(inst.root)) else {
+        return;
+    };
+    for (name, value) in cookies.iter().take(64) {
+        if let Some(value) = value.as_str()
+            && !name.is_empty()
+            && !name.contains([';', '=', '\r', '\n'])
+            && !value.contains([';', '\r', '\n'])
+            && http.cookie(&root, name).is_none()
+        {
+            http.set_cookie(&root, &format!("{name}={value}; Path=/"));
+        }
     }
 }
 
@@ -135,6 +238,7 @@ fn target(category: &str, url: &Url) -> Option<Target> {
 }
 
 fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
+    init_cookies(&instance(category), http);
     match target(category, &url) {
         Some(Target::Tag(raw, page)) => tag(category, http, unquote(&raw), page),
         Some(Target::Post(id)) => crate::sites::once(async move {
@@ -253,15 +357,7 @@ fn parse_list(
         } else {
             rpartition(mime, "/").1
         };
-        let file_url = if inst.index_file_url {
-            format!("{}/index.php?q=image/{pid}.{ext}", inst.root)
-        } else {
-            format!(
-                "{}/_images/{md5}/{pid}%20-%20{}.{ext}",
-                inst.root,
-                quote(tags)
-            )
-        };
+        let file_url = format_positional(inst.file_url, &[inst.root, md5, pid, &quote(tags), ext]);
         let mut post = Map::new();
         post.insert("file_url".into(), file_url.into());
         post.insert("id".into(), pid.into());
@@ -328,14 +424,18 @@ fn items(
 ) -> Vec<crate::event::ExtractionEvent> {
     let mut out = Vec::new();
     for post in posts {
-        if let Some(item) = finish(post, data) {
+        if let Some(item) = finish(inst, post, data) {
             out.push(item);
         }
     }
     super::per_post(inst.site, http, route, out)
 }
 
-fn finish(mut post: Map<String, Value>, data: &Map<String, Value>) -> Option<Item> {
+fn finish(
+    inst: &Instance,
+    mut post: Map<String, Value>,
+    data: &Map<String, Value>,
+) -> Option<Item> {
     let text = |post: &Map<String, Value>, key: &str| {
         post.get(key)
             .and_then(Value::as_str)
@@ -352,7 +452,9 @@ fn finish(mut post: Map<String, Value>, data: &Map<String, Value>) -> Option<Ite
         post.insert(key.clone(), value.clone());
     }
     let raw = text(&post, "file_url");
-    let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
+    let url = Url::parse(&raw)
+        .ok()
+        .filter(|url| crate::sites::instances::plain_or_root(url, inst.root))?;
     let (filename, extension) = if raw.contains("/index.php?") {
         let (name, ext) = rpartition(rpartition(&raw, "/").1, ".");
         (name.to_owned(), ext.to_owned())
@@ -510,6 +612,61 @@ mod tests {
             "{}",
             requests[0]
         );
+    }
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        let instance = crate::sites::instances::define(
+            "shimmie2",
+            "shimmie2-configured",
+            serde_json::json!({
+                "root": "https://configured.test/booru",
+                "pattern": r"(?:www\.)?configured\.test/booru",
+                "quote": "\"",
+                "file_url": "{0}/index.php?q=image/{2}.{4}",
+                "cookies": {"session": "abc"},
+            }),
+        );
+        let page = "<html><head><title>Post 5: a b - c</title>\
+            <link rel=\"stylesheet\" href=\"/s.css\"></head>\
+            <img id=\"main_image\" src=\"/booru/_images/ff/5.png\" data-width=1 data-height=2>\
+            </html>";
+        let list = "<a data-mime=\"image/png\" data-post-id=\"9\" title=\"x y // 10x20 // 1KB\" \
+            href=\"/post/view/9\"><img src=\"/_thumbs/0d/thumb.jpg\"></a>";
+        let (root, server) = serve(vec![html(page), html(list)]);
+        let http = http("configured", root);
+        let url = Url::parse("https://www.configured.test/booru/post/view/5").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "shimmie2-configured");
+        let files = media((site.extract)(&http, url)).await;
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "shimmie2-configured");
+        assert_eq!(k["subcategory"], "post");
+        assert_eq!(
+            k["file_url"],
+            "https://configured.test/booru/_images/ff/5.png"
+        );
+        let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
+        assert_eq!(
+            file.render(&files[0]).unwrap(),
+            "shimmie2-configured_5_ff.png"
+        );
+        let url = Url::parse("https://configured.test/booru/post/list/x/1").unwrap();
+        let files = media((instance.site.extract)(&http, url)).await;
+        let k = keywords(&files[0]);
+        assert_eq!(k["subcategory"], "tag");
+        assert_eq!(
+            k["file_url"],
+            "https://configured.test/booru/index.php?q=image/9.png"
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /booru/post/view/5 "));
+        // Instance cookies are scoped to the instance root's host.
+        let origin = Url::parse("https://configured.test/booru/x").unwrap();
+        assert_eq!(http.cookie(&origin, "session").as_deref(), Some("abc"));
+        let other = Url::parse("https://other.test/").unwrap();
+        assert_eq!(http.cookie(&other, "session"), None);
+        assert!(requests[1].starts_with("GET /booru/post/list/x/1 "));
     }
 
     #[tokio::test]

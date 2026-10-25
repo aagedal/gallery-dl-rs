@@ -293,3 +293,6 @@ mod tests {
         assert!(path_segment("abc") && !path_segment("%2E.") && !path_segment(""));
     }
 }
+
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

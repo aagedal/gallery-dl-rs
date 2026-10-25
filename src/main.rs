@@ -312,8 +312,17 @@ fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
         Some("mastodon") => {
             gallery_dl_rs::mastodon::instance_category(url.host_str().unwrap()).unwrap()
         }
-        Some(category) => category,
+        Some(category) => instance_settings(category),
         None => "direct",
+    }
+}
+
+/// Instances selected with a `<basecategory>:` prefix after settings were
+/// resolved use their family's base scope.
+fn instance_settings(category: &'static str) -> &'static str {
+    match gallery_dl_rs::sites::instances::get(category) {
+        Some(instance) if instance.late => instance.family.basecategory,
+        _ => category,
     }
 }
 
@@ -374,6 +383,11 @@ fn media_settings_key<'a>(
     settings: &BTreeMap<&str, Settings>,
 ) -> &'a str {
     if !settings.contains_key(media.category.as_str()) {
+        if let Some(base) = gallery_dl_rs::sites::instances::basecategory(&media.category)
+            && settings.contains_key(base)
+        {
+            return base;
+        }
         // Generic compatibility output from other gallery-dl extractors.
         return "direct";
     }
@@ -2314,6 +2328,13 @@ async fn resolved_settings(
         None if options.is_empty() => Config::default(),
         None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
+    // Configured instances, and the hosts of `<basecategory>:` inputs on the
+    // command line, get their own settings scopes.
+    gallery_dl_rs::sites::instances::register(config.instances())?;
+    for url in &args.urls {
+        // Invalid inputs are reported when they are extracted.
+        let _ = gallery_dl_rs::sites::instances::prefixed_input(url);
+    }
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
         retries: Some(2),
@@ -2477,7 +2498,11 @@ async fn resolved_settings(
     .into_iter()
     .chain(BOORU_CLASS_KEYS.iter().copied())
     .chain(gallery_dl_rs::sites::categories())
-    {
+    .chain(
+        gallery_dl_rs::sites::instances::families()
+            .iter()
+            .map(|family| family.basecategory),
+    ) {
         let class = category
             .split_once('.')
             .filter(|(base, _)| gallery_dl_rs::booru::is_danbooru_family(base));
@@ -2590,6 +2615,8 @@ async fn resolved_settings(
             },
         );
     }
+    // Instances registered from now on resolve their base scope's settings.
+    gallery_dl_rs::sites::instances::freeze();
     Ok((
         settings,
         config.cache_location().clone(),

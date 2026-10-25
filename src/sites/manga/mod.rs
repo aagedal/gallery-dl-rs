@@ -321,3 +321,6 @@ pub(super) mod tests {
         crate::sites::archive_key(media).unwrap().1
     }
 }
+
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

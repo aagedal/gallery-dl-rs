@@ -82,3 +82,6 @@ pub(crate) fn ytdl_item(page: &str, keywords: Map<String, Value>) -> Option<crat
             .job(crate::extract::MediaJob::VideoPage { page_url }),
     )
 }
+
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

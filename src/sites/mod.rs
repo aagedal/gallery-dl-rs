@@ -7,6 +7,7 @@
 //! fields as gallery-dl. Default paths render the upstream `filename_fmt` and
 //! `directory_fmt`; archive identities use the upstream `archive_fmt` fields.
 pub mod http;
+pub mod instances;
 
 mod adult;
 mod adult_video;
@@ -168,7 +169,12 @@ pub fn sites() -> &'static [&'static Site] {
 /// Lazily initialized per-site HTTP state for one CLI invocation.
 pub struct Runtime {
     cells: Vec<tokio::sync::OnceCell<Result<Http>>>,
+    /// Cells of configured and prefixed instances, created on first use and
+    /// kept for the rest of the process.
+    instances: std::sync::Mutex<std::collections::HashMap<&'static str, &'static HttpCell>>,
 }
+
+type HttpCell = tokio::sync::OnceCell<Result<Http>>;
 
 impl Default for Runtime {
     fn default() -> Self {
@@ -177,27 +183,36 @@ impl Default for Runtime {
                 .iter()
                 .map(|_| tokio::sync::OnceCell::new())
                 .collect(),
+            instances: Default::default(),
         }
     }
 }
 
 impl Runtime {
-    /// Whether the site's HTTP state was already created.
-    pub fn initialized(&self, site: &Site) -> bool {
+    fn cell(&self, site: &Site) -> Option<&HttpCell> {
+        if let Some(instance) = instances::get(site.category) {
+            let mut cells = self.instances.lock().unwrap_or_else(|e| e.into_inner());
+            let cell: &'static HttpCell = cells
+                .entry(instance.category)
+                .or_insert_with(|| Box::leak(Box::new(tokio::sync::OnceCell::new())));
+            return Some(cell);
+        }
         sites()
             .iter()
             .position(|candidate| candidate.category == site.category)
-            .is_some_and(|index| self.cells[index].initialized())
+            .map(|index| &self.cells[index])
+    }
+
+    /// Whether the site's HTTP state was already created.
+    pub fn initialized(&self, site: &Site) -> bool {
+        self.cell(site).is_some_and(|cell| cell.initialized())
     }
 
     /// The site's HTTP state, created by `init` on first use. An
     /// initialization failure is retained for later inputs of the site.
     pub async fn get(&self, site: &Site, init: impl FnOnce() -> Result<Http>) -> Result<&Http> {
-        let index = sites()
-            .iter()
-            .position(|candidate| candidate.category == site.category)
-            .ok_or_else(|| error("unknown registry site"))?;
-        self.cells[index]
+        self.cell(site)
+            .ok_or_else(|| error("unknown registry site"))?
             .get_or_init(|| async { init() })
             .await
             .as_ref()
@@ -205,13 +220,25 @@ impl Runtime {
     }
 }
 
-/// The registry site handling a URL, if any.
+/// The registry site handling a URL, if any. Configured and prefixed
+/// instances are consulted first; built-in instances they replace are
+/// skipped.
 pub fn find(url: &Url) -> Option<&'static Site> {
-    sites().iter().copied().find(|site| (site.matches)(url))
+    if let Some((instance, _)) = instances::lookup(url) {
+        return Some(&instance.site);
+    }
+    sites()
+        .iter()
+        .copied()
+        .find(|site| (site.matches)(url) && !instances::overridden(site.category))
 }
 
-/// The registry site for a category name.
+/// The registry site for a category name; a configured instance replaces a
+/// built-in one of the same name.
 pub fn site(category: &str) -> Option<&'static Site> {
+    if let Some(instance) = instances::get(category) {
+        return Some(&instance.site);
+    }
     sites()
         .iter()
         .copied()
@@ -252,8 +279,15 @@ pub fn is_category(category: &str) -> bool {
     site(category).is_some()
 }
 
+/// Every registry category: built-in sites, then configured and prefixed
+/// instances that do not replace a built-in one.
 pub fn categories() -> impl Iterator<Item = &'static str> {
-    sites().iter().map(|site| site.category)
+    let added: Vec<_> = instances::all()
+        .into_iter()
+        .map(|instance| instance.category)
+        .filter(|category| !sites().iter().any(|site| site.category == *category))
+        .collect();
+    sites().iter().map(|site| site.category).chain(added)
 }
 
 /// Routes child URLs that no registry site handles to the program's other

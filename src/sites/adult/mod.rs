@@ -154,3 +154,6 @@ mod tests {
         );
     }
 }
+
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[];

@@ -832,6 +832,11 @@ pub fn input_url(value: &str) -> Result<Url> {
         crate::oauth::target(target)?;
         return Url::parse(value).map_err(|_| error("invalid oauth: input"));
     }
+    // Upstream `<basecategory>:https://host/...` selects a registry family
+    // for any host; the host becomes an instance of it.
+    if let Some(url) = crate::sites::instances::prefixed_input(value) {
+        return url;
+    }
     let prefixed = |value: &str| -> Option<(&'static str, String)> {
         let (prefix, rest) = value.split_once(':')?;
         let scheme = if prefix.eq_ignore_ascii_case("g") || prefix.eq_ignore_ascii_case("generic") {
@@ -1550,7 +1555,9 @@ impl Backend {
             "--option",
             "output.jsonl=false",
         ]);
-        command.arg("--").arg(url.as_str());
+        command
+            .arg("--")
+            .arg(crate::sites::instances::upstream_input(url));
         command.stdin(Stdio::null()).kill_on_drop(true);
         command
     }
@@ -1900,6 +1907,11 @@ const DEDICATED_CATEGORIES: &[&str] = &[
     "direct",
     "directlink",
 ];
+
+/// Whether a category belongs to one of the dedicated native extractors.
+pub(crate) fn is_dedicated_category(category: &str) -> bool {
+    DEDICATED_CATEGORIES.contains(&category)
+}
 
 /// Whether a category came from generic gallery-dl compatibility output.
 pub(crate) fn generic_category(category: &str) -> bool {

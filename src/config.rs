@@ -49,6 +49,79 @@ fn booru_family_scope(name: &str) -> bool {
     booru_scope_dialect(name).is_some()
 }
 
+/// Remove the instance objects (objects with a `root`) from every
+/// `extractor.<basecategory>` scope of a registry family.
+fn take_instances(root: &mut Value) -> Result<Vec<crate::sites::instances::InstanceDef>> {
+    let mut defs = Vec::new();
+    let Some(extractor) = root.get_mut("extractor").and_then(Value::as_object_mut) else {
+        return Ok(defs);
+    };
+    for family in crate::sites::instances::families() {
+        let Some(scope) = extractor.get_mut(family.basecategory) else {
+            continue;
+        };
+        let scope = scope
+            .as_object_mut()
+            .ok_or_else(|| error("native configuration category must be a JSON object"))?;
+        let mut taken = Vec::new();
+        for (category, value) in scope.iter() {
+            if let Some(def) =
+                crate::sites::instances::parse_def(family.basecategory, category, value)?
+            {
+                taken.push(category.clone());
+                defs.push(def);
+            }
+        }
+        for category in taken {
+            scope.remove(&category);
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    if defs.iter().any(|def| !seen.insert(def.category.as_str())) {
+        return Err(error(
+            "configured instance category is defined by more than one family",
+        ));
+    }
+    Ok(defs)
+}
+
+/// Whether `api-key` applies to a configured instance or family scope.
+fn instance_api_key(name: &str, defs: &[crate::sites::instances::InstanceDef]) -> bool {
+    let family = defs
+        .iter()
+        .find(|def| def.category == name)
+        .map_or(name, |def| def.basecategory.as_str());
+    crate::sites::instances::family(family).is_some_and(|family| family.template.api_key)
+}
+
+/// Registry scopes besides the built-in categories: every family's
+/// `basecategory`, configured instance categories, and host-named scopes
+/// for `<basecategory>:https://host/` inputs.
+fn instance_scopes(root: &Value, defs: &[crate::sites::instances::InstanceDef]) -> Vec<String> {
+    let typed = |name: &str| {
+        crate::extract::is_dedicated_category(name)
+            || matches!(name, "Danbooru" | "E621" | "oauth")
+            || crate::sites::categories().any(|category| category == name)
+    };
+    let hosts = root
+        .get("extractor")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|extractor| extractor.keys())
+        .filter(|name| name.contains('.') && crate::sites::instances::host_scope(name))
+        .cloned();
+    let mut names: Vec<String> = crate::sites::instances::families()
+        .iter()
+        .map(|family| family.basecategory.to_owned())
+        .chain(defs.iter().map(|def| def.category.clone()))
+        .chain(hosts)
+        .filter(|name| !typed(name))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     (
         "reddit",
@@ -652,6 +725,8 @@ pub struct Config {
     parent_keywords: Vec<String>,
     cache: crate::cache::Location,
     oauth: crate::oauth::Settings,
+    /// `extractor.<basecategory>.<category>` instance definitions.
+    instances: Vec<crate::sites::instances::InstanceDef>,
 }
 
 /// Upstream `cache`: an object whose `file` is a path or null (disabled).
@@ -1220,6 +1295,20 @@ impl Config {
         // every configuration scope to JSON objects before typed decoding.
         let mut shape: Value = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
+        if !shape.is_object() {
+            return Err(error("native configuration must be a JSON object"));
+        }
+        if shape
+            .get("extractor")
+            .is_some_and(|value| !value.is_object())
+        {
+            return Err(error(
+                "native configuration extractor must be a JSON object",
+            ));
+        }
+        // `extractor.<basecategory>.<category>` instance definitions.
+        let instances = take_instances(&mut shape)?;
+        let instance_scopes = instance_scopes(&shape, &instances);
         let object = shape
             .as_object()
             .ok_or_else(|| error("native configuration must be a JSON object"))?;
@@ -1270,6 +1359,8 @@ impl Config {
             ]
             .into_iter()
             .chain(crate::sites::categories())
+            .map(|name| -> &str { name })
+            .chain(instance_scopes.iter().map(String::as_str))
             {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
@@ -1380,6 +1471,7 @@ impl Config {
             Some(value) => cache_location(value, directory)?,
         };
         let oauth = oauth_settings(&mut original)?;
+        take_instances(&mut original)?;
         if let Some(extractor) = original.get_mut("extractor").and_then(Value::as_object_mut) {
             // Shared job options keep their typed meaning; all other keys
             // belong to the site, even where another site uses the name.
@@ -1412,7 +1504,10 @@ impl Config {
                 "timeout",
                 "api-key",
             ];
-            for category in crate::sites::categories() {
+            for category in crate::sites::categories()
+                .map(|name| -> &str { name })
+                .chain(instance_scopes.iter().map(String::as_str))
+            {
                 if let Some(mut value) = extractor.remove(category) {
                     // Keys outside the shared option set are site options.
                     if let Some(fields) = value.as_object_mut() {
@@ -1701,6 +1796,7 @@ impl Config {
                     | "gelbooru"
                     | "safebooru"
             ) && !crate::sites::site(name).is_some_and(|site| site.api_key)
+                && !instance_api_key(name, &instances)
                 && settings.api_key.0.is_some()
             {
                 return Err(error(
@@ -1870,6 +1966,7 @@ impl Config {
             parent_keywords,
             cache,
             oauth,
+            instances,
         })
     }
 
@@ -1924,10 +2021,19 @@ impl Config {
                 | "vsco"
                 | "direct"
         ) && !crate::sites::is_category(category)
+            && crate::sites::instances::family(category).is_none()
+            && !self.instances.iter().any(|def| def.category == category)
         {
             return Err(error("unsupported native configuration category"));
         }
         let mut settings = self.extractor.clone();
+        // Upstream's `basecategory` scope of a registry family instance.
+        if let Some(base) = self.instance_base(category)
+            && base != category
+            && let Some(base) = self.categories.get(base)
+        {
+            settings = settings.overlay(base);
+        }
         if matches!(category, "mastodon.social" | "pawoo" | "baraag")
             && let Some(base) = self.categories.get("mastodon")
         {
@@ -1951,6 +2057,20 @@ impl Config {
     }
     pub fn parent_keywords(&self) -> &[String] {
         &self.parent_keywords
+    }
+    /// `extractor.<basecategory>.<category>` instance definitions, to be
+    /// registered with [`crate::sites::instances::register`].
+    pub fn instances(&self) -> &[crate::sites::instances::InstanceDef] {
+        &self.instances
+    }
+    /// The registry family `basecategory` of a built-in, configured or
+    /// prefixed instance category.
+    fn instance_base(&self, category: &str) -> Option<&str> {
+        self.instances
+            .iter()
+            .find(|def| def.category == category)
+            .map(|def| def.basecategory.as_str())
+            .or_else(|| crate::sites::instances::basecategory(category))
     }
     /// Upstream's `basecategory` scope of a Danbooru/e621 instance: the
     /// instance's own scope is consulted first, then `Danbooru`/`E621`.

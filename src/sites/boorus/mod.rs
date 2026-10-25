@@ -79,36 +79,14 @@ pub(super) static SITES: &[&Site] = &[
 
 /// The URL's path and query (`/path?query`) below one of `roots`, where each
 /// root is an exact `host` or `host/prefix` (no implicit `www.`). Rejects
-/// ports, credentials and non-HTTP schemes. The returned text keeps the
-/// URL's percent-encoding, like the upstream regexes see it.
+/// credentials, non-HTTP schemes and ports a root does not name. The
+/// returned text keeps the URL's percent-encoding, like the upstream
+/// regexes see it.
 pub(crate) fn below(url: &Url, roots: &[&str]) -> Option<String> {
-    if !crate::sites::plain(url) {
-        return None;
-    }
-    let host = url.host_str()?;
-    let mut rest = url.path().to_owned();
-    if let Some(query) = url.query() {
-        rest.push('?');
-        rest.push_str(query);
-    }
-    for root in roots {
-        let (root_host, prefix) = match root.split_once('/') {
-            Some((h, p)) => (h, format!("/{p}")),
-            None => (*root, String::new()),
-        };
-        if !host.eq_ignore_ascii_case(root_host) {
-            continue;
-        }
-        if prefix.is_empty() {
-            return Some(rest);
-        }
-        if let Some(tail) = rest.strip_prefix(&prefix)
-            && (tail.is_empty() || tail.starts_with(['/', '?']))
-        {
-            return Some(tail.to_owned());
-        }
-    }
-    None
+    // Configured instance roots may name a port (`host:port[/prefix]`).
+    roots
+        .iter()
+        .find_map(|root| crate::sites::instances::below(url, root))
 }
 
 /// Leading ASCII digits of `text` (at least one, at most 20).
@@ -531,3 +509,6 @@ pub(crate) fn item(
         .caption(caption)
         .timestamp(timestamp)
 }
+
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[&shimmie2::FAMILY];
