@@ -2484,9 +2484,10 @@ ending in a media extension), and `recursive:URL` (or `r:URL`) queues every
 HTTP(S) URL in the fetched page. `bit.ly` and `t.co` short links resolve to
 their targets. URLs a site queues are routed like command-line inputs, so a
 forum or list linking to X, Instagram, Reddit or any other supported site is
-extracted by that site's extractor. Not supported: `generic`'s `enabled`
-option (prefix-less fallback) and `recursive:` with local `file://` sources
-(use `--input-file`). Gallery-dl's
+extracted by that site's extractor. With `extractor.generic.enabled` set,
+native mode sends URLs no other extractor matches to `generic` without the
+prefix, as upstream does. `recursive:` with local `file://` sources is not
+supported (use `--input-file`). Gallery-dl's
 `shopify:`/`xenforo:` URL prefixes and extra configured instances are not
 supported, and all `*.reactor.cc` subdomains share the `reactor` category.
 Username/password logins and SmugMug OAuth are not ported; pass `--cookies`

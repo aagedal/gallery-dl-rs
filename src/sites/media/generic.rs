@@ -3,8 +3,8 @@
 //! `srcset` of `<img>`, `<video>` and `<source>` and every URL-like run
 //! ending in a media extension, resolved against the page and deduplicated.
 //!
-//! Upstream's `enabled` option, which makes the prefix optional for URLs no
-//! other extractor matches, is not supported.
+//! With upstream's `enabled` option, the program routes URLs no other
+//! extractor matches here without the prefix.
 use crate::sites::art::{extr, nameext_into};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};

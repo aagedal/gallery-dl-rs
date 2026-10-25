@@ -1980,3 +1980,70 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
     assert_eq!(output.status.code(), Some(2));
     assert!(!log.exists());
 }
+
+/// Serve one HTML page per accepted connection, up to `count` requests.
+fn serve_page(page: &'static str, count: usize) -> (String, std::thread::JoinHandle<Vec<String>>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let worker = std::thread::spawn(move || {
+        let mut requests = Vec::new();
+        for _ in 0..count {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut buffer = [0; 4096];
+            let read = socket.read(&mut buffer).unwrap();
+            requests.push(String::from_utf8_lossy(&buffer[..read]).into_owned());
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{page}",
+                page.len()
+            );
+            socket.write_all(response.as_bytes()).unwrap();
+        }
+        requests
+    });
+    (base, worker)
+}
+
+#[test]
+fn generic_prefix_and_enabled_fallback_list_page_images() {
+    const PAGE: &str = r#"<html><img src="/media/one.png"><a href="two.jpg">x</a></html>"#;
+    let (base, server) = serve_page(PAGE, 2);
+    let prefixed = binary()
+        .args(["--extractor", "native", "-g"])
+        .arg(format!("generic:{base}/gallery/page"))
+        .output()
+        .unwrap();
+    assert!(prefixed.status.success(), "{prefixed:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&prefixed.stdout),
+        format!("{base}/media/one.png\n{base}/gallery/two.jpg\n")
+    );
+    let fallback = binary()
+        .args([
+            "--extractor",
+            "native",
+            "-o",
+            "extractor.generic.enabled=true",
+            "-g",
+        ])
+        .arg(format!("{base}/gallery/page"))
+        .output()
+        .unwrap();
+    assert!(fallback.status.success(), "{fallback:?}");
+    assert_eq!(prefixed.stdout, fallback.stdout);
+    let requests = server.join().unwrap();
+    assert!(requests.iter().all(|r| r.starts_with("GET /gallery/page ")));
+    // Without the option, an unmatched URL is still unsupported natively.
+    let plain = binary()
+        .args([
+            "--extractor",
+            "native",
+            "-g",
+            "https://unmatched.invalid/page",
+        ])
+        .output()
+        .unwrap();
+    assert!(!plain.status.success());
+    assert!(String::from_utf8_lossy(&plain.stderr).contains("unsupported URL"));
+}

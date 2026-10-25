@@ -463,7 +463,7 @@ async fn run(args: Args) -> Result<()> {
     }));
     let extractor = args.extractor;
     gallery_dl_rs::sites::set_router(gallery_dl_rs::sites::Router {
-        supports: Box::new(move |url| routable(url, extractor)),
+        supports: Box::new(move |url| routable(url, extractor, settings)),
         extract: Box::new(move |url| child_queue(extractors, backend, extractor, settings)(url)),
     });
     let failed = Cell::new(0);
@@ -1110,16 +1110,34 @@ fn child_queue<'a>(
     settings: &'a BTreeMap<&str, Settings>,
 ) -> event::Queue<'a> {
     Arc::new(move |url: url::Url| {
-        routable(&url, extractor)
+        routable(&url, extractor, settings)
             .then(|| extract_input(url.to_string(), extractors, backend, extractor, settings))
     })
 }
 
 /// Whether a child URL can be routed like a command-line input.
-fn routable(url: &url::Url, extractor: Extractor) -> bool {
+fn routable(url: &url::Url, extractor: Extractor, settings: &BTreeMap<&str, Settings>) -> bool {
     routed_site(url, extractor).is_some()
         || extract::direct(url).is_some()
         || matches!(extractor, Extractor::Compatibility)
+        || generic_fallback(settings)
+}
+
+/// Upstream's `extractor.generic.enabled`: URLs no other extractor matches
+/// go to the generic extractor without its `generic:` prefix.
+fn generic_fallback(settings: &BTreeMap<&str, Settings>) -> bool {
+    settings
+        .get("generic")
+        .and_then(|generic| generic.options.site_options.as_ref())
+        .and_then(|options| options.get("enabled"))
+        .is_some_and(|enabled| match enabled {
+            serde_json::Value::Bool(value) => *value,
+            serde_json::Value::Number(value) => value.as_f64() != Some(0.0),
+            serde_json::Value::String(value) => !value.is_empty(),
+            serde_json::Value::Array(value) => !value.is_empty(),
+            serde_json::Value::Object(value) => !value.is_empty(),
+            serde_json::Value::Null => false,
+        })
 }
 
 fn extract_input<'a>(
@@ -2040,6 +2058,9 @@ fn extract_input<'a>(
                     ..BackendOptions::default()
                 },
             )
+        } else if generic_fallback(settings) {
+            // Upstream's generic `enabled` option makes its prefix optional.
+            extract_input(format!("generic:{url}"), extractors, backend, extractor, settings)
         } else {
             return Err(error(
                 "unsupported URL; expected a social URL or direct media file (other gallery-dl sites need --extractor compatibility)",
