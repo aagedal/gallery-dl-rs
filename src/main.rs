@@ -563,7 +563,8 @@ async fn run(args: Args) -> Result<()> {
                             )
                             || matches!(
                                 gallery_dl_rs::mastodon::target(&url),
-                                Ok(gallery_dl_rs::mastodon::Target::Collection { .. })
+                                Ok(gallery_dl_rs::mastodon::Target::Collection { .. }
+                                    | gallery_dl_rs::mastodon::Target::Following { .. })
                             )
                             || (extract::social_site(&url) == Some("twitter")
                                 && (settings["twitter"].options.quoted == Some(true)
@@ -1305,6 +1306,11 @@ fn extract_input<'a>(
                                     }
                                     native
                                         .with_api_server(options.api_server.as_deref())?
+                                        .with_credentials(
+                                            options.username.as_deref(),
+                                            options.password.as_deref(),
+                                        )?
+                                        .with_options(options.site_options.as_deref())?
                                         .with_likes_endpoint(
                                             options.bluesky_endpoint.unwrap_or_default(),
                                         )
@@ -1395,7 +1401,10 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Mastodon initialization failed: {e}"))
                         })?;
-                    native.events(&url)
+                    native.events_with_queue(
+                        &url,
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if matches!(category, "kemono" | "coomer") => {
                     let native = extractors.kemono[usize::from(category == "coomer")]

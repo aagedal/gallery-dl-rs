@@ -318,14 +318,37 @@ later hydration and pages while leaving sibling include views available.
 
 `extractor.bluesky.endpoint: "getActorLikes"` selects the alternative AppView
 feed endpoint; other bounded strings, `false` or `null` select repository records.
-The alternative stops on an empty feed even with a cursor. No native Bluesky
-login is implemented; restricted endpoints/content still report access errors.
+The alternative stops on an empty feed even with a cursor.
 Category-scoped `api-server` overrides the AppView base URL (HTTP(S), optional
 path, no credentials/query/fragment), appending `/xrpc/`; it does not redirect
 DID discovery or repository reads. An empty string, `false` or `null` restores
 the public AppView. Both settings forward to compatibility mode. Blob routing
 and repository reads use their authors' DID service roots independently of this
 override; no API credentials are copied to blob jobs.
+
+Further upstream classes: `/profile/NAME/follows` (`following`) pages
+`app.bsky.graph.getFollows` and queues each followed account as a lazy user
+dispatcher child; `/search?q=QUERY` or `/search/QUERY` (`search`) and
+`/hashtag/TAG[/top|/latest]` (`hashtag`, a search for `#TAG`) page
+`app.bsky.feed.searchPosts` without author filtering; `/saved` (`bookmark`)
+pages the logged-in account's `app.bsky.bookmark.getBookmarks` until an empty
+page, skipping deleted or blocked bookmarks. Upstream's mirror hosts
+(`fxbsky.app`, `vxbsky.app`, `cbsky.app`, `bskye.app`, `bskyx.app`,
+`main.bsky.dev`, ...) are accepted. `extractor.bluesky.depth` (integer or numeric
+string up to 1000, default 0) also emits that many reply levels of single posts
+and liked posts, breadth-first after the post itself; unavailable replies are
+skipped, and a thread without selected media is an error.
+
+Category-scoped `username` (handle or email; DIDs contain `:` and are not
+accepted) and `password` (preferably an app password) log in lazily with
+`com.atproto.server.createSession` on `https://bsky.social`, or on `api-server`
+when set, and then send API calls there with the session's bearer token, as
+upstream does. Sessions live in memory only; an expired or refused access token
+is refreshed once through `refreshSession` (falling back to a new login). Tokens
+are attached only to the API origin, never to DID discovery, repository reads
+or blob downloads, and login errors report only the XRPC error code. Search may
+require a login on the public AppView; bookmarks always do and fail before any
+request without one.
 
 Experimental native Reddit extraction (`--extractor native`, category `reddit`)
 accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`,
@@ -536,9 +559,18 @@ atfbooru/aibooru/booruvar/e6ai instances and Danbooru host aliases.
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
 `mastodon.social`, `pawoo` and `baraag`; the host is also exposed as `instance`.
-Supported: statuses (`/@USER/ID`, `/web/statuses/ID`), user timelines
-(`/@USER`, `/@USER/media`, `/users/USER`, including `@user@remote` and numeric
-`id:ID` accounts), `/bookmarks`, `/favourites`, `/lists/ID`, and `/tags/TAG`.
+Supported: statuses (`/@USER/ID`, `/web/statuses/ID`, `/notice/ID`,
+`/users/USER/statuses/ID`), ActivityPub objects (`/objects/ID`,
+`/users/USER/objects/ID`, resolved to their status through the redirect
+`Location` without credentials), user timelines (`/@USER`, `/@USER/media`,
+`/users/USER`, including `@user@remote` and numeric `id:ID` accounts),
+followed accounts (`/@USER/following`, `/users/USER/following`; `following`),
+`/bookmarks`, `/favourites`, `/lists/ID`, and `/tags/TAG`. As upstream, a failed
+account lookup falls back to `/api/v1/accounts/search` for `@USER@INSTANCE` and
+accepts only an exact `acct` match. Following lists page
+`/api/v1/accounts/ID/following` lazily and queue each account's `url` as a child
+job when it is a user page on a supported instance (accounts elsewhere are skipped,
+like upstream's unsupported URLs); child jobs use their own instance settings.
 Hashtags accept Unicode letters/numbers and underscores. Pages contain up to 40
 statuses and traverse lazily, capped at 100 pages. Collection cursors come from
 all `Link` headers, including bookmark cursors distinct from status IDs. Date
@@ -549,8 +581,11 @@ Shared options belong under `extractor.mastodon`; instance settings under
 them. Set `access-token` only in an instance scope; the token is bound to that
 instance's HTTPS API origin and never attached to media or other instances.
 An empty string or false disables the native token. OAuth login/cache discovery
-is not implemented. Explicit credentials and selection options also forward to
-the compatibility backend for their input instance.
+is not implemented, and upstream's built-in per-instance application tokens are
+not embedded, so endpoints an instance restricts to authenticated clients (for
+example baraag.net hashtag timelines) need a configured `access-token`. Explicit
+credentials and selection options also forward to the compatibility backend for
+their input instance.
 
 `reblogs` and `cards` default to false, `replies` to true, and `text-posts` to false.
 Enabling reblogs includes original attachments under the outer status identity;
@@ -753,33 +788,59 @@ file ID). Plain imgbox/Postimg CDN file links (i.postimg.cc,
 images2.imgbox.com) stay direct downloads.
 
 Experimental native Tumblr extraction (`--extractor native`, `tumblr`
-category) covers blog listings (`BLOG.tumblr.com`, `/posts`,
-`www.tumblr.com/BLOG`), single posts (`/post/ID[/slug]`,
-`www.tumblr.com/BLOG/ID`) and tags (`/tagged/TAG`) via API v2
-(`/v2/blog/BLOG.tumblr.com/posts`, legacy format, reblogs included, offset
-paging capped at 200 pages). It uses upstream's public API key unless
-`extractor.tumblr.api-key` is set (accepted only in the `tumblr` category).
+category) mirrors upstream's classes via API v2 (legacy post format, reblog
+info included): blog posts (`BLOG.tumblr.com[/posts|/archive|/page/N]`,
+`www.tumblr.com/BLOG`, `/blog/BLOG`, `/blog/view/BLOG`; subcategory `user`),
+single posts (`/post/ID[/slug]`, `/image/ID`, `www.tumblr.com/BLOG/ID`; `post`),
+tags (`/tagged/TAG`; `tag`), one UTC day (`/day/YYYY/MM/DD`; `day`), likes
+(`/likes`; `likes`, paged by `liked_timestamp`), followed blogs and followers
+(`/following`, `/followers`; each blog queued as a `user` child job) and
+searches (`www.tumblr.com/search/QUERY[/MODE[/POST_TYPE]][?t=DAYS...]`;
+`search`, via `/v2/timeline/search`). Upstream's `tumblr:` prefix selects any
+blog domain, usually a custom one (`tumblr:https://blog.example.com/post/ID`);
+the API is then addressed by that domain while files keep the post's blog name.
+Listings page lazily (offset, `before` or `_links.next`, capped at 200 pages).
+
+It uses upstream's public API key unless `extractor.tumblr.api-key` is set
+(accepted only in the `tumblr` category). Setting `access-token` and
+`access-token-secret` (and optionally `api-key`/`api-secret`, defaulting to
+upstream's application) signs API requests with OAuth 1.0a (HMAC-SHA1) instead
+of sending `api_key`, which can reach dashboard-only and private blogs the
+account may view. As upstream, a blog that refuses OAuth access ("You do not have
+permission to view this blog") is retried once with `api_key` authentication, and
+dashboard-only blogs report which credentials to configure. `access-token:
+"cache"` means unset (no OAuth token cache or interactive `oauth:tumblr` flow
+exists natively); an empty or false `api-secret` disables signing. Credentials
+are sent only to the API origin, never to media or token pages, and errors never
+echo them. When the shared default key hits its daily limit (and OAuth is not
+configured), the web client's public token is used and its NPF posts are
+converted.
+
 Media: photo `original_size` or a larger `alt_sizes` rendition, `video_url`, direct
-`audio_url`, and inline `<img>` images; all must be HTTPS on
-`*.media.tumblr.com` (audio also `a.tumblr.com`). `post_id` is the post ID,
-`media_id` a hash of the media path, `username` the blog name, caption the
-summary (or caption with HTML stripped), with timestamp and width/height.
-Default filenames are `{post_id}_{index}.{extension}`; archive identity is
-(blog, post, media ID). Capped photo renditions (`s2048x3072` at width 2048 or
-height 3072) and modern inline image sizes request the original through
-Tumblr's `s99999x99999` HTML token page. Legacy inline image sizes become
-`_1280`; GIF downloads also offer a GIFV fallback. Token requests use the
-configured network settings and timeouts without API credentials. Failed
-token lookups retain the API rendition as a download fallback; upstream's
-delayed token refresh retries are not implemented. Archive identities remain
-stable across refreshed tokens. Selection options include `reblogs` (boolean or
-`"same-blog"`, requiring the reblog root to belong to the current blog), `posts`
-(`"all"`, a comma-separated string or list of legacy post types, or false/empty
-selection to disable listings), `inline`
-(boolean or `"reblog"` for the comment, `"original"` for the original tree with
-comment fallback), and `original` (boolean, default true). Single-post URLs
-ignore `posts`, matching upstream. Disabling `original` avoids token lookups;
-legacy inline `_1280` rewriting remains enabled. Plain media links stay direct downloads.
+`audio_url`, and inline `<img>`/`<source>` media; all must be HTTPS on
+`*.media.tumblr.com` (audio also `a.tumblr.com`, videos also
+`vt`/`vtt`/`ve`/`va.tumblr.com`). Files carry upstream's keyword dictionary
+(`blog`, `blog_name`, `id`, `num`, `count`, `photo`, `hash`, ...). Default paths
+follow upstream: `tumblr/{blog_name}/tumblr_{blog_name}_{id}_{num:>02}.{extension}`
+(likes under `tumblr/{blog_name}/likes`). Archive identity is (blog, post, media
+ID), where the media ID hashes the media path. Capped photo renditions
+(`s2048x3072` at width 2048 or height 3072) and modern inline image sizes request
+the original through Tumblr's `s99999x99999` HTML token page, retried after
+`fallback-delay` seconds up to `fallback-retries` times; failed lookups keep the
+API rendition as a download fallback. Legacy inline image sizes become `_1280`;
+GIF downloads also offer a GIFV fallback. Token requests use the configured
+network settings without API credentials, and archive identities stay stable
+across refreshed tokens.
+
+Selection options: `reblogs` (boolean or `"same-blog"`, requiring the reblog root
+to belong to the current blog), `posts` (`"all"`, a comma-separated string or list
+of legacy post types; false/empty disables listings), `inline` (boolean,
+`"reblog"` for the comment, `"original"` for the original tree with comment
+fallback), `original` (boolean, default true), `external` (queue links to other
+sites as child jobs), `avatar` (emit the blog's 512px avatar first), `offset`,
+`pagination` (`"api"`, `"before"`, `"offset"`) and `ratelimit: "wait"`.
+Single-post URLs ignore `posts`, matching upstream. Plain media links stay direct
+downloads.
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv`, `pixiv-novel` or `deviantart`
@@ -2583,7 +2644,7 @@ are always native):
 | Facebook | native photos, posts, albums, videos, reels, share links and profiles | public albums, album lists and profile photos in full, paged through the logged-out grid and collection queries |
 | Reddit | native REST listings, submissions, users | yes; where Reddit sends logged-out JSON clients to its login page, listings, users and submissions fall back to the public Atom feeds (direct images, videos and links; no gallery metadata or comments; about one feed page per minute). `--cookies` restores the full API |
 | Pinterest, Bluesky | native | yes |
-| Tumblr | native | yes; when the shared default API key hits its daily limit, the web client's public token is used (its NPF posts are converted) |
+| Tumblr | native | yes; when the shared default API key hits its daily limit, the web client's public token is used (its NPF posts are converted); OAuth 1.0a `access-token`/`access-token-secret` reach dashboard-only blogs |
 | TikTok | native posts and user listings | yes |
 | Telegram | public channels and posts via `t.me/s/` | yes |
 | Weibo | native statuses, albums, videos | statuses and albums; timelines need cookies |

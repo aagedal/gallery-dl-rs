@@ -813,6 +813,9 @@ pub fn input_url(value: &str) -> Result<Url> {
             "generic"
         } else if matches!(prefix, "r" | "recursive") {
             "recursive"
+        } else if prefix == "tumblr" {
+            // Upstream's `tumblr:DOMAIN` selects Tumblr for custom blog domains.
+            "tumblr"
         } else {
             return None;
         };
@@ -882,6 +885,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     // Registry sites include the host-less `generic:`/`recursive:` inputs.
     if let Some(site) = crate::sites::find(url) {
         return Some(site.category);
+    }
+    if url.scheme() == "tumblr" {
+        return crate::tumblr::is_blog_url(url).then_some("tumblr");
     }
     let host = url.host_str()?;
     if crate::mastodon::INSTANCES.contains(&host) {
