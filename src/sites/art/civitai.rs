@@ -1,11 +1,13 @@
-//! Civitai models, images, posts, collections and searches, mirroring
+//! Civitai models, images, posts, collections, searches and the generator
+//! feed, mirroring
 //! gallery_dl/extractor/civitai.py through the public tRPC API (the
 //! upstream default) and the public Meilisearch endpoint.
 //!
 //! Supported options: `quality`, `quality-videos`, `nsfw`, `period`, `sort`,
 //! `include` (user dispatch), `api-key` (tRPC) and `token` (search). Not
-//! supported: `api` (REST), `metadata` and `files`. Reactions, the generator feed
-//! and anything else needing an account are not matched.
+//! supported: `api` (REST), `metadata` and `files`. The `generated` feed needs
+//! `api-key` or a `__Secure-civitai-token` session cookie, as upstream;
+//! reaction feeds are not matched.
 use crate::sites::art;
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -42,9 +44,10 @@ pub static SITE: Site = Site {
         &USER_IMAGES,
         &USER_VIDEOS,
         &USER_COLLECTIONS,
+        &GENERATED,
     ],
     api_key: true,
-    cookies: None,
+    cookies: Some("civitai.com"),
 };
 
 const FILENAME: &str = "{file[id]}.{extension}";
@@ -99,6 +102,12 @@ static USER_VIDEOS: Route = Route::new(
     ARCHIVE,
 );
 static USER_COLLECTIONS: Route = Route::new("user-collections", FILENAME, DIRECTORY, ARCHIVE);
+static GENERATED: Route = Route::new(
+    "generated",
+    "{filename}.{extension}",
+    &["{category}", "generated"],
+    ARCHIVE,
+);
 
 #[derive(Debug, PartialEq)]
 enum Target {
@@ -123,6 +132,8 @@ enum Target {
     UserImages(String, Option<String>),
     UserVideos(String, Option<String>),
     UserCollections(String, Option<String>),
+    /// The account's generator feed (`/generate`, unanchored upstream).
+    Generated,
 }
 
 fn id(text: &str) -> Option<i64> {
@@ -175,6 +186,7 @@ fn target(url: &Url) -> Option<Target> {
         }
         ["search", "models"] => return query.map(Target::SearchModels),
         ["search", "images"] => return query.map(Target::SearchImages),
+        [first, ..] if first.starts_with("generate") => return Some(Target::Generated),
         _ => {}
     }
     if let Some(q) = listing("models") {
@@ -1198,9 +1210,90 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             Target::UserImages(user, q) => user_images(http, &USER_IMAGES, cfg, "image", &user, q)?,
             Target::UserVideos(user, q) => user_images(http, &USER_VIDEOS, cfg, "video", &user, q)?,
             Target::UserCollections(user, q) => user_collections_flow(http, cfg, user, q),
+            Target::Generated => generated_flow(http, cfg)?,
         })
     })();
     result.unwrap_or_else(crate::sites::fail)
+}
+
+/// Upstream `_require_auth`: an API key or the session cookie.
+fn require_auth(http: &Http) -> Result<()> {
+    let root = art::url(ROOT)?;
+    if http.api_key().is_some() || http.cookie(&root, "__Secure-civitai-token").is_some() {
+        Ok(())
+    } else {
+        Err(error(
+            "civitai generated images require authentication: \
+             set `api-key` or pass authenticated cookies",
+        ))
+    }
+}
+
+/// Upstream `CivitaiGeneratedExtractor`: one directory per generation and
+/// one file per step image, keyed `{"file": image, **step, **gen}`.
+fn generated_flow(http: &Http, cfg: Cfg) -> Result<Events<'_>> {
+    require_auth(http)?;
+    let params = object(json!({
+        "ascending": cfg.sort == json!("Oldest"),
+        "tags": ["gen"],
+        "authed": true,
+    }));
+    Ok(trpc_paginate(
+        http,
+        "orchestrator.queryGeneratedImages",
+        params,
+        None,
+        move |gens| {
+            Ok(chain(
+                gens.into_iter()
+                    .map(|generation| file_events(http, &GENERATED, generated_items(generation)))
+                    .collect(),
+            ))
+        },
+    ))
+}
+
+fn generated_items(generation: Value) -> Vec<Item> {
+    let mut generation = object(generation);
+    let ts = iso(generation.get("createdAt"));
+    generation.insert("date".into(), date_value(ts));
+    let steps = match generation.shift_remove("steps") {
+        Some(Value::Array(steps)) => steps,
+        _ => Vec::new(),
+    };
+    let gen_id = scalar_of(&generation, "id");
+    let mut items = Vec::new();
+    for step in steps {
+        let mut step = object(step);
+        let images = match step.shift_remove("images") {
+            Some(Value::Array(images)) => images,
+            _ => Vec::new(),
+        };
+        for image in images {
+            let Some(raw) = image.get("url").and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+            let Some(url) = Url::parse(raw.trim()).ok().filter(crate::sites::plain) else {
+                continue;
+            };
+            let media_id = image
+                .get("id")
+                .filter(|v| !v.is_null())
+                .map(crate::sites::scalar)
+                .unwrap_or_default();
+            let mut data = Map::new();
+            data.insert("file".into(), image);
+            art::update(&mut data, &step);
+            art::update(&mut data, &generation);
+            art::nameext_into(&raw, &mut data);
+            items.push(
+                Item::new(url, data)
+                    .ids(gen_id.clone(), media_id)
+                    .timestamp(ts),
+            );
+        }
+    }
+    items
 }
 
 fn user_images<'a>(
@@ -1294,6 +1387,11 @@ mod tests {
             Some(Target::Images(Some("tags=482".into())))
         );
         assert_eq!(t("https://civitai.com/videos"), Some(Target::Videos(None)));
+        assert_eq!(t("https://civitai.com/generate"), Some(Target::Generated));
+        assert_eq!(
+            t("https://civitai.com/generate?view=feed"),
+            Some(Target::Generated)
+        );
         assert_eq!(t("https://civitai.com/posts"), Some(Target::Posts(None)));
         assert_eq!(
             t("https://civitai.com/user/waomodder"),
@@ -1325,7 +1423,6 @@ mod tests {
             "https://civitai.com/search/models",
             "https://civitai.com/user/w/images?section=reactions",
             "https://civitai.com/user/w/videos?section=reactions",
-            "https://civitai.com/generate",
             "https://civitai.com/user/w/unknown",
             "https://civitai.com.evil.com/models/1",
             "https://evilcivitai.com/models/1",
@@ -1415,6 +1512,101 @@ mod tests {
         json!({"id": id, "url": format!("uuid-{id}"), "name": format!("{id:05}-seed.png"),
             "createdAt": "2024-08-31T01:11:47.021Z", "postId": post, "type": "image",
             "user": {"id": 9, "username": "bolero537"}})
+    }
+
+    fn generation(id: &str, images: &[&str], step: &str) -> Value {
+        json!({"id": id, "createdAt": "2025-01-02T03:04:05.000Z", "status": "succeeded",
+            "steps": [{"name": step, "params": {"prompt": "cat"},
+                "images": images.iter().map(|i| json!({"id": i,
+                    "url": format!("https://orchestration.civitai.com/v2/consumer/blobs/{i}.jpeg")}))
+                    .collect::<Vec<_>>()}]})
+    }
+
+    #[tokio::test]
+    async fn generated_feed_paginates_with_authentication() {
+        let (root, server) = serve(vec![
+            trpc_reply(json!({"items": [generation("g1", &["A", "B"], "s1")],
+                "nextCursor": "C2"})),
+            trpc_reply(json!({"items": [generation("g2", &["C"], "s2")], "nextCursor": null})),
+        ]);
+        let http = http("civitai", root)
+            .with_api_key(Some("secret"))
+            .with_options(Some(Arc::new(object(json!({"sort": "oldest"})))));
+        let files = media(extract(
+            &http,
+            Url::parse("https://civitai.com/generate").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 3);
+        assert_eq!(
+            files[0].url.as_str(),
+            "https://orchestration.civitai.com/v2/consumer/blobs/A.jpeg"
+        );
+        let k = keywords(&files[1]);
+        assert_eq!(k["subcategory"], "generated");
+        assert_eq!(k["file"]["id"], "B");
+        assert_eq!(k["name"], "s1");
+        assert_eq!(k["params"]["prompt"], "cat");
+        assert_eq!(k["id"], "g1");
+        assert_eq!(k["status"], "succeeded");
+        assert_eq!(k["date"], "2025-01-02 03:04:05");
+        assert_eq!(k["filename"], "B");
+        assert_eq!(k["extension"], "jpeg");
+        assert!(k.get("steps").is_none());
+        assert!(k.get("images").is_none());
+        assert_eq!(
+            files[0].metadata.as_ref().unwrap().timestamp,
+            Some(1735787045)
+        );
+        let (file, dir) = crate::sites::default_templates(&files[2]).unwrap();
+        assert_eq!(file.render(&files[2]).unwrap(), "C.jpeg");
+        assert_eq!(
+            dir.render(&files[2]).unwrap().unwrap(),
+            PathBuf::from("civitai/generated")
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/trpc/orchestrator.queryGeneratedImages?input="));
+        assert_eq!(
+            input(&requests[0]),
+            json!({"json": {"ascending": true, "tags": ["gen"], "authed": true, "cursor": null},
+                "meta": {"values": {"cursor": ["undefined"]}}})
+        );
+        assert_eq!(input(&requests[1])["json"]["cursor"], "C2");
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn generated_feed_accepts_the_session_cookie() {
+        let (root, server) = serve(vec![trpc_reply(json!({"items": []}))]);
+        let http = http("civitai", root);
+        http.set_cookie(
+            &Url::parse(ROOT).unwrap(),
+            "__Secure-civitai-token=t; Domain=.civitai.com; Path=/; Secure",
+        );
+        let files = media(extract(
+            &http,
+            Url::parse("https://civitai.com/generate").unwrap(),
+        ))
+        .await;
+        assert!(files.is_empty());
+        let requests = server.join().unwrap();
+        assert_eq!(input(&requests[0])["json"]["ascending"], false);
+    }
+
+    #[tokio::test]
+    async fn generated_feed_requires_authentication() {
+        let http = http("civitai", Url::parse("http://127.0.0.1:9/").unwrap());
+        assert!(
+            crate::sites::testing::fails(extract(
+                &http,
+                Url::parse("https://civitai.com/generate").unwrap(),
+            ))
+            .await
+        );
     }
 
     #[tokio::test]
