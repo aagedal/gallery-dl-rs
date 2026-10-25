@@ -441,24 +441,31 @@ async fn run(args: Args) -> Result<()> {
             "--config is only supported with --extractor compatibility",
         ));
     }
-    let settings = resolved_settings(&args).await?;
+    // Settings, extractors and the backend live for the rest of the process,
+    // so registry sites can route child URLs through them.
+    let settings: &'static _ = Box::leak(Box::new(resolved_settings(&args).await?));
     let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
-    let extractors = Extractors {
+    let extractors: &'static Extractors = Box::leak(Box::new(Extractors {
         ytdl: args.ytdl_command.clone(),
         ytdl_cookies: ytdl_cookies(&args),
         ..Extractors::default()
-    };
+    }));
     let archives: BTreeMap<_, OnceCell<Result<Archive>>> = settings
         .values()
         .filter_map(|settings| settings.options.archive.clone())
         .map(|path| (path, OnceCell::new()))
         .collect();
-    let backend = Backend {
+    let backend: &'static Backend = Box::leak(Box::new(Backend {
         executable: args.extractor_command.clone(),
         cookies: None,
         config: args.config.clone(),
         timeout: Duration::from_secs(args.extraction_timeout),
-    };
+    }));
+    let extractor = args.extractor;
+    gallery_dl_rs::sites::set_router(gallery_dl_rs::sites::Router {
+        supports: Box::new(move |url| routable(url, extractor)),
+        extract: Box::new(move |url| child_queue(extractors, backend, extractor, settings)(url)),
+    });
     let failed = Cell::new(0);
     // Input URLs by index, and the inputs that failed, for -e/--error-file.
     let input_sources = std::cell::RefCell::new(BTreeMap::<usize, String>::new());
@@ -574,7 +581,7 @@ async fn run(args: Args) -> Result<()> {
                         .ok()
                         .map(|url| &settings[settings_key(&url, args.extractor)]);
                     let input =
-                        extract_input(source, &extractors, &backend, args.extractor, &settings);
+                        extract_input(source, extractors, backend, args.extractor, settings);
                     let input = match args.sleep_extractor {
                         Some(delay) => stream::once(async move {
                             tokio::time::sleep(delay.sample()).await;
@@ -642,7 +649,7 @@ async fn run(args: Args) -> Result<()> {
             })
         })
         .map(|(index, mut job)| {
-            settings[media_settings_key(&job.media, args.extractor, &settings)]
+            settings[media_settings_key(&job.media, args.extractor, settings)]
                 .network
                 .apply_media(&mut job.media);
             (index, job)
@@ -721,7 +728,7 @@ async fn run(args: Args) -> Result<()> {
     } else if args.simulate {
         while let Some((_, job)) = media.next().await {
             let item = &job.media;
-            let settings = &settings[media_settings_key(item, args.extractor, &settings)];
+            let settings = &settings[media_settings_key(item, args.extractor, settings)];
             match download::destination_with_templates(
                 settings.options.base_directory.as_ref().unwrap(),
                 item,
@@ -756,7 +763,7 @@ async fn run(args: Args) -> Result<()> {
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
-                let settings = &settings[media_settings_key(&item, args.extractor, &settings)];
+                let settings = &settings[media_settings_key(&item, args.extractor, settings)];
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap())
@@ -1103,11 +1110,16 @@ fn child_queue<'a>(
     settings: &'a BTreeMap<&str, Settings>,
 ) -> event::Queue<'a> {
     Arc::new(move |url: url::Url| {
-        (routed_site(&url, extractor).is_some()
-            || extract::direct(&url).is_some()
-            || matches!(extractor, Extractor::Compatibility))
-        .then(|| extract_input(url.to_string(), extractors, backend, extractor, settings))
+        routable(&url, extractor)
+            .then(|| extract_input(url.to_string(), extractors, backend, extractor, settings))
     })
+}
+
+/// Whether a child URL can be routed like a command-line input.
+fn routable(url: &url::Url, extractor: Extractor) -> bool {
+    routed_site(url, extractor).is_some()
+        || extract::direct(url).is_some()
+        || matches!(extractor, Extractor::Compatibility)
 }
 
 fn extract_input<'a>(
@@ -1118,7 +1130,7 @@ fn extract_input<'a>(
     settings: &'a BTreeMap<&str, Settings>,
 ) -> BoxStream<'a, Result<ExtractionEvent>> {
     let input = stream::once(async move {
-        let url = extract::http_url(&source)?;
+        let url = extract::input_url(&source)?;
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
         {

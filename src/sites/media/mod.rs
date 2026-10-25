@@ -11,6 +11,7 @@ mod audiochan;
 mod bbc;
 mod desktopography;
 mod directlink;
+mod generic;
 mod imagebam;
 mod imagechest;
 mod imagefap;
@@ -23,6 +24,7 @@ mod misskey;
 mod pexels;
 mod photovogue;
 mod pixnet;
+mod recursive;
 mod redgifs;
 mod shopify;
 mod slickpic;
@@ -40,6 +42,8 @@ pub(super) use directlink::{SITE as DIRECTLINK, matches as is_direct_link};
 
 pub(super) static SITES: &[&Site] = &[
     &directlink::SITE,
+    &generic::SITE,
+    &recursive::SITE,
     &redgifs::SITE,
     &soundgasm::SITE,
     &misskey::MISSKEY_IO,

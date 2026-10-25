@@ -2476,7 +2476,17 @@ Manganelo mirrors, `mangataro`, `mangoxo`, `weebdex`, `hentai2read`,
 galleries are also native (`8muses`, `luscious`, `erome`, `pornpics`,
 `pornhub`, `xvideos`, `xhamster`, `vipergirls`, `bellazon`, `fansly` with its
 owner `token`, and the other upstream adult modules); sites built around
-leaked private content or celebrity fakes are intentionally not ported. Gallery-dl's
+leaked private content or celebrity fakes are intentionally not ported.
+
+Upstream's input prefixes work natively too: `generic:URL` (or `g:URL`)
+downloads the images and videos a page references (tag sources plus URLs
+ending in a media extension), and `recursive:URL` (or `r:URL`) queues every
+HTTP(S) URL in the fetched page. `bit.ly` and `t.co` short links resolve to
+their targets. URLs a site queues are routed like command-line inputs, so a
+forum or list linking to X, Instagram, Reddit or any other supported site is
+extracted by that site's extractor. Not supported: `generic`'s `enabled`
+option (prefix-less fallback) and `recursive:` with local `file://` sources
+(use `--input-file`). Gallery-dl's
 `shopify:`/`xenforo:` URL prefixes and extra configured instances are not
 supported, and all `*.reactor.cc` subdomains share the `reactor` category.
 Username/password logins and SmugMug OAuth are not ported; pass `--cookies`

@@ -254,19 +254,42 @@ pub fn categories() -> impl Iterator<Item = &'static str> {
     sites().iter().map(|site| site.category)
 }
 
-/// Whether a queued child URL can be extracted natively: a registry site or,
-/// as upstream's lowest-priority extractor, a direct link to a media file.
+/// Routes child URLs that no registry site handles to the program's other
+/// extractors, the way command-line inputs are routed (upstream queues every
+/// URL to whichever extractor matches it).
+pub struct Router {
+    pub supports: Box<dyn Fn(&Url) -> bool + Send + Sync>,
+    pub extract: Box<dyn Fn(Url) -> Option<Events<'static>> + Send + Sync>,
+}
+
+static ROUTER: std::sync::OnceLock<Router> = std::sync::OnceLock::new();
+
+/// Install the process-wide child router; later calls are ignored.
+pub fn set_router(router: Router) {
+    let _ = ROUTER.set(router);
+}
+
+/// Whether a queued child URL can be extracted: a registry site, a direct
+/// link to a media file (upstream's lowest-priority extractor), or a URL
+/// the installed router accepts.
 pub(crate) fn supported(url: &Url) -> bool {
-    find(url).is_some() || media::is_direct_link(url)
+    find(url).is_some()
+        || media::is_direct_link(url)
+        || ROUTER.get().is_some_and(|router| (router.supports)(url))
 }
 
 /// Extract any registry URL, for child jobs that cross site boundaries.
-/// Direct links to media files no other site claims become single files.
+/// Direct links to media files no other site claims become single files;
+/// other URLs go to the installed router.
 pub fn extract<'a>(http: &'a Http, url: Url) -> Events<'a> {
     match find(&url) {
         Some(site) => (site.extract)(http, url),
         None if media::is_direct_link(&url) => (media::DIRECTLINK.extract)(http, url),
-        None => fail(error("unsupported child URL")),
+        None => ROUTER
+            .get()
+            .filter(|router| (router.supports)(&url))
+            .and_then(|router| (router.extract)(url))
+            .unwrap_or_else(|| fail(error("unsupported child URL"))),
     }
 }
 
@@ -407,7 +430,11 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
         keywords.entry("extension").or_insert(ext.into());
     }
     keywords.insert("category".into(), site.category.into());
-    keywords.insert("subcategory".into(), route.subcategory.into());
+    // Routes without a fixed subcategory (upstream's per-URL `generic` and
+    // `directlink` subcategories) keep one set by the item.
+    if !route.subcategory.is_empty() || !keywords.get("subcategory").is_some_and(Value::is_string) {
+        keywords.insert("subcategory".into(), route.subcategory.into());
+    }
     let stem = keywords.get("filename").map(scalar).unwrap_or_default();
     let extension = keywords.get("extension").map(scalar).unwrap_or_default();
     let filename = if extension.is_empty() {

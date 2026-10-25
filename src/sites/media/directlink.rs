@@ -8,8 +8,8 @@ use crate::sites::{Events, Http, Item, Route, Site};
 use serde_json::{Map, Value};
 use url::Url;
 
-/// Upstream names the subcategory after the link's domain; registry routes
-/// are static, so files carry an empty subcategory. Upstream's filename
+/// The subcategory is per link, the last two labels of its domain, as
+/// upstream sets it. Upstream's filename
 /// `{domain}/{path}/{filename}.{extension}` is cleaned as one segment, so
 /// its slashes become underscores; `R` does that replacement here.
 static DIRECTLINK: Route = Route::new(
@@ -78,6 +78,15 @@ fn item(url: Url, domain: &str, path: &str) -> Item {
     let (dir, name) = path.rsplit_once('/').unwrap_or(("", &path));
     let (filename, ext) = name.rsplit_once('.').unwrap_or(("", name));
     let mut data = Map::new();
+    let labels: Vec<&str> = domain.rsplitn(3, '.').collect();
+    let subcategory = labels
+        .iter()
+        .take(2)
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .join(".");
+    data.insert("subcategory".into(), subcategory.into());
     data.insert("domain".into(), unquote(domain).into());
     data.insert("path".into(), dir.into());
     let optional = |value: Option<&str>| match value.filter(|v| !v.is_empty()) {
@@ -133,6 +142,7 @@ mod tests {
         let k = keywords(&files[0]);
         assert_eq!(k["category"], "directlink");
         assert_eq!(k["domain"], "img.example.org");
+        assert_eq!(k["subcategory"], "example.org");
         assert_eq!(k["path"], "a b/c");
         assert_eq!(k["filename"], "My Pic");
         assert_eq!(k["extension"], "jpg");
