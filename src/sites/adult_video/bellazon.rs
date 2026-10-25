@@ -3,8 +3,8 @@
 //! `www.bellazon.com/main`.
 //!
 //! Each post is a post boundary: the forum's own uploads and attachments
-//! are files, and other links are queued when a native extractor supports
-//! them. Threads list their newest post first unless `order-posts` says
+//! are files, and other links are queued when a native extractor or the
+//! direct-link fallback supports them. Threads list their newest post first unless `order-posts` says
 //! otherwise; quoted posts are skipped unless `quoted` is set.
 use crate::sites::art::{
     Scan, date, ext_from_url, extr, extract_iter, leading_digits, nameext_from_name, on_host,
@@ -456,7 +456,7 @@ fn post_events<'a>(
             let Some(child) = crate::sites::media::web_url(&url) else {
                 continue;
             };
-            if crate::sites::find(&child).is_none() {
+            if !crate::sites::supported(&child) {
                 continue;
             }
             let mut dc = data.clone();
@@ -567,7 +567,7 @@ mod tests {
         )
     }
 
-    /// An external link without a native extractor, which is skipped.
+    /// An external link no native extractor supports, which is skipped.
     const OTHER: &str = "https://unsupported.test/x";
 
     fn article(id: u64, external: &str) -> String {

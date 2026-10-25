@@ -10,6 +10,7 @@ use url::Url;
 mod audiochan;
 mod bbc;
 mod desktopography;
+mod directlink;
 mod imagebam;
 mod imagechest;
 mod imagefap;
@@ -35,7 +36,10 @@ mod wallpapercave;
 mod whyp;
 mod wikimedia;
 
+pub(super) use directlink::{SITE as DIRECTLINK, matches as is_direct_link};
+
 pub(super) static SITES: &[&Site] = &[
+    &directlink::SITE,
     &redgifs::SITE,
     &soundgasm::SITE,
     &misskey::MISSKEY_IO,

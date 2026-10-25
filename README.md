@@ -2485,7 +2485,8 @@ them). Unsplash, Pexels, Toyhouse, Comick, Lexica and Khinsider answered this
 network with bot challenges; MangaPark, MangaFire, MangaReader, TCB Scans,
 Desktopography, Pixnet and AO3 were unreachable or had changed; and 8chan
 needs browser cookies past its proof-of-work page, so those are
-fixture-tested only. Plurk queues only links a native site handles.
+fixture-tested only. Queued links that no native site handles still extract when they point
+directly at a media file, as upstream's `directlink` does.
 
 WhatsApp, WeChat, Messenger and QQ have no public media pages. The Kuaishou
 and Xiaohongshu extractors are tested against fixtures only; this network gets

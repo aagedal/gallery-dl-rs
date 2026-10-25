@@ -2,7 +2,8 @@
 //! through the forum's `vr.php` XML export.
 //!
 //! Each post is a post boundary whose images are queued to their image
-//! hosts; hosts without a native extractor are skipped. Requests go to
+//! hosts; links that no native extractor or the direct-link fallback
+//! supports are skipped. Requests go to
 //! `https://viper.click` unless the `domain` option names another mirror.
 //! Threads list their newest post first unless `order-posts` says
 //! otherwise. Upstream's login and `like` option are not supported; pass
@@ -121,7 +122,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     .enumerate()
                     .filter_map(move |(index, image)| {
                         let url = Url::parse(&image).ok().filter(crate::sites::plain)?;
-                        crate::sites::find(&url)?;
+                        crate::sites::supported(&url).then_some(())?;
                         let mut data = data.clone();
                         data.insert("count".into(), count.into());
                         data.insert("num".into(), (index + 1).into());

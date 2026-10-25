@@ -254,10 +254,18 @@ pub fn categories() -> impl Iterator<Item = &'static str> {
     sites().iter().map(|site| site.category)
 }
 
+/// Whether a queued child URL can be extracted natively: a registry site or,
+/// as upstream's lowest-priority extractor, a direct link to a media file.
+pub(crate) fn supported(url: &Url) -> bool {
+    find(url).is_some() || media::is_direct_link(url)
+}
+
 /// Extract any registry URL, for child jobs that cross site boundaries.
+/// Direct links to media files no other site claims become single files.
 pub fn extract<'a>(http: &'a Http, url: Url) -> Events<'a> {
     match find(&url) {
         Some(site) => (site.extract)(http, url),
+        None if media::is_direct_link(&url) => (media::DIRECTLINK.extract)(http, url),
         None => fail(error("unsupported child URL")),
     }
 }

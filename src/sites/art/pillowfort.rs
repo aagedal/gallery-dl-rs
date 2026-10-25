@@ -219,8 +219,8 @@ pub(crate) fn parse_post(post: &Value, options: &Options) -> Vec<Entry> {
             continue;
         }
         if embed {
-            // Only embeds of natively supported sites can be followed.
-            if crate::sites::find(&url).is_some() {
+            // Only embeds of natively supported sites or media files can be followed.
+            if crate::sites::supported(&url) {
                 entries.push(Entry::Queue(url, data.clone()));
             }
             continue;
