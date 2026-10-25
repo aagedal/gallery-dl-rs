@@ -1592,14 +1592,18 @@ fn extract_input<'a>(
                     let native = extractors
                         .newgrounds
                         .get_or_init(|| async {
-                            gallery_dl_rs::newgrounds::Newgrounds::new(backend.timeout).and_then(
-                                |native| {
-                                    native
-                                        .with_retries(options.retries.unwrap())
-                                        .with_request_timeout(options.timeout.unwrap())
-                                        .with_network(&configured.network)
-                                },
+                            gallery_dl_rs::newgrounds::Newgrounds::from_cookie_jar(
+                                extractors.cookie_jar(configured, "newgrounds.com").await?,
+                                backend.timeout,
                             )
+                            .and_then(|native| {
+                                native
+                                    .with_options(options.site_options.as_deref())?
+                                    .with_include(options.include.clone())
+                                    .with_retries(options.retries.unwrap())
+                                    .with_request_timeout(options.timeout.unwrap())
+                                    .with_network(&configured.network)
+                            })
                         })
                         .await
                         .as_ref()

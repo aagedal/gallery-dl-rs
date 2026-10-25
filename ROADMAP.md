@@ -981,11 +981,24 @@ the page preloaded state and `medias/profile` API. Remaining: HLS videos
 (upstream ytdl), collections, journals, spaces, avatars, and upstream's
 `videos` option.
 
-**Implemented experimental native Newgrounds:** art posts and user art
-listings via page scraping and XHR listing pages. Remaining: login/cookies
-(adult posts), audio, movies/games, favorites, following, search, user
-overview, upstream's `flash`, `format` and `include` options, and tags/rating/
-score metadata.
+**Implemented experimental native Newgrounds:** upstream's `image` (including
+`art.ngfiles.com` file URLs), `media` (portal movies/games and audio),
+`art`, `audio`, `movies`, `games`, `favorite`, `following` (queued
+profiles), `search` and `user` (`include` dispatch) classes via page scraping
+and XHR listing pages, with `ng_session` cookies from `--cookies`/
+`--cookies-from-browser` for adult-rated posts. Movies are downloaded
+directly from `portal/video` sources chosen by the `format` option (other
+formats as fallbacks), as upstream does (no yt-dlp handoff); the `flash`
+option is honored. Files carry upstream's keywords (title, description,
+date, rating, score, favorites, sorted tags, artists, comment, `_type`/
+`_index`, `num`), including author-comment images. Default paths now follow
+upstream (`{category}_{_index}_{title}.{extension}` in
+`newgrounds/{artist[:10]:J, }/`) instead of `newgrounds/INDEX_N.ext`; art
+archive keys are unchanged, audio and portal files use `a`/`p`-prefixed
+identities. Remaining: username/password login, search `suitabilities`
+(a session POST), the 0.5–1.5 s request interval, and live verification:
+the "NG Guard" bot check answered every request with HTTP 403 on
+2026-10-25 (reported as an error suggesting browser cookies).
 
 **Implemented experimental native Fur Affinity:** upstream's `post`,
 `gallery`, `scraps`, `folder`, `favorite` (with `favorite_id`), `search`

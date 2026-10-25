@@ -1177,15 +1177,33 @@ the description, timestamp `uploadDate`, with width/height. Default filenames
 are `{media_id}.{extension}`; archive identity is the media ID.
 
 Experimental native Newgrounds extraction (`--extractor native`, `newgrounds`
-category) scrapes art pages `www.newgrounds.com/art/view/USER/SLUG` (main
-image from `<div class="image">` or `og:image`, extra images from `imageData`
-/`art-images`, title from `og:title`, date from `itemprop="datePublished"`).
-`USER.newgrounds.com/art` pages `art/page/N` with `X-Requested-With:
-XMLHttpRequest` (capped at 200 pages) and fetches every listed post. Audio,
-movies and games are unsupported; there is no login, so adult-rated posts are
-skipped. HTTPS on `*.ngfiles.com` only. `post_id` is the image's numeric ID,
-`media_id` `POSTID_INDEX`, `username` the URL user, caption the title. Default
-filenames are `{post_id}_{index}.{extension}`; archive identity is `media_id`.
+category) mirrors upstream's classes: art posts
+`www.newgrounds.com/art/view/USER/SLUG` and `art.ngfiles.com/images/...` file
+URLs (`image`), `/portal/view/ID` and `/audio/listen/ID` (`media`),
+`USER.newgrounds.com/art|audio|movies|games[/page/N]` (XHR listing pages,
+capped at 200), `/favorites[/art|audio|movies]` (`favorite`),
+`/favorites/following` (`following`, queued profiles),
+`www.newgrounds.com/search/conduct/KIND?terms=...` (`search`) and
+`USER.newgrounds.com` (`user`, `include` of `art` (default), `audio`, `games`,
+`movies`). Post pages are scraped like upstream: art from
+`full_image_text` plus `imageData`/`art-images` extras, audio from the page's
+file URL, movies from `portal/video/ID` sources chosen by
+`extractor.newgrounds.format` (`original` list, a list, or a maximum height
+such as `720p`; the other candidates become download fallbacks), and games/
+flash from the page (`extractor.newgrounds.flash`, default true, requests
+`/format/flash`); author-comment images follow. The `ng_session` cookie from
+`--cookies` or `--cookies-from-browser` is sent to newgrounds.com only; posts
+behind the adult wall are skipped without it. Newgrounds' "NG Guard" bot check
+answers unrecognized clients with HTTP 403, reported as an error that suggests
+browser cookies (it blocked live checks on 2026-10-25). HTTPS on `*.ngfiles.com` and
+`*.ungrounded.net` only. Files carry upstream's keywords (title, description,
+date, type, rating, score, favorites, sorted tags, `artist` list, `user`,
+comment, `_type`/`_index`, `num`); `media_id` is `INDEX_N` for art (unchanged),
+`aINDEX_N` for audio and `pINDEX_N` for portal files. Default paths follow
+upstream: `{category}_{_index}_{title}.{extension}` in
+`newgrounds/{artist[:10]:J, }/`, `newgrounds/{user}/Favorites/` or
+`newgrounds/search/{search_tags}/` (previously
+`newgrounds/{post_id}_{index}.{extension}`); archive identity is `media_id`.
 
 Experimental native Fur Affinity extraction (`--extractor native`,
 `furaffinity` category) mirrors upstream's classes on `furaffinity.net` and its
@@ -1611,8 +1629,8 @@ Native mode can import an explicitly selected Firefox profile:
   -j 'https://www.instagram.com/p/SHORTCODE/'
 ```
 
-Native imports support Instagram, Facebook, X, Pixiv web requests, Kemono/Coomer
-and FurAffinity. Log in to the site in that Firefox profile first (use `x.com`
+Native imports support Instagram, Facebook, X, Pixiv web requests, Kemono/Coomer,
+FurAffinity and Newgrounds. Log in to the site in that Firefox profile first (use `x.com`
 for X). Supply the
 profile directory containing `cookies.sqlite`, or that database file itself.
 Relative paths use the working directory; `~` expansion, automatic profile

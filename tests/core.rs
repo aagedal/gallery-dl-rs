@@ -422,7 +422,15 @@ fn routes_social_hosts_without_lookalike_domains() {
             Some("newgrounds"),
         ),
         ("https://alice.newgrounds.com/art", Some("newgrounds")),
-        ("https://www.newgrounds.com/portal/view/1", None),
+        (
+            "https://www.newgrounds.com/portal/view/1",
+            Some("newgrounds"),
+        ),
+        (
+            "https://www.newgrounds.com/audio/listen/1",
+            Some("newgrounds"),
+        ),
+        ("https://alice.newgrounds.com/", Some("newgrounds")),
         ("https://www.newgrounds.com/art", None),
         ("https://art.ngfiles.com/images/1/1_a.png", None),
         ("https://www.newgrounds.com.evil.example/art/view/a/b", None),
