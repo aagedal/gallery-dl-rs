@@ -1,6 +1,7 @@
 pub mod archive;
 pub mod artstation;
 mod backend;
+pub mod base_instances;
 pub mod bluesky;
 pub mod booru;
 pub mod browser;

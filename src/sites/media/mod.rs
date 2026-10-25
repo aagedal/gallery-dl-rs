@@ -278,6 +278,10 @@ pub(crate) fn set_param(params: &mut Vec<(String, String)>, name: &str, value: S
     }
 }
 
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] =
+    &[&misskey::FAMILY, &wikimedia::FAMILY, &shopify::FAMILY];
+
 #[cfg(test)]
 mod tests {
     use super::*;

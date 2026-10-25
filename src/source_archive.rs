@@ -98,6 +98,7 @@ pub(crate) fn default_keywords_supported(descriptor: &ArchiveDescriptor) -> bool
         "bluesky" | "reddit" | "tumblr" | "deviantart" | "pinterest" | "newgrounds" | "catbox"
         | "imgbox" | "postimg" | "mastodon" | "mastodon.social" | "pawoo" | "baraag" | "direct"
         | "directlink" => false,
+        category if crate::mastodon::is_instance_category(category) => false,
         _ => true,
     }
 }
@@ -150,9 +151,9 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if crate::reddit::target(url).is_ok() {
         return Some(descriptor("reddit", "{filename}"));
     }
-    if crate::mastodon::target(url).is_ok() {
+    if let Ok(target) = crate::mastodon::target(url) {
         return Some(descriptor(
-            crate::mastodon::instance_category(url.host_str()?)?,
+            crate::mastodon::instance_category(target.instance())?,
             "{media[id]}",
         ));
     }
@@ -272,28 +273,25 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if crate::facebook::photo_id(url).is_ok() || crate::facebook_video::video_id(url).is_ok() {
         return Some(descriptor("facebook", "{id}.{extension}"));
     }
-    for site in crate::booru::Site::ALL {
+    // Configured and prefixed instances follow the built-in ones.
+    let configured = crate::booru::site_for_url(url).filter(|site| site.instance().is_some());
+    for site in crate::booru::Site::ALL.into_iter().chain(configured) {
         let category = site.category();
         if let Ok((target, _)) = crate::booru::target(site, url) {
             // The native parser accepts extra host aliases which have no
             // matching installed upstream extractor; do not invent a class.
             if match category {
-                "danbooru" => url.host_str() != Some("danbooru.donmai.us"),
+                "danbooru" => !url.host_str().is_some_and(crate::booru::danbooru_host),
                 "e621" => !matches!(
                     url.host_str(),
-                    Some("e621.net" | "e926.net" | "e621.cc" | "e621.anthro.fr")
+                    Some("e621.net" | "e621.cc" | "e621.anthro.fr")
                 ),
+                "e926" => url.host_str() != Some("e926.net"),
                 "safebooru" => url.host_str() != Some("safebooru.org"),
                 _ => false,
             } {
                 return None;
             }
-            let category =
-                if url.host_str().map(|host| host.trim_start_matches("www.")) == Some("e926.net") {
-                    "e926"
-                } else {
-                    category
-                };
             let format = match target {
                 crate::booru::Target::Post { .. } => "{id}",
                 crate::booru::Target::Tags { .. } => {
@@ -390,7 +388,7 @@ pub fn for_media(media: &Media) -> Option<ArchiveDescriptor> {
         }
         "pixiv-novel" => PIXIV,
         "bluesky" | "reddit" => "{filename}",
-        "mastodon.social" | "pawoo" | "baraag" => "{media[id]}",
+        category if crate::mastodon::is_instance_category(category) => "{media[id]}",
         "tumblr" => "{id}_{num}",
         "artstation" => "{asset[id]}",
         "newgrounds" => "{_type}{_index}",
@@ -445,7 +443,10 @@ pub fn project_keywords(media: &Media, context: &mut serde_json::Map<String, ser
                 .entry("submitid")
                 .or_insert_with(|| metadata.post_id.clone().into());
         }
-        "mastodon.social" | "pawoo" | "baraag" if crate::mastodon::valid_id(&metadata.media_id) => {
+        category
+            if crate::mastodon::is_instance_category(category)
+                && crate::mastodon::valid_id(&metadata.media_id) =>
+        {
             // Attachment IDs are copied verbatim. Preview cards deliberately do
             // not qualify: their synthetic native IDs have additional guards.
             context

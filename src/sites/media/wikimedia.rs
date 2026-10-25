@@ -54,12 +54,121 @@ enum Hosts {
         root: &'static str,
         hosts: &'static [&'static str],
     },
+    /// A configured instance: its root, matched as `host[:port][/path]`.
+    Configured {
+        root: &'static str,
+        spec: &'static str,
+    },
 }
 
 struct Instance {
     hosts: Hosts,
+    /// Upstream `api-path`: below the root when it starts with `/`, else
+    /// an absolute URL; empty to probe the usual locations.
     api_path: &'static str,
     user_agent: Option<&'static str>,
+}
+
+/// Configured `extractor.wikimedia.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "wikimedia",
+    builtin: &[
+        &WIKIPEDIA,
+        &WIKTIONARY,
+        &WIKIQUOTE,
+        &WIKIBOOKS,
+        &WIKISOURCE,
+        &WIKINEWS,
+        &WIKIVERSITY,
+        &WIKIDATA,
+        &WIKIVOYAGE,
+        &WIKISPECIES,
+        &WIKIMEDIACOMMONS,
+        &MEDIAWIKI,
+        &MARIOWIKI,
+        &BULBAPEDIA,
+        &PIDGIWIKI,
+        &AZURLANEWIKI,
+        &MGEWIKI,
+    ],
+    related: &[],
+    template: &MEDIAWIKI,
+    matches: |category, url| target(lookup(category).1, url).is_some(),
+    extract: |category, http, url| {
+        let (site, instance) = lookup(category);
+        extract(site, instance, http, url)
+    },
+};
+
+/// Built-in instances and their settings.
+static BUILTIN: &[(&Site, &Instance)] = &[
+    (&WIKIPEDIA, &WIKIPEDIA_INSTANCE),
+    (&WIKTIONARY, &WIKTIONARY_INSTANCE),
+    (&WIKIQUOTE, &WIKIQUOTE_INSTANCE),
+    (&WIKIBOOKS, &WIKIBOOKS_INSTANCE),
+    (&WIKISOURCE, &WIKISOURCE_INSTANCE),
+    (&WIKINEWS, &WIKINEWS_INSTANCE),
+    (&WIKIVERSITY, &WIKIVERSITY_INSTANCE),
+    (&WIKIDATA, &WIKIDATA_INSTANCE),
+    (&WIKIVOYAGE, &WIKIVOYAGE_INSTANCE),
+    (&WIKISPECIES, &WIKISPECIES_INSTANCE),
+    (&WIKIMEDIACOMMONS, &WIKIMEDIACOMMONS_INSTANCE),
+    (&MEDIAWIKI, &MEDIAWIKI_INSTANCE),
+    (&MARIOWIKI, &MARIOWIKI_INSTANCE),
+    (&BULBAPEDIA, &BULBAPEDIA_INSTANCE),
+    (&PIDGIWIKI, &PIDGIWIKI_INSTANCE),
+    (&AZURLANEWIKI, &AZURLANEWIKI_INSTANCE),
+    (&MGEWIKI, &MGEWIKI_INSTANCE),
+];
+
+/// The site and settings of a built-in or configured instance. Configured
+/// settings are built once per category and kept for the process; one
+/// replacing a built-in instance keeps its API path and User-Agent unless
+/// it sets `api-path`/`useragent`.
+fn lookup(category: &str) -> (&'static Site, &'static Instance) {
+    let builtin = BUILTIN
+        .iter()
+        .find(|(site, _)| site.category == category)
+        .copied();
+    let Some(configured) = crate::sites::instances::configured(&FAMILY, category) else {
+        return builtin.unwrap_or(BUILTIN[0]);
+    };
+    static CONFIGURED: std::sync::Mutex<Vec<(&'static str, &'static Instance)>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut cache = CONFIGURED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, instance)) = cache.iter().find(|(c, _)| *c == configured.category) {
+        return (&configured.site, instance);
+    }
+    let text = |key| {
+        configured
+            .config(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty() && s.len() <= 512)
+            .map(|s| &*Box::leak(s.to_owned().into_boxed_str()))
+    };
+    let instance: &'static Instance = Box::leak(Box::new(Instance {
+        hosts: Hosts::Configured {
+            root: configured.root,
+            spec: configured.spec,
+        },
+        api_path: text("api-path")
+            .or(builtin.map(|(_, b)| b.api_path))
+            .unwrap_or(""),
+        user_agent: text("useragent").or(builtin.and_then(|(_, b)| b.user_agent)),
+    }));
+    cache.push((configured.category, instance));
+    (&configured.site, instance)
+}
+
+/// `_search_api_path`: the first of the usual API locations that answers.
+async fn search_api_path(http: &Http, root: &str) -> crate::Result<String> {
+    for path in ["/api.php", "/w/api.php", "/wiki/api.php"] {
+        let url = format!("{root}{path}");
+        if http.head(&http.api(&url)?, &[]).await.is_ok() {
+            return Ok(url);
+        }
+    }
+    Err(error("Unable to find MediaWiki API endpoint"))
 }
 
 macro_rules! wiki {
@@ -225,11 +334,24 @@ enum Kind {
 }
 
 fn target(instance: &Instance, url: &Url) -> Option<Target> {
+    if let Hosts::Configured { root, spec } = instance.hosts {
+        let rest = crate::sites::instances::below(url, spec)?;
+        let (path, query) = match rest.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (rest.as_str(), None),
+        };
+        return parse_path(
+            root.to_owned(),
+            String::new(),
+            path,
+            query.is_none() && url.fragment().is_none(),
+        );
+    }
     if !crate::sites::plain(url) {
         return None;
     }
     let host = url.host_str()?;
-    let (mut root, mut lang) = match instance.hosts {
+    let (root, lang) = match instance.hosts {
         Hosts::Project(project) => {
             let label = host.strip_suffix(&format!(".{project}.org"))?;
             if label.len() < 2 || !label.bytes().all(|b| b.is_ascii_lowercase()) {
@@ -247,11 +369,23 @@ fn target(instance: &Instance, url: &Url) -> Option<Target> {
             }
             (root.to_owned(), String::new())
         }
+        Hosts::Configured { .. } => return None,
     };
-    let raw = &url.path()[1..];
+    parse_path(
+        root,
+        lang,
+        url.path(),
+        url.query().is_none() && url.fragment().is_none(),
+    )
+}
+
+/// The article path below an instance root; `bare` when the URL has no
+/// query or fragment.
+fn parse_path(mut root: String, mut lang: String, path: &str, bare: bool) -> Option<Target> {
+    let raw = path.strip_prefix('/').unwrap_or(path);
     if raw.is_empty() {
         // `/?$`
-        return (url.query().is_none() && url.fragment().is_none()).then_some(Target {
+        return bare.then_some(Target {
             root,
             lang,
             kind: Kind::Wiki,
@@ -351,7 +485,54 @@ fn extract<'a>(
     ] {
         params.push((key.into(), value.into()));
     }
-    let api = format!("{}{}", target.root, instance.api_path);
+    let root = target.root;
+    if instance.api_path.is_empty() {
+        return crate::sites::once(async move {
+            let api = search_api_path(http, &root).await?;
+            Ok(listing(
+                site,
+                instance,
+                http,
+                route,
+                api,
+                root,
+                params,
+                info,
+                subcategories,
+            ))
+        });
+    }
+    let api = if instance.api_path.starts_with('/') {
+        format!("{root}{}", instance.api_path)
+    } else {
+        instance.api_path.to_owned()
+    };
+    listing(
+        site,
+        instance,
+        http,
+        route,
+        api,
+        root,
+        params,
+        info,
+        subcategories,
+    )
+}
+
+/// The file listing, then queued subcategories when requested.
+#[allow(clippy::too_many_arguments)]
+fn listing<'a>(
+    site: &'static Site,
+    instance: &'static Instance,
+    http: &'a Http,
+    route: &'static Route,
+    api: String,
+    root: String,
+    mut params: Vec<(String, String)>,
+    info: Map<String, Value>,
+    subcategories: bool,
+) -> Events<'a> {
     let files = query(
         site,
         instance,
@@ -365,7 +546,7 @@ fn extract<'a>(
         return files;
     }
     // Subcategories are queued as category articles after the files.
-    let base = format!("{}/wiki/", target.root);
+    let base = format!("{root}/wiki/");
     for (key, value) in &mut params {
         if key == "gcmtype" {
             *value = "subcat".into();
@@ -743,6 +924,71 @@ mod tests {
         );
         let requests = server.join().unwrap();
         assert!(requests[0].contains("generator=allpages&gapnamespace=6&gaplimit=50&"));
+    }
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root_and_api_path() {
+        crate::sites::instances::define(
+            "wikimedia",
+            "wikimedia-configured",
+            json!({"root": "https://wiki.test/mw", "pattern": r"(?:www\.)?wiki-alias\.test/mw",
+                "api-path": "/api/api.php", "useragent": "Custom/1.0"}),
+        );
+        let url = Url::parse("https://www.wiki-alias.test/mw/wiki/File:A.jpg").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "wikimedia-configured");
+        assert!(
+            crate::sites::find(&Url::parse("https://wiki.test/other/wiki/X").unwrap()).is_none()
+        );
+        let (root, server) = serve(vec![json(
+            json!({"query": {"pages": {"1": page(1, "File:A.jpg")}}}),
+        )]);
+        let http = http("wikimedia-configured", root);
+        let files = media((site.extract)(&http, url)).await;
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "wikimedia-configured");
+        assert_eq!(k["subcategory"], "file");
+        assert_eq!(k["page"], "File:A.jpg");
+        assert_eq!(k["lang"], "");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /mw/api/api.php?titles=File%3AA.jpg&action=query"),
+            "{}",
+            requests[0]
+        );
+        assert!(
+            requests[0].contains("user-agent: Custom/1.0"),
+            "{}",
+            requests[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_instance_probes_the_api_path() {
+        crate::sites::instances::define(
+            "wikimedia",
+            "wikimedia-probed",
+            json!({"root": "https://probe-wiki.test"}),
+        );
+        let url = Url::parse("https://probe-wiki.test/").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "wikimedia-probed");
+        let (root, server) = serve(vec![
+            crate::sites::testing::response("404 Not Found", "text/html", b""),
+            crate::sites::testing::response("200 OK", "text/html", b""),
+            json(json!({"query": {"pages": {"1": page(1, "File:A.jpg")}}})),
+        ]);
+        let http = http("wikimedia-probed", root);
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(keywords(&files[0])["subcategory"], "wiki");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("HEAD /api.php "), "{}", requests[0]);
+        assert!(
+            requests[1].starts_with("HEAD /w/api.php "),
+            "{}",
+            requests[1]
+        );
+        assert!(requests[2].starts_with("GET /w/api.php?generator=allpages"));
     }
 
     #[tokio::test]

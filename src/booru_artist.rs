@@ -196,11 +196,7 @@ pub(super) fn events(
         .api_root
         .clone()
         .unwrap_or_else(|| public_root.clone());
-    let category = if public_root.host_str() == Some("e926.net") {
-        "e926"
-    } else {
-        booru.site.category()
-    };
+    let category = booru.site.category();
     let state = Artists {
         detail,
         params,

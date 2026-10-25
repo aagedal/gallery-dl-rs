@@ -3,8 +3,9 @@
 //! pages.
 //!
 //! Both sites need a session: upstream's `username`/`password` login is
-//! not supported, so a `nijie_tok` or `horne_tok` cookie from `--cookies`
-//! is required. Upstream's `request_interval` of two to four seconds is
+//! not supported, so a `<category>_tok` cookie (`nijie_tok`, `horne_tok`)
+//! from `--cookies` is required, also for configured
+//! `extractor.Nijie.<category>` instances. Upstream's `request_interval` of two to four seconds is
 //! not applied.
 use super::{digits, extr, extract_iter, leading_digits, on_host, parse_int};
 use crate::sites::{Events, Http, Item, Route, Site, unescape};
@@ -62,7 +63,22 @@ macro_rules! instance {
 instance!(NIJIE, "nijie", "Nijie", "nijie.info");
 instance!(HORNE, "horne", "Horne", "horne.red");
 
+/// Configured `extractor.Nijie.<category>` instances. Their session cookie
+/// is `<category>_tok` on the instance host, as upstream; one replacing
+/// `horne` keeps Horne's page layout.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "Nijie",
+    builtin: &[&NIJIE, &HORNE],
+    related: &[],
+    template: &NIJIE,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return &instance.site;
+    }
     match category {
         "horne" => &HORNE,
         _ => &NIJIE,
@@ -70,6 +86,9 @@ fn site(category: &str) -> &'static Site {
 }
 
 fn root(category: &str) -> &'static str {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return instance.root;
+    }
     match category {
         "horne" => "https://horne.red",
         _ => "https://nijie.info",
@@ -95,14 +114,27 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    let host = &root(category)["https://".len()..];
-    if !on_host(url, &[host]) {
-        return None;
-    }
-    let path = url.path();
+    let (path, query) = match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => {
+            let rest = crate::sites::instances::below(url, instance.spec)?;
+            match rest.split_once('?') {
+                Some((path, query)) => (path.to_owned(), Some(query.to_owned())),
+                None => (rest, None),
+            }
+        }
+        None => {
+            let host = &root(category)["https://".len()..];
+            if !on_host(url, &[host]) {
+                return None;
+            }
+            (url.path().to_owned(), url.query().map(str::to_owned))
+        }
+    };
+    let path = path.as_str();
     // `PAGE\.php\?id=(\d+)`
     let id = || {
-        url.query()?
+        query
+            .as_deref()?
             .strip_prefix("id=")
             .and_then(leading_digits)
             .map(str::to_owned)
@@ -458,6 +490,28 @@ mod tests {
         );
         http.set_cookie(root, &format!("{category}_tok=tok; Path=/"));
         http
+    }
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root_and_token() {
+        crate::sites::instances::define(
+            "Nijie",
+            "nijie-configured",
+            serde_json::json!({"root": "https://nj.test", "pattern": r"(?:www\.)?nj\.test"}),
+        );
+        let url = Url::parse("https://www.nj.test/view.php?id=70720").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "nijie-configured");
+        assert_eq!(site.cookies, Some("nj.test"));
+        let (root, server) = serve(vec![html(VIEW)]);
+        let http = session("nijie-configured", &root);
+        let files = media((site.extract)(&http, url)).await;
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "nijie-configured");
+        assert_eq!(k["image_id"], 70720);
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /view.php?id=70720 "));
+        assert!(requests[0].contains("nijie-configured_tok=tok"));
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 //! jschan imageboards (94chan), mirroring gallery_dl/extractor/jschan.py
 //! through the board JSON API.
-use super::{DIRECTORY, component, digits, host_in, rest};
+use super::{DIRECTORY, component, digits, instance_rest};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::Value;
@@ -33,6 +33,24 @@ pub static NINETYFOURCHAN: Site = Site {
 
 const ROOT: &str = "https://94chan.org";
 
+/// Configured `extractor.jschan.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "jschan",
+    builtin: &[&NINETYFOURCHAN],
+    related: &[],
+    template: &NINETYFOURCHAN,
+    matches: |category, url| target_in(category, url).is_some(),
+    extract: extract_in,
+};
+
+/// The instance's site and root.
+fn instance(category: &str) -> (&'static Site, &'static str) {
+    match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => (&instance.site, instance.root),
+        None => (&NINETYFOURCHAN, ROOT),
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum Target {
     Thread { board: String, thread: String },
@@ -40,10 +58,11 @@ enum Target {
 }
 
 fn target(url: &Url) -> Option<Target> {
-    if !host_in(url, &["94chan.org"]) {
-        return None;
-    }
-    let (board, tail) = component(rest(url))?;
+    target_in("94chan", url)
+}
+
+fn target_in(category: &str, url: &Url) -> Option<Target> {
+    let (board, tail) = component(instance_rest(&FAMILY, category, url, || &["94chan.org"])?)?;
     if let Some((thread, after)) = tail.strip_prefix("/thread/").and_then(digits)
         && after.starts_with(".html")
     {
@@ -65,20 +84,22 @@ fn target(url: &Url) -> Option<Target> {
 }
 
 fn extract(http: &Http, url: Url) -> Events<'_> {
-    match target(&url) {
+    extract_in("94chan", http, url)
+}
+
+fn extract_in<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
+    let (site, root) = instance(category);
+    match target_in(category, &url) {
         Some(Target::Thread { board, thread }) => crate::sites::once(async move {
-            let api = http.api(&format!("{ROOT}/{board}/thread/{thread}.json"))?;
+            let api = http.api(&format!("{root}/{board}/thread/{thread}.json"))?;
             let body = http.json(&api).await?;
-            let items = parse_thread(&body)?;
+            let items = parse_thread(root, &body)?;
             Ok(crate::sites::events(crate::sites::post(
-                &NINETYFOURCHAN,
-                http,
-                &THREAD,
-                items,
+                site, http, &THREAD, items,
             )))
         }),
         Some(Target::Board { board }) => crate::sites::once(async move {
-            let api = http.api(&format!("{ROOT}/{board}/catalog.json"))?;
+            let api = http.api(&format!("{root}/{board}/catalog.json"))?;
             let body = http.json(&api).await?;
             let threads = body
                 .as_array()
@@ -89,17 +110,17 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     let data = thread.as_object()?.clone();
                     let id = data.get("postId").map(crate::sites::scalar)?;
                     digits(&id).filter(|(_, tail)| tail.is_empty())?;
-                    let url = Url::parse(&format!("{ROOT}/{board}/thread/{id}.html")).ok()?;
+                    let url = Url::parse(&format!("{root}/{board}/thread/{id}.html")).ok()?;
                     Some((url, data))
                 })
                 .collect();
-            Ok(super::queue_all(http, &NINETYFOURCHAN, &BOARD, children))
+            Ok(super::queue_all(http, site, &BOARD, children))
         }),
         None => crate::sites::fail(error("unsupported jschan URL")),
     }
 }
 
-fn parse_thread(body: &Value) -> Result<Vec<Item>> {
+fn parse_thread(root: &str, body: &Value) -> Result<Vec<Item>> {
     let mut thread = body
         .as_object()
         .cloned()
@@ -148,7 +169,7 @@ fn parse_thread(body: &Value) -> Result<Vec<Item>> {
             {
                 continue;
             }
-            let Ok(url) = Url::parse(&format!("{ROOT}/file/{name}")) else {
+            let Ok(url) = Url::parse(&format!("{root}/file/{name}")) else {
                 continue;
             };
             file.extend(thread.clone());
@@ -181,7 +202,7 @@ fn parse_thread(body: &Value) -> Result<Vec<Item>> {
                     .user(user)
                     .caption(caption)
                     .timestamp(date)
-                    .header("Referer", &format!("{ROOT}/")),
+                    .header("Referer", &format!("{root}/")),
             );
         }
     }
@@ -193,6 +214,30 @@ mod tests {
     use super::*;
     use crate::sites::testing::{http, json, keywords, media, serve};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        crate::sites::instances::define(
+            "jschan",
+            "jschan-configured",
+            json!({"root": "https://js.test", "pattern": r"(?:www\.)?js\.test"}),
+        );
+        let url = Url::parse("https://www.js.test/art/thread/25.html").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "jschan-configured");
+        assert_eq!(
+            crate::sites::find(&Url::parse("https://js.test/art/thread/25").unwrap())
+                .map(|s| s.category),
+            None
+        );
+        let (origin, server) = serve(vec![json(thread())]);
+        let http = http("jschan-configured", origin);
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files[0].url.as_str(), "https://js.test/file/abc123.png");
+        assert_eq!(keywords(&files[0])["category"], "jschan-configured");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /art/thread/25.json "));
+    }
 
     #[test]
     fn classifies_urls() {

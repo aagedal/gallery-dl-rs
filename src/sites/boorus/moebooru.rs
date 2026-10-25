@@ -45,7 +45,24 @@ instance!(KONACHAN, "konachan", "Konachan");
 instance!(SAKUGABOORU, "sakugabooru", "Sakugabooru");
 instance!(LOLIBOORU, "lolibooru", "Lolibooru");
 
+/// Configured `extractor.moebooru.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "moebooru",
+    builtin: &[&YANDERE, &KONACHAN, &SAKUGABOORU, &LOLIBOORU],
+    related: &[],
+    template: &YANDERE,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
+fn configured(category: &str) -> Option<&'static crate::sites::instances::Instance> {
+    crate::sites::instances::configured(&FAMILY, category)
+}
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = configured(category) {
+        return &instance.site;
+    }
     match category {
         "yandere" => &YANDERE,
         "konachan" => &KONACHAN,
@@ -55,6 +72,9 @@ fn site(category: &str) -> &'static Site {
 }
 
 fn root(category: &str) -> &'static str {
+    if let Some(instance) = configured(category) {
+        return instance.root;
+    }
     match category {
         "yandere" => "https://yande.re",
         "konachan" => "https://konachan.com",
@@ -88,6 +108,12 @@ fn digits(text: &str) -> bool {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
+    // Configured instances: the path below the instance root.
+    if let Some(instance) = configured(category) {
+        let rest = crate::sites::instances::below(url, instance.spec)?;
+        let below = Url::parse(&format!("https://instance.invalid{rest}")).ok()?;
+        return target_path(&below);
+    }
     let host = url.host_str()?;
     if !crate::sites::plain(url)
         || !hosts(category)
@@ -96,6 +122,11 @@ fn target(category: &str, url: &Url) -> Option<Target> {
     {
         return None;
     }
+    target_path(url)
+}
+
+/// The target of a URL's path and query.
+fn target_path(url: &Url) -> Option<Target> {
     let parts = crate::sites::segments(url);
     match parts
         .iter()
@@ -273,7 +304,9 @@ pub(crate) fn parse_post(category: &str, post: &Value, data: &Map<String, Value>
     } else {
         raw.to_owned()
     };
-    let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
+    let url = Url::parse(&raw)
+        .ok()
+        .filter(|url| crate::sites::instances::plain_or_root(url, root(category)))?;
     let id = fields.get("id").map(crate::sites::scalar)?;
     if !fields.contains_key("extension") {
         let (name, ext) = crate::sites::nameext(&url);
@@ -342,6 +375,55 @@ mod tests {
             crate::sites::find(&Url::parse("https://konachan.com/post/show/1").unwrap())
                 .is_some_and(|site| site.category == "konachan")
         );
+    }
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        let instance = crate::sites::instances::define(
+            "moebooru",
+            "moebooru-configured",
+            json!({"root": "https://moe.test/board", "pattern": r"(?:www\.)?moe(?:mirror)?\.test/board"}),
+        );
+        let url = Url::parse("https://www.moemirror.test/board/post/show/7").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "moebooru-configured");
+        assert_eq!(
+            target(
+                "moebooru-configured",
+                &Url::parse("https://moe.test/board/pool/show/3").unwrap()
+            ),
+            Some(Target::Pool("3".into()))
+        );
+        assert_eq!(
+            target(
+                "moebooru-configured",
+                &Url::parse("https://moe.test/pool/show/3").unwrap()
+            ),
+            None
+        );
+        let posts = json!([{"id": 7, "md5": "abc", "created_at": 1500000000,
+            "file_url": "/data/abc.jpg", "author": "u", "tags": "x y"}]);
+        let (root, server) = serve(vec![json(posts)]);
+        let http = http("moe.test", root);
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 1);
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "moebooru-configured");
+        assert_eq!(k["subcategory"], "post");
+        assert_eq!(k["id"], 7);
+        assert_eq!(files[0].url.as_str(), "https://moe.test/board/data/abc.jpg");
+        let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
+        assert_eq!(
+            file.render(&files[0]).unwrap(),
+            "moebooru-configured_7_abc.jpg"
+        );
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /board/post.json?tags=id:7 "),
+            "{}",
+            requests[0]
+        );
+        assert!(std::ptr::eq(site, &instance.site));
     }
 
     #[test]

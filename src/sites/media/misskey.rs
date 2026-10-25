@@ -57,11 +57,50 @@ enum Target {
     Favorite,
 }
 
+/// Configured `extractor.misskey.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "misskey",
+    builtin: &[
+        &MISSKEY_IO,
+        &MISSKEY_DESIGN,
+        &MISSKEY_ART,
+        &LESBIAN_ENERGY,
+        &SUSHI_SKI,
+    ],
+    related: &[],
+    template: &MISSKEY_IO,
+    matches: |category, url| target(category, url).is_some(),
+    extract: |category, http, url| extract(site(category), http, url),
+};
+
+/// The registry site of a built-in or configured instance.
+fn site(category: &str) -> &'static Site {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return &instance.site;
+    }
+    FAMILY
+        .builtin
+        .iter()
+        .copied()
+        .find(|site| site.category == category)
+        .unwrap_or(&MISSKEY_IO)
+}
+
+/// The instance root without scheme; a built-in category is its host.
+fn spec(category: &str) -> &str {
+    crate::sites::instances::configured(&FAMILY, category).map_or(category, |i| i.spec)
+}
+
 /// The instance host itself; upstream patterns have no `www.` alternative.
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !crate::sites::plain(url) || url.host_str() != Some(category) {
+    // The path and query below the instance root, as a URL of its own.
+    let rest = crate::sites::instances::below(url, spec(category))?;
+    if !rest.is_empty() && !rest.starts_with('/') {
         return None;
     }
+    let mut below = Url::parse(&format!("http://instance{rest}")).ok()?;
+    below.set_fragment(url.fragment());
+    let url = &below;
     let parts = crate::sites::segments(url);
     let p: Vec<&str> = parts.iter().map(String::as_str).collect();
     let user = |segment: &str| {
@@ -96,7 +135,10 @@ fn target(category: &str, url: &Url) -> Option<Target> {
 }
 
 fn root(site: &Site) -> String {
-    format!("https://{}", site.category)
+    match crate::sites::instances::configured(&FAMILY, site.category) {
+        Some(instance) => instance.root.to_owned(),
+        None => format!("https://{}", site.category),
+    }
 }
 
 async fn call(http: &Http, site: &Site, endpoint: &str, data: &Value) -> Result<Value> {
@@ -370,7 +412,10 @@ fn notes_events(
             .and_then(|u| u.get("host"))
             .cloned()
             .unwrap_or(Value::Null);
-        note.insert("instance".into(), site.category.into());
+        // Upstream `self.root.rpartition("://")[2]`.
+        let root = root(site);
+        let instance = root.rsplit_once("://").map_or(root.as_str(), |(_, i)| i);
+        note.insert("instance".into(), instance.into());
         note.insert("instance_remote".into(), host);
         note.insert("count".into(), files.len().into());
         let created = crate::sites::media::iso_ts(crate::sites::media::str_of(
@@ -538,6 +583,42 @@ mod tests {
         assert_eq!(k["id"], "avatar");
         assert_eq!(k["file"]["id"], "abc");
         assert_eq!(k["date"], "[Invalid DateTime]");
+    }
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root() {
+        crate::sites::instances::define(
+            "misskey",
+            "misskey-configured",
+            json!({"root": "https://mk.test:8443/social", "pattern": r"(?:www\.)?mk-alias\.test|mk\.test:8443/social"}),
+        );
+        let url = Url::parse("https://www.mk-alias.test/notes/abc").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "misskey-configured");
+        assert!(
+            crate::sites::find(&Url::parse("https://mk.test:8443/social/@bob").unwrap())
+                .is_some_and(|site| site.category == "misskey-configured")
+        );
+        assert!(crate::sites::find(&Url::parse("https://mk.test/social/@bob").unwrap()).is_none());
+        let (root, server) = serve(vec![reply(note("n9", false))]);
+        let http = http("misskey-configured", root);
+        let files = media((site.extract)(&http, url)).await;
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "misskey-configured");
+        assert_eq!(k["subcategory"], "note");
+        assert_eq!(k["instance"], "mk.test:8443/social");
+        let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
+        assert_eq!(
+            file.render(&files[0]).unwrap(),
+            "misskey-configured_n9_fn9.webp"
+        );
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("POST /social/api/notes/show "),
+            "{}",
+            requests[0]
+        );
+        assert!(requests[0].contains(r#""noteId":"abc""#));
     }
 
     #[tokio::test]

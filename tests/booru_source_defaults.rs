@@ -61,7 +61,7 @@ async fn backend_root_provenance_retains_private_defaults_and_publishes_source_p
         let backend = fixture(root.path(), &messages);
         let url = Url::parse(case["url"].as_str().unwrap()).unwrap();
         let mut events = backend.events_with_options(&url, BackendOptions::default());
-        let typed_category = if category == "e926" { "e621" } else { category };
+        let typed_category = category;
         let mut post_defaults = None;
         let mut published = Vec::new();
         while let Some(event) = events.next().await {

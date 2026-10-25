@@ -309,11 +309,44 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
 
 fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
     match routed_site(url, extractor) {
-        Some("mastodon") => {
-            gallery_dl_rs::mastodon::instance_category(url.host_str().unwrap()).unwrap()
-        }
-        Some(category) => category,
+        Some("mastodon") => scope_key(mastodon_category(url)),
+        Some(category) => instance_settings(scope_key(category)),
         None => "direct",
+    }
+}
+
+/// The output category of a Mastodon URL's instance.
+fn mastodon_category(url: &url::Url) -> &'static str {
+    gallery_dl_rs::mastodon::target(url)
+        .ok()
+        .and_then(|target| gallery_dl_rs::mastodon::instance_category(target.instance()))
+        .unwrap_or("mastodon")
+}
+
+/// The settings key of a category: URL-prefixed instances (category
+/// `host[:port]`) use their family's upstream `basecategory` scope.
+fn scope_key(category: &'static str) -> &'static str {
+    gallery_dl_rs::base_instances::by_category(category)
+        .filter(|instance| instance.prefixed)
+        .map_or(category, |instance| instance.base.scope())
+}
+
+/// The http(s) URL an input routes by, including `Danbooru:`/`E621:`/
+/// `mastodon:` prefixed inputs.
+fn routing_url(source: &str) -> Option<url::Url> {
+    extract::http_url(source).ok().or_else(|| {
+        let url = extract::input_url(source).ok()?;
+        gallery_dl_rs::base_instances::prefixed(&url)?;
+        gallery_dl_rs::base_instances::unprefix(url).ok()
+    })
+}
+
+/// Instances selected with a `<basecategory>:` prefix after settings were
+/// resolved use their family's base scope.
+fn instance_settings(category: &'static str) -> &'static str {
+    match gallery_dl_rs::sites::instances::get(category) {
+        Some(instance) if instance.late => instance.family.basecategory,
+        _ => category,
     }
 }
 
@@ -351,12 +384,23 @@ const BOORU_CLASS_KEYS: &[&str] = &[
     "e6ai.artist",
     "e6ai.artist-search",
     "e6ai.tag",
+    "e926.artist",
+    "e926.artist-search",
+    "e926.tag",
 ];
 fn class_key(category: &str, subcategory: &str) -> Option<&'static str> {
     BOORU_CLASS_KEYS
         .iter()
         .copied()
         .find(|key| key.split_once('.') == Some((category, subcategory)))
+        .or_else(|| {
+            gallery_dl_rs::base_instances::by_category(category)
+                .filter(|instance| {
+                    !instance.prefixed
+                        && instance.base != gallery_dl_rs::base_instances::Base::Mastodon
+                })?
+                .class_key(subcategory)
+        })
 }
 fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
     let category = settings_category(url, extractor);
@@ -374,6 +418,17 @@ fn media_settings_key<'a>(
     settings: &BTreeMap<&str, Settings>,
 ) -> &'a str {
     if !settings.contains_key(media.category.as_str()) {
+        // URL-prefixed instances use their family's base scope.
+        if let Some(instance) = gallery_dl_rs::base_instances::by_category(&media.category)
+            && settings.contains_key(instance.base.scope())
+        {
+            return instance.base.scope();
+        }
+        if let Some(base) = gallery_dl_rs::sites::instances::basecategory(&media.category)
+            && settings.contains_key(base)
+        {
+            return base;
+        }
         // Generic compatibility output from other gallery-dl extractors.
         return "direct";
     }
@@ -536,13 +591,13 @@ async fn run(args: Args) -> Result<()> {
             let root_category = source
                 .as_ref()
                 .ok()
-                .and_then(|source| extract::http_url(source).ok())
+                .and_then(|source| routing_url(source))
                 .map(|url| settings_category(&url, args.extractor).to_owned());
             let root_subcategory = if matches!(args.extractor, Extractor::Native) {
                 source
                     .as_ref()
                     .ok()
-                    .and_then(|source| extract::http_url(source).ok())
+                    .and_then(|source| routing_url(source))
                     .and_then(|url| booru_subcategory(&url))
                     .map(str::to_owned)
             } else {
@@ -551,7 +606,7 @@ async fn run(args: Args) -> Result<()> {
             let archive_descriptor = source
                 .as_ref()
                 .ok()
-                .and_then(|source| extract::http_url(source).ok())
+                .and_then(|source| routing_url(source))
                 .and_then(|url| gallery_dl_rs::source_archive::for_url(&url));
             let input = match source {
                 Ok(source) => {
@@ -599,8 +654,7 @@ async fn run(args: Args) -> Result<()> {
                                             )
                                         ))))
                     });
-                    let selected_settings = extract::http_url(&source)
-                        .ok()
+                    let selected_settings = routing_url(&source)
                         .map(|url| &settings[settings_key(&url, args.extractor)]);
                     let input =
                         extract_input(source, extractors, backend, args.extractor, settings);
@@ -718,7 +772,8 @@ async fn run(args: Args) -> Result<()> {
                     | "weasyl"
                     | "vsco"
             ) || gallery_dl_rs::sites::is_category(&item.category)
-                || gallery_dl_rs::booru::Site::from_category(&item.category).is_some())
+                || gallery_dl_rs::booru::Site::from_category(&item.category).is_some()
+                || gallery_dl_rs::mastodon::is_instance_category(&item.category))
                 && let Some(file_key) = item.archive_key()
             {
                 identity = serde_json::json!([file_key, identity]).to_string();
@@ -1034,6 +1089,7 @@ fn list_extractors(detailed: bool) {
         "aibooru",
         "booruvar",
         "e6ai",
+        "e926",
         "gelbooru",
         "safebooru",
         "mastodon.social",
@@ -1088,6 +1144,11 @@ fn list_extractors(detailed: bool) {
     }
 }
 
+/// Process-lifetime extractor cells of configured and URL-prefixed
+/// instances, created on first use.
+type ConfiguredCells<K, T> =
+    std::sync::Mutex<std::collections::HashMap<K, &'static OnceCell<Result<T>>>>;
+
 #[derive(Default)]
 struct Extractors {
     instagram: OnceCell<Result<Instagram>>,
@@ -1102,6 +1163,10 @@ struct Extractors {
     booru_artist_search:
         [OnceCell<Result<gallery_dl_rs::booru::Booru>>; gallery_dl_rs::booru::Site::COUNT],
     mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 3],
+    /// Extractors of configured and URL-prefixed instances, by category and
+    /// booru class (0: other routes, 1: artist, 2: artist-search).
+    configured_booru: ConfiguredCells<(&'static str, u8), gallery_dl_rs::booru::Booru>,
+    configured_mastodon: ConfiguredCells<String, gallery_dl_rs::mastodon::Mastodon>,
     kemono: [OnceCell<Result<gallery_dl_rs::kemono::Kemono>>; 2],
     imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
@@ -1138,6 +1203,30 @@ fn ytdl_cookies(args: &Args) -> Option<gallery_dl_rs::cookies::YtdlCookies> {
 }
 
 impl Extractors {
+    /// The process-lifetime extractor cell of a configured instance.
+    fn configured_booru(
+        &self,
+        category: &'static str,
+        class: u8,
+    ) -> &'static OnceCell<Result<gallery_dl_rs::booru::Booru>> {
+        self.configured_booru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry((category, class))
+            .or_insert_with(|| Box::leak(Box::new(OnceCell::new())))
+    }
+
+    fn configured_mastodon(
+        &self,
+        instance: &str,
+    ) -> &'static OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>> {
+        self.configured_mastodon
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(instance.to_owned())
+            .or_insert_with(|| Box::leak(Box::new(OnceCell::new())))
+    }
+
     async fn cookie_jar(&self, settings: &Settings, site: &str) -> Result<CookieJar> {
         if let Some(browser) = &settings.browser {
             return browser.load(site).await;
@@ -1202,9 +1291,9 @@ fn extract_input<'a>(
             let target = gallery_dl_rs::oauth::target(url.path())?;
             let configured = settings
                 .get(match &target {
-                    gallery_dl_rs::oauth::Target::Mastodon(instance) => {
-                        gallery_dl_rs::mastodon::instance_category(instance).unwrap_or("mastodon")
-                    }
+                    gallery_dl_rs::oauth::Target::Mastodon(instance) => scope_key(
+                        gallery_dl_rs::mastodon::instance_category(instance).unwrap_or("mastodon"),
+                    ),
                     target => target.site(),
                 })
                 .unwrap_or(&settings["direct"]);
@@ -1218,6 +1307,9 @@ fn extract_input<'a>(
             .await?;
             return Ok(stream::empty().boxed());
         }
+        // `Danbooru:`/`E621:`/`mastodon:` inputs register their host as an
+        // instance and continue as its plain URL.
+        let url = gallery_dl_rs::base_instances::unprefix(url)?;
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
         {
@@ -1416,12 +1508,16 @@ fn extract_input<'a>(
                     )
                 }
                 Extractor::Native if category == "mastodon" => {
-                    let host = url.host_str().expect("Mastodon input host");
-                    let slot = gallery_dl_rs::mastodon::INSTANCES
+                    let instance = gallery_dl_rs::mastodon::target(&url)?.instance().to_owned();
+                    let host = instance.as_str();
+                    let cell = match gallery_dl_rs::mastodon::INSTANCES
                         .iter()
                         .position(|candidate| *candidate == host)
-                        .expect("supported instance");
-                    let native = extractors.mastodon[slot]
+                    {
+                        Some(slot) => &extractors.mastodon[slot],
+                        None => extractors.configured_mastodon(host),
+                    };
+                    let native = cell
                         .get_or_init(|| async {
                             let native = gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
                                 |native| {
@@ -1963,19 +2059,28 @@ fn extract_input<'a>(
                 Extractor::Native
                     if let Some(site) = gallery_dl_rs::booru::Site::from_category(category) =>
                 {
-                    let cache = match booru_subcategory(&url) {
-                        Some("artist") => &extractors.booru_artist,
-                        Some("artist-search") => &extractors.booru_artist_search,
-                        _ => &extractors.booru,
+                    let (cache, class) = match booru_subcategory(&url) {
+                        Some("artist") => (&extractors.booru_artist, 1),
+                        Some("artist-search") => (&extractors.booru_artist_search, 2),
+                        _ => (&extractors.booru, 0),
                     };
-                    let native = cache[site as usize]
+                    let cell = match site.slot() {
+                        Some(slot) => &cache[slot],
+                        None => extractors.configured_booru(site.category(), class),
+                    };
+                    let native = cell
                         .get_or_init(|| async {
+                            // URL-prefixed hosts are anonymous: the shared
+                            // basecategory credentials stay with configured
+                            // instances.
+                            let anonymous =
+                                site.instance().is_some_and(|instance| instance.prefixed);
                             gallery_dl_rs::booru::Booru::new(site, backend.timeout).and_then(
                                 |native| {
                                     native
                                         .with_credentials(
-                                            options.username.as_deref(),
-                                            options.password.as_deref(),
+                                            options.username.as_deref().filter(|_| !anonymous),
+                                            options.password.as_deref().filter(|_| !anonymous),
                                         )?
                                         .with_api_credentials(
                                             options.user_id.as_deref(),
@@ -2210,7 +2315,7 @@ fn extract_input<'a>(
             ));
         };
         let input = if routed_site(&url, extractor) == Some("mastodon") {
-            let category = settings_category(&url, extractor);
+            let category = mastodon_category(&url);
             input
                 .map(move |event| {
                     event.map(|mut event| {
@@ -2314,6 +2419,26 @@ async fn resolved_settings(
         None if options.is_empty() => Config::default(),
         None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
+    gallery_dl_rs::base_instances::register(config.instances());
+    let configured: Vec<&'static str> = config
+        .instances()
+        .iter()
+        .filter_map(|definition| gallery_dl_rs::base_instances::by_category(&definition.category))
+        .flat_map(|instance| {
+            let classes = (instance.base != gallery_dl_rs::base_instances::Base::Mastodon)
+                .then_some(instance.class_keys)
+                .into_iter()
+                .flatten();
+            std::iter::once(instance.category).chain(classes)
+        })
+        .collect();
+    // Configured instances, and the hosts of `<basecategory>:` inputs on the
+    // command line, get their own settings scopes.
+    gallery_dl_rs::sites::instances::register(config.site_instances())?;
+    for url in &args.urls {
+        // Invalid inputs are reported when they are extracted.
+        let _ = gallery_dl_rs::sites::instances::prefixed_input(url);
+    }
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
         retries: Some(2),
@@ -2448,6 +2573,7 @@ async fn resolved_settings(
         "aibooru",
         "booruvar",
         "e6ai",
+        "e926",
         "gelbooru",
         "safebooru",
         "mastodon",
@@ -2477,13 +2603,24 @@ async fn resolved_settings(
     .into_iter()
     .chain(BOORU_CLASS_KEYS.iter().copied())
     .chain(gallery_dl_rs::sites::categories())
-    {
+    .chain(["Danbooru", "E621"])
+    .chain(configured)
+    .chain(
+        gallery_dl_rs::sites::instances::families()
+            .iter()
+            .map(|family| family.basecategory),
+    ) {
         let class = category
-            .split_once('.')
+            .rsplit_once('.')
+            .filter(|(_, class)| matches!(*class, "artist" | "artist-search" | "tag"))
             .filter(|(base, _)| gallery_dl_rs::booru::is_danbooru_family(base));
-        let resolved = match class {
-            Some((base, class)) => config.resolve_class(base, class)?,
-            None => config.resolve(category)?,
+        let resolved = match (class, category) {
+            (Some((base, class)), _) => config.resolve_class(base, class)?,
+            (None, "Danbooru") => {
+                config.resolve_base(gallery_dl_rs::base_instances::Base::Danbooru)?
+            }
+            (None, "E621") => config.resolve_base(gallery_dl_rs::base_instances::Base::E621)?,
+            (None, category) => config.resolve(category)?,
         };
         let options = defaults.overlay(&resolved).overlay(&overrides);
         let browser_spec = args.cookies_from_browser.clone().or_else(|| {
@@ -2590,6 +2727,8 @@ async fn resolved_settings(
             },
         );
     }
+    // Instances registered from now on resolve their base scope's settings.
+    gallery_dl_rs::sites::instances::freeze();
     Ok((
         settings,
         config.cache_location().clone(),

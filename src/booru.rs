@@ -87,7 +87,7 @@ impl Dialect {
 }
 
 /// A native booru instance with its own output category, API roots, CDN
-/// hosts, credentials and extractor cache slot. e926.net shares `e621`.
+/// hosts, credentials and extractor cache slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Site {
     Danbooru,
@@ -102,11 +102,17 @@ pub enum Site {
     Booruvar,
     /// e6ai.net (e621 dialect).
     E6ai,
+    /// e926.net (e621 dialect), upstream's separate `e926` instance.
+    E926,
+    /// A user-configured or URL-prefixed Danbooru/e621 instance
+    /// (`extractor.Danbooru.NAME`, `Danbooru:URL`; see
+    /// [`crate::base_instances`]).
+    Configured(&'static crate::base_instances::Instance),
 }
 
 impl Site {
-    /// Every instance, in cache-slot order (`site as usize`).
-    pub const ALL: [Self; 8] = [
+    /// Every built-in instance, in cache-slot order (see [`Site::slot`]).
+    pub const ALL: [Self; 9] = [
         Self::Danbooru,
         Self::E621,
         Self::Gelbooru,
@@ -115,14 +121,30 @@ impl Site {
         Self::Aibooru,
         Self::Booruvar,
         Self::E6ai,
+        Self::E926,
     ];
     /// Number of instances, for per-instance extractor caches.
     pub const COUNT: usize = Self::ALL.len();
 
+    /// The built-in or registered Danbooru/e621 instance with a category.
     pub fn from_category(category: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|site| site.category() == category)
+            .or_else(|| configured(crate::base_instances::by_category(category)?))
+    }
+
+    /// The extractor cache slot of a built-in instance.
+    pub fn slot(self) -> Option<usize> {
+        Self::ALL.iter().position(|site| *site == self)
+    }
+
+    /// The configured or prefixed instance behind this site, if any.
+    pub fn instance(self) -> Option<&'static crate::base_instances::Instance> {
+        match self {
+            Self::Configured(instance) => Some(instance),
+            _ => None,
+        }
     }
 
     pub fn category(self) -> &'static str {
@@ -135,15 +157,21 @@ impl Site {
             Self::Aibooru => "aibooru",
             Self::Booruvar => "booruvar",
             Self::E6ai => "e6ai",
+            Self::E926 => "e926",
+            Self::Configured(instance) => instance.category,
         }
     }
 
     pub fn dialect(self) -> Dialect {
         match self {
             Self::Danbooru | Self::Atfbooru | Self::Aibooru | Self::Booruvar => Dialect::Danbooru,
-            Self::E621 | Self::E6ai => Dialect::E621,
+            Self::E621 | Self::E6ai | Self::E926 => Dialect::E621,
             Self::Gelbooru => Dialect::Gelbooru,
             Self::Safebooru => Dialect::Safebooru,
+            Self::Configured(instance) => match instance.base {
+                crate::base_instances::Base::E621 => Dialect::E621,
+                _ => Dialect::Danbooru,
+            },
         }
     }
 
@@ -169,6 +197,8 @@ impl Site {
             Self::Aibooru => "AIBooru",
             Self::Booruvar => "Booruvar",
             Self::E6ai => "e6AI",
+            Self::E926 => "e926",
+            Self::Configured(instance) => instance.category,
         }
     }
 
@@ -188,8 +218,11 @@ impl Site {
     fn media_host(self, host: &str) -> bool {
         let within = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
         match self {
-            Self::Danbooru => host == "cdn.donmai.us" || host.ends_with(".donmai.us"),
-            Self::E621 => {
+            Self::Danbooru => {
+                host == "cdn.donmai.us" || host.ends_with(".donmai.us") || within("donmai.moe")
+            }
+            // e926 serves its files from e621's CDN as well as its own.
+            Self::E621 | Self::E926 => {
                 host == "static1.e621.net"
                     || host.ends_with(".e621.net")
                     || host.ends_with(".e926.net")
@@ -200,6 +233,8 @@ impl Site {
             Self::Aibooru => within("aibooru.online") || within("aibooru.download"),
             Self::Booruvar => within("borvar.art"),
             Self::E6ai => within("e6ai.net"),
+            // Configured instances serve files from their root's domain.
+            Self::Configured(instance) => instance.root.host_str().is_some_and(within),
         }
     }
 
@@ -210,6 +245,9 @@ impl Site {
         match self {
             Self::Atfbooru => Some("https://booru.allthefallen.moe"),
             Self::Booruvar => Some("https://booru.borvar.art"),
+            Self::Configured(instance) if self.dialect() == Dialect::Danbooru => {
+                Some(instance.origin)
+            }
             _ => None,
         }
     }
@@ -219,9 +257,34 @@ impl Site {
     fn static_host(self) -> &'static str {
         match self {
             Self::E6ai => "static1.e6ai.net",
+            Self::E926 => "static1.e926.net",
+            Self::Configured(instance) => instance.static_host,
             _ => "static1.e621.net",
         }
     }
+}
+
+/// A registered instance as a Danbooru/e621-dialect site.
+fn configured(instance: &'static crate::base_instances::Instance) -> Option<Site> {
+    matches!(
+        instance.base,
+        crate::base_instances::Base::Danbooru | crate::base_instances::Base::E621
+    )
+    .then_some(Site::Configured(instance))
+}
+
+/// Upstream's `danbooru` instance pattern
+/// `(?:danbooru|hijiribe|sonohara|safebooru)\.donmai\.us|donmai\.moe`.
+/// Upstream's `root: None` derives the API root from the matched host.
+pub fn danbooru_host(host: &str) -> bool {
+    matches!(
+        host,
+        "danbooru.donmai.us"
+            | "hijiribe.donmai.us"
+            | "sonohara.donmai.us"
+            | "safebooru.donmai.us"
+            | "donmai.moe"
+    )
 }
 
 /// aibooru's upstream pattern `(?:safe\.|general\.)?aibooru\.(?:online|download)`;
@@ -234,16 +297,12 @@ fn aibooru_host(host: &str) -> bool {
     matches!(host, "aibooru.online" | "aibooru.download")
 }
 
-/// The dialect of a native booru output category; `e926` is e621's.
+/// The dialect of a native booru output category.
 pub fn category_dialect(category: &str) -> Option<Dialect> {
-    if category == "e926" {
-        return Some(Dialect::E621);
-    }
     Site::from_category(category).map(Site::dialect)
 }
 
-/// Whether `category` belongs to a native Danbooru- or e621-dialect
-/// instance (including e621's `e926` label).
+/// Whether `category` belongs to a native Danbooru- or e621-dialect instance.
 pub fn is_danbooru_family(category: &str) -> bool {
     matches!(
         category_dialect(category),
@@ -331,7 +390,7 @@ pub fn source_search_tags(site: Site, url: &Url) -> Option<String> {
 
 fn source_search_tags_raw(site: Site, url: &Url) -> Option<&str> {
     if !matches!(url.scheme(), "http" | "https")
-        || url.port().is_some()
+        || url.port().is_some() && site.instance().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
     {
@@ -341,8 +400,10 @@ fn source_search_tags_raw(site: Site, url: &Url) -> Option<&str> {
     // Upstream instance patterns: the original hosts, or each additional
     // instance's exact hosts.
     let instance_host = url.host_str().is_some_and(|host| match site {
-        Site::Danbooru => host == "danbooru.donmai.us",
-        Site::E621 => matches!(host, "e621.net" | "e926.net"),
+        Site::Danbooru => danbooru_host(host),
+        Site::E621 => host == "e621.net",
+        Site::E926 => host == "e926.net",
+        Site::Configured(instance) => instance.matches(url),
         _ => Site::from_instance_host(host) == Some(site),
     });
     Some(match site.dialect() {
@@ -414,7 +475,7 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         })
     };
     if !matches!(url.scheme(), "http" | "https")
-        || url.port().is_some()
+        || url.port().is_some() && site.instance().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
     {
@@ -423,11 +484,19 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     let exact_host = url.host_str().ok_or_else(unsupported)?;
     let host = exact_host.strip_prefix("www.").unwrap_or(exact_host);
     let root: std::borrow::Cow<'static, str> = match (site, host) {
+        // Configured instances use their configured root for any URL their
+        // pattern matches; prefixed ones the input's scheme and host.
+        (Site::Configured(instance), _) if instance.matches(url) => {
+            instance.root.as_str().to_owned().into()
+        }
+        (Site::Configured(_), _) => return Err(unsupported()),
         (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => {
             "https://danbooru.donmai.us/".into()
         }
+        // Upstream's other `danbooru` hosts keep their own (exact) root.
+        (Site::Danbooru, _) if danbooru_host(exact_host) => format!("https://{exact_host}/").into(),
         (Site::E621, "e621.net" | "e621.cc" | "e621.anthro.fr") => "https://e621.net/".into(),
-        (Site::E621, "e926.net") => "https://e926.net/".into(),
+        (Site::E926, "e926.net") => "https://e926.net/".into(),
         (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/".into(),
         (Site::Safebooru, "safebooru.org") => "https://safebooru.org/".into(),
         // Additional instances match only upstream's exact hosts; aibooru's
@@ -541,11 +610,13 @@ fn valid_extension(ext: &str) -> bool {
 fn media_url(site: Site, raw: &str) -> Option<Url> {
     let url = Url::parse(raw).ok()?;
     let host = url.host_str()?;
-    (url.scheme() == "https"
-        && url.port().is_none()
-        && url.username().is_empty()
+    let same_origin = site
+        .instance()
+        .is_some_and(|instance| url.origin() == instance.root.origin());
+    (url.username().is_empty()
         && url.password().is_none()
-        && site.media_host(host))
+        && (same_origin
+            || url.scheme() == "https" && url.port().is_none() && site.media_host(host)))
     .then_some(url)
 }
 
@@ -890,22 +961,28 @@ fn defaults(
     ))
 }
 
+/// The instance owning a URL's exact upstream host (no aliases such as
+/// `www.`). The route itself is not checked; see [`target`].
+pub fn site_for_url(url: &Url) -> Option<Site> {
+    builtin_site_for_url(url).or_else(|| configured(crate::base_instances::find(url)?))
+}
+
+/// [`site_for_url`] for the built-in instances only.
+pub(crate) fn builtin_site_for_url(url: &Url) -> Option<Site> {
+    Some(match url.host_str()? {
+        host if danbooru_host(host) => Site::Danbooru,
+        "e621.net" | "e621.cc" | "e621.anthro.fr" => Site::E621,
+        "e926.net" => Site::E926,
+        "gelbooru.com" => Site::Gelbooru,
+        "safebooru.org" => Site::Safebooru,
+        host => Site::from_instance_host(host)?,
+    })
+}
+
 pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDefaults>> {
-    let category = match url.host_str()? {
-        "danbooru.donmai.us" => "danbooru",
-        "e621.net" | "e621.cc" | "e621.anthro.fr" => "e621",
-        "e926.net" => "e926",
-        "gelbooru.com" => "gelbooru",
-        "safebooru.org" => "safebooru",
-        host => Site::from_instance_host(host)?.category(),
-    };
-    let site = if category == "e926" {
-        Site::E621
-    } else {
-        Site::from_category(category)?
-    };
+    let site = site_for_url(url)?;
     let (target, _) = target(site, url).ok()?;
-    Some(defaults(site, category, &target))
+    Some(defaults(site, site.category(), &target))
 }
 
 /// Parse one post object. Posts without a usable file yield `None`.
@@ -2880,11 +2957,11 @@ mod tests {
             Target::Tags { tags: "a b".into() }
         );
         assert_eq!(
-            t(Site::E621, "https://e926.net/pools/42").unwrap(),
+            t(Site::E926, "https://e926.net/pools/42").unwrap(),
             Target::Pool { id: "42".into() }
         );
         let (_, root) =
-            target(Site::E621, &Url::parse("https://e926.net/posts/1").unwrap()).unwrap();
+            target(Site::E926, &Url::parse("https://e926.net/posts/1").unwrap()).unwrap();
         assert_eq!(root.as_str(), "https://e926.net/");
         assert_eq!(
             t(
@@ -2914,7 +2991,8 @@ mod tests {
             (Site::Danbooru, "https://danbooru.donmai.us/posts"),
             (Site::Danbooru, "https://danbooru.donmai.us/posts/abc"),
             (Site::Danbooru, "https://danbooru.donmai.us:444/posts/1"),
-            (Site::Danbooru, "https://safebooru.donmai.us/posts/1"),
+            // Upstream's danbooru alternation has no testbooru host.
+            (Site::Danbooru, "https://testbooru.donmai.us/posts/1"),
             (Site::E621, "https://e621.net/users/1"),
             (
                 Site::Gelbooru,

@@ -49,7 +49,30 @@ instance!(ALLGIRLBOORU, "allgirlbooru", "All Girl Booru");
 instance!(DRAWFRIENDS, "drawfriends", "Draw Friends");
 instance!(VIDYART2, "vidyart2", "/v/idyart2");
 
+/// Configured `extractor.gelbooru_v01.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "gelbooru_v01",
+    builtin: &[
+        &THECOLLECTION,
+        &ILLUSIONCARDSBOORU,
+        &ALLGIRLBOORU,
+        &DRAWFRIENDS,
+        &VIDYART2,
+    ],
+    related: &[],
+    template: &THECOLLECTION,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
+fn configured(category: &str) -> Option<&'static crate::sites::instances::Instance> {
+    crate::sites::instances::configured(&FAMILY, category)
+}
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = configured(category) {
+        return &instance.site;
+    }
     match category {
         "thecollection" => &THECOLLECTION,
         "illusioncardsbooru" => &ILLUSIONCARDSBOORU,
@@ -59,7 +82,11 @@ fn site(category: &str) -> &'static Site {
     }
 }
 
+/// The instance root without scheme (`host[:port][/prefix]`).
 fn host(category: &str) -> &'static str {
+    if let Some(instance) = configured(category) {
+        return instance.spec;
+    }
     match category {
         "thecollection" => "the-collection.booru.org",
         "illusioncardsbooru" => "illusioncards.booru.org",
@@ -70,6 +97,9 @@ fn host(category: &str) -> &'static str {
 }
 
 fn root(category: &str) -> String {
+    if let Some(instance) = configured(category) {
+        return instance.root.to_owned();
+    }
     format!("https://{}", host(category))
 }
 
@@ -241,7 +271,9 @@ fn parse_page(category: &str, id: &str, page: &str, data: &Map<String, Value>) -
     } else {
         file_url
     };
-    let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
+    let url = Url::parse(&raw)
+        .ok()
+        .filter(|url| crate::sites::instances::plain_or_root(url, &root(category)))?;
     booru_fields(&url, &mut fields, data);
     let user = fields
         .get("uploader")
@@ -263,6 +295,34 @@ mod tests {
 
     fn t(category: &str, raw: &str) -> Option<Target> {
         target(category, &Url::parse(raw).unwrap())
+    }
+
+    #[test]
+    fn configured_instances_route_on_their_root() {
+        let instance = crate::sites::instances::define(
+            "gelbooru_v01",
+            "gelbooru_v01-configured",
+            serde_json::json!({"root": "http://gv1.test:8080", "pattern": r"gv1(?:-mirror)?\.test:8080"}),
+        );
+        let url =
+            Url::parse("http://gv1-mirror.test:8080/index.php?page=post&s=view&id=4").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert!(std::ptr::eq(site, &instance.site));
+        assert_eq!(root("gelbooru_v01-configured"), "http://gv1.test:8080");
+        assert_eq!(
+            t(
+                "gelbooru_v01-configured",
+                "http://gv1.test:8080/index.php?page=favorites&s=view&id=9"
+            ),
+            Some(Target::Favorite("9".into()))
+        );
+        assert_eq!(
+            t(
+                "gelbooru_v01-configured",
+                "http://gv1.test/index.php?page=post&s=view&id=4"
+            ),
+            None
+        );
     }
 
     #[test]

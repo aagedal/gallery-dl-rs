@@ -265,7 +265,7 @@ impl ChildMetadata {
             subcategory: subcategory.into(),
             fields,
             keyword_updates: None,
-            target_category: Some(if category == "e926" { "e621" } else { category }.into()),
+            target_category: Some(category.into()),
             source_archive: Some(Arc::new(crate::source_archive::ArchiveDescriptor {
                 category: category.into(),
                 format: "t_{search_tags}_{id}".into(),

@@ -145,10 +145,8 @@ fn assert_requests(case: &Value, root: &Url, requests: Vec<String>) {
     }
 }
 fn native_category(case: &Value) -> &str {
-    match case["family"].as_str().unwrap() {
-        "e926" => "e621",
-        family => family,
-    }
+    // e926 is its own instance, as upstream.
+    case["family"].as_str().unwrap()
 }
 fn client(case: &Value, root: Url, frozen_today: &str) -> Booru {
     let today = frozen_today
@@ -254,11 +252,7 @@ fn popular_constructor_queries_and_archive_descriptors_match_source() {
     assert_eq!(routes.len(), 12);
     for case in routes {
         let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
-        let site = if source.host_str() == Some("danbooru.donmai.us") {
-            Site::Danbooru
-        } else {
-            Site::E621
-        };
+        let site = site_for_url(&source).unwrap_or(Site::E621);
         if case["extractor"].is_null() {
             assert!(target(site, &source).is_err(), "{source}");
             continue;

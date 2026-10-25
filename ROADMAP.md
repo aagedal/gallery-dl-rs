@@ -680,11 +680,23 @@ scopes `extractor.Danbooru`/`extractor.E621` (also consulted by danbooru and
 e621), credentials are instance-scoped, and atfbooru/booruvar resolve
 root-relative file URLs like upstream. Existing danbooru, e621/e926, gelbooru
 and safebooru output, archive identities and paths are unchanged.
-Remaining: the DAPI `url` option, Danbooru host aliases (hijiribe, sonohara,
-safebooru.donmai.us, donmai.moe), upstream's separate `e926` category (e926
-still shares e621's category and credentials natively), user-configured
-instances and the `Danbooru:URL`/`E621:URL` prefixes, class scopes under the
-base scopes, recorded source-oracle fixtures for the new instances, per-post
+Upstream's other `danbooru` hosts (hijiribe, sonohara and safebooru.donmai.us,
+donmai.moe) route to the danbooru instance with their own host as API root,
+exactly as upstream's instance pattern (no `www.` or other subdomains).
+e926 is now upstream's separate `e926` instance (own category, settings scope
+falling back to `extractor.E621`, credentials, archive identity `e926:` and
+`static1.e926.net` hidden-file host); e621.net output is unchanged.
+User-configured instances (`extractor.Danbooru.NAME`/`extractor.E621.NAME`
+with `root`/`pattern`, upstream `BaseExtractor.update`) and the
+`Danbooru:URL`/`E621:URL` prefixes (category `host[:port]`, upstream
+`_init_category`) are native through a process-wide instance registry
+(`base_instances`, `booru::Site::Configured`); configured scopes fall back to
+the base scope, prefixed hosts use the base scope without its credentials.
+Patterns use the `regex` crate (no look-around/back-references) and must match
+up to the host; roots must be bare http(s) origins.
+Remaining: the DAPI `url` option, class scopes under the
+base scopes, `extractor.<host>` scopes for prefixed hosts, overriding a
+built-in instance's root through configuration, recorded source-oracle fixtures for the new instances, per-post
 laziness of option requests (they run per page), and authenticated live
 verification.
 
@@ -705,12 +717,43 @@ and empty post boundaries. Optional card images append outer-post previews with
 upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
 Scoped config, compatibility forwarding, header privacy, split Link fields, date
 ordering and cancellation have local coverage. Unset or `"cache"`
-`access-token` reads the token `oauth:mastodon:INSTANCE` cached. Remaining:
+`access-token` reads the token `oauth:mastodon:INSTANCE` cached.
+User-configured instances (`extractor.mastodon.NAME`) and the `mastodon:URL`
+prefix are native, with per-instance tokens (setting, then the per-instance
+credential cache, then the definition's `access-token`) and applications for
+`oauth:mastodon:`. Remaining:
 upstream's built-in per-instance access tokens (not embedded natively; some
 instances need a configured or cached `access-token`, e.g. baraag.net hashtags),
-user-configured instances and the `mastodon:URL` prefix, the moved-account
+the moved-account
 warning, and fuller metadata/default naming. Authenticated live verification and
 real captures remain required.
+
+**Implemented experimental configurable registry instances:** upstream's
+`BaseExtractor.update`/`_init_category` for the registry families (2chen,
+blogger, chevereto, foolfuuka, gelbooru_v01, gelbooru_v02, hentaicosplays,
+IMHentai, jschan, lolisafe, lynxchan, manganelo, misskey, moebooru, Nijie,
+nitter, philomena, postmill, reactor, shimmie2, shopify, szurubooru,
+urlshortener, vichan, wikimedia, xenforo). `extractor.<basecategory>.<category>`
+objects with a `root` (http(s), no credentials; optional bounded `pattern`
+regular expression, default the escaped root) add or replace instances, and
+`<basecategory>:https://host/...` inputs make the host an instance.
+`crate::sites::instances` leaks one `Site` per instance for the process,
+consults instances before built-in sites, rewrites matched URLs onto the
+instance root so each family's URL parsing is reused, and gives each instance
+its own HTTP state, cookie domain and settings scope with `basecategory`
+fallback (also for built-in instances and related classes such as paheal,
+twibooru, joyreactor, imagepond and cyberdrop). Per-instance options upstream
+reads through `config_instance` are honoured where the port has the feature
+(Shimmie2 `file_url`/`quote`/`cookies`, Wikimedia `api-path`/`useragent` with
+API-path probing, Gelbooru v0.2 `root-api`/`request-interval`, Philomena
+`filter_id`, szurubooru `query-all`, URL shortener `headers`); lolisafe gained
+a generic album extractor for configured instances. Remaining: FoOlSlide (no
+port), upstream's `root: null` configured instances (roots are required),
+regex-level backtracking between an instance pattern and the family suffix
+(the pattern must end at a path boundary), xenforo's `cookies` login names,
+lolisafe's `domain` option, ports in embedded-video URLs handed to yt-dlp, and
+host-named settings scopes for prefixed inputs first seen in input files (they
+use the base scope).
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept
@@ -1415,8 +1458,8 @@ serialization, raw field presence and stable initial directories.
 
 **Implemented booru source paths:** native post/tag/pool/favorite-group routes
 retain immutable source class templates privately alongside the raw keyword
-snapshot. Source category `e926` is preserved independently of native e621
-settings and identity. Filename/directory overrides resolve independently, and
+snapshot. Source category `e926` is preserved; e926 is now its own native
+instance with its own settings and identity. Filename/directory overrides resolve independently, and
 conditional templates without a matching branch fall back to the source class
 default; an explicit empty directory remains empty. Directories freeze before
 Init/Post and after the preceding PostAfter, including implicit class defaults.

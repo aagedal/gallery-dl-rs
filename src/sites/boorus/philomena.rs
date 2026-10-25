@@ -38,32 +38,63 @@ instance!(DERPIBOORU, "derpibooru", "Derpibooru");
 instance!(PONYBOORU, "ponybooru", "Ponybooru");
 instance!(FURBOORU, "furbooru", "Furbooru");
 
+/// Configured `extractor.philomena.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "philomena",
+    builtin: &[&DERPIBOORU, &PONYBOORU, &FURBOORU],
+    related: &["twibooru"],
+    template: &FURBOORU,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
 struct Instance {
     site: &'static Site,
     root: &'static str,
     hosts: &'static [&'static str],
-    filter_id: &'static str,
+    /// Upstream `filter_id` instance option, the default search filter.
+    filter_id: String,
 }
 
 fn instance(category: &str) -> Instance {
+    let builtin = builtin(category);
+    let Some(configured) = crate::sites::instances::configured(&FAMILY, category) else {
+        return builtin;
+    };
+    // A configured instance replacing a built-in one keeps its filter.
+    let filter_id = match configured.config("filter_id") {
+        Some(Value::String(id)) if !id.is_empty() => id.clone(),
+        Some(Value::Number(id)) => id.to_string(),
+        _ if builtin.site.category == category => builtin.filter_id,
+        _ => "2".into(),
+    };
+    Instance {
+        site: &configured.site,
+        root: configured.root,
+        hosts: configured.specs,
+        filter_id,
+    }
+}
+
+fn builtin(category: &str) -> Instance {
     match category {
         "derpibooru" => Instance {
             site: &DERPIBOORU,
             root: "https://derpibooru.org",
             hosts: &["derpibooru.org", "www.derpibooru.org"],
-            filter_id: "56027",
+            filter_id: "56027".into(),
         },
         "ponybooru" => Instance {
             site: &PONYBOORU,
             root: "https://ponybooru.org",
             hosts: &["ponybooru.org", "www.ponybooru.org"],
-            filter_id: "3",
+            filter_id: "3".into(),
         },
         _ => Instance {
             site: &FURBOORU,
             root: "https://furbooru.org",
             hosts: &["furbooru.org"],
-            filter_id: "2",
+            filter_id: "2".into(),
         },
     }
 }
@@ -185,7 +216,7 @@ fn search<'a>(
     if let Some(filter) = filter_option(http) {
         params.push(("filter_id".into(), filter));
     } else if http.api_key().is_none() {
-        params.push(("filter_id".into(), inst.filter_id.into()));
+        params.push(("filter_id".into(), inst.filter_id.clone()));
     }
     let endpoint = format!("{}/api/v1/json/search/images", inst.root);
     crate::sites::paginate(Some(1u64), move |page| {
@@ -319,6 +350,44 @@ mod tests {
             "uploader": "someone", "tags": ["safe", "cute"],
             "view_url": format!("https://derpicdn.net/img/view/2017/7/14/{id}.png"),
             "representations": {"full": format!("https://derpicdn.net/img/view/2017/7/14/{id}.png")}})
+    }
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root_and_filter() {
+        let instance = crate::sites::instances::define(
+            "philomena",
+            "philomena-configured",
+            json!({"root": "https://pony.test", "pattern": r"(?:www\.)?pony(?:mirror)?\.test", "filter_id": 100073}),
+        );
+        let url = Url::parse("https://ponymirror.test/tags/artist-colon-x").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert!(std::ptr::eq(site, &instance.site));
+        assert_eq!(
+            target(
+                "philomena-configured",
+                &Url::parse("https://pony.test/images/5").unwrap()
+            ),
+            Some(Target::Post("5".into()))
+        );
+        let (root, server) = serve(vec![json(json!({"images": [image(9, "png")]}))]);
+        let http = http("pony", root);
+        let files = media((site.extract)(&http, url)).await;
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "philomena-configured");
+        assert_eq!(k["subcategory"], "search");
+        assert_eq!(k["search_tags"], "artist:x");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with(
+                "GET /api/v1/json/search/images?q=artist%3Ax&filter_id=100073&page=1&per_page=50 "
+            ),
+            "{}",
+            requests[0]
+        );
+        assert_eq!(
+            crate::sites::instances::basecategory("twibooru"),
+            Some("philomena")
+        );
     }
 
     #[tokio::test]

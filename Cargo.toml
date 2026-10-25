@@ -15,6 +15,7 @@ flate2 = "1"
 getrandom = "0.2"
 httpdate = "1"
 psl = "2"
+regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 roxmltree = "0.21.1"
 rusqlite = { version = "0.38", features = ["bundled", "hooks"] }

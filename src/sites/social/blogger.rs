@@ -3,8 +3,9 @@
 //! with the `videos` option (default on) the blog's embedded videos.
 //!
 //! Upstream's built-in instance is `blogspot` (`*.blogspot.com`); custom
-//! domains configured as extra instances or given as `blogger:URL` are not
-//! supported. The `api-key` setting replaces upstream's public key.
+//! domains are configured as `extractor.blogger.<category>` instances or
+//! given as `blogger:URL`. The `api-key` setting replaces upstream's public
+//! key.
 use crate::sites::art::{extract_iter, json_loads, parse_iso, str_of};
 use crate::sites::{Events, Http, Item, Route, Site, remove_html};
 use crate::{Result, error};
@@ -33,6 +34,22 @@ pub static SITE: Site = Site {
     cookies: None,
 };
 
+/// Configured `extractor.blogger.<category>` instances (custom domains).
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "blogger",
+    builtin: &[&SITE],
+    related: &[],
+    template: &SITE,
+    matches: |category, url| configured_target(category, url).is_some(),
+    extract: |category, http, url| match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => match configured_target(category, &url) {
+            Some((host, target)) => run(&instance.site, http, host, target),
+            None => crate::sites::fail(error("unsupported Blogger URL")),
+        },
+        None => crate::sites::fail(error("unsupported Blogger URL")),
+    },
+};
+
 const API: &str = "https://www.googleapis.com/blogger/v3";
 const API_KEY: &str = "AIzaSyCN9ax34oMMyM07g_M-5pjeDp_312eITK8";
 
@@ -58,13 +75,35 @@ fn target(url: &Url) -> Option<(String, Target)> {
     {
         return None;
     }
-    let path = url.path();
+    let rest = &url[url::Position::BeforePath..url::Position::AfterQuery];
+    Some((host.to_owned(), parse_path(rest, url.fragment().is_none())?))
+}
+
+/// [`target`] for a configured instance: the blog is upstream's
+/// `root.rpartition("/")[2]`.
+fn configured_target(category: &str, url: &Url) -> Option<(String, Target)> {
+    let instance = crate::sites::instances::configured(&FAMILY, category)?;
+    let rest = crate::sites::instances::below(url, instance.spec)?;
+    let blog = instance.root.rsplit('/').next().unwrap_or_default();
+    Some((
+        blog.to_owned(),
+        parse_path(&rest, url.fragment().is_none())?,
+    ))
+}
+
+/// The class matching a raw `/path?query`.
+fn parse_path(rest: &str, no_fragment: bool) -> Option<Target> {
+    let (path, query) = match rest.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (rest, None),
+    };
+    let path = if path.is_empty() { "/" } else { path };
     let target = if let Some(post) = post_path(path) {
         Target::Post(post)
-    } else if path == "/" && url.query().is_none() && url.fragment().is_none() {
+    } else if path == "/" && query.is_none() && no_fragment {
         Target::Blog
     } else if matches!(path, "/search" | "/search/") {
-        let query = url.query()?.strip_prefix("q=")?;
+        let query = query?.strip_prefix("q=")?;
         let query = query.split('&').next().unwrap_or_default();
         if query.is_empty() {
             return None;
@@ -78,7 +117,7 @@ fn target(url: &Url) -> Option<(String, Target)> {
             .filter(|label| !label.is_empty())?;
         Target::Label(crate::sites::percent_decode(label))
     };
-    Some((host.to_owned(), target))
+    Some(target)
 }
 
 /// `/\d\d\d\d/\d\d/[^/?#]+\.html`, raw as upstream sees it.
@@ -104,6 +143,10 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     let Some((host, target)) = target(&url) else {
         return crate::sites::fail(error("unsupported Blogger URL"));
     };
+    run(&SITE, http, host, target)
+}
+
+fn run<'a>(site: &'static Site, http: &'a Http, host: String, target: Target) -> Events<'a> {
     crate::sites::once(async move {
         let blog = blog_by_url(http, &host).await?;
         let id = str_of(&Value::Object(blog.clone()), "id").to_owned();
@@ -120,7 +163,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     None,
                 )
                 .await?;
-                return post_events(http, &POST, host, blog, meta, post).await;
+                return post_events(site, http, &POST, host, blog, meta, post).await;
             }
             Target::Blog => (&BLOG, format!("/blogs/{id}/posts"), Vec::new()),
             Target::Search(query) => {
@@ -140,7 +183,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 )
             }
         };
-        Ok(pagination(http, route, host, blog, meta, endpoint, params))
+        Ok(pagination(
+            site, http, route, host, blog, meta, endpoint, params,
+        ))
     })
 }
 
@@ -194,7 +239,9 @@ async fn blog_by_url(http: &Http, host: &str) -> Result<Map<String, Value>> {
 }
 
 /// `_pagination` over `nextPageToken`, one API page at a time.
+#[allow(clippy::too_many_arguments)]
 fn pagination<'a>(
+    site: &'static Site,
     http: &'a Http,
     route: &'static Route,
     host: String,
@@ -223,7 +270,7 @@ fn pagination<'a>(
                 futures_util::stream::iter(posts),
                 move |post| {
                     let (host, blog, meta) = (host.clone(), blog.clone(), meta.clone());
-                    async move { post_events(http, route, host, blog, meta, post).await }
+                    async move { post_events(site, http, route, host, blog, meta, post).await }
                 },
             ));
             Ok(Some((events, next)))
@@ -361,6 +408,7 @@ async fn videos(http: &Http, host: &str, post_id: &str) -> Result<Vec<String>> {
 }
 
 async fn post_events<'a>(
+    site: &'static Site,
     http: &'a Http,
     route: &'static Route,
     host: String,
@@ -382,7 +430,7 @@ async fn post_events<'a>(
     }
     let items = parse_post(&mut post, &content, &blog, &meta, files);
     Ok(crate::sites::events(crate::sites::post(
-        &SITE, http, route, items,
+        site, http, route, items,
     )))
 }
 
@@ -530,6 +578,38 @@ mod tests {
             ),
             vec!["https://www.blogger.com/video.g?token=AD6v5d"]
         );
+    }
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_domain() {
+        crate::sites::instances::define(
+            "blogger",
+            "blogger-configured",
+            json!({"root": "https://blog.configured.test", "pattern": r"(?:www\.)?blog\.configured\.test"}),
+        );
+        let url = Url::parse("https://www.blog.configured.test/search/label/Cats").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "blogger-configured");
+        assert!(site.api_key);
+        assert_eq!(
+            configured_target(
+                "blogger-configured",
+                &Url::parse("https://blog.configured.test/search/label/Cats").unwrap()
+            ),
+            Some(("blog.configured.test".into(), Target::Label("Cats".into())))
+        );
+        let (root, server) = serve(vec![json(blog()), json(json!({"items": []}))]);
+        let http = http("blogger-configured", root);
+        assert!(media((site.extract)(&http, url)).await.is_empty());
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with(
+                "GET /blogger/v3/blogs/byurl?url=http%3A%2F%2Fblog.configured.test&key="
+            ),
+            "{}",
+            requests[0]
+        );
+        assert!(requests[1].starts_with("GET /blogger/v3/blogs/123/posts?labels=Cats&"));
     }
 
     fn blog() -> Value {
