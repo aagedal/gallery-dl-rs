@@ -3415,4 +3415,77 @@ mod site_scope_tests {
             assert!(parse(bad).is_err(), "{bad}");
         }
     }
+
+    #[test]
+    fn registry_family_instances_and_base_scopes() {
+        let dir = std::env::temp_dir();
+        let config = super::Config::parse(
+            br#"{"extractor":{
+                "moebooru":{"retries":4,"notes":true,"lang":"de",
+                    "cfgbooru":{"root":"https://cfg.test/","pattern":"(?:www\\.)?cfg\\.test","extra":1}},
+                "cfgbooru":{"timeout":9,"notes":false},
+                "yandere":{"lang":"en"},
+                "example.test":{"retries":1}
+            }}"#,
+            &dir,
+        )
+        .unwrap();
+        let defs = config.instances();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].category, "cfgbooru");
+        assert_eq!(defs[0].basecategory, "moebooru");
+        assert_eq!(defs[0].root, "https://cfg.test");
+        assert_eq!(defs[0].info["extra"], 1);
+        // The instance scope applies first, then the base category scope.
+        let instance = config.resolve("cfgbooru").unwrap();
+        assert_eq!(instance.retries, Some(4));
+        assert_eq!(instance.timeout, Some(std::time::Duration::from_secs(9)));
+        let options = instance.site_options.unwrap();
+        assert_eq!(options["notes"], false);
+        assert_eq!(options["lang"], "de");
+        assert!(!options.contains_key("cfgbooru"));
+        // Built-in instances fall back to the base scope too.
+        let yandere = config.resolve("yandere").unwrap();
+        assert_eq!(yandere.retries, Some(4));
+        let options = yandere.site_options.unwrap();
+        assert_eq!(options["lang"], "en");
+        assert_eq!(options["notes"], true);
+        assert_eq!(config.resolve("moebooru").unwrap().retries, Some(4));
+        assert_eq!(config.resolve("konachan").unwrap().retries, Some(4));
+        // Unrelated families keep their own settings.
+        assert_eq!(config.resolve("rule34").unwrap().retries, None);
+        // `-o` can define instances as well.
+        let cli =
+            [super::parse_option("extractor.shimmie2.optbooru.root=https://opt.test").unwrap()];
+        let config = super::Config::parse_with_options(b"{}", &dir, &cli).unwrap();
+        assert_eq!(config.instances()[0].category, "optbooru");
+        assert_eq!(config.instances()[0].basecategory, "shimmie2");
+        assert!(config.resolve("optbooru").is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_registry_family_instances() {
+        let dir = std::env::temp_dir();
+        let parse = |json: &str| super::Config::parse(json.as_bytes(), &dir);
+        for bad in [
+            r#"{"extractor":{"moebooru":{"x":{"root":"ftp://x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://u:p@x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://x.test","pattern":"("}}}}"#,
+            r#"{"extractor":{"moebooru":{"twitter":{"root":"https://x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"rule34":{"root":"https://x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://a.test"}},
+                "szurubooru":{"x":{"root":"https://b.test"}}}}"#,
+            r#"{"extractor":{"moebooru":[]}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://x.test"}},"x":1}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://x.test"}},"x":{"api-key":"k"}}}"#,
+            r#"{"extractor":{"nosuchsite":{}}}"#,
+            r#"{"extractor":{"bad host.test":{}}}"#,
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        // Objects without a root stay ordinary settings of the base scope.
+        let config = parse(r#"{"extractor":{"moebooru":{"x":{"pattern":"y"}}}}"#).unwrap();
+        assert!(config.instances().is_empty());
+        assert!(config.resolve("yandere").unwrap().site_options.unwrap()["x"].is_object());
+    }
 }
