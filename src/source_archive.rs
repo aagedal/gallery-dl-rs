@@ -188,7 +188,8 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if let Ok(target) = crate::deviantart::target(url) {
         use crate::deviantart::Target;
         let format = match target {
-            Target::User(_) => "",
+            // Queue-only following and the watch feeds set no archive_fmt.
+            Target::User(_) | Target::Following(_) | Target::Watch | Target::WatchPosts => "",
             Target::Folder { .. } => "F_{folder[uuid]}_{index}.{extension}",
             Target::Collection { .. } => "C_{collection[uuid]}_{index}.{extension}",
             Target::Favorite(_) => "f_{_username}_{index}.{extension}",

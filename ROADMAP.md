@@ -1136,7 +1136,9 @@ avatar, background, gallery, scraps, journal, status, favorite), `gallery`,
 `folder` (with subfolder child jobs), `scraps` and `gallery-search` (Eclipse
 API with front-page CSRF token and session cookies), `favorite`, `collection`,
 `journal`, `status`, `avatar`, `background`, `tag`, `search` (logged-out HTML
-results) and `stash` classes over the OAuth2 API (client credentials,
+results), `stash`, `following` (watched users queued as profile children),
+`watch` and `watch-posts` (private-token feeds of watched users; journals
+unpacked like upstream) classes over the OAuth2 API (client credentials,
 overridable `client-id`/`client-secret`, and `refresh-token` for upstream's
 private-token switching; the token `oauth:deviantart` cached is used when the
 setting is unset or `"cache"`, and rotated refresh tokens are written back to
@@ -1149,7 +1151,7 @@ formats; literature, journals and statuses are written as HTML or text per
 UUID (plus file kind for videos/flash/journal text; user+index for avatars),
 not upstream's per-class `archive_fmt`. Remaining: login/cookies, groups
 (`group-*` subcategories), premium/watcher-locked content and
-`auto-watch`/`auto-unwatch`, `watch`/`watch-posts`/`following`, additional
+`auto-watch`/`auto-unwatch`, additional
 media of multi-image deviations, tiptap literature markup (falls back to the
 excerpt), `comments`/`comments-avatars`, `extra` stash links, `previews`,
 `folders`, `jwt`, `pagination`/`wait-min`, CloudFront block waits, persisting

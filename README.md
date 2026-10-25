@@ -1314,7 +1314,10 @@ deviations (`USER/art|journal/SLUG-ID`, `view/ID`, `fav.me/dID`), user profiles
 subfolders as child jobs), scraps and gallery searches (web "Eclipse"
 endpoints with a CSRF token and session cookies), favourites, collections,
 journals, status updates, avatars, banners, tags, searches (logged-out HTML
-results) and stash links; legacy `USER.deviantart.com` and `fxdeviantart.com`
+results), stash links, watched users (`USER/about#watching`, each queued as a
+`following` child dispatching the profile) and, with a refresh token, the
+account's watch feeds (`watch/deviations` and `watch/posts`, upstream's `watch`
+and `watch-posts`); legacy `USER.deviantart.com` and `fxdeviantart.com`
 hosts are normalized. Listings page lazily (offset or cursor, capped at 200
 pages); web page requests are spaced two seconds apart like upstream. Files use
 upstream's `content` handling: preview URLs with `quality`/`intermediary`

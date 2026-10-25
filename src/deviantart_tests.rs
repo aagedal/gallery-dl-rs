@@ -297,6 +297,21 @@ fn classifies_every_upstream_class() {
             Target::Stash("0abc123".into()),
         ),
         ("https://sta.sh/0abc123", Target::Stash("0abc123".into())),
+        (
+            "https://www.deviantart.com/Alice/about#watching",
+            Target::Following(user("alice")),
+        ),
+        (
+            "https://www.deviantart.com/alice/watching",
+            Target::Following(user("alice")),
+        ),
+        (
+            "https://alice.deviantart.com/watching/",
+            Target::Following(user("alice")),
+        ),
+        ("https://www.deviantart.com/watch/deviations", Target::Watch),
+        ("https://deviantart.com/notifications/watch", Target::Watch),
+        ("https://www.deviantart.com/watch/posts", Target::WatchPosts),
     ];
     for (raw, expected) in cases {
         assert_eq!(t(raw).unwrap(), expected, "{raw}");
@@ -306,7 +321,10 @@ fn classifies_every_upstream_class() {
         "https://www.deviantart.com/",
         "https://www.deviantart.com/tag/",
         "https://www.deviantart.com/search",
-        "https://www.deviantart.com/watch/deviations",
+        "https://www.deviantart.com/watch/other",
+        "https://www.fxdeviantart.com/watch/deviations",
+        "https://www.deviantart.com/alice/about",
+        "https://www.deviantart.com/alice/about#gallery",
         "https://www.deviantart.com/alice/art/no-id",
         "https://www.deviantart.com/alice/gallery/7",
         "https://www.deviantart.com/alice/unknown",
@@ -1130,4 +1148,130 @@ async fn rejected_credentials_are_not_echoed() {
     assert!(error.contains("client-secret"), "{error}");
     assert!(!error.contains("topsecret") && !error.contains("127.0.0.1"));
     assert_eq!(server.join().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn following_queues_watched_users_as_profile_children() {
+    let friend = |name: &str| {
+        json!({"user": {"username": name, "userid": "U"},
+        "is_watching": true, "watches_you": false, "lastvisit": null})
+    };
+    let (root, server) = serve(vec![
+        token("t"),
+        ok(json!({"results": [friend("Bob"), friend("bad name")],
+            "has_more": true, "next_offset": 50})),
+        page(vec![deviation(&uuid(1), 900000001, false)], None),
+        page(vec![], None),
+    ]);
+    let client = with(
+        root,
+        json!({"group": false, "include": "gallery", "flat": true}),
+    );
+    let events = run(&client, "https://www.deviantart.com/Alice/about#watching").await;
+    let scopes: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            ExtractionEvent::BeginChild(scope) => Some(&scope.metadata),
+            _ => None,
+        })
+        .collect();
+    // The watched user is a `following` child dispatching its profile.
+    assert_eq!(
+        scopes.iter().map(|m| m.subcategory()).collect::<Vec<_>>(),
+        ["following", "user"]
+    );
+    let media = files(&events);
+    assert_eq!(media.len(), 1);
+    assert_eq!(keywords(media[0])["subcategory"], "gallery");
+    assert_eq!(paths(media[0]).1, dir(&["deviantart", "bob"]));
+    let requests = server.join().unwrap();
+    assert!(line(&requests[1]).starts_with(
+        "GET /api/v1/oauth2/user/friends/alice?mature_content=true&offset=0&limit=50 "
+    ));
+    assert!(line(&requests[2]).starts_with(
+        "GET /api/v1/oauth2/gallery/all?mature_content=true&username=bob&offset=0&limit=24 "
+    ));
+    assert!(line(&requests[3]).starts_with(
+        "GET /api/v1/oauth2/user/friends/alice?mature_content=true&offset=50&limit=50 "
+    ));
+}
+
+#[tokio::test]
+async fn watch_feeds_require_and_use_the_private_token() {
+    let (root, server) = serve(vec![
+        ok(json!({"access_token": "priv", "refresh_token": "rt2"})),
+        page(vec![deviation(&uuid(1), 900000001, false)], None),
+    ]);
+    let client = with(root, json!({})).with_refresh_token(Some("rt1"));
+    let events = run(&client, "https://www.deviantart.com/watch/deviations").await;
+    let media = files(&events);
+    assert_eq!(media.len(), 1);
+    let k = keywords(media[0]);
+    assert_eq!(
+        (&k["subcategory"], &k["username"]),
+        (&json!("watch"), &json!("Alice"))
+    );
+    assert_eq!(
+        paths(media[0]),
+        (
+            "deviantart_900000001_My Art.jpg".into(),
+            dir(&["deviantart", "Alice"])
+        )
+    );
+    assert_eq!(
+        media[0].archive_key().unwrap(),
+        legacy_key(json!([uuid(1)]))
+    );
+    let requests = server.join().unwrap();
+    assert!(requests[0].contains("grant_type=refresh_token"));
+    assert!(line(&requests[1]).starts_with(
+        "GET /api/v1/oauth2/browse/deviantsyouwatch?mature_content=true&offset=0&limit=50 "
+    ));
+    assert!(
+        requests[1]
+            .to_ascii_lowercase()
+            .contains("authorization: bearer priv")
+    );
+
+    // Posts unpack each result's journal; entries without one are skipped.
+    let (root, server) = serve(vec![
+        ok(json!({"access_token": "priv"})),
+        ok(
+            json!({"results": [{"journal": journal(456)}, {"status": {}}],
+            "has_more": false, "next_offset": null}),
+        ),
+        html(LITERATURE),
+    ]);
+    let client = with(root, json!({})).with_refresh_token(Some("rt1"));
+    let events = run(&client, "https://www.deviantart.com/watch/posts").await;
+    let media = files(&events);
+    assert_eq!(media.len(), 1);
+    assert_eq!(keywords(media[0])["subcategory"], "watch-posts");
+    assert_eq!(
+        paths(media[0]),
+        (
+            "deviantart_456_My Journal.htm".into(),
+            dir(&["deviantart", "Alice"])
+        )
+    );
+    assert_eq!(
+        media[0].archive_key().unwrap(),
+        legacy_key(json!([UUID, "journal"]))
+    );
+    let requests = server.join().unwrap();
+    assert!(line(&requests[1]).starts_with(
+        "GET /api/v1/oauth2/browse/posts/deviantsyouwatch?mature_content=true&offset=0&limit=50 "
+    ));
+
+    // Without a refresh token nothing is requested.
+    let (root, server) = serve(vec![]);
+    let error = with(root, json!({}))
+        .stream(&Url::parse("https://www.deviantart.com/watch/posts").unwrap())
+        .collect::<Vec<_>>()
+        .await
+        .remove(0)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("refresh-token"), "{error}");
+    assert!(server.join().unwrap().is_empty());
 }

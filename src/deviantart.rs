@@ -16,7 +16,8 @@
 //! Every file carries upstream's keyword dictionary and its extractor class
 //! (`deviation`, `gallery`, `folder`, `scraps`, `favorite`, `collection`,
 //! `journal`, `status`, `avatar`, `background`, `tag`, `search`,
-//! `gallery-search`, `stash`, and `user` dispatching), so default paths
+//! `gallery-search`, `stash`, `watch`, `watch-posts`, and `user`/`following`
+//! dispatching; the watch feeds need a refresh token), so default paths
 //! follow upstream's `filename_fmt`/`directory_fmt`. Archive identity is the
 //! deviation (or status) UUID, plus the file kind for videos, flash files and
 //! journal text; avatars use the user name and icon index.
@@ -144,6 +145,32 @@ static SEARCH: Route = Route::new(
     &["{category}", "Search", "{search_tags}"],
     "Q_{search_tags}_{index}.{extension}",
 );
+/// Deviations and posts of watched users; upstream sets no `archive_fmt`.
+static WATCH: Route = Route::new("watch", FILENAME, USER_DIR, "");
+static WATCH_POSTS: Route = Route::new("watch-posts", FILENAME, USER_DIR, "");
+
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+/// `following` queues watched users; `user` dispatches profile children.
+pub const SUBCATEGORIES: &[&str] = &[
+    "avatar",
+    "background",
+    "collection",
+    "deviation",
+    "favorite",
+    "folder",
+    "following",
+    "gallery",
+    "gallery-search",
+    "journal",
+    "scraps",
+    "search",
+    "stash",
+    "status",
+    "tag",
+    "user",
+    "watch",
+    "watch-posts",
+];
 
 /// Upstream extractor class for a subcategory name, for tests and tooling.
 pub fn route(subcategory: &str) -> Option<&'static Route> {
@@ -163,6 +190,8 @@ pub fn route(subcategory: &str) -> Option<&'static Route> {
         &STATUS,
         &TAG,
         &SEARCH,
+        &WATCH,
+        &WATCH_POSTS,
     ]
     .into_iter()
     .find(|route| route.subcategory == subcategory)
@@ -259,6 +288,12 @@ pub enum Target {
     /// Raw search query string (`q=...&...`).
     Search(String),
     Stash(String),
+    /// `USER/about#watching`: the users USER watches, queued as profiles.
+    Following(String),
+    /// The authenticated account's watch feed (`/watch/deviations`).
+    Watch,
+    /// Posts (journals) from watched users (`/watch/posts`).
+    WatchPosts,
 }
 
 /// Whether a URL is a DeviantArt page handled by this extractor.
@@ -316,6 +351,10 @@ pub fn target(url: &Url) -> Result<Target> {
                     Ok(Target::Search(query.to_owned()))
                 }
                 ["stash", id, ..] if !fx && stash_id(id) => Ok(Target::Stash(id.to_string())),
+                ["watch", "deviations", ..] | ["notifications", "watch", ..] if !fx => {
+                    Ok(Target::Watch)
+                }
+                ["watch", "posts", ..] if !fx => Ok(Target::WatchPosts),
                 ["view" | "deviation", id, ..] if digits(id) => Ok(Target::Deviation {
                     user: None,
                     kind: "art",
@@ -335,7 +374,7 @@ pub fn target(url: &Url) -> Result<Target> {
                     })
                 }
                 [user, rest @ ..] if !RESERVED.contains(&user.to_ascii_lowercase().as_str()) => {
-                    user_target(user, rest, query).ok_or_else(unsupported)
+                    user_target(user, rest, query, url.fragment()).ok_or_else(unsupported)
                 }
                 _ => Err(unsupported()),
             }
@@ -347,7 +386,7 @@ pub fn target(url: &Url) -> Result<Target> {
                 .or_else(|| host.strip_suffix(".fxdeviantart.com"))
                 .filter(|user| !user.contains('.') && *user != "www")
                 .ok_or_else(unsupported)?;
-            user_target(user, &segments, query).ok_or_else(unsupported)
+            user_target(user, &segments, query, url.fragment()).ok_or_else(unsupported)
         }
     }
 }
@@ -360,7 +399,7 @@ fn stash_id(id: &str) -> bool {
 }
 
 /// Upstream's per-user URL patterns; the user name is lowercased.
-fn user_target(user: &str, rest: &[&str], query: &str) -> Option<Target> {
+fn user_target(user: &str, rest: &[&str], query: &str, fragment: Option<&str>) -> Option<Target> {
     if !valid_user(user) {
         return None;
     }
@@ -390,6 +429,9 @@ fn user_target(user: &str, rest: &[&str], query: &str) -> Option<Target> {
             name: None,
         },
         ["avatar", ..] => Target::Avatar(user),
+        // Upstream `/(?:about#)?watching`.
+        ["watching", ..] => Target::Following(user),
+        ["about"] if fragment.is_some_and(|f| f.starts_with("watching")) => Target::Following(user),
         ["banner" | "background", ..] => Target::Background(user),
         ["favourites"] | ["favourites", "all"] => Target::Favorite(user),
         ["favourites", id, name, ..] if folder_id(id) => Target::Collection {
@@ -987,6 +1029,10 @@ struct OAuthPager {
     extend: bool,
     /// Keep only posts whose URL contains this (journals, statuses).
     filter: Option<&'static str>,
+    /// Upstream `unpack`: each result's `journal` object (watched posts).
+    unpack: bool,
+    /// Results are `user/friends` entries, queued as profile children.
+    friends: bool,
     pages: usize,
 }
 
@@ -1538,6 +1584,8 @@ impl DeviantArt {
             public: None,
             extend: false,
             filter: None,
+            unpack: false,
+            friends: false,
             pages: 0,
         };
         let mut folders = Vec::new();
@@ -1575,6 +1623,12 @@ impl DeviantArt {
                 .and_then(Value::as_array)
                 .cloned()
                 .ok_or_else(|| error("DeviantArt response contains no results"))?;
+            if pager.unpack {
+                results = results
+                    .into_iter()
+                    .filter_map(|item| item.get("journal").cloned())
+                    .collect();
+            }
             if pager.extend {
                 if self.has_refresh
                     && self.is_public(pager.public)
@@ -1801,15 +1855,18 @@ impl DeviantArt {
             }
             Pager::OAuth(oauth) => {
                 let statuses = oauth.filter == Some("/status-update/");
+                let friends = oauth.friends;
                 Ok(self.oauth_page(oauth).await?.map(|results| {
                     results
                         .into_iter()
-                        .map(|r| {
-                            if statuses {
+                        .filter_map(|r| {
+                            Some(if friends {
+                                friend_child(r)?
+                            } else if statuses {
                                 Raw::Status(r)
                             } else {
                                 Raw::Deviation(r)
-                            }
+                            })
                         })
                         .collect()
                 }))
@@ -2007,6 +2064,8 @@ impl DeviantArt {
             public: None,
             extend: true,
             filter: None,
+            unpack: false,
+            friends: false,
             pages: 0,
         }
     }
@@ -2197,6 +2256,28 @@ impl DeviantArt {
                         pages: 0,
                     },
                 )
+            }
+            Target::Following(user) => {
+                // Upstream `user_friends`: the public token unless `public` is off.
+                let mut pager = self.oauth(format!("user/friends/{user}"), Vec::new(), 50);
+                pager.friends = true;
+                self.listing(Context::new(&USER, None), Pager::OAuth(pager))
+            }
+            Target::Watch | Target::WatchPosts => {
+                if !self.has_refresh {
+                    return Err(error(
+                        "DeviantArt watch feeds require a refresh-token (configure `refresh-token` or run `oauth:deviantart`)",
+                    ));
+                }
+                let (route, path) = if matches!(target, Target::Watch) {
+                    (&WATCH, "browse/deviantsyouwatch")
+                } else {
+                    (&WATCH_POSTS, "browse/posts/deviantsyouwatch")
+                };
+                let mut pager = self.oauth(path.into(), Vec::new(), 50);
+                pager.public = Some(false);
+                pager.unpack = matches!(target, Target::WatchPosts);
+                self.listing(Context::new(route, None), Pager::OAuth(pager))
             }
             Target::Stash(id) => {
                 let mut seen = HashSet::new();
@@ -2840,6 +2921,25 @@ impl DeviantArt {
 
 /// Upstream `DeviantartStatusExtractor.process_status`: shared deviations
 /// and statuses first, then the status itself unless deleted.
+/// Upstream `DeviantartFollowingExtractor`: one `user/friends` entry queued
+/// as its profile URL, with the entry as the child's keywords.
+fn friend_child(entry: Value) -> Option<Raw> {
+    let name = entry.pointer("/user/username")?.as_str()?;
+    if !valid_user(name) {
+        return None;
+    }
+    let target = Target::User(name.to_ascii_lowercase());
+    let Value::Object(data) = entry else {
+        return None;
+    };
+    Some(Raw::Child {
+        target,
+        subcategory: "following",
+        data,
+        parent: None,
+    })
+}
+
 fn process_status(status: Value, out: &mut Vec<Value>, depth: usize) {
     if depth < 8 {
         for item in status
