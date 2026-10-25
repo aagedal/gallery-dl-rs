@@ -151,7 +151,10 @@ fn metadata(data: &Value) -> Result<Map<String, Value>> {
         .get("galleryPage")
         .ok_or_else(|| error("xHamster page has no gallery"))?;
     let info = &gallery["infoProps"];
-    let model = &gallery["galleryModel"];
+    // Upstream fails on pages without the gallery model too.
+    let model = gallery
+        .get("galleryModel")
+        .ok_or_else(|| error("xHamster page has no gallery model"))?;
     let author = &info["authorInfoProps"];
     let tags: Vec<Value> = info["categoriesTags"]
         .as_array()
