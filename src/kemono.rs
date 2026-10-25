@@ -975,9 +975,11 @@ pub struct Kemono {
     archives: bool,
     archives_format: ArchivesFormat,
     /// Host and hash to archive metadata; failures are cached as `None`.
-    archive_metadata:
-        tokio::sync::Mutex<HashMap<(String, String), Option<Arc<Map<String, Value>>>>>,
+    archive_metadata: tokio::sync::Mutex<HashMap<(String, String), ArchiveMetadata>>,
 }
+
+/// Cached `/v1/file/{hash}` object, or `None` after a failed lookup.
+type ArchiveMetadata = Option<Arc<Map<String, Value>>>;
 
 /// Upstream's optional per-post `comments`, `dms` and `announcements`
 /// keywords from compatibility output, bounded like native responses.
