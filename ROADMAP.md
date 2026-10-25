@@ -888,6 +888,26 @@ carrying them), and calls are spaced 0.5 s apart. Public posts, creators,
 tags and the redirect were checked live on 2026-10-25; paid content is
 fixture-tested only.
 
+**Implemented experimental native Patreon:** every upstream class
+(`creator` including `c/`, `cw/`, `id:`, `user?u=`, `profile/creators`
+and `filters[...]`/`sort` queries, `user` home feed, `post`, `collection`)
+through the JSON:API `posts`/`stream` endpoints and the pages' bootstrap
+data, with upstream's Patreon app User-Agent, keywords (`creator` from the
+user API, `campaign`, `tags`, `hash`, `type`, `file`, TipTap
+`content_json_string` rendered as `content`), MD5-hash de-duplication and
+default paths, and the `files`, `format-images`, `order-posts`, `cursor`
+and (home feed) `date-max` options. `.m3u8` videos become `ytdl:` HLS
+manifest jobs; attachments resolve their redirect with the session, and
+unnamed files take their `Content-Disposition` name (HEAD). A `session_id`
+cookie from `--cookies` unlocks patron-only posts; unviewable single posts,
+refusals and the home feed without it report the missing cookie. Beyond
+upstream, bootstrap data is also read from `__NEXT_DATA__` scripts with a
+`nonce` and from post pages' React Server Component chunks, which current
+pages need. Public posts (images, postfile/attachments, Mux HLS), creators,
+`filters[month]`, `user?u=`, a collection and `format-images` were checked
+live on 2026-10-25; logged-in feeds and patron-only posts are
+fixture-tested only.
+
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
 lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
 and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`

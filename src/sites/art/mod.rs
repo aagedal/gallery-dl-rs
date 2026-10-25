@@ -36,6 +36,7 @@ mod myportfolio;
 mod naverblog;
 mod nekohouse;
 mod nijie;
+mod patreon;
 mod picarto;
 mod piczel;
 mod pillowfort;
@@ -78,6 +79,7 @@ pub(super) static SITES: &[&Site] = &[
     &lightroom::SITE,
     &nijie::NIJIE,
     &nijie::HORNE,
+    &patreon::SITE,
     &picarto::SITE,
     &piczel::SITE,
     &pillowfort::SITE,
