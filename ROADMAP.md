@@ -113,6 +113,10 @@ shared extraction interface that emits media, post metadata, and child URLs.
   consumer pauses, and cancellation. Authenticated live collection traversal,
   real fixtures, bookmark-specific metadata, membership/follow traversal,
   and other routes/options remain unfinished.
+  **Implemented experimental live events:** `/i/events/ID` (upstream `event`)
+  loads the event object and pages the legacy REST live-event timeline,
+  converting its `globalObjects` tweets for the shared timeline parser; posts
+  carry the `event` keyword. Live verification remains outstanding.
   **Implemented experimental community feeds:** explicit `/i/communities/ID`
   media timelines and the session's followed-community feed at `/i/communities`
   or `/USER/communities` share lazy traversal, limits, media options, expansion,

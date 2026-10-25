@@ -1,5 +1,6 @@
 //! Explicit authenticated collection routes and their owned timeline envelopes.
 use super::*;
+use serde_json::json;
 use timeline::{Page, ProfileTab};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +11,8 @@ pub(super) enum Collection {
     Home,
     Community(String),
     Communities,
+    /// `/i/events/ID`: upstream `TwitterEventExtractor`'s REST live event.
+    Event(String),
 }
 
 pub fn is_collection_url(url: &Url) -> bool {
@@ -45,7 +48,14 @@ pub(super) fn input(url: &Url) -> Result<Option<Collection>> {
             Some(Collection::Home)
         }
         _ => {
-            if let Some(id) = path
+            if let Some(rest) = path.strip_prefix("/i/events/") {
+                // Upstream `/i/events/(\d+)`, unanchored.
+                let id = rest.split('/').next().unwrap_or_default();
+                if !valid_id(id) {
+                    return Err(error("Twitter event identifier missing or invalid"));
+                }
+                Some(Collection::Event(id.into()))
+            } else if let Some(id) = path
                 .strip_prefix("/i/communities/")
                 .filter(|id| !id.contains('/'))
             {
@@ -95,8 +105,19 @@ pub(super) fn parse_collection_posts_with_text(
     pinned: bool,
     text_tweets: bool,
 ) -> Result<Page> {
+    if matches!(collection, Collection::Event(_)) {
+        let instructions = rest_instructions(bytes)?;
+        return timeline::parse_instructions(
+            &instructions,
+            None,
+            ProfileTab::Timeline,
+            pinned,
+            None,
+        );
+    }
     let data = timeline::document(bytes)?;
     let path = match collection {
+        Collection::Event(_) => unreachable!("REST timeline"),
         Collection::Bookmarks => "/data/bookmark_timeline_v2/timeline/instructions",
         Collection::Home | Collection::HomeLatest => "/data/home/home_timeline_urt/instructions",
         Collection::Communities => "/data/viewer/communities_timeline/timeline/instructions",
@@ -202,6 +223,232 @@ pub(super) fn parse_collection_posts_with_text(
     timeline::parse_instructions(instructions, None, ProfileTab::Timeline, pinned, None)
 }
 
+/// Upstream `TwitterAPI.params`, sent with the legacy REST endpoints.
+pub(super) const REST_PARAMS: &[(&str, &str)] = &[
+    ("include_profile_interstitial_type", "1"),
+    ("include_blocking", "1"),
+    ("include_blocked_by", "1"),
+    ("include_followed_by", "1"),
+    ("include_want_retweets", "1"),
+    ("include_mute_edge", "1"),
+    ("include_can_dm", "1"),
+    ("include_can_media_tag", "1"),
+    ("include_ext_is_blue_verified", "1"),
+    ("include_ext_verified_type", "1"),
+    ("include_ext_profile_image_shape", "1"),
+    ("skip_status", "1"),
+    ("cards_platform", "Web-12"),
+    ("include_cards", "1"),
+    ("include_ext_alt_text", "true"),
+    ("include_ext_limited_action_results", "true"),
+    ("include_quote_count", "true"),
+    ("include_reply_count", "1"),
+    ("tweet_mode", "extended"),
+    ("include_ext_views", "true"),
+    ("include_entities", "true"),
+    ("include_user_entities", "true"),
+    ("include_ext_media_color", "true"),
+    ("include_ext_media_availability", "true"),
+    ("include_ext_sensitive_media_warning", "true"),
+    ("include_ext_trusted_friends_metadata", "true"),
+    ("send_error_codes", "true"),
+    ("simple_quoted_tweet", "true"),
+    ("count", "20"),
+    (
+        "ext",
+        "mediaStats,highlightedLabel,parodyCommentaryFanLabel,voiceInfo,birdwatchPivot,superFollowMetadata,unmentionInfo,editControl,article",
+    ),
+];
+
+/// A REST endpoint below the GraphQL base's `/i/api/` root.
+pub(super) fn rest_endpoint(base: &Url, path: &str, extra: &[(&str, &str)]) -> Result<Url> {
+    let mut url = base
+        .join(&format!("../{path}"))
+        .map_err(|_| error("invalid Twitter REST endpoint"))?;
+    {
+        let mut query = url.query_pairs_mut();
+        // Upstream copies `params` and then sets the extra keys.
+        for (key, value) in REST_PARAMS
+            .iter()
+            .filter(|(key, _)| !extra.iter().any(|(name, _)| name == key))
+            .chain(extra)
+        {
+            query.append_pair(key, value);
+        }
+    }
+    Ok(url)
+}
+
+/// Upstream `live_event`: the event object of `/1.1/live_event/1/ID/timeline.json`.
+pub(super) fn parse_live_event(bytes: &[u8], id: &str) -> Result<Value> {
+    timeline::document(bytes)?
+        .get("twitter_objects")
+        .and_then(|objects| objects.get("live_events"))
+        .and_then(|events| events.get(id))
+        .filter(|event| event.is_object())
+        .cloned()
+        .ok_or_else(|| error("Twitter event not found"))
+}
+
+/// Upstream `_pagination_rest`: the legacy `globalObjects` timeline as
+/// GraphQL-shaped instructions, so the shared timeline parser handles
+/// retweets, quotes and cursors. Missing tweets are skipped like upstream;
+/// a page without a bottom cursor, or without tweets and a keep-going
+/// cursor, ends the timeline.
+pub(super) fn rest_instructions(bytes: &[u8]) -> Result<Vec<Value>> {
+    let data = timeline::document(bytes)?;
+    let invalid = || error("Twitter REST timeline is invalid");
+    let instructions = data
+        .pointer("/timeline/instructions")
+        .and_then(Value::as_array)
+        .ok_or_else(invalid)?;
+    let terminate = json!({"type": "TimelineTerminateTimeline", "direction": "Bottom"});
+    if instructions.is_empty() {
+        return Ok(vec![terminate]);
+    }
+    let tweets = data
+        .pointer("/globalObjects/tweets")
+        .and_then(Value::as_object)
+        .ok_or_else(invalid)?;
+    let users = data
+        .pointer("/globalObjects/users")
+        .and_then(Value::as_object)
+        .ok_or_else(invalid)?;
+    const BOTTOM: [&str; 2] = ["cursor-bottom-", "sq-cursor-bottom"];
+    let mut cursor: Option<(String, bool)> = None;
+    let mut entries: &[Value] = &[];
+    for instruction in instructions {
+        if let Some(added) = instruction.pointer("/addEntries/entries") {
+            entries = added.as_array().map(Vec::as_slice).ok_or_else(invalid)?;
+        } else if let Some(entry) = instruction.pointer("/replaceEntry/entry")
+            && entry
+                .get("entryId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| BOTTOM.iter().any(|prefix| id.starts_with(prefix)))
+            && let Some(value) = entry
+                .pointer("/content/operation/cursor/value")
+                .and_then(Value::as_str)
+        {
+            cursor = Some((value.to_owned(), false));
+        }
+    }
+    let mut ids: Vec<String> = Vec::new();
+    let mut keep_going = false;
+    for entry in entries {
+        let entry_id = entry.get("entryId").and_then(Value::as_str).unwrap_or("");
+        let content = entry.get("content").unwrap_or(&Value::Null);
+        if entry_id.starts_with("tweet-") || entry_id.starts_with("sq-I-t-") {
+            if let Some(id) = content.pointer("/item/content/tweet/id") {
+                ids.push(match id {
+                    Value::String(id) => id.clone(),
+                    other => other.to_string(),
+                });
+            }
+        } else if entry_id.starts_with("homeConversation-") {
+            if let Some(all) = content
+                .pointer("/timelineModule/metadata/conversationMetadata/allTweetIds")
+                .and_then(Value::as_array)
+            {
+                ids.extend(
+                    all.iter()
+                        .rev()
+                        .filter_map(|id| id.as_str().map(str::to_owned)),
+                );
+            }
+        } else if BOTTOM.iter().any(|prefix| entry_id.starts_with(prefix)) {
+            let operation = content.pointer("/operation/cursor").ok_or_else(invalid)?;
+            let stop = operation
+                .get("stopOnEmptyResponse")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            keep_going |= !stop;
+            if let Some(value) = operation.get("value").and_then(Value::as_str) {
+                cursor = Some((value.to_owned(), !stop));
+            }
+        } else if entry_id.starts_with("conversationThread-") {
+            for item in content
+                .pointer("/timelineModule/items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(id) = item
+                    .get("entryId")
+                    .and_then(Value::as_str)
+                    .and_then(|id| id.strip_prefix("tweet-"))
+                {
+                    ids.push(id.to_owned());
+                }
+            }
+        }
+    }
+    let convert = |tweet: &Value| -> Option<Value> {
+        let id = tweet.get("id_str")?.as_str()?;
+        let user_id = tweet.get("user_id_str")?.as_str()?;
+        let user = users.get(user_id)?;
+        Some(json!({
+            "__typename": "Tweet",
+            "rest_id": id,
+            "core": {"user_results": {"result": {
+                "__typename": "User", "rest_id": user_id, "legacy": user,
+            }}},
+            "legacy": tweet,
+        }))
+    };
+    let mut output = Vec::new();
+    for id in &ids {
+        let Some(tweet) = tweets.get(id) else {
+            continue; // deleted
+        };
+        let Some(mut result) = convert(tweet) else {
+            continue;
+        };
+        if let Some(retweet) = tweet
+            .get("retweeted_status_id_str")
+            .and_then(Value::as_str)
+            .and_then(|id| tweets.get(id))
+            .and_then(convert)
+        {
+            result["legacy"]["retweeted_status_result"] = json!({"result": retweet});
+        }
+        if let Some(quoted) = tweet
+            .get("quoted_status_id_str")
+            .and_then(Value::as_str)
+            .and_then(|id| tweets.get(id))
+            .and_then(convert)
+        {
+            result["quoted_status_result"] = json!({"result": quoted});
+        }
+        output.push(json!({
+            "entryId": format!("tweet-{id}"),
+            "content": {
+                "entryType": "TimelineTimelineItem",
+                "itemContent": {"itemType": "TimelineTweet", "tweet_results": {"result": result}},
+            },
+        }));
+    }
+    let more = (!tweets.is_empty() || keep_going)
+        .then_some(cursor)
+        .flatten();
+    let mut instructions = Vec::new();
+    if let Some((value, keep_going)) = more {
+        output.push(json!({
+            "entryId": "cursor-bottom-0",
+            "content": {
+                "entryType": "TimelineTimelineCursor",
+                "cursorType": "Bottom",
+                "value": value,
+                "stopOnEmptyResponse": !keep_going,
+            },
+        }));
+        instructions.push(json!({"type": "TimelineAddEntries", "entries": output}));
+    } else {
+        instructions.push(json!({"type": "TimelineAddEntries", "entries": output}));
+        instructions.push(terminate);
+    }
+    Ok(instructions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +487,7 @@ mod tests {
             Collection::Communities => {
                 json!({"data":{"viewer":{"communities_timeline":{"timeline":{"instructions":instructions}}}}})
             }
+            Collection::Event(_) => unreachable!("REST timeline"),
         }
     }
     fn parse(data: Value, collection: &Collection, pinned: bool) -> Result<Page> {
@@ -268,6 +516,8 @@ mod tests {
                 ("i/communities/42", Collection::Community("42".into())),
                 ("i/communities", Collection::Communities),
                 ("fixture/communities", Collection::Communities),
+                ("i/events/77", Collection::Event("77".into())),
+                ("i/events/77/more", Collection::Event("77".into())),
             ] {
                 let url = Url::parse(&format!("https://{host}/{path}/?s=20#fragment")).unwrap();
                 assert_eq!(input(&url).unwrap(), Some(expected));
@@ -284,6 +534,7 @@ mod tests {
             "i/communities/42/members",
             "fixture/communities/more",
             "bad!name/communities",
+            "i/events",
         ] {
             assert_eq!(
                 input(&Url::parse(&format!("https://x.com/{path}")).unwrap()).unwrap(),
@@ -299,6 +550,8 @@ mod tests {
             "https://x.com/i/communities/042",
             "https://x.com/i/communities/18446744073709551616",
             "https://x.com/i/communities/PRIVATE",
+            "https://x.com/i/events/PRIVATE",
+            "https://x.com/i/events//7",
             "https://user:PRIVATE@x.com/home",
             "https://x.com:444/home",
             "https://x.com.evil/home",

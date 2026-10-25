@@ -1836,6 +1836,17 @@ templates can use `{community_id}` and `{community_name}`; missing values fail
 like other required template fields. Default output directory rules are unchanged.
 Authenticated live community traversal and captures remain unverified.
 
+Native live events (`/i/events/EVENT_ID`, upstream's `event` class) first read
+the event object from the legacy REST `1.1/live_event/1/ID/timeline.json`
+endpoint, then page `2/live_event/timeline/ID.json` (`timeline_id=recap`) with
+upstream's REST parameters. Its `globalObjects` tweets (including retweet and
+quote relations, and `homeConversation`/`conversationThread` entries) go
+through the same media, expansion and archive handling as other collection
+feeds; deleted tweets are skipped and a page without a bottom cursor ends the
+feed. Every post and file carries the `event` keyword (`{event[id]}`,
+`{event[short_title]}`); default paths and archive identity are those of other
+posts. Live verification is outstanding: X may no longer serve these endpoints.
+
 Scoped `"limit"` sets the page size for profile and collection requests (integer
 1–100, default 50), independently of `search-limit`, and forwards to compatibility
 mode only when explicit. Bookmarks tolerate 128 consecutive empty continuations;
