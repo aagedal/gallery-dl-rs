@@ -3,7 +3,8 @@ use std::process::Command;
 
 /// The binary with its default credential cache moved to a private
 /// temporary directory, so tests never read or write the developer's real
-/// `cache.sqlite3`.
+/// `cache.sqlite3`. Some test crates only call it from platform-gated tests.
+#[allow(dead_code)]
 pub fn binary_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
     let cache =
