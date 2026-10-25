@@ -1,6 +1,6 @@
 //! LynxChan imageboards (bbw-chan, kohlchan, endchan), mirroring
 //! gallery_dl/extractor/lynxchan.py through the board JSON API.
-use super::{DIRECTORY, component, digits, host_in, rest};
+use super::{DIRECTORY, component, digits, instance_rest};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::Value;
@@ -38,7 +38,20 @@ instance!(BBWCHAN, "bbw-chan", "BBW-Chan");
 instance!(KOHLCHAN, "kohlchan", "Kohlchan");
 instance!(ENDCHAN, "endchan", "Endchan");
 
+/// Configured `extractor.lynxchan.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "lynxchan",
+    builtin: &[&BBWCHAN, &KOHLCHAN, &ENDCHAN],
+    related: &[],
+    template: &KOHLCHAN,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return &instance.site;
+    }
     match category {
         "bbw-chan" => &BBWCHAN,
         "kohlchan" => &KOHLCHAN,
@@ -56,6 +69,9 @@ fn hosts(category: &str) -> &'static [&'static str] {
 
 /// Upstream instance root; `endchan` has none and uses the matched origin.
 fn root(category: &str, url: &Url) -> String {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return instance.root.into();
+    }
     match category {
         "bbw-chan" => "https://bbw-chan.link".into(),
         "kohlchan" => "https://kohlchan.net".into(),
@@ -70,10 +86,7 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !host_in(url, hosts(category)) {
-        return None;
-    }
-    let (board, tail) = component(rest(url))?;
+    let (board, tail) = component(instance_rest(&FAMILY, category, url, || hosts(category))?)?;
     if let Some((thread, _)) = tail.strip_prefix("/res/").and_then(digits) {
         return Some(Target::Thread {
             board,
@@ -197,6 +210,32 @@ mod tests {
     use super::*;
     use crate::sites::testing::{http, json, keywords, media, serve};
     use serde_json::json;
+
+    #[test]
+    fn routes_configured_instances() {
+        crate::sites::instances::define(
+            "lynxchan",
+            "lynxchan-configured",
+            json!({"root": "https://lynx.test:8443", "pattern": r"lynx\.test:8443|lynx-alias\.test"}),
+        );
+        let find = |raw: &str| crate::sites::find(&Url::parse(raw).unwrap()).map(|s| s.category);
+        assert_eq!(
+            find("https://lynx-alias.test/b/res/5.html"),
+            Some("lynxchan-configured")
+        );
+        assert_eq!(
+            find("https://lynx.test:8443/b/catalog.html"),
+            Some("lynxchan-configured")
+        );
+        assert_eq!(find("https://lynx.test/b/res/5.html"), None);
+        let url = Url::parse("https://lynx.test:8443/b/").unwrap();
+        assert_eq!(root("lynxchan-configured", &url), "https://lynx.test:8443");
+        assert_eq!(site("lynxchan-configured").category, "lynxchan-configured");
+        assert_eq!(
+            target("lynxchan-configured", &url),
+            Some(Target::Board { board: "b".into() })
+        );
+    }
 
     #[test]
     fn classifies_urls() {
