@@ -1888,3 +1888,8 @@ category), so upstream class coverage can be diffed mechanically. Diffing
 against upstream 1.32.17 leaves only imgur `me` and twitter `notifications`
 unported among the dedicated extractors. Reddit share links now queue their
 submission as a `redirect` child like upstream.
+
+**Implemented Twitter notifications:** `/notifications` and `/i/timeline`
+(upstream `notifications`) page the session's REST `device_follow` timeline
+through the shared `globalObjects` conversion, failing before any request
+without `auth_token`/`ct0` cookies. Live verification is outstanding.

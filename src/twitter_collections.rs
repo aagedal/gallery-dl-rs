@@ -13,6 +13,9 @@ pub(super) enum Collection {
     Communities,
     /// `/i/events/ID`: upstream `TwitterEventExtractor`'s REST live event.
     Event(String),
+    /// `/notifications`, `/i/timeline`: upstream `TwitterNotificationsExtractor`'s
+    /// REST `device_follow` timeline, which needs a logged-in session.
+    Notifications,
 }
 
 pub fn is_collection_url(url: &Url) -> bool {
@@ -46,6 +49,15 @@ pub(super) fn input(url: &Url) -> Result<Option<Collection>> {
         "/home" | "/home/following" => Some(Collection::HomeLatest),
         "/home/foryou" | "/home/for-you" | "/home/for_you" | "/home/for%20you" => {
             Some(Collection::Home)
+        }
+        // Upstream `/(?:notifications|i/timeline())`, unanchored; whole
+        // segments only, so profiles such as `/notificationsfan` stay profiles.
+        _ if ["/notifications", "/i/timeline"].iter().any(|prefix| {
+            path.strip_prefix(prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        }) =>
+        {
+            Some(Collection::Notifications)
         }
         _ => {
             if let Some(rest) = path.strip_prefix("/i/events/") {
@@ -105,7 +117,7 @@ pub(super) fn parse_collection_posts_with_text(
     pinned: bool,
     text_tweets: bool,
 ) -> Result<Page> {
-    if matches!(collection, Collection::Event(_)) {
+    if matches!(collection, Collection::Event(_) | Collection::Notifications) {
         let instructions = rest_instructions(bytes)?;
         return timeline::parse_instructions(
             &instructions,
@@ -117,7 +129,7 @@ pub(super) fn parse_collection_posts_with_text(
     }
     let data = timeline::document(bytes)?;
     let path = match collection {
-        Collection::Event(_) => unreachable!("REST timeline"),
+        Collection::Event(_) | Collection::Notifications => unreachable!("REST timeline"),
         Collection::Bookmarks => "/data/bookmark_timeline_v2/timeline/instructions",
         Collection::Home | Collection::HomeLatest => "/data/home/home_timeline_urt/instructions",
         Collection::Communities => "/data/viewer/communities_timeline/timeline/instructions",
@@ -487,7 +499,7 @@ mod tests {
             Collection::Communities => {
                 json!({"data":{"viewer":{"communities_timeline":{"timeline":{"instructions":instructions}}}}})
             }
-            Collection::Event(_) => unreachable!("REST timeline"),
+            Collection::Event(_) | Collection::Notifications => unreachable!("REST timeline"),
         }
     }
     fn parse(data: Value, collection: &Collection, pinned: bool) -> Result<Page> {
@@ -518,6 +530,9 @@ mod tests {
                 ("fixture/communities", Collection::Communities),
                 ("i/events/77", Collection::Event("77".into())),
                 ("i/events/77/more", Collection::Event("77".into())),
+                ("notifications", Collection::Notifications),
+                ("notifications/mentions", Collection::Notifications),
+                ("i/timeline", Collection::Notifications),
             ] {
                 let url = Url::parse(&format!("https://{host}/{path}/?s=20#fragment")).unwrap();
                 assert_eq!(input(&url).unwrap(), Some(expected));
@@ -535,6 +550,8 @@ mod tests {
             "fixture/communities/more",
             "bad!name/communities",
             "i/events",
+            "notificationsfan",
+            "i/timelines",
         ] {
             assert_eq!(
                 input(&Url::parse(&format!("https://x.com/{path}")).unwrap()).unwrap(),

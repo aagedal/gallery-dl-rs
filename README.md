@@ -1851,6 +1851,17 @@ feed. Every post and file carries the `event` keyword (`{event[id]}`,
 `{event[short_title]}`); default paths and archive identity are those of other
 posts. Live verification is outstanding: X may no longer serve these endpoints.
 
+Native notifications (`/notifications[/...]` and `/i/timeline`, upstream's
+`notifications` class) page the legacy REST
+`2/notifications/device_follow.json` timeline (the posts of accounts whose
+notifications you enabled) with upstream's REST parameters, `count` set by
+`"limit"` (default 50) and the bottom cursor. It reads the logged-in session's
+own feed, so it fails before any request unless `auth_token`/`ct0` cookies are
+available; requests are signed like other authenticated collection routes. The
+`globalObjects` posts go through the same conversion, expansion, default paths
+and archive identity as live events and other feeds. Live verification is
+outstanding.
+
 Scoped `"limit"` sets the page size for profile and collection requests (integer
 1–100, default 50), independently of `search-limit`, and forwards to compatibility
 mode only when explicit. Bookmarks tolerate 128 consecutive empty continuations;
