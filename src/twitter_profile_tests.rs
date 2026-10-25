@@ -1956,6 +1956,9 @@ fn feed_page(kind: &collections::Collection, tweets: Vec<Value>, cursor: Option<
         collections::Collection::Communities => {
             json!({"data":{"viewer":{"communities_timeline":{"timeline":{"instructions":instructions}}}}})
         }
+        collections::Collection::Event(_) | collections::Collection::Notifications => {
+            unreachable!("REST timeline")
+        }
     }
 }
 fn other_author(mut post: Value) -> Value {
@@ -2031,7 +2034,12 @@ async fn feed_operations_are_lazy_cursor_bound_and_keep_original_media_identity(
             Collection::Home => {
                 json!({"count":7,"includePromotedContent":false,"latestControlAvailable":true,"withCommunity":true})
             }
-            Collection::Community(_) | Collection::Communities => unreachable!(),
+            Collection::Community(_)
+            | Collection::Communities
+            | Collection::Event(_)
+            | Collection::Notifications => {
+                unreachable!()
+            }
         };
         assert_eq!(variables(&urls[0]), expected);
         expected["cursor"] = "opaque+/=?".into();
@@ -6412,4 +6420,218 @@ async fn guests_read_a_profiles_top_posts_through_user_tweets() {
             .to_ascii_lowercase()
             .contains("x-guest-token: 9\r\n")
     );
+}
+
+#[tokio::test]
+async fn events_load_the_live_event_then_page_its_rest_timeline() {
+    use crate::event::ExtractionEvent;
+    let legacy = |id: &str| {
+        let mut tweet = tweet(id)["legacy"].clone();
+        tweet["user_id_str"] = "42".into();
+        tweet
+    };
+    let users = json!({"42": {"id_str": "42", "screen_name": "fixture"}});
+    let first = json!({
+        "globalObjects": {"tweets": {"100": legacy("100"), "101": legacy("101")}, "users": users},
+        "timeline": {"instructions": [{"addEntries": {"entries": [
+            {"entryId": "tweet-100", "content": {"item": {"content": {"tweet": {"id": "100"}}}}},
+            {"entryId": "tweet-999", "content": {"item": {"content": {"tweet": {"id": "999"}}}}},
+            {"entryId": "sq-I-t-101", "content": {"item": {"content": {"tweet": {"id": "101"}}}}},
+            {"entryId": "cursor-bottom-0", "content": {"operation": {"cursor": {"value": "next+/="}}}},
+        ]}}]},
+    });
+    let second =
+        json!({"globalObjects": {"tweets": {}, "users": {}}, "timeline": {"instructions": []}});
+    let server = Server::new(vec![
+        Response::json(json!({"twitter_objects": {"live_events": {"7": {
+            "id": "7", "short_title": "Launch", "title": "Rocket launch"}}}})),
+        Response::json(first),
+        Response::json(second),
+    ]);
+    let native = extractor(Duration::from_secs(3)).await;
+    let events: Vec<_> = native
+        .feed_events(
+            collections::Collection::Event("7".into()),
+            server.base.clone(),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        event_shape(&events),
+        vec![
+            ('P', "100".into(), 0),
+            ('M', "100".into(), 1),
+            ('E', String::new(), 0),
+            ('P', "101".into(), 0),
+            ('M', "101".into(), 1),
+            ('E', String::new(), 0),
+        ]
+    );
+    for event in &events {
+        let metadata = match event {
+            ExtractionEvent::Post(post) => post.metadata.as_ref().unwrap(),
+            ExtractionEvent::Media(media) => media.metadata.as_ref().unwrap(),
+            _ => continue,
+        };
+        let extra = metadata.extra_keywords.as_ref().unwrap();
+        assert_eq!(extra["event"]["short_title"], "Launch");
+    }
+    let ExtractionEvent::Media(media) = &events[1] else {
+        unreachable!()
+    };
+    // Archive identity is the ordinary tweet/file identity.
+    let direct = parse_response(
+        &serde_json::to_vec(&post_response(tweet("100"))).unwrap(),
+        "100",
+    )
+    .unwrap();
+    assert_eq!(media.archive_key(), direct[0].archive_key());
+    let urls = server.urls();
+    assert_eq!(urls.len(), 3);
+    let query = |url: &Url, key: &str| {
+        url.query_pairs()
+            .filter(|(name, _)| name == key)
+            .map(|(_, value)| value.into_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(urls[0].path(), "/i/api/1.1/live_event/1/7/timeline.json");
+    assert_eq!(query(&urls[0], "count"), ["0"]);
+    assert_eq!(query(&urls[0], "tweet_mode"), ["extended"]);
+    assert_eq!(urls[1].path(), "/i/api/2/live_event/timeline/7.json");
+    assert_eq!(query(&urls[1], "timeline_id"), ["recap"]);
+    assert_eq!(query(&urls[1], "count"), ["20"]);
+    assert!(query(&urls[1], "cursor").is_empty());
+    assert_eq!(query(&urls[2], "cursor"), ["next+/="]);
+}
+
+#[test]
+fn rest_timelines_convert_retweets_quotes_and_stop_without_a_cursor() {
+    let tweet = |id: &str, user: &str| json!({"id_str": id, "user_id_str": user, "full_text": id});
+    let mut retweet = tweet("200", "42");
+    retweet["retweeted_status_id_str"] = "201".into();
+    retweet["quoted_status_id_str"] = "202".into();
+    let body = json!({
+        "globalObjects": {
+            "tweets": {"200": retweet, "201": tweet("201", "43"), "202": tweet("202", "44")},
+            "users": {"42": {"screen_name": "a"}, "43": {"screen_name": "b"}, "44": {"screen_name": "c"}},
+        },
+        "timeline": {"instructions": [{"addEntries": {"entries": [
+            {"entryId": "homeConversation-1", "content": {"timelineModule": {"metadata":
+                {"conversationMetadata": {"allTweetIds": ["201", "200"]}}}}},
+        ]}}]},
+    });
+    let instructions = collections::rest_instructions(&serde_json::to_vec(&body).unwrap()).unwrap();
+    let entries = instructions[0]["entries"].as_array().unwrap();
+    let result = |at: usize| &entries[at]["content"]["itemContent"]["tweet_results"]["result"];
+    // `allTweetIds` is reversed like upstream.
+    assert_eq!(result(0)["rest_id"], "200");
+    assert_eq!(
+        result(0)["legacy"]["retweeted_status_result"]["result"]["core"]["user_results"]["result"]
+            ["legacy"]["screen_name"],
+        "b"
+    );
+    assert_eq!(
+        result(0)["quoted_status_result"]["result"]["rest_id"],
+        "202"
+    );
+    assert_eq!(result(1)["rest_id"], "201");
+    assert_eq!(
+        instructions[1],
+        json!({"type": "TimelineTerminateTimeline", "direction": "Bottom"})
+    );
+    assert!(collections::rest_instructions(b"{}").is_err());
+}
+
+#[tokio::test]
+async fn notifications_page_the_rest_device_follow_timeline_with_a_session() {
+    use crate::event::ExtractionEvent;
+    let legacy = |id: &str| {
+        let mut tweet = tweet(id)["legacy"].clone();
+        tweet["user_id_str"] = "42".into();
+        tweet
+    };
+    let users = json!({"42": {"id_str": "42", "screen_name": "fixture"}});
+    let first = json!({
+        "globalObjects": {"tweets": {"300": legacy("300")}, "users": users},
+        "timeline": {"instructions": [{"addEntries": {"entries": [
+            {"entryId": "tweet-300", "content": {"item": {"content": {"tweet": {"id": "300"}}}}},
+            {"entryId": "cursor-bottom-0", "content": {"operation": {"cursor": {"value": "n+/="}}}},
+        ]}}]},
+    });
+    let second = json!({
+        "globalObjects": {"tweets": {"301": legacy("301")}, "users": users},
+        "timeline": {"instructions": [{"addEntries": {"entries": [
+            {"entryId": "tweet-301", "content": {"item": {"content": {"tweet": {"id": "301"}}}}},
+        ]}}]},
+    });
+    let server = Server::new(vec![Response::json(first), Response::json(second)]);
+    let mut native = extractor(Duration::from_secs(3)).await;
+    native.timeline_options.limit = 9;
+    let events: Vec<_> = native
+        .feed_events(collections::Collection::Notifications, server.base.clone())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        event_shape(&events),
+        vec![
+            ('P', "300".into(), 0),
+            ('M', "300".into(), 1),
+            ('E', String::new(), 0),
+            ('P', "301".into(), 0),
+            ('M', "301".into(), 1),
+            ('E', String::new(), 0),
+        ]
+    );
+    let ExtractionEvent::Media(media) = &events[1] else {
+        unreachable!()
+    };
+    // Files keep the ordinary tweet identity, filename and keywords.
+    let direct = parse_response(
+        &serde_json::to_vec(&post_response(tweet("300"))).unwrap(),
+        "300",
+    )
+    .unwrap();
+    assert_eq!(media.archive_key(), direct[0].archive_key());
+    assert_eq!(media.filename, direct[0].filename);
+    assert_eq!(media.url, direct[0].url);
+    let metadata = media.metadata.as_ref().unwrap();
+    assert_eq!(metadata.username.as_deref(), Some("fixture"));
+    let urls = server.urls();
+    assert_eq!(urls.len(), 2);
+    let query = |url: &Url, key: &str| {
+        url.query_pairs()
+            .filter(|(name, _)| name == key)
+            .map(|(_, value)| value.into_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(urls[0].path(), "/i/api/2/notifications/device_follow.json");
+    assert_eq!(query(&urls[0], "count"), ["9"]);
+    assert_eq!(query(&urls[0], "tweet_mode"), ["extended"]);
+    assert!(query(&urls[0], "cursor").is_empty());
+    assert_eq!(query(&urls[1], "cursor"), ["n+/="]);
+    for request in server.requests.lock().unwrap().iter() {
+        let lower = request.to_ascii_lowercase();
+        assert!(lower.contains("authorization: bearer "));
+        assert!(lower.contains("x-twitter-auth-type: oauth2session\r\n"));
+        assert!(lower.contains("x-csrf-token: csrf\r\n"));
+        assert!(lower.contains("auth_token=session"));
+        assert!(lower.contains("x-client-transaction-id: "));
+        assert!(!lower.contains("x-guest-token"));
+    }
+}
+
+#[tokio::test]
+async fn notifications_require_a_session_before_any_request() {
+    let server = Server::new(vec![Response::json(json!({"guest_token": "9"}))]);
+    let native = Twitter::new(None, Duration::from_secs(3)).await.unwrap();
+    let error = native
+        .feed_events(collections::Collection::Notifications, server.base.clone())
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("logged-in session"), "{error}");
+    assert!(server.urls().is_empty());
 }

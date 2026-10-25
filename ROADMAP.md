@@ -113,6 +113,10 @@ shared extraction interface that emits media, post metadata, and child URLs.
   consumer pauses, and cancellation. Authenticated live collection traversal,
   real fixtures, bookmark-specific metadata, membership/follow traversal,
   and other routes/options remain unfinished.
+  **Implemented experimental live events:** `/i/events/ID` (upstream `event`)
+  loads the event object and pages the legacy REST live-event timeline,
+  converting its `globalObjects` tweets for the shared timeline parser; posts
+  carry the `event` keyword. Live verification remains outstanding.
   **Implemented experimental community feeds:** explicit `/i/communities/ID`
   media timelines and the session's followed-community feed at `/i/communities`
   or `/USER/communities` share lazy traversal, limits, media options, expansion,
@@ -447,6 +451,8 @@ synthetic parser and local transport tests. Anonymous upstream public album and
 photo checks returned logged-out shells; accepted object nesting and successful
 live authenticated traversal remain unverified. Empty albums, more response
 variants, profile album listings, and upstream jump heuristics remain.
+Profile `NAME/info` (upstream `info`) now emits the parsed profile object as a
+file-less post; upstream's HTML biography fallback is not ported.
 
 **Implemented file selection:** `--range` and scoped native `file-range` strings
 or lists select one-based media positions using comma unions, inclusive hyphen
@@ -960,7 +966,10 @@ fields beyond the converted legacy media, and authenticated live verification
 of dashboard/private blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
-works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
+works via the App API with a `refresh-token` (upstream `work`, including its
+legacy image-URL and `touch.`/`phixiv.net` forms), `me` (`pixiv.me` redirect
+resolved, then a queued user) and `unlisted` (web AJAX `illust/unlisted`,
+`id_unlisted` keyword, real-ID archives), including lazy ugoira frame ZIPs
 and `ugoira: "original"` individual frames with ordered ZIP member names/delays
 in metadata (`ugoira: false` skips them). Original URL derivation, JPG/PNG/GIF
 probes, empty frame lists, file-only frame indices and exact option truthiness
@@ -1136,7 +1145,9 @@ avatar, background, gallery, scraps, journal, status, favorite), `gallery`,
 `folder` (with subfolder child jobs), `scraps` and `gallery-search` (Eclipse
 API with front-page CSRF token and session cookies), `favorite`, `collection`,
 `journal`, `status`, `avatar`, `background`, `tag`, `search` (logged-out HTML
-results) and `stash` classes over the OAuth2 API (client credentials,
+results), `stash`, `following` (watched users queued as profile children),
+`watch` and `watch-posts` (private-token feeds of watched users; journals
+unpacked like upstream) classes over the OAuth2 API (client credentials,
 overridable `client-id`/`client-secret`, and `refresh-token` for upstream's
 private-token switching; the token `oauth:deviantart` cached is used when the
 setting is unset or `"cache"`, and rotated refresh tokens are written back to
@@ -1149,7 +1160,7 @@ formats; literature, journals and statuses are written as HTML or text per
 UUID (plus file kind for videos/flash/journal text; user+index for avatars),
 not upstream's per-class `archive_fmt`. Remaining: login/cookies, groups
 (`group-*` subcategories), premium/watcher-locked content and
-`auto-watch`/`auto-unwatch`, `watch`/`watch-posts`/`following`, additional
+`auto-watch`/`auto-unwatch`, additional
 media of multi-image deviations, tiptap literature markup (falls back to the
 excerpt), `comments`/`comments-avatars`, `extra` stash links, `previews`,
 `folders`, `jwt`, `pagination`/`wait-min`, CloudFront block waits, persisting
@@ -1869,3 +1880,23 @@ different concrete type. Global default headers cannot replace the required
 scoped request boundary. Do not discard inline manifests or flatten cookies
 to make a preview adapter appear complete. No companion dependency or runtime
 delegation is enabled yet; gallery-owned integration/publication tests remain.
+
+**Implemented subcategory listing for dedicated extractors:** `--list-extractors`
+now prints `category: sub1, sub2` for the dedicated native extractors as well,
+from per-module `SUBCATEGORIES` lists (booru dialects and image hosts per
+category), so upstream class coverage can be diffed mechanically. Diffing
+against upstream 1.32.17 leaves only imgur `me` and twitter `notifications`
+unported among the dedicated extractors. Reddit share links now queue their
+submission as a `redirect` child like upstream.
+
+**Implemented Twitter notifications:** `/notifications` and `/i/timeline`
+(upstream `notifications`) page the session's REST `device_follow` timeline
+through the shared `globalObjects` conversion, failing before any request
+without `auth_token`/`ct0` cookies. Live verification is outstanding.
+
+**Implemented Imgur `me`:** `/user/me[/posts][/hidden]` pages the session's
+`post/v1/accounts/me` posts or hidden albums with the imgur.com cookies
+(`accesstoken` required, checked before any request) and queues each post
+like the other listings. With Twitter `notifications`, every upstream
+1.32.17 dedicated-extractor class is now listed natively. Live verification
+is outstanding.

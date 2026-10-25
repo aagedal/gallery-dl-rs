@@ -165,6 +165,20 @@ static RELATED_BOARD: Route = Route::new(
     BOARD_ARCHIVE,
 );
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "allpins",
+    "board",
+    "created",
+    "pin",
+    "pinit",
+    "related-board",
+    "related-pin",
+    "search",
+    "section",
+    "user",
+];
+
 /// Pin IDs (numeric, or upstream's alphanumeric form).
 pub fn valid_id(id: &str) -> bool {
     (1..=64).contains(&id.len())

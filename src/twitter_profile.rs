@@ -42,6 +42,9 @@ struct State {
     budget: Duration,
     /// A guest read only the profile's best posts; the rest needs a session.
     guest_partial: bool,
+    /// Source keywords shared by every post (upstream `metadata()`, e.g.
+    /// an event's `event` object), loaded before the first page.
+    extra: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
 }
 
 impl Twitter {
@@ -496,6 +499,7 @@ impl Twitter {
             done: false,
             budget: self.timeout,
             guest_partial: false,
+            extra: None,
         };
         stream::unfold(state, move |mut state| async move {
             loop {
@@ -552,6 +556,14 @@ impl Twitter {
                 .await?
             {
                 Some(mut media) => {
+                    if let Some(extra) = &state.extra {
+                        media.metadata.extra_keywords = Some(extra.clone());
+                        for item in &mut media.media {
+                            if let Some(metadata) = item.metadata.as_mut() {
+                                metadata.extra_keywords = Some(extra.clone());
+                            }
+                        }
+                    }
                     if matches!(
                         &state.source,
                         Source::Feed(
@@ -801,6 +813,24 @@ impl Twitter {
                 page
             }
             Source::Feed(kind) => {
+                if let collections::Collection::Event(id) = kind
+                    && state.extra.is_none()
+                {
+                    // Upstream `TwitterEventExtractor.metadata`.
+                    let target = collections::rest_endpoint(
+                        &state.base,
+                        &format!("1.1/live_event/1/{id}/timeline.json"),
+                        &[("count", "0"), ("urt", "true")],
+                    )?;
+                    self.ensure_transaction_at("", &target).await?;
+                    let body = self.fetch(&target, "", true).await?;
+                    let event = collections::parse_live_event(&body, id)?;
+                    state.extra = Some(std::sync::Arc::new(serde_json::Map::from_iter([(
+                        "event".to_owned(),
+                        event,
+                    )])));
+                    return Ok(());
+                }
                 let target = feed_endpoint(
                     &state.base,
                     kind,
@@ -808,6 +838,15 @@ impl Twitter {
                     self.timeline_options.limit,
                     self.text_tweets,
                 )?;
+                if matches!(kind, collections::Collection::Notifications)
+                    && !self.has_session_for(&target)
+                {
+                    // Guests cannot read notifications; fail before any request.
+                    return Err(error(
+                        "Twitter notifications require a logged-in session; pass x.com \
+                         auth_token and ct0 cookies with --cookies",
+                    ));
+                }
                 self.ensure_transaction_at("", &target).await?;
                 let body = self.fetch(&target, "", true).await?;
                 let page = if self.text_tweets {
@@ -1291,8 +1330,37 @@ fn feed_endpoint(
 ) -> Result<Url> {
     use collections::Collection;
     validate_limit(limit)?;
+    if let Collection::Event(id) = kind {
+        // Upstream `live_event_timeline` over the legacy REST API.
+        if !valid_id(id) {
+            return Err(error("Twitter event identifier invalid"));
+        }
+        let mut extra = vec![
+            ("timeline_id", "recap"),
+            ("urt", "true"),
+            ("get_annotations", "true"),
+        ];
+        if let Some(cursor) = cursor {
+            extra.push(("cursor", cursor));
+        }
+        return collections::rest_endpoint(
+            base,
+            &format!("2/live_event/timeline/{id}.json"),
+            &extra,
+        );
+    }
+    if let Collection::Notifications = kind {
+        // Upstream `notifications_devicefollow`: `count` is the `limit` option.
+        let count = limit.to_string();
+        let mut extra = vec![("count", count.as_str())];
+        if let Some(cursor) = cursor {
+            extra.push(("cursor", cursor));
+        }
+        return collections::rest_endpoint(base, "2/notifications/device_follow.json", &extra);
+    }
     let mut variables = serde_json::json!({"count":limit});
     let operation = match kind {
+        Collection::Event(_) | Collection::Notifications => unreachable!("REST timeline"),
         Collection::Bookmarks => {
             variables["includePromotedContent"] = false.into();
             "pLtjrO4ubNh996M_Cubwsg/Bookmarks"

@@ -69,6 +69,16 @@ static UPLOADS: Route = Route::new(
 /// Views of upstream's `WallhavenUserExtractor` dispatcher.
 const USER_VIEWS: &[&str] = &["uploads", "collections"];
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "collection",
+    "collections",
+    "image",
+    "search",
+    "uploads",
+    "user",
+];
+
 /// Wallpaper IDs such as `94x38z`.
 pub fn valid_id(id: &str) -> bool {
     (1..=16).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())

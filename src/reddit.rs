@@ -77,6 +77,16 @@ const MAX_QUERY_PARAMS: usize = 32;
 /// Upstream `{id}{num:? //>02} {title|link_title:[:220]}.{extension}`; the
 /// template engine has no `[:N]` format specifier, so accessor slices are used.
 const FILENAME: &str = "{id}{num:? //>02} {title[:220]|link_title[:220]}.{extension}";
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "home",
+    "image",
+    "redirect",
+    "submission",
+    "subreddit",
+    "user",
+];
+
 pub static SUBMISSION: Route = Route::new(
     "submission",
     FILENAME,
@@ -1930,7 +1940,12 @@ impl Reddit {
                     ))
                 })
                 .map(move |result| match result {
-                    Ok(state) => self.drive(state),
+                    // Upstream `RedditRedirectExtractor` queues the resolved
+                    // submission as a child of its `redirect` class.
+                    Ok(state) => crate::event::child_job(
+                        ChildMetadata::from_raw("reddit", "redirect", &Map::new()),
+                        move || self.drive(state),
+                    ),
                     Err(e) => stream::once(async move { Err(e) }).boxed(),
                 })
                 .flatten()
@@ -3236,6 +3251,16 @@ mod tests {
             .collect()
             .await;
         assert_eq!(keywords(files(&events)[0])["id"], "abc12");
+        // Files keep the queued submission class; the queue is `redirect`.
+        assert_eq!(keywords(files(&events)[0])["subcategory"], "submission");
+        let scopes: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                Ok(ExtractionEvent::BeginChild(scope)) => Some(scope.metadata.subcategory()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(scopes, ["redirect"]);
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /r/pics/s/abc456GHIJ "));
         assert!(requests[1].starts_with("GET /comments/abc12/.json?"));

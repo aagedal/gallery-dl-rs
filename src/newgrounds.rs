@@ -80,6 +80,20 @@ static SEARCH: Route = Route::new(
 /// Views of upstream's `NewgroundsUserExtractor` dispatcher.
 const USER_VIEWS: &[&str] = &["art", "audio", "games", "movies"];
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "art",
+    "audio",
+    "favorite",
+    "following",
+    "games",
+    "image",
+    "media",
+    "movies",
+    "search",
+    "user",
+];
+
 /// Media IDs are `INDEX_NUM`, prefixed `a` for audio and `p` for portal
 /// movies/games (art keeps its original unprefixed identity).
 pub fn valid_id(id: &str) -> bool {

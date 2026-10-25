@@ -89,6 +89,19 @@ static SUBMISSIONS: Route = Route::new("submissions", FILENAME, DIRECTORY, "{id}
 /// Views of upstream's `FuraffinityUserExtractor` dispatcher.
 const USER_VIEWS: &[&str] = &["gallery", "scraps", "favorite"];
 
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "favorite",
+    "folder",
+    "following",
+    "gallery",
+    "post",
+    "scraps",
+    "search",
+    "submissions",
+    "user",
+];
+
 /// Submission IDs are decimal.
 pub fn valid_id(id: &str) -> bool {
     (1..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())

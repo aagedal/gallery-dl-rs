@@ -39,6 +39,9 @@ pub enum Target {
     },
 }
 
+/// Upstream `pixiv-novel` extractor classes supported natively.
+pub const SUBCATEGORIES: &[&str] = &["bookmark", "novel", "series", "user"];
+
 pub(super) fn is_route(url: &Url) -> bool {
     let segments = super::segments(url);
     let segments = segments.strip_prefix(&["en"]).unwrap_or(&segments);

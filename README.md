@@ -28,6 +28,10 @@ cargo build --release --locked
 ./target/release/gallery-dl-rs -C cookies.txt 'https://www.facebook.com/photo/?fbid=PHOTO_ID'
 ./target/release/gallery-dl-rs -C cookies.txt 'https://x.com/USERNAME/status/POST_ID'
 
+# List native extractors with the upstream classes (subcategories) each
+# supports, one `category: sub1, sub2` line per site (`--list-modules`: names only)
+./target/release/gallery-dl-rs --list-extractors
+
 # Native direct media downloads need no Python or gallery-dl installation
 ./target/release/gallery-dl-rs --jobs 4 -d downloads 'https://example.com/photo.jpg'
 
@@ -182,7 +186,10 @@ and deadlines. Page requests send upstream's navigation headers
 [Facebook fixture notes](tests/fixtures/facebook/README.md).
 
 Profile routes mirror upstream: `facebook.com/NAME` and `NAME/photos[_by]`
-read the profile's photos, `NAME/avatar` its profile picture, and
+read the profile's photos, `NAME/avatar` its profile picture, `NAME/info`
+(upstream `info`) one file-less post carrying the profile object (`id`,
+`user_pfbid`, `username`, `biography`, flattened `profile_tabs`, `set_id`, ...)
+for `-K`/`-j`, filters and metadata postprocessors, and
 `NAME/photos_albums[/TITLE]` each album (or the one titled `TITLE`), paging the
 album list through `ProfileCometAppCollectionAlbumsRendererPaginationQuery`. `profile.php?id=ID` (with `sk=photos` or
 `sk=photos_albums`) and `people/NAME/ID/...` are accepted too. Profile pages
@@ -252,9 +259,15 @@ listing classes page lazily through the `3` API with the `Client-ID` header
 album (`/a/ID`) or image child job: `user` (`/user/NAME[/posts|/submitted]`),
 `favorite` (`/user/NAME/favorites`), `favorite-folder`
 (`/user/NAME/favorites/folder/ID`, `post/v1`-style paging), `subreddit`
-(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). The
-cookie-only `/user/me` listings are not supported. Compatibility mode sends
-Imgur URLs to the backend.
+(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). Your own
+posts (`me`: `/user/me[/posts]`, or the hidden albums with `/hidden`) page
+`post/v1/accounts/me/all_posts` (or `hidden_albums`) from page 1, newest
+first, like upstream; these requests carry the imgur.com session cookies from
+`--cookies`/`--cookies-from-browser` and an `Origin` header instead of
+`Client-ID`, and fail before any request unless an `accesstoken` cookie is
+available (upstream only logs an error). No OAuth flow is involved; other
+Imgur routes never send cookies. Compatibility mode sends Imgur URLs to the
+backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
@@ -947,7 +960,15 @@ downloads.
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv`, `pixiv-novel` or `deviantart`
 category, never echoed) or one cached by `oauth:pixiv`; without it selected Pixiv jobs fail before any network access,
-except for public Pixiv Sketch feeds and the Pixivision article request described below.
+except for public Pixiv Sketch feeds, the Pixivision article request described below,
+`pixiv.me/NAME` links (resolved by their redirect, then queued as an upstream
+`me` child dispatching the user profile, which needs the token) and unlisted
+works (`artworks/unlisted/KEY`, read from the web AJAX API with the `pixiv.net`
+cookies like upstream's `unlisted` class; files keep the real work ID for
+archives and add `id_unlisted`). Like upstream's `work` class, legacy image
+URLs (`i.pximg.net/.../img-*/img/YYYY/MM/DD/hh/mm/ss/ID_p0.png`,
+`iN.pixiv.net`, `imgN.pixiv.net/img/NAME/ID`, `pixiv.net/i/ID`) and the
+`touch.pixiv.net`/`phixiv.net` hosts resolve to their artwork.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
 access token cached in memory (refreshed once on `invalid_grant`). Supported:
 `www.pixiv.net/[en/]artworks/ID`, `member_illust.php?illust_id=ID` (App API
@@ -1314,7 +1335,10 @@ deviations (`USER/art|journal/SLUG-ID`, `view/ID`, `fav.me/dID`), user profiles
 subfolders as child jobs), scraps and gallery searches (web "Eclipse"
 endpoints with a CSRF token and session cookies), favourites, collections,
 journals, status updates, avatars, banners, tags, searches (logged-out HTML
-results) and stash links; legacy `USER.deviantart.com` and `fxdeviantart.com`
+results), stash links, watched users (`USER/about#watching`, each queued as a
+`following` child dispatching the profile) and, with a refresh token, the
+account's watch feeds (`watch/deviations` and `watch/posts`, upstream's `watch`
+and `watch-posts`); legacy `USER.deviantart.com` and `fxdeviantart.com`
 hosts are normalized. Listings page lazily (offset or cursor, capped at 200
 pages); web page requests are spaced two seconds apart like upstream. Files use
 upstream's `content` handling: preview URLs with `quality`/`intermediary`
@@ -1821,6 +1845,28 @@ stable archive entry. Compatibility rows select this scope through upstream
 templates can use `{community_id}` and `{community_name}`; missing values fail
 like other required template fields. Default output directory rules are unchanged.
 Authenticated live community traversal and captures remain unverified.
+
+Native live events (`/i/events/EVENT_ID`, upstream's `event` class) first read
+the event object from the legacy REST `1.1/live_event/1/ID/timeline.json`
+endpoint, then page `2/live_event/timeline/ID.json` (`timeline_id=recap`) with
+upstream's REST parameters. Its `globalObjects` tweets (including retweet and
+quote relations, and `homeConversation`/`conversationThread` entries) go
+through the same media, expansion and archive handling as other collection
+feeds; deleted tweets are skipped and a page without a bottom cursor ends the
+feed. Every post and file carries the `event` keyword (`{event[id]}`,
+`{event[short_title]}`); default paths and archive identity are those of other
+posts. Live verification is outstanding: X may no longer serve these endpoints.
+
+Native notifications (`/notifications[/...]` and `/i/timeline`, upstream's
+`notifications` class) page the legacy REST
+`2/notifications/device_follow.json` timeline (the posts of accounts whose
+notifications you enabled) with upstream's REST parameters, `count` set by
+`"limit"` (default 50) and the bottom cursor. It reads the logged-in session's
+own feed, so it fails before any request unless `auth_token`/`ct0` cookies are
+available; requests are signed like other authenticated collection routes. The
+`globalObjects` posts go through the same conversion, expansion, default paths
+and archive identity as live events and other feeds. Live verification is
+outstanding.
 
 Scoped `"limit"` sets the page size for profile and collection requests (integer
 1–100, default 50), independently of `search-limit`, and forwards to compatibility

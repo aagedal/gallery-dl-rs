@@ -61,6 +61,18 @@ const RESERVED: [&str; 16] = [
 
 const FILENAME: &str = "{id}.{extension}";
 const USER_DIRECTORY: &[&str] = &["{category}", "{user}"];
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "avatar",
+    "collection",
+    "gallery",
+    "image",
+    "space",
+    "spaces",
+    "user",
+    "video",
+];
+
 pub static USER: Route = Route::new("user", FILENAME, USER_DIRECTORY, "{id}");
 pub static GALLERY: Route = Route::new("gallery", FILENAME, USER_DIRECTORY, "{id}");
 pub static COLLECTION: Route = Route::new(

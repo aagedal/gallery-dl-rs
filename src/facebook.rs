@@ -1,4 +1,5 @@
-//! Experimental native Facebook photo, album, and video extraction.
+//! Experimental native Facebook photo, album, video and profile (`photos`,
+//! `albums`, `avatar`, `info`) extraction.
 pub use crate::facebook_video::{parse_video, video_id};
 use crate::{
     Result,
@@ -9,7 +10,8 @@ use crate::{
         AlbumInput, Grid, album_input, parse_grid, parse_grid_page, parse_navigation, parse_seed,
     },
     facebook_profile::{
-        Tab, parse_albums, parse_avatar, parse_photos_grid, parse_photos_set, profile_input,
+        Tab, parse_albums, parse_avatar, parse_info, parse_photos_grid, parse_photos_set,
+        profile_input,
     },
     network::NetworkOptions,
     transport::{RateLimits, Redirects, retry_after},
@@ -30,6 +32,11 @@ use url::Url;
 
 pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
+
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "albums", "avatar", "info", "photo", "photos", "set", "user", "video",
+];
 
 pub struct Facebook {
     client: Client,
@@ -257,9 +264,21 @@ impl Facebook {
         &self,
         input: crate::facebook_profile::ProfileInput,
     ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
+        match input.page() {
+            Ok(page) => self.profile_events_at(input, page),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        }
+    }
+
+    /// [`Self::profile_events`] reading the profile page from `page`.
+    fn profile_events_at(
+        &self,
+        input: crate::facebook_profile::ProfileInput,
+        page: Url,
+    ) -> BoxStream<'_, Result<crate::event::ExtractionEvent>> {
         stream::once(async move {
             let base = Url::parse("https://www.facebook.com/").unwrap();
-            let body = self.request_body(&input.page()?, self.timeout).await?;
+            let body = self.request_body(&page, self.timeout).await?;
             let events = match &input.tab {
                 Tab::Photos => match parse_photos_set(&body)? {
                     Some(set) => {
@@ -277,6 +296,38 @@ impl Facebook {
                         .append_pair("fbid", &id)
                         .append_pair("set", "");
                     self.post_events_endpoint(endpoint, id, false)
+                }
+                Tab::Info => {
+                    let user = parse_info(&body)?;
+                    let text = |key: &str| {
+                        user.get(key)
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .map(std::sync::Arc::from)
+                    };
+                    let metadata = PostMetadata {
+                        post_id: user
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        username: text("username"),
+                        caption: text("biography"),
+                        extra_keywords: Some(std::sync::Arc::new(user)),
+                        ..PostMetadata::default()
+                    };
+                    stream::iter([
+                        Ok(crate::event::ExtractionEvent::Post(Box::new(
+                            crate::event::Post {
+                                keywords: Default::default(),
+                                category: "facebook".into(),
+                                count: Some(0),
+                                metadata: Some(metadata),
+                            },
+                        ))),
+                        Ok(crate::event::ExtractionEvent::EndPost),
+                    ])
+                    .boxed()
                 }
                 Tab::Albums(name) => {
                     let list = parse_albums(&body, name.as_deref())?;
@@ -1124,6 +1175,44 @@ mod transport_tests {
             );
             assert!(server.join().unwrap().starts_with("GET "));
         }
+    }
+
+    #[tokio::test]
+    async fn profile_info_emits_one_fileless_post_with_upstream_user_keywords() {
+        use crate::event::ExtractionEvent;
+        use futures_util::StreamExt;
+        let page = br#"<script>{"userVanity":"NASA","userID":"100044561550831","x":{"__typename":"User","user":{"id":"pfbid0abc","name":"NASA","profile_tabs":{"profile_user":{"timeline_nav_app_sections":{"edges":[]}}}},"viewer":{}},"best_description":{"text":"Explore"}}</script>"#;
+        let (endpoint, server) = serve_once("200 OK", "", page, Duration::ZERO);
+        let native = Facebook::new(None, Duration::from_secs(3)).await.unwrap();
+        let input = crate::facebook_profile::ProfileInput {
+            profile: "NASA".into(),
+            tab: Tab::Info,
+        };
+        let events = native
+            .profile_events_at(input, endpoint)
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(events.len(), 2);
+        let ExtractionEvent::Post(post) = &events[0] else {
+            panic!("info post missing");
+        };
+        assert!(matches!(events[1], ExtractionEvent::EndPost));
+        assert_eq!((post.category.as_str(), post.count), ("facebook", Some(0)));
+        let metadata = post.metadata.as_ref().unwrap();
+        assert_eq!(metadata.post_id, "100044561550831");
+        assert_eq!(metadata.username.as_deref(), Some("NASA"));
+        assert_eq!(metadata.caption.as_deref(), Some("Explore"));
+        let user = metadata.extra_keywords.as_ref().unwrap();
+        assert_eq!(
+            (&user["user_pfbid"], &user["set_id"], &user["profile_tabs"]),
+            (
+                &Value::from("pfbid0abc"),
+                &Value::from(""),
+                &serde_json::json!([])
+            )
+        );
+        assert!(server.join().unwrap().starts_with("GET /photo/ "));
     }
 
     #[tokio::test]

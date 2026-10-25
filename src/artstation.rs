@@ -77,6 +77,20 @@ const RESERVED_HOSTS: [&str; 4] = ["www", "magazine", "api", "help"];
 
 const FILENAME: &str = "{category}_{id}_{asset[id]}_{title}.{extension}";
 const USER_DIRECTORY: &[&str] = &["{category}", "{userinfo[username]}"];
+/// Upstream extractor classes supported natively, for `--list-extractors`.
+pub const SUBCATEGORIES: &[&str] = &[
+    "album",
+    "artwork",
+    "challenge",
+    "collection",
+    "collections",
+    "following",
+    "image",
+    "likes",
+    "search",
+    "user",
+];
+
 pub static USER: Route = Route::new("user", FILENAME, USER_DIRECTORY, "{asset[id]}");
 pub static ALBUM: Route = Route::new(
     "album",
