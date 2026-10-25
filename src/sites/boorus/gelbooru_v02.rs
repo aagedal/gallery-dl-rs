@@ -51,7 +51,29 @@ instance!(TBIB, "tbib", "The Big ImageBoard");
 instance!(HYPNOHUB, "hypnohub", "Hypnohub");
 instance!(XBOORU, "xbooru", "Xbooru");
 
+/// Configured `extractor.gelbooru_v02.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "gelbooru_v02",
+    builtin: &[&RULE34, &TBIB, &HYPNOHUB, &XBOORU],
+    related: &[],
+    template: &TBIB,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
+fn configured(category: &str) -> Option<&'static crate::sites::instances::Instance> {
+    crate::sites::instances::configured(&FAMILY, category)
+}
+
+/// Whether `category` is a built-in instance of the family.
+fn builtin(category: &str) -> bool {
+    FAMILY.builtin.iter().any(|site| site.category == category)
+}
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = configured(category) {
+        return &instance.site;
+    }
     match category {
         "rule34" => &RULE34,
         "tbib" => &TBIB,
@@ -61,6 +83,9 @@ fn site(category: &str) -> &'static Site {
 }
 
 fn root(category: &str) -> &'static str {
+    if let Some(instance) = configured(category) {
+        return instance.root;
+    }
     match category {
         "rule34" => "https://rule34.xxx",
         "tbib" => "https://tbib.org",
@@ -71,6 +96,18 @@ fn root(category: &str) -> &'static str {
 
 /// Instance `root-api`, falling back to `root`.
 fn root_api(category: &str) -> &'static str {
+    if let Some(instance) = configured(category) {
+        if let Some(api) = instance
+            .config("root-api")
+            .and_then(Value::as_str)
+            .filter(|api| api.starts_with("https://") || api.starts_with("http://"))
+        {
+            return api.trim_end_matches('/');
+        }
+        if !builtin(category) {
+            return instance.root;
+        }
+    }
     match category {
         "rule34" => "https://api.rule34.xxx",
         other => root(other),
@@ -79,6 +116,18 @@ fn root_api(category: &str) -> &'static str {
 
 /// Instance `request-interval`.
 fn interval(category: &str) -> Duration {
+    if let Some(instance) = configured(category) {
+        if let Some(seconds) = instance
+            .config("request-interval")
+            .and_then(Value::as_f64)
+            .filter(|s| s.is_finite() && *s >= 0.0)
+        {
+            return Duration::from_secs_f64(seconds.min(3600.0));
+        }
+        if !builtin(category) {
+            return Duration::ZERO;
+        }
+    }
     match category {
         "rule34" => Duration::from_secs(1),
         _ => Duration::ZERO,
@@ -86,6 +135,9 @@ fn interval(category: &str) -> Duration {
 }
 
 fn hosts(category: &str) -> &'static [&'static str] {
+    if let Some(instance) = configured(category) {
+        return instance.specs;
+    }
     match category {
         "rule34" => &["rule34.xxx", "www.rule34.xxx"],
         "tbib" => &["tbib.org"],
@@ -532,7 +584,9 @@ fn parse_post(
     if raw.starts_with('/') {
         raw = format!("{}{raw}", root(category));
     }
-    let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
+    let url = Url::parse(&raw)
+        .ok()
+        .filter(|url| crate::sites::instances::plain_or_root(url, root(category)))?;
     booru_fields(&url, &mut fields, data);
     let tags = fields
         .get("tags")
@@ -785,6 +839,52 @@ mod tests {
             requests[2].contains("&tags=id%3A%3C100&pid=0&"),
             "{}",
             requests[2]
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        let instance = crate::sites::instances::define(
+            "gelbooru_v02",
+            "gelbooru_v02-configured",
+            serde_json::json!({
+                "root": "https://gv2.test/booru",
+                "pattern": r"(?:www\.)?gv2(?:alias)?\.test/booru",
+                "root-api": "https://api.gv2.test/",
+                "request-interval": 0,
+            }),
+        );
+        assert_eq!(root_api("gelbooru_v02-configured"), "https://api.gv2.test");
+        assert_eq!(interval("gelbooru_v02-configured"), Duration::ZERO);
+        let url =
+            Url::parse("https://gv2alias.test/booru/index.php?page=post&s=view&id=7").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert!(std::ptr::eq(site, &instance.site));
+        assert_eq!(
+            t(
+                "gelbooru_v02-configured",
+                "https://gv2.test/index.php?page=post&s=view&id=7"
+            ),
+            None
+        );
+        let (root, server) = serve(vec![xml(&posts_xml(1, 7..=7))]);
+        let http = http("gv2", root);
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 1);
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "gelbooru_v02-configured");
+        assert_eq!(k["subcategory"], "post");
+        assert_eq!(k["id"], "7");
+        let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
+        assert_eq!(
+            file.render(&files[0]).unwrap(),
+            "gelbooru_v02-configured_7_m7.png"
+        );
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /index.php?page=dapi&s=post&q=index&id=7&"),
+            "{}",
+            requests[0]
         );
     }
 

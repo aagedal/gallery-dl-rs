@@ -511,4 +511,11 @@ pub(crate) fn item(
 }
 
 /// Families with configurable instances (`crate::sites::instances`).
-pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[&shimmie2::FAMILY];
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[
+    &shimmie2::FAMILY,
+    &gelbooru_v01::FAMILY,
+    &gelbooru_v02::FAMILY,
+    &moebooru::FAMILY,
+    &philomena::FAMILY,
+    &szurubooru::FAMILY,
+];

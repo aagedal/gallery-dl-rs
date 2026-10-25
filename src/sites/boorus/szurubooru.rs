@@ -34,7 +34,24 @@ instance!(BCBNSFW, "bcbnsfw", "bcbnsfw");
 instance!(SNOOTBOORU, "snootbooru", "Snootbooru");
 instance!(VISUABUSTERS, "visuabusters", "Visuabusters");
 
+/// Configured `extractor.szurubooru.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "szurubooru",
+    builtin: &[&BCBNSFW, &SNOOTBOORU, &VISUABUSTERS],
+    related: &[],
+    template: &SNOOTBOORU,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
+fn configured(category: &str) -> Option<&'static crate::sites::instances::Instance> {
+    crate::sites::instances::configured(&FAMILY, category)
+}
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = configured(category) {
+        return &instance.site;
+    }
     match category {
         "bcbnsfw" => &BCBNSFW,
         "snootbooru" => &SNOOTBOORU,
@@ -43,6 +60,9 @@ fn site(category: &str) -> &'static Site {
 }
 
 fn root(category: &str) -> &'static str {
+    if let Some(instance) = configured(category) {
+        return instance.root;
+    }
     match category {
         "bcbnsfw" => "https://booru.bcbnsfw.space",
         "snootbooru" => "https://snootbooru.com",
@@ -52,6 +72,9 @@ fn root(category: &str) -> &'static str {
 
 /// Upstream `pattern`s as `host[/prefix]` roots.
 fn roots(category: &str) -> &'static [&'static str] {
+    if let Some(instance) = configured(category) {
+        return instance.specs;
+    }
     match category {
         "bcbnsfw" => &["booru.bcbnsfw.space"],
         "snootbooru" => &["snootbooru.com"],
@@ -61,6 +84,11 @@ fn roots(category: &str) -> &'static [&'static str] {
 
 /// Instance `query-all` setting.
 fn query_all(category: &str) -> Option<&'static str> {
+    if let Some(instance) = configured(category)
+        && let Some(query) = instance.config("query-all")
+    {
+        return query.as_str().filter(|q| !q.is_empty());
+    }
     (category == "bcbnsfw").then_some("*")
 }
 
@@ -187,7 +215,9 @@ fn parse_post(category: &str, post: &Value, data: &Map<String, Value>) -> Option
     } else {
         format!("{}/{raw}", root(category))
     };
-    let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
+    let url = Url::parse(&raw)
+        .ok()
+        .filter(|url| crate::sites::instances::plain_or_root(url, root(category)))?;
     booru_fields(&url, &mut fields, data);
 
     let timestamp = fields
@@ -254,6 +284,35 @@ mod tests {
 
     fn t(category: &str, raw: &str) -> Option<Target> {
         target(category, &Url::parse(raw).unwrap())
+    }
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root_and_query_all() {
+        let instance = crate::sites::instances::define(
+            "szurubooru",
+            "szurubooru-configured",
+            serde_json::json!({"root": "https://szuru.test/b", "pattern": r"(?:www\.)?szuru\.test/b", "query-all": "-x"}),
+        );
+        let url = Url::parse("https://www.szuru.test/b/posts").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert!(std::ptr::eq(site, &instance.site));
+        assert_eq!(
+            t("szurubooru-configured", "https://szuru.test/b/post/3"),
+            Some(Target::Post("3".into()))
+        );
+        assert_eq!(
+            t("szurubooru-configured", "https://szuru.test/post/3"),
+            None
+        );
+        let (root, server) = serve(vec![json(json!({"results": []}))]);
+        let http = http("szuru", root);
+        assert!(media((site.extract)(&http, url)).await.is_empty());
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /b/api/posts/?query=-x&offset=0&limit=100 "),
+            "{}",
+            requests[0]
+        );
     }
 
     #[test]
