@@ -89,8 +89,14 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("wallhaven", &["metadata"]),
     ("pixeldrain", &["zip", "recursive"]),
-    ("kemono", &["dms", "announcements"]),
-    ("coomer", &["dms", "announcements"]),
+    (
+        "kemono",
+        &["dms", "announcements", "archives", "archives-format"],
+    ),
+    (
+        "coomer",
+        &["dms", "announcements", "archives", "archives-format"],
+    ),
     ("danbooru", &["metadata"]),
     ("e621", &["metadata"]),
     ("gelbooru", &["tags", "notes"]),

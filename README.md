@@ -675,6 +675,16 @@ per host/service/creator (upstream reuses the first creator's values for an
 entire run) and request failures end extraction. These values reach filters,
 templates and JSON output and are bounded to 8 MiB each.
 
+Every post (and Discord message) carries upstream's `archives` keyword: the
+file entries (`name`, normalized `path`, `type`, `hash`, plus `url`, `filename`
+and `extension` for creator posts) of its ZIP/RAR/7z/tar/gz/bz2/lzma/xz files,
+also listed in thumbnail mode. Category-scoped `archives` (default false) starts
+each entry from the `/api/v1/file/{hash}` object (file fields win), cached per
+host and hash; failures keep the file fields, as upstream only warns.
+`archives-format: "dict"` or `"object"` keys the entries by hash instead of
+listing them. Discord messages expose their complete archive list on every file
+(upstream grows it as files are yielded). Archive identities are unchanged.
+
 API responses support gzip with separate 32 MiB encoded and decoded limits,
 complete member/checksum validation and cancellable background decoding.
 Unsupported content encodings fail explicitly. Media requests retain identity

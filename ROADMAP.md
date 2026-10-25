@@ -685,9 +685,10 @@ Upstream's `comments`, `dms` and `announcements` options now attach those API
 values to posts (comments non-fatal per post, DMs/announcements once per
 creator rather than upstream's first-creator reuse), and upstream's
 kemono.st/coomer.cr domains are recognized. Upstream 1.32.17 has no popular
-class, so none is planned. Remaining: the `archives`/`archives-format` options
-(per-hash archive file metadata and the always-present `archives` keyword),
-username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
+class, so none is planned. The always-present `archives` keyword and the
+`archives`/`archives-format` options (cached per-hash `/v1/file` metadata,
+list or hash-keyed object) are now native for posts and Discord messages.
+Remaining: username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
 upstream extractors) and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile

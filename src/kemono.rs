@@ -678,11 +678,26 @@ fn selected_post(
     user: &str,
     selection: &Selection,
 ) -> (Vec<Media>, usize) {
+    let (media, count, _) = selected_post_with_archives(post, host, service, user, selection);
+    (media, count)
+}
+
+/// Like [`selected_post`], also returning upstream's per-post `archives`
+/// file entries (before optional `/v1/file/{hash}` metadata). Archives are
+/// listed in both original and thumbnail modes, as upstream builds the list
+/// before any download decision.
+fn selected_post_with_archives(
+    post: &Value,
+    host: &str,
+    service: &str,
+    user: &str,
+    selection: &Selection,
+) -> (Vec<Media>, usize, Vec<Map<String, Value>>) {
     let Some(category) = category(host) else {
-        return (Vec::new(), 0);
+        return (Vec::new(), 0, Vec::new());
     };
     let Ok(identity) = post_identity(post, Some((service, user)), None) else {
-        return (Vec::new(), 0);
+        return (Vec::new(), 0, Vec::new());
     };
     let host = host
         .strip_prefix("www.")
@@ -692,6 +707,7 @@ fn selected_post(
     let mut hashes = HashSet::new();
     let mut count = 0;
     let mut media = Vec::new();
+    let mut archives = Vec::new();
     for file in selected_files(post, category, selection) {
         if !safe_file_path(&file.path) {
             continue;
@@ -724,6 +740,17 @@ fn selected_post(
             .or_else(|| path_ext.clone())
             .unwrap_or_else(|| "bin".into());
         count += 1;
+        if path_ext.as_deref().is_some_and(archive_extension)
+            || path_ext.as_deref() == Some("bin") && archive_extension(&output_ext)
+        {
+            archives.push(archive_entry(
+                file.name.as_deref(),
+                &file.path,
+                hash.unwrap_or_default(),
+                "archive",
+                Some((format!("https://{host}/data{}", file.path), &output_ext)),
+            ));
+        }
         if !selection.original && !path_ext.as_deref().is_some_and(image_extension) {
             continue;
         }
@@ -784,8 +811,63 @@ fn selected_post(
             handoff: BTreeMap::new(),
         });
     }
-    (media, count)
+    (media, count, archives)
 }
+
+/// Upstream's file dictionary for one `archives` entry: the source `name`
+/// and normalized `path`, the content `hash` (empty when unrecognized) and
+/// `type`, plus `url`/`filename`/`extension` for creator posts (upstream
+/// copies Discord attachments before those are assigned).
+fn archive_entry(
+    name: Option<&str>,
+    path: &str,
+    hash: &str,
+    kind: &str,
+    resolved: Option<(String, &str)>,
+) -> Map<String, Value> {
+    let mut entry = Map::new();
+    if let Some(name) = name {
+        entry.insert("name".into(), name.into());
+    }
+    entry.insert("path".into(), path.into());
+    entry.insert("type".into(), kind.into());
+    entry.insert("hash".into(), hash.into());
+    if let Some((url, extension)) = resolved {
+        let base = name
+            .and_then(|name| name.rsplit(['/', '\\']).next())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| path.rsplit('/').next().unwrap_or_default());
+        let filename = base
+            .rsplit_once('.')
+            .filter(|(stem, _)| !stem.is_empty())
+            .map_or(base, |(stem, _)| stem);
+        entry.insert("url".into(), url.into());
+        entry.insert("filename".into(), filename.into());
+        entry.insert("extension".into(), extension.into());
+    }
+    entry
+}
+
+/// Upstream `archives-format`: a list of entries, or an object keyed by hash.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArchivesFormat {
+    #[default]
+    List,
+    Dict,
+}
+
+impl ArchivesFormat {
+    /// Upstream selects an object for exactly `"dict"` or `"object"`.
+    pub fn from_option(value: Option<&Value>) -> Self {
+        match value.and_then(Value::as_str) {
+            Some("dict" | "object") => Self::Dict,
+            _ => Self::List,
+        }
+    }
+}
+
+/// Bound for `/v1/file/{hash}` archive metadata entries cached per extractor.
+const MAX_ARCHIVE_CACHE: usize = 1024;
 
 fn json(bytes: &[u8]) -> Result<Value> {
     if bytes.len() > MAX_RESPONSE {
@@ -889,12 +971,18 @@ pub struct Kemono {
     announcements: bool,
     /// Per-creator `dms`/`announcements` values, fetched once per creator.
     creator_extras: tokio::sync::Mutex<HashMap<CreatorKey, Arc<Map<String, Value>>>>,
+    /// Upstream `archives`: fetch `/v1/file/{hash}` metadata for archive files.
+    archives: bool,
+    archives_format: ArchivesFormat,
+    /// Host and hash to archive metadata; failures are cached as `None`.
+    archive_metadata:
+        tokio::sync::Mutex<HashMap<(String, String), Option<Arc<Map<String, Value>>>>>,
 }
 
 /// Upstream's optional per-post `comments`, `dms` and `announcements`
 /// keywords from compatibility output, bounded like native responses.
 pub(crate) fn extras_from_keywords(data: &Map<String, Value>) -> Option<Arc<Map<String, Value>>> {
-    let extras: Map<String, Value> = ["comments", "dms", "announcements"]
+    let extras: Map<String, Value> = ["comments", "dms", "announcements", "archives"]
         .into_iter()
         .filter_map(|key| Some((key.to_owned(), data.get(key)?.clone())))
         .filter(|(_, value)| {
@@ -946,6 +1034,9 @@ impl Kemono {
             dms: false,
             announcements: false,
             creator_extras: tokio::sync::Mutex::new(HashMap::new()),
+            archives: false,
+            archives_format: ArchivesFormat::List,
+            archive_metadata: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -956,7 +1047,9 @@ impl Kemono {
     }
 
     /// Apply upstream extractor settings: `dms` and `announcements` attach
-    /// each creator's DMs and announcements to its posts (Python truthiness).
+    /// each creator's DMs and announcements to its posts (Python truthiness);
+    /// `archives` fetches archive file metadata and `archives-format`
+    /// selects a list or a hash-keyed object for the `archives` keyword.
     pub fn with_options(mut self, options: Option<&Map<String, Value>>) -> Self {
         if let Some(options) = options {
             if let Some(value) = options.get("dms") {
@@ -965,8 +1058,79 @@ impl Kemono {
             if let Some(value) = options.get("announcements") {
                 self.announcements = crate::postprocess::truthy(value);
             }
+            if let Some(value) = options.get("archives") {
+                self.archives = crate::postprocess::truthy(value);
+            }
+            if options.contains_key("archives-format") {
+                self.archives_format = ArchivesFormat::from_option(options.get("archives-format"));
+            }
         }
         self
+    }
+
+    /// Upstream's always-present `archives` keyword merged into the post's
+    /// optional extras. With `archives` enabled each entry starts from the
+    /// `/v1/file/{hash}` API object and is updated with the file fields;
+    /// failures fall back to the file fields alone, as upstream only warns.
+    async fn with_archives(
+        &self,
+        host: &str,
+        extras: Option<&Arc<Map<String, Value>>>,
+        files: Vec<Map<String, Value>>,
+    ) -> Arc<Map<String, Value>> {
+        let mut entries = Vec::with_capacity(files.len());
+        for file in files {
+            let hash = file
+                .get("hash")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let mut entry = if self.archives && valid_hash(&hash) {
+                self.archive_metadata(host, &hash)
+                    .await
+                    .map(|metadata| metadata.as_ref().clone())
+                    .unwrap_or_default()
+            } else {
+                Map::new()
+            };
+            entry.extend(file);
+            entries.push((hash, Value::Object(entry)));
+        }
+        let archives = match self.archives_format {
+            ArchivesFormat::List => Value::Array(entries.into_iter().map(|(_, e)| e).collect()),
+            ArchivesFormat::Dict => Value::Object(entries.into_iter().collect()),
+        };
+        let mut keywords = extras
+            .map(|extras| extras.as_ref().clone())
+            .unwrap_or_default();
+        keywords.insert("archives".into(), archives);
+        Arc::new(keywords)
+    }
+
+    async fn archive_metadata(&self, host: &str, hash: &str) -> Option<Arc<Map<String, Value>>> {
+        let key = (host.to_owned(), hash.to_owned());
+        // Serialize lookups like creator profiles; a dropped request inserts nothing.
+        let mut cache = self.archive_metadata.lock().await;
+        if let Some(cached) = cache.get(&key) {
+            return cached.clone();
+        }
+        let metadata = match self.call(host, &format!("api/v1/file/{hash}"), &[]).await {
+            Ok(bytes) => json(&bytes)
+                .ok()
+                .filter(|value| {
+                    serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_EXTRA_BYTES)
+                })
+                .and_then(|value| match value {
+                    Value::Object(map) => Some(Arc::new(map)),
+                    _ => None,
+                }),
+            Err(_) => None,
+        };
+        if cache.len() >= MAX_ARCHIVE_CACHE {
+            cache.clear();
+        }
+        cache.insert(key, metadata.clone());
+        metadata
     }
 
     /// The optional `comments`/`dms`/`announcements` keywords of one source
@@ -1158,8 +1322,13 @@ impl Kemono {
             .map_err(|_| error("native Kemono extraction timed out"))?
     }
 
-    fn finish(&self, host: &str, post: &Value, identity: &Identity) -> VecDeque<ExtractionEvent> {
-        let (mut media, count) = selected_post(
+    fn finish(
+        &self,
+        host: &str,
+        post: &Value,
+        identity: &Identity,
+    ) -> (VecDeque<ExtractionEvent>, Vec<Map<String, Value>>) {
+        let (mut media, count, archives) = selected_post_with_archives(
             post,
             host,
             &identity.service,
@@ -1170,7 +1339,7 @@ impl Kemono {
         for item in &mut media {
             self.network.apply_media(item);
         }
-        if media.is_empty() {
+        let events = if media.is_empty() {
             VecDeque::from([
                 ExtractionEvent::Post(Box::new(Post {
                     keywords: Default::default(),
@@ -1186,10 +1355,11 @@ impl Kemono {
                 post.count = Some(count);
             }
             events
-        }
+        };
+        (events, archives)
     }
 
-    fn finish_revision(
+    async fn finish_revision(
         &self,
         host: &str,
         post: RevisionPost,
@@ -1197,7 +1367,8 @@ impl Kemono {
         creator: &CreatorMetadata,
         extras: Option<&Arc<Map<String, Value>>>,
     ) -> VecDeque<ExtractionEvent> {
-        let mut events = self.finish(host, &post.post, identity);
+        let (mut events, archives) = self.finish(host, &post.post, identity);
+        let extras = Some(self.with_archives(host, extras, archives).await);
         for event in &mut events {
             match event {
                 ExtractionEvent::Post(boundary) => {
@@ -1205,7 +1376,7 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
-                        metadata.kemono_extras = extras.cloned();
+                        metadata.kemono_extras = extras.clone();
                     }
                 }
                 ExtractionEvent::Media(media) => {
@@ -1213,7 +1384,7 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
-                        metadata.kemono_extras = extras.cloned();
+                        metadata.kemono_extras = extras.clone();
                     }
                     if let Some(id) = post
                         .metadata
@@ -1315,13 +1486,15 @@ impl Kemono {
                                     (host, identity, prepared, revisions, pending),
                                 ));
                             }
-                            pending = self.finish_revision(
-                                &host,
-                                revisions.pop_front()?,
-                                &identity,
-                                prepared.0.as_deref().expect("prepared creator"),
-                                prepared.1.as_ref(),
-                            );
+                            pending = self
+                                .finish_revision(
+                                    &host,
+                                    revisions.pop_front()?,
+                                    &identity,
+                                    prepared.0.as_deref().expect("prepared creator"),
+                                    prepared.1.as_ref(),
+                                )
+                                .await;
                         }
                     },
                 )
@@ -1452,13 +1625,15 @@ impl Kemono {
                         .revision_identity
                         .as_ref()
                         .expect("prepared source identity");
-                    state.pending = self.finish_revision(
-                        &state.host,
-                        revision,
-                        identity,
-                        state.revision_creator.as_deref().expect("prepared creator"),
-                        state.revision_extras.as_ref(),
-                    );
+                    state.pending = self
+                        .finish_revision(
+                            &state.host,
+                            revision,
+                            identity,
+                            state.revision_creator.as_deref().expect("prepared creator"),
+                            state.revision_extras.as_ref(),
+                        )
+                        .await;
                     continue;
                 }
                 if self.max_posts.is_some_and(|limit| state.emitted >= limit) {
@@ -3705,8 +3880,137 @@ mod tests {
             .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
             .collect()
             .await;
-        assert!(post_extras_of(&events).iter().all(Map::is_empty));
+        // Only upstream's always-present `archives` keyword remains.
+        assert!(
+            post_extras_of(&events)
+                .iter()
+                .all(|extras| extras.keys().collect::<Vec<_>>() == ["archives"]
+                    && extras["archives"] == json!([]))
+        );
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    fn archive_post(id: &str) -> Value {
+        json!({"id": id, "user": "42", "service": "patreon", "title": "Pack",
+            "published": "2024-01-02T03:04:05",
+            "attachments": [
+                {"name": "cover.png", "path": format!("/aa/11/{HASH_A}.png")},
+                {"name": "pack.zip", "path": format!("/bb/22/{HASH_B}.zip")},
+                {"name": "extra.7z", "path": format!("/cc/33/{HASH_C}.bin")}]})
+    }
+
+    const HASH_C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+    #[tokio::test]
+    async fn archives_keyword_lists_archive_files_without_requests_by_default() {
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            json!({"post": archive_post("7")}).to_string().as_bytes(),
+        )]);
+        let events: Vec<_> = kemono(root)
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        let extras = post_extras_of(&events);
+        assert_eq!(extras.len(), 4, "{events:?}");
+        let expected = json!([
+            {"name": "pack.zip", "path": format!("/bb/22/{HASH_B}.zip"), "type": "archive",
+             "hash": HASH_B, "url": format!("https://kemono.cr/data/bb/22/{HASH_B}.zip"),
+             "filename": "pack", "extension": "zip"},
+            {"name": "extra.7z", "path": format!("/cc/33/{HASH_C}.bin"), "type": "archive",
+             "hash": HASH_C, "url": format!("https://kemono.cr/data/cc/33/{HASH_C}.bin"),
+             "filename": "extra", "extension": "7z"}]);
+        assert!(extras.iter().all(|extras| extras["archives"] == expected));
+        let ExtractionEvent::Media(media) = events[1].as_ref().unwrap() else {
+            panic!("expected media");
+        };
+        let public = serde_json::to_value(media.metadata.as_ref().unwrap()).unwrap();
+        assert_eq!(public["archives"], expected);
+        assert!(crate::filter::context(media).contains_key("archives"));
+        // Archive identities stay file-based.
+        assert_eq!(
+            media.archive_key(),
+            parse_post_with_selection(
+                &archive_post("7"),
+                "kemono.cr",
+                "patreon",
+                "42",
+                &Selection {
+                    original: true,
+                    ..Selection::default()
+                }
+            )[0]
+            .archive_key()
+        );
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archives_option_merges_cached_file_metadata_into_hash_keyed_object() {
+        let page = json!([archive_post("1"), archive_post("2")]).to_string();
+        let (root, server) = serve(vec![
+            response("200 OK", page.as_bytes()),
+            response(
+                "200 OK",
+                br#"{"id":9,"hash":"ignored","size":1024,"file_list":["a.txt"],"password":null}"#,
+            ),
+            response("404 Not Found", br#"{"error":"missing"}"#),
+        ]);
+        let options = json!({"archives": true, "archives-format": "object"});
+        let events: Vec<_> = kemono(root)
+            .with_options(options.as_object())
+            .events(&Url::parse("https://kemono.cr/patreon/user/42").unwrap())
+            .collect()
+            .await;
+        let extras = post_extras_of(&events);
+        assert_eq!(extras.len(), 8, "{events:?}");
+        for extras in &extras {
+            let archives = extras["archives"].as_object().unwrap();
+            assert_eq!(archives.keys().collect::<Vec<_>>(), [HASH_B, HASH_C]);
+            let pack = &archives[HASH_B];
+            // API fields first, file fields override them.
+            assert_eq!(pack["id"], 9);
+            assert_eq!(pack["size"], 1024);
+            assert_eq!(pack["file_list"], json!(["a.txt"]));
+            assert_eq!(pack["hash"], HASH_B);
+            assert_eq!(pack["name"], "pack.zip");
+            // A failed lookup keeps only the file fields.
+            assert!(!archives[HASH_C].as_object().unwrap().contains_key("id"));
+            assert_eq!(archives[HASH_C]["extension"], "7z");
+        }
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3, "metadata is fetched once per hash");
+        assert!(requests[1].starts_with(&format!("GET /api/v1/file/{HASH_B} ")));
+        assert!(requests[2].starts_with(&format!("GET /api/v1/file/{HASH_C} ")));
+    }
+
+    #[test]
+    fn archives_format_and_compatibility_keywords_follow_upstream() {
+        for (value, expected) in [
+            (json!("dict"), ArchivesFormat::Dict),
+            (json!("object"), ArchivesFormat::Dict),
+            (json!("list"), ArchivesFormat::List),
+            (json!("Dict"), ArchivesFormat::List),
+            (json!(true), ArchivesFormat::List),
+        ] {
+            assert_eq!(
+                ArchivesFormat::from_option(Some(&value)),
+                expected,
+                "{value}"
+            );
+        }
+        assert_eq!(ArchivesFormat::from_option(None), ArchivesFormat::List);
+        let data = json!({"archives": {"h": {"name": "a.zip"}}, "title": "x"});
+        let extras = extras_from_keywords(data.as_object().unwrap()).unwrap();
+        assert_eq!(extras["archives"], json!({"h": {"name": "a.zip"}}));
+        let (_, _, archives) = selected_post_with_archives(
+            &archive_post("7"),
+            "kemono.cr",
+            "patreon",
+            "42",
+            &Selection::default(),
+        );
+        assert_eq!(archives.len(), 2, "thumbnail mode still lists archives");
     }
 
     #[test]

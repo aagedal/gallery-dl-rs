@@ -709,7 +709,7 @@ pub struct PostMetadata {
     pub creator: Option<crate::kemono::CreatorMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<crate::kemono::RevisionMetadata>,
-    /// Kemono/Coomer `comments`, `dms` and `announcements` API values.
+    /// Kemono/Coomer `comments`, `dms`, `announcements` and `archives` values.
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub kemono_extras: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
