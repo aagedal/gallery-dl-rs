@@ -83,6 +83,7 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("wallhaven", &["metadata"]),
+    ("pixeldrain", &["zip", "recursive"]),
     ("furaffinity", &["descriptions", "external", "layout"]),
     ("weasyl", &["metadata"]),
     ("newgrounds", &["flash", "format"]),

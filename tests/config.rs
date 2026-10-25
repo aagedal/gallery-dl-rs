@@ -2089,6 +2089,10 @@ fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
         Some(key)
     );
     assert_eq!(cfg.resolve("catbox").unwrap().api_key, None);
+    let cfg = parse(r#"{"extractor":{"pixeldrain":{"zip":true,"recursive":0}}}"#).unwrap();
+    let options = cfg.resolve("pixeldrain").unwrap().site_options.unwrap();
+    assert_eq!(options["zip"], serde_json::json!(true));
+    assert_eq!(options["recursive"], serde_json::json!(0));
     for value in [
         serde_json::json!(null),
         serde_json::json!(7),

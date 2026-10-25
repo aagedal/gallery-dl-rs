@@ -1834,6 +1834,7 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_pixeldrain_api_key(options.api_key.as_deref())?
+                                        .with_options(options.site_options.as_deref())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)

@@ -254,6 +254,8 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         let (category, format) = match target {
             Target::PixeldrainFile(_) | Target::PixeldrainList(..) => ("pixeldrain", "{id}"),
             Target::CatboxAlbum(_) => ("catbox", "{album_id}_{filename}"),
+            Target::PixeldrainFolder(_) => ("pixeldrain", "{path}_{num}"),
+            Target::CatboxFile(_) => ("catbox", "{filename}"),
             Target::ImgboxImage(_) => ("imgbox", "{image_key}"),
             Target::ImgboxGallery(_) => ("imgbox", "{gallery_key}_{image_key}"),
             Target::PostimgImage(_) | Target::PostimgGallery(_) => ("postimg", "{token}"),
@@ -328,7 +330,10 @@ pub fn for_media(media: &Media) -> Option<ArchiveDescriptor> {
         .metadata
         .as_ref()
         .and_then(|metadata| metadata.site_keywords.as_ref())
-        .filter(|_| crate::sites::is_category(&media.category))
+        .filter(|_| {
+            crate::sites::is_category(&media.category)
+                || matches!(media.category.as_str(), "pixeldrain" | "catbox")
+        })
     {
         return Some(descriptor(&media.category, keywords.route.archive));
     }

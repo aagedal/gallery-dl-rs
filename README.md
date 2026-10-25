@@ -683,22 +683,36 @@ public site media may follow CDN redirects with validated post/channel Referers.
 Username/password login is not implemented.
 
 Experimental native image host extraction (`--extractor native`), one category
-per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
-`/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`), including
-zero-based `#item=N` selection with original list numbering (out-of-range
-selection produces no files). Set `extractor.pixeldrain.api-key` to use HTTP
+per site: `pixeldrain` files (`/u/ID` or `/api/file/ID`, via
+`/api/file/ID/info`, downloaded from `/api/file/ID?download`), lists/albums
+(`/l/ID`, `/api/list/ID`), including zero-based `#item=N` selection with
+original list numbering (out-of-range selection produces no files), and
+filesystem paths (`/d/PATH`, `/api/filesystem/PATH`) via the `?stat` API:
+a directory's files (or the single requested file) download from
+`/api/filesystem/PATH?attach` and subdirectories are queued as child jobs
+unless `extractor.pixeldrain.recursive` is false. `extractor.pixeldrain.zip`
+downloads a list as one `/api/list/ID/zip` archive. Set
+`extractor.pixeldrain.api-key` to use HTTP
 Basic authentication for API requests and file downloads; credentials stay in
 private request headers and are omitted from inspection JSON. `catbox` albums
-(`/c/ID`, file links, `<h1>` title and creation date from the page); `imgbox` galleries
+(`/c/ID`, file links, `<h1>` title, creation date and description from the
+page) and direct `files`/`litter`/`de.catbox.moe` file links. Pixeldrain and
+Catbox files carry upstream's keyword dictionaries (`album`, `num`, `date`,
+`path`, `share_url`, `hash_sha256`, `album_id`, `album_name`, …) and default to
+upstream's paths (for example `pixeldrain/{album[date]:%Y-%m-%d} {album[title]}
+({album[id]})/{num:>03} {filename} ({id}).{extension}` and
+`catbox/{album_name} ({album_id})/{filename}.{extension}`); archive identities
+stay the file ID (filesystem files use upstream's `{path}_{num}`); `imgbox` galleries
 (`/g/ID`, thumbnails mapped to `imagesN.imgbox.com/.../ID_o.EXT`) and image pages
 (`/ID`); `postimg` (postimg.cc/postimages.org) image pages (download link, else
 `og:image`) and galleries (thumbnail links, each image page fetched; capped at
 1000). Media must be HTTPS on the site's CDN. `post_id` is the file/list/album/
 gallery ID, `media_id` the file ID, caption the title (or file name), file
-`media_type` the MIME type and description the original name. Filenames are
-`{media_id}.{extension}` for single files and `{post_id}_{index:02}.{extension}`
-otherwise; archive identity is (category, file ID). Plain CDN file links
-(files.catbox.moe, i.postimg.cc, images2.imgbox.com) stay direct downloads.
+`media_type` the MIME type and description the original name. imgbox/Postimg
+filenames are `{media_id}.{extension}` for single files and
+`{post_id}_{index:02}.{extension}` otherwise; archive identity is (category,
+file ID). Plain imgbox/Postimg CDN file links (i.postimg.cc,
+images2.imgbox.com) stay direct downloads.
 
 Experimental native Tumblr extraction (`--extractor native`, `tumblr`
 category) covers blog listings (`BLOG.tumblr.com`, `/posts`,

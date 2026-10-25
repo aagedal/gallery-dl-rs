@@ -517,7 +517,10 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.pixiv.net.evil.example/artworks/1", None),
         ("https://pixeldrain.com/u/abc", Some("pixeldrain")),
         ("https://catbox.moe/c/abc", Some("catbox")),
-        ("https://files.catbox.moe/abc.png", None),
+        // Upstream's catbox `file` class handles direct file-host links.
+        ("https://files.catbox.moe/abc.png", Some("catbox")),
+        ("https://litter.catbox.moe/abc.png", Some("catbox")),
+        ("https://pixeldrain.com/d/abc/dir", Some("pixeldrain")),
         ("https://imgbox.com/g/AbCdEfGhIj", Some("imgbox")),
         ("https://images2.imgbox.com/ab/cd/x_o.png", None),
         ("https://postimg.cc/gallery/abc", Some("postimg")),

@@ -768,9 +768,19 @@ lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
 and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
 and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
 change media selection. Pixeldrain API keys authenticate API requests and file downloads.
-Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
-`/c/` descriptions; imgbox per-image metadata (width/height); Postimg
-JS-paginated gallery pages beyond the server-rendered listing.
+Pixeldrain now covers upstream's `file`, `album` and `folder` classes
+(`/api/file`, `/api/list`, `/d/` and `/api/filesystem` paths, the `zip` and
+`recursive` options, unavailable-file skipping and lazily queued
+subdirectories); Catbox covers `album` (with `description`) and `file`
+(`files`/`litter`/`de.catbox.moe`). Both carry upstream keyword dictionaries
+and default paths, replacing the old `{post_id}_{index:02}.{extension}` /
+`{media_id}.{extension}` names (default-path change, files are not migrated);
+archive keys remain the file ID, so existing archives still match, and
+filesystem files use `{path}_{num}`. Lists and albums no longer drop repeated
+file IDs (upstream keeps them; the archive deduplicates).
+Remaining: imgbox per-image metadata (width/height); Postimg JS-paginated
+gallery pages beyond the server-rendered listing. Upstream only matches
+`pixeldrain.com`, so no other Pixeldrain domains are planned.
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
 tagged listings via API v2 with an overridable `api-key`, original-image token
