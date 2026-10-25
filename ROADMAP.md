@@ -643,6 +643,16 @@ classes for these sites. Remaining: the DAPI `url` option, other
 Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
 aliases, per-post laziness of option requests (they run per page), and
 authenticated live verification.
+The other instances do not fit the current `booru::Site` model cleanly: `Site`
+is at once the API dialect, the output category, the media-CDN allow-list and
+the key of the per-site extractor/credential caches, and the category strings
+`danbooru`/`e621`/`e926` are special-cased across keyword policies, filter
+contexts, source-archive descriptors, naming defaults and compatibility
+normalization (e926 itself still shares e621's category and credentials).
+Distinct upstream categories need an instance layer (dialect, category, API
+root, CDN hosts such as `cdn.aibooru.download`/`static1.e6ai.net`, aibooru's
+host-dependent root) threaded through those paths with per-instance
+credential scopes, and their own source-oracle coverage.
 
 **Implemented experimental native Mastodon:** every upstream class (statuses,
 ActivityPub `/objects/ID` resolved by redirect, user timelines, followed accounts

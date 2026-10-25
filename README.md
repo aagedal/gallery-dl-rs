@@ -569,8 +569,8 @@ e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
 Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
 `tags_<type>` strings and note lists. These requests happen when a page is
 fetched, before its posts are emitted. Not supported natively: the DAPI `url`
-option, and the
-atfbooru/aibooru/booruvar/e6ai instances and Danbooru host aliases.
+option, Danbooru host aliases, and upstream's other instances (`atfbooru`,
+`aibooru`, `booruvar`, `e6ai`), whose URLs are not routed natively.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
