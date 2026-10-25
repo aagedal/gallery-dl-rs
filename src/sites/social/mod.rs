@@ -22,13 +22,16 @@ mod snapchat;
 mod telegram;
 mod threads;
 mod tiktok;
+mod urlshortener;
 mod vk;
 mod weibo;
-mod xenforo;
+pub(super) mod xenforo;
 mod xiaohongshu;
 mod youtube_posts;
 
 pub(super) static SITES: &[&Site] = &[
+    &urlshortener::BITLY,
+    &urlshortener::TCO,
     &weibo::SITE,
     &tiktok::SITE,
     &discord::SITE,

@@ -776,6 +776,47 @@ pub struct Backend {
     pub timeout: Duration,
 }
 
+/// A command-line input: an HTTP(S) URL, or one behind upstream's
+/// `g:`/`generic:` (case-insensitive) or `r:`/`recursive:` prefix, kept as a
+/// `generic:` or `recursive:` URL around the HTTP(S) target. A target
+/// without a scheme gets `https://`, as upstream does. Local `file://`
+/// sources for `recursive:` are not supported; `--input-file` reads them.
+pub fn input_url(value: &str) -> Result<Url> {
+    let prefixed = |value: &str| -> Option<(&'static str, String)> {
+        let (prefix, rest) = value.split_once(':')?;
+        let scheme = if prefix.eq_ignore_ascii_case("g") || prefix.eq_ignore_ascii_case("generic") {
+            "generic"
+        } else if matches!(prefix, "r" | "recursive") {
+            "recursive"
+        } else {
+            return None;
+        };
+        Some((scheme, rest.to_owned()))
+    };
+    let Some((scheme, target)) = prefixed(value) else {
+        return http_url(value);
+    };
+    if scheme == "recursive" && target.starts_with("file:") {
+        return Err(error(
+            "recursive: file sources are not supported; use --input-file",
+        ));
+    }
+    let lower = target.to_ascii_lowercase();
+    let target = if lower.starts_with("http://") || lower.starts_with("https://") {
+        target
+    } else {
+        format!("https://{target}")
+    };
+    let target = http_url(&target)?;
+    Url::parse(&format!("{scheme}:{target}")).map_err(|_| error("invalid prefixed URL"))
+}
+
+/// The HTTP(S) URL inside a `generic:` or `recursive:` input URL.
+pub fn prefixed_target(url: &Url) -> Option<Url> {
+    let inner = url.as_str().split_once(':')?.1;
+    http_url(inner).ok()
+}
+
 pub fn http_url(value: &str) -> Result<Url> {
     let url = Url::parse(value)?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
@@ -813,10 +854,11 @@ pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
 }
 
 pub fn social_site(url: &Url) -> Option<&'static str> {
-    let host = url.host_str()?;
+    // Registry sites include the host-less `generic:`/`recursive:` inputs.
     if let Some(site) = crate::sites::find(url) {
         return Some(site.category);
     }
+    let host = url.host_str()?;
     if crate::mastodon::INSTANCES.contains(&host) {
         return Some("mastodon");
     }

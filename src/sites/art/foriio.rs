@@ -3,7 +3,8 @@
 //!
 //! Image works resolve to their original files on `foriio.imgix.net`;
 //! video and sound works are handed to yt-dlp as upstream's `ytdl:` URLs,
-//! and web articles are queued when a native extractor supports them.
+//! and web articles are queued when a native extractor or the direct-link
+//! fallback supports them.
 use super::{digits, on_host, raw_segments, str_of, truthy};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -162,7 +163,7 @@ fn work_events(http: &Http, mut work: Map<String, Value>) -> Result<Events<'_>> 
             if enabled && key == "web_articles" {
                 if let Ok(child) = Url::parse(page)
                     && crate::sites::plain(&child)
-                    && crate::sites::find(&child).is_some()
+                    && crate::sites::supported(&child)
                 {
                     children.push((child, work.clone()));
                 }

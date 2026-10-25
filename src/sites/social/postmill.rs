@@ -4,7 +4,8 @@
 //!
 //! Text posts become `text:` documents (link posts too with the
 //! `save-link-post-body` option); image posts download their image, and
-//! other links are queued when a native extractor supports them.
+//! other links are queued when a native extractor or the direct-link
+//! fallback supports them.
 use crate::sites::art::{
     Scan, date, digits, extr, extract_iter, file_url, leading_digits, nameext_into, parse_int,
     parse_iso, parse_query, url as site_url,
@@ -325,9 +326,7 @@ pub(crate) fn parse_post(
         nameext_into(&url, &mut fields);
         if let Some(file) = file_url(&url, root) {
             if link {
-                queued = crate::sites::find(&file)
-                    .is_some()
-                    .then_some((file, fields));
+                queued = crate::sites::supported(&file).then_some((file, fields));
             } else {
                 items.push(Item::new(file, fields));
             }

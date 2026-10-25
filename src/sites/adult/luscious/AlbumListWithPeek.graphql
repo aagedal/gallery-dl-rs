@@ -1,0 +1,79 @@
+query AlbumListWithPeek($input: AlbumListInput!) {
+    album {
+        list(input: $input) {
+            info {
+                ...FacetCollectionInfo
+            }
+            items {
+                ...AlbumMinimal
+                peek_thumbnails {
+                    width
+                    height
+                    size
+                    url
+                }
+            }
+        }
+    }
+}
+
+fragment FacetCollectionInfo on FacetCollectionInfo {
+    page
+    has_next_page
+    has_previous_page
+    total_items
+    total_pages
+    items_per_page
+    url_complete
+    url_filters_only
+}
+
+fragment AlbumMinimal on Album {
+    __typename
+    id
+    title
+    labels
+    description
+    created
+    modified
+    number_of_favorites
+    number_of_pictures
+    slug
+    is_manga
+    url
+    download_url
+    cover {
+        width
+        height
+        size
+        url
+    }
+    content {
+        id
+        title
+        url
+    }
+    language {
+        id
+        title
+        url
+    }
+    tags {
+        id
+        category
+        text
+        url
+        count
+    }
+    genres {
+        id
+        title
+        slug
+        url
+    }
+    audiences {
+        id
+        title
+        url
+    }
+}

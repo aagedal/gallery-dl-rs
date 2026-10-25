@@ -2472,7 +2472,22 @@ Manganelo mirrors, `mangataro`, `mangoxo`, `weebdex`, `hentai2read`,
 `hentaihere`, `simplyhentai`, IMHentai mirrors, `tmohentai`, `sankaku`,
 `idolcomplex`, `sankakucomplex`, `nozomi`, `sizebooru`, `aryion`, `iwara`
 (direct video files), `foriio`, `kabeuchi`, `comedywildlifephoto`,
-`nekohouse` and Raddle (`postmill`). Gallery-dl's
+`nekohouse` and Raddle (`postmill`). Adult gallery, forum and video-site
+galleries are also native (`8muses`, `luscious`, `erome`, `pornpics`,
+`pornhub`, `xvideos`, `xhamster`, `vipergirls`, `bellazon`, `fansly` with its
+owner `token`, and the other upstream adult modules); sites built around
+leaked private content or celebrity fakes are intentionally not ported.
+
+Upstream's input prefixes work natively too: `generic:URL` (or `g:URL`)
+downloads the images and videos a page references (tag sources plus URLs
+ending in a media extension), and `recursive:URL` (or `r:URL`) queues every
+HTTP(S) URL in the fetched page. `bit.ly` and `t.co` short links resolve to
+their targets. URLs a site queues are routed like command-line inputs, so a
+forum or list linking to X, Instagram, Reddit or any other supported site is
+extracted by that site's extractor. With `extractor.generic.enabled` set,
+native mode sends URLs no other extractor matches to `generic` without the
+prefix, as upstream does. `recursive:` with local `file://` sources is not
+supported (use `--input-file`). Gallery-dl's
 `shopify:`/`xenforo:` URL prefixes and extra configured instances are not
 supported, and all `*.reactor.cc` subdomains share the `reactor` category.
 Username/password logins and SmugMug OAuth are not ported; pass `--cookies`
@@ -2481,7 +2496,8 @@ them). Unsplash, Pexels, Toyhouse, Comick, Lexica and Khinsider answered this
 network with bot challenges; MangaPark, MangaFire, MangaReader, TCB Scans,
 Desktopography, Pixnet and AO3 were unreachable or had changed; and 8chan
 needs browser cookies past its proof-of-work page, so those are
-fixture-tested only. Plurk queues only links a native site handles.
+fixture-tested only. Queued links that no native site handles still extract when they point
+directly at a media file, as upstream's `directlink` does.
 
 WhatsApp, WeChat, Messenger and QQ have no public media pages. The Kuaishou
 and Xiaohongshu extractors are tested against fixtures only; this network gets
@@ -2564,16 +2580,20 @@ With `--resume`, the final failed candidate's checkpoint is retained for a later
 run. Explicit
 cross-origin fallbacks clear every per-item header, including authorization,
 referer, user-agent, and custom headers. Configured HTTP-client defaults still
-apply. This does not enable cross-origin redirects or import browser/session
-cookies into media requests. Fallback URLs remain private in inspection output
+apply. Fallbacks do not import browser/session cookies into media requests. Fallback URLs remain private in inspection output
 and metadata sidecars. Signed-URL/header changes and changed fallback context
 can create separate request paths/checkpoints while stable social archive keys
 remain unchanged.
 
-Media downloads follow up to five redirects within the same origin (scheme,
-host, and effective port), retaining the original destination name and request
-headers. Cross-origin redirects, HTTPS downgrades, URL credentials, malformed
-redirects, and loops fail without requesting the target. The Rust downloader
+Media downloads follow up to five redirects, retaining the original
+destination name. Within the same origin (scheme, host, and effective port)
+all request headers are kept; once a redirect leaves that origin, only
+`User-Agent`, `Accept`, `Accept-Encoding`, `Range`, `If-Range` and `Referer`
+are sent, so cookies, authorization and custom headers never reach another
+host. HTTPS downgrades, URL credentials, malformed redirects, and loops fail
+without requesting the target. Registry site page and API requests follow
+redirects the same way (GET/HEAD only), dropping credential headers on leaving
+the requested origin. The Rust downloader
 forwards per-item `_http_headers`, but does not import the backend's session cookie
 jar or TLS/browser impersonation. Media requiring those features may fail even
 when extraction succeeds.

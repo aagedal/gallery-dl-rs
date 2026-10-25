@@ -132,6 +132,7 @@ async fn decode_gzip_body(body: Vec<u8>, limit: usize, state: Arc<DecodeState>) 
 pub(crate) struct Redirects {
     visited: Vec<Url>,
     subdomains: bool,
+    cross_origin: bool,
 }
 
 impl Redirects {
@@ -141,7 +142,16 @@ impl Redirects {
         Self {
             visited: vec![url],
             subdomains: false,
+            cross_origin: false,
         }
+    }
+
+    /// Also follow redirects to other origins, as upstream's `requests`
+    /// session does. The caller must drop request credentials that do not
+    /// belong to the new origin.
+    pub(crate) fn allow_cross_origin(mut self, allow: bool) -> Self {
+        self.cross_origin = allow;
+        self
     }
 
     /// Also accept HTTPS redirects from an HTTPS origin to a subdomain of its
@@ -197,11 +207,22 @@ impl Redirects {
         if !matches!(target.scheme(), "http" | "https")
             || !target.username().is_empty()
             || target.password().is_some()
-            || target.origin() != self.visited[0].origin() && !self.subdomain_of_origin(&target)
+            || !self.cross_origin
+                && target.origin() != self.visited[0].origin()
+                && !self.subdomain_of_origin(&target)
         {
             return Err(error(
                 "HTTP redirect requires the same origin and no URL credentials",
             ));
+        }
+        if self.cross_origin
+            && target.scheme() == "http"
+            && self
+                .visited
+                .last()
+                .is_some_and(|last| last.scheme() == "https")
+        {
+            return Err(error("HTTP redirect downgrades HTTPS"));
         }
         target.set_fragment(None);
         if self.visited.contains(&target) {
@@ -322,6 +343,47 @@ mod tests {
         ] {
             assert!(hop(allowed(), bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn cross_origin_redirects_are_opt_in_and_never_downgrade() {
+        let origin = Url::parse("https://example.com/file.jpg").unwrap();
+        let hop = |redirects: Redirects, location: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(reqwest::header::LOCATION, location.parse().unwrap());
+            let mut redirects = redirects;
+            redirects.next(&origin, reqwest::StatusCode::FOUND, &headers)
+        };
+        let allowed = || Redirects::new(&origin).allow_cross_origin(true);
+        assert!(hop(Redirects::new(&origin), "https://cdn.example.net/x").is_err());
+        assert_eq!(
+            hop(allowed(), "https://cdn.example.net/x")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "https://cdn.example.net/x"
+        );
+        for bad in [
+            "http://cdn.example.net/x",
+            "http://example.com/x",
+            "https://user:pass@cdn.example.net/x",
+            "ftp://cdn.example.net/x",
+        ] {
+            assert!(hop(allowed(), bad).is_err(), "{bad}");
+        }
+        let plain = Url::parse("http://example.com/file.jpg").unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::LOCATION,
+            "https://cdn.example.net/x".parse().unwrap(),
+        );
+        assert!(
+            Redirects::new(&plain)
+                .allow_cross_origin(true)
+                .next(&plain, reqwest::StatusCode::FOUND, &headers)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]

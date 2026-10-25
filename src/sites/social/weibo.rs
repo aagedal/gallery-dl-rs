@@ -463,10 +463,12 @@ impl<'a> Ctx<'a> {
             headers.push(("Referer", referer.as_str()));
         }
         let headers = headers.as_slice();
-        match self.http.get(url, headers).await {
+        // A redirect to another origin is the passport/login page, so it
+        // must fail rather than be followed.
+        match self.http.get_same_origin(url, headers).await {
             Err(e) if is_redirect(&e) => {
                 visitor(self.http).await?;
-                self.http.get(url, headers).await.map_err(|e| {
+                self.http.get_same_origin(url, headers).await.map_err(|e| {
                     if is_redirect(&e) {
                         error("Weibo redirected to its login page")
                     } else {

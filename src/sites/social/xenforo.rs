@@ -3,8 +3,8 @@
 //! `order-posts` says otherwise), forums, profiles and the media gallery.
 //!
 //! Each post's videos, inline images and attachments are files; external
-//! links and media embeds are queued when a native extractor supports them
-//! and skipped otherwise. Options: `attachments`, `embeds`, `quoted`,
+//! links and media embeds are queued when a native extractor or the
+//! direct-link fallback supports them and skipped otherwise. Options: `attachments`, `embeds`, `quoted`,
 //! `order-posts` and `metadata`. Upstream's `username`/`password` login is
 //! not supported; pass the forum's session cookies with `--cookies`.
 use crate::sites::art::{Scan, extr, extract_iter, json_loads, parse_int, str_of};
@@ -759,7 +759,7 @@ fn parse_author(author: Option<&Value>, data: &mut Map<String, Value>) {
 }
 
 /// `Extractor._extract_jsonld`.
-fn jsonld(page: &str) -> Option<Value> {
+pub(crate) fn jsonld(page: &str) -> Option<Value> {
     let data = match extr(page, "<script type=\"application/ld+json\">", "</script>") {
         "" => extr(page, "<script type='application/ld+json'>", "</script>"),
         data => data,
@@ -900,7 +900,7 @@ fn parse_profile(page: &str) -> Option<Value> {
 }
 
 /// `_remove_quotes`: drop `<blockquote>` blocks, nested ones included.
-fn remove_quotes(content: &str) -> String {
+pub(crate) fn remove_quotes(content: &str) -> String {
     let mut content = content.to_owned();
     while let Some(beg) = content.find("<blockquote") {
         let Some(mut end) = content[beg..].find("</blockquote").map(|i| i + beg) else {
@@ -1222,7 +1222,7 @@ fn post_events<'a>(
             counters.bump(&mut data, "external");
             if let Ok(url) = Url::parse(&link)
                 && crate::sites::plain(&url)
-                && crate::sites::find(&url).is_some()
+                && crate::sites::supported(&url)
             {
                 children.push((url, data.clone()));
             }

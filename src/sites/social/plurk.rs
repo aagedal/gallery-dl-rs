@@ -2,8 +2,8 @@
 //! links in each plurk (and, with the `comments` option, its responses) are
 //! queued as child jobs with the plurk as their metadata.
 //!
-//! Upstream queues every link and lets unsupported ones fail; here links no
-//! registry site handles are skipped.
+//! Upstream queues every link and lets unsupported ones fail; here links that
+//! neither a registry site nor a direct media link handles are skipped.
 use crate::sites::art::{Scan, extract_iter, strptime};
 use crate::sites::{Events, Http, Route, Site};
 use crate::{Result, error};
@@ -192,7 +192,7 @@ fn queue_links<'a>(http: &'a Http, route: &'static Route, plurks: Vec<Value>) ->
             let children = links
                 .into_iter()
                 .filter_map(|link| Url::parse(&link).ok())
-                .filter(|link| crate::sites::find(link).is_some())
+                .filter(crate::sites::supported)
                 .map(|link| (link, data.clone()))
                 .collect::<Vec<(Url, Map<String, Value>)>>();
             Ok(futures_util::StreamExt::boxed(
@@ -346,7 +346,7 @@ mod tests {
     #[tokio::test]
     async fn timeline_queues_links_and_paginates() {
         let page = r#"<script>GLOBAL = {"page_user": {"id": 42, "nick_name": "x"}};
-var _PLURKS = [{"id": 1, "posted": new Date("Fri, 05 Mar 2021 12:34:56 GMT"), "content": "<a href=\"https://speakerdeck.com/u/deck\">x</a> <a href=\"https://unsupported.test/x\">y</a>"}];
+var _PLURKS = [{"id": 1, "posted": new Date("Fri, 05 Mar 2021 12:34:56 GMT"), "content": "<a href=\"https://speakerdeck.com/u/deck\">x</a> <a href=\"https://unsupported.test/x\">y</a> <a href=\"https://img.example.test/a.jpg\">i</a>"}];
 </script>"#;
         let (root, server) = serve(vec![
             html(page),
@@ -365,6 +365,8 @@ var _PLURKS = [{"id": 1, "posted": new Date("Fri, 05 Mar 2021 12:34:56 GMT"), "c
         assert_eq!(
             found,
             vec![
+                ("timeline".to_owned(), "1".to_owned()),
+                // Direct media links fall back to the direct-link extractor.
                 ("timeline".to_owned(), "1".to_owned()),
                 ("timeline".to_owned(), "2".to_owned())
             ]

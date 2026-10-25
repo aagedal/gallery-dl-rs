@@ -1,6 +1,8 @@
 //! Shared bounded HTTP access for registry site extractors.
 //!
-//! Requests follow same-origin redirects only, retry HTTP 429/5xx and
+//! GET and HEAD requests follow redirects to other origins like upstream's
+//! `requests` session, dropping credential headers once they leave the
+//! requested origin; POST redirects are never followed. Requests retry HTTP 429/5xx and
 //! transport failures with backoff and `Retry-After` cooldowns, and cap
 //! responses at 16 MiB. Diagnostics never include URLs or credentials.
 use crate::{
@@ -228,6 +230,17 @@ impl Http {
         self.api_key.as_deref()
     }
 
+    /// A redirect target under the test origin, like [`Http::api`], so that
+    /// tests never leave the local server.
+    fn local(&self, mut url: Url) -> Url {
+        if let Some(root) = &self.root {
+            let _ = url.set_scheme(root.scheme());
+            let _ = url.set_host(root.host_str());
+            let _ = url.set_port(root.port());
+        }
+        url
+    }
+
     /// Rewrite an absolute API URL to the test origin, keeping path and query.
     pub fn api(&self, url: &str) -> Result<Url> {
         let mut url = Url::parse(url).map_err(|_| error("invalid site API URL"))?;
@@ -265,6 +278,12 @@ impl Http {
         Ok(self.send(url, headers, Method::Get).await?.2)
     }
 
+    /// GET that fails instead of following a redirect to another origin, for
+    /// sites that treat such a redirect as a signal (a login or guest page).
+    pub async fn get_same_origin(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
+        Ok(self.send(url, headers, Method::SameOriginGet).await?.2)
+    }
+
     /// The response headers and body of one GET, for sites that read
     /// headers such as `Content-Range`.
     pub async fn get_with_headers(
@@ -281,8 +300,8 @@ impl Http {
         Ok(self.send(url, headers, Method::Head).await?.1)
     }
 
-    /// The body text and the URL it was served from after same-origin
-    /// redirects, for sites that read the final location (upstream
+    /// The body text and the URL it was served from after redirects, for
+    /// sites that read the final location (upstream
     /// `response.url`).
     pub async fn page(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(Url, String)> {
         let (url, _, body) = self.send(url, headers, Method::Get).await?;
@@ -309,17 +328,7 @@ impl Http {
         if !response.status().is_redirection() {
             return Ok(None);
         }
-        Ok(response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| value.len() <= 8192)
-            .and_then(|value| url.join(value).ok())
-            .filter(|target| {
-                matches!(target.scheme(), "http" | "https")
-                    && target.username().is_empty()
-                    && target.password().is_none()
-            }))
+        Ok(redirect_target(url, response.headers()))
     }
 
     /// POST a body and return the raw response; redirects are refused.
@@ -330,6 +339,27 @@ impl Http {
         headers: &[(&str, &str)],
     ) -> Result<Vec<u8>> {
         Ok(self.send(url, headers, Method::Post(body)).await?.2)
+    }
+
+    /// POST a body without following a redirect (upstream
+    /// `allow_redirects=False`): the response body, or the redirect's
+    /// HTTP(S) `Location` resolved against `url`.
+    pub async fn post_or_redirect(
+        &self,
+        url: &Url,
+        body: Body<'_>,
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<Vec<u8>, Url>> {
+        match self.send(url, headers, Method::Post(body)).await {
+            Ok((_, _, bytes)) => Ok(Ok(bytes)),
+            Err(failure) => match failure
+                .downcast_ref::<PostRedirect>()
+                .and_then(|redirect| redirect.location.clone())
+            {
+                Some(location) => Ok(Err(location)),
+                None => Err(failure),
+            },
+        }
     }
 
     /// POST a form and parse the JSON response; redirects are refused.
@@ -391,11 +421,15 @@ impl Http {
     ) -> std::result::Result<(Url, HeaderMap, Vec<u8>), Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
-        let mut redirects = Redirects::new(endpoint);
+        let mut redirects = Redirects::new(endpoint)
+            .allow_cross_origin(matches!(method, Method::Get | Method::Head));
         let body = match method {
             Method::Post(body) => Some(body),
-            Method::Get | Method::Head => None,
+            Method::Get | Method::SameOriginGet | Method::Head => None,
         };
+        // Set once the chain leaves the requested origin, before any test
+        // rewrite, and kept even if a later hop returns.
+        let mut left_origin = false;
         let response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = match body {
@@ -435,6 +469,9 @@ impl Http {
                 request = request.header("Cookie", cookie);
             }
             for (key, value) in headers {
+                if left_origin && credential_header(key) {
+                    continue;
+                }
                 request = request.header(*key, *value);
             }
             let response = request.send().await.map_err(|_| {
@@ -445,10 +482,17 @@ impl Http {
                 .unwrap_or_else(|e| e.into_inner())
                 .store_response(&target, response.headers());
             if body.is_some() && response.status().is_redirection() {
-                return Err(error(format!("{name} redirected a POST request")).into());
+                let redirected: crate::Error = Box::new(PostRedirect {
+                    message: format!("{name} redirected a POST request"),
+                    location: redirect_target(&target, response.headers()),
+                });
+                return Err(redirected.into());
             }
             match redirects.next(response.url(), response.status(), response.headers())? {
-                Some(next) => target = next,
+                Some(next) => {
+                    left_origin |= next.origin() != endpoint.origin();
+                    target = self.local(next);
+                }
                 None => break response,
             }
         };
@@ -509,8 +553,24 @@ impl Http {
 #[derive(Clone, Copy)]
 enum Method<'b> {
     Get,
+    SameOriginGet,
     Head,
     Post(Body<'b>),
+}
+
+/// Request headers that carry credentials for the requested origin, which
+/// are not sent after a redirect to another origin. Beyond `requests`'
+/// `Authorization` rule this covers cookies and token/key/session headers.
+fn credential_header(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "authorization" | "proxy-authorization" | "cookie"
+    ) || [
+        "token", "auth", "key", "session", "csrf", "secret", "password",
+    ]
+    .iter()
+    .any(|word| name.contains(word))
 }
 
 /// An HTTP 401/403 response. Displays like any other site error (no URL or
@@ -528,6 +588,35 @@ impl std::fmt::Display for Refused {
 }
 
 impl std::error::Error for Refused {}
+
+/// A redirect answering a POST request, which is never followed.
+#[derive(Debug)]
+struct PostRedirect {
+    message: String,
+    location: Option<Url>,
+}
+
+impl std::fmt::Display for PostRedirect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PostRedirect {}
+
+/// A response's `Location` resolved against `url`, if it is plain HTTP(S).
+fn redirect_target(url: &Url, headers: &HeaderMap) -> Option<Url> {
+    headers
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| value.len() <= 8192)
+        .and_then(|value| url.join(value).ok())
+        .filter(|target| {
+            matches!(target.scheme(), "http" | "https")
+                && target.username().is_empty()
+                && target.password().is_none()
+        })
+}
 
 /// The HTTP status (401 or 403) of a refused request, if `error` is one.
 pub fn refused_status(error: &crate::Error) -> Option<u16> {
@@ -614,5 +703,99 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].contains("cookie: explicit=1"));
         assert!(!requests[0].contains("jar=1"));
+    }
+
+    fn moved(location: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\n\
+             Content-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn cross_origin_redirects_drop_credential_headers() {
+        let (root, server) = serve(vec![
+            moved("https://cdn.example.test/next"),
+            json(serde_json::json!({"ok": true})),
+        ]);
+        let http = http("Test", root.clone());
+        let headers = [
+            ("Authorization", "Bearer secret"),
+            ("X-Api-Token", "secret"),
+            ("Cookie", "sid=secret"),
+            ("Referer", "https://example.test/"),
+        ];
+        let (url, body) = http
+            .page(&root.join("start").unwrap(), &headers)
+            .await
+            .unwrap();
+        assert_eq!(url.path(), "/next");
+        assert_eq!(body, r#"{"ok":true}"#);
+        let requests = server.join().unwrap();
+        let first = requests[0].to_ascii_lowercase();
+        assert!(first.contains("authorization: bearer secret"));
+        assert!(first.contains("x-api-token: secret"));
+        let second = requests[1].to_ascii_lowercase();
+        assert!(second.starts_with("get /next "));
+        assert!(!second.contains("secret"), "{second}");
+        assert!(second.contains("referer: https://example.test/"));
+    }
+
+    #[tokio::test]
+    async fn same_origin_redirects_keep_credential_headers() {
+        let (root, server) = serve(vec![moved("/next"), json(serde_json::json!({}))]);
+        let http = http("Test", root.clone());
+        http.json_with(
+            &root.join("start").unwrap(),
+            &[("Authorization", "Bearer kept")],
+        )
+        .await
+        .unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("authorization: Bearer kept"));
+    }
+
+    #[tokio::test]
+    async fn same_origin_gets_and_posts_refuse_cross_origin_redirects() {
+        let (root, server) = serve(vec![
+            moved("https://login.example.test/"),
+            moved("https://login.example.test/"),
+        ]);
+        let http = http("Test", root.clone());
+        let error = http
+            .get_same_origin(&root.join("a").unwrap(), &[])
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("same origin"), "{error}");
+        let error = http
+            .post_form(&root.join("b").unwrap(), &[("x", "1")], &[])
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("redirected a POST"), "{error}");
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn credential_headers_are_recognised() {
+        for name in [
+            "Authorization",
+            "proxy-authorization",
+            "Cookie",
+            "X-CSRF-Token",
+            "X-Api-Key",
+            "x-session-id",
+        ] {
+            assert!(credential_header(name), "{name}");
+        }
+        for name in [
+            "Referer",
+            "Origin",
+            "Accept",
+            "User-Agent",
+            "X-Requested-With",
+        ] {
+            assert!(!credential_header(name), "{name}");
+        }
     }
 }
