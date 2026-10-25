@@ -517,7 +517,7 @@ Valid own media now emit before quote validation, so a malformed quote cannot
 erase those files or poison later likes. On 2026-10-20 bounded public native
 likes inspection emitted one media job with no errors; an upstream resolved-JSON
 inspection selected the same original post, author DID and blob CID. Neither
-inspection downloaded media. Native login/restricted likes remain unfinished.
+inspection downloaded media. Logged-in AppView hydration of restricted liked posts is untested live.
 
 **Implemented author-specific Bluesky blob routing:** asynchronous native post,
 feed, liked-post, quote and profile-image streams now use each media author's
@@ -631,26 +631,39 @@ views and artist discovery. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: other favorites, notes,
-`tags`/`metadata` options, per-category tags and authenticated live verification.
+Danbooru/e621 `tags_<category>` keywords are emitted from the API, and upstream's
+Danbooru `random`/`media-asset`, e621 `/p/` short links, `e621.cc` and `frontend`
+links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
+`metadata` (includes; notes/pools) and Gelbooru/Safebooru `tags`/`notes`
+(per-post HTML) options, e621 hidden-URL reconstruction and Danbooru ugoira WebM
+samples. Upstream has no other favorites classes for these sites. Remaining:
+Danbooru `external` and `ugoira` frame data, the DAPI `url` option, other
+Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
+aliases, per-post laziness of option requests (they run per page), and
+authenticated live verification.
 
-**Implemented experimental native Mastodon:** statuses, user timelines,
-bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
-pawoo.net and baraag.net. Instance scopes (`mastodon.social`/`pawoo`/`baraag`)
-inherit shared `mastodon` settings; tokens bind explicitly to an instance API
-origin and stay out of media requests. Instance output categories now match
+**Implemented experimental native Mastodon:** every upstream class (statuses,
+ActivityPub `/objects/ID` resolved by redirect, user timelines, followed accounts
+queued as user child jobs, bookmarks, favourites, list timelines and Unicode
+hashtags) on mastodon.social, pawoo.net and baraag.net, which are all instances
+upstream ships. Instance scopes (`mastodon.social`/`pawoo`/`baraag`) inherit
+shared `mastodon` settings; tokens bind explicitly to an instance API origin and
+stay out of media and object requests. Instance output categories now match
 upstream; existing attachment archive identities remain stable, while default
 category directories change without migrating files. Numeric account IDs skip
-lookup. Collection paging follows server bookmark/status cursors from all Link
-fields, detects cycles, and stops lazily; collection dates are non-terminating.
+lookup, and failed lookups fall back to an exact-`acct` account search as
+upstream. Collection and following paging follow server cursors from all Link
+fields, detect cycles, and stop lazily; collection dates are non-terminating.
 `reblogs`/`replies`/`text-posts` preserve outer repost metadata, attachment IDs,
 and empty post boundaries. Optional card images append outer-post previews with
 upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
-Scoped config, compatibility forwarding, header
-privacy, split Link fields, date ordering and cancellation have local coverage.
-Remaining: OAuth/cache discovery, arbitrary/additional instances, followed views,
-account-search fallback/moved handling, and fuller metadata/default
-naming. Authenticated live verification and real captures remain required.
+Scoped config, compatibility forwarding, header privacy, split Link fields, date
+ordering and cancellation have local coverage. Remaining: OAuth/cache discovery,
+upstream's built-in per-instance application tokens (not embedded natively; some
+instances need a configured `access-token`, e.g. baraag.net hashtags),
+user-configured instances and the `mastodon:URL` prefix, the moved-account
+warning, and fuller metadata/default naming. Authenticated live verification and
+real captures remain required.
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept
@@ -668,9 +681,14 @@ no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
 thumbnail job and a Coomer MP4 original job with creator display names; no media
 was downloaded in those inspections. Authenticated verification, wider service
 captures and successful original transfers remain required.
-Remaining: popular views, comments/DMs, archive/link
-extraction from post text, username/password login, additional endpoint behavior
-and full upstream metadata/default naming.
+Upstream's `comments`, `dms` and `announcements` options now attach those API
+values to posts (comments non-fatal per post, DMs/announcements once per
+creator rather than upstream's first-creator reuse), and upstream's
+kemono.st/coomer.cr domains are recognized. Upstream 1.32.17 has no popular
+class, so none is planned. Remaining: the `archives`/`archives-format` options
+(per-hash archive file metadata and the always-present `archives` keyword),
+username/password login, `creator_links`/`fancards`/`tags` endpoints (unused by
+upstream extractors) and full upstream metadata/default naming.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
 lookups attach typed immutable IDs and optional display names, public IDs, dates,
@@ -768,21 +786,38 @@ lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
 and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
 and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
 change media selection. Pixeldrain API keys authenticate API requests and file downloads.
-Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
-`/c/` descriptions; imgbox per-image metadata (width/height); Postimg
-JS-paginated gallery pages beyond the server-rendered listing.
+Pixeldrain now covers upstream's `file`, `album` and `folder` classes
+(`/api/file`, `/api/list`, `/d/` and `/api/filesystem` paths, the `zip` and
+`recursive` options, unavailable-file skipping and lazily queued
+subdirectories); Catbox covers `album` (with `description`) and `file`
+(`files`/`litter`/`de.catbox.moe`). Both carry upstream keyword dictionaries
+and default paths, replacing the old `{post_id}_{index:02}.{extension}` /
+`{media_id}.{extension}` names (default-path change, files are not migrated);
+archive keys remain the file ID, so existing archives still match, and
+filesystem files use `{path}_{num}`. Lists and albums no longer drop repeated
+file IDs (upstream keeps them; the archive deduplicates).
+Remaining: imgbox per-image metadata (width/height); Postimg JS-paginated
+gallery pages beyond the server-rendered listing. Upstream only matches
+`pixeldrain.com`, so no other Pixeldrain domains are planned.
 
-**Implemented experimental native Tumblr:** blog listings, single posts and
-tagged listings via API v2 with an overridable `api-key`, original-image token
-resolution for capped photos and modern inline images, legacy inline `_1280`
-rewriting, GIFV download fallbacks, and `reblogs` (boolean/`same-blog`), `posts`
-(legacy type selection), `inline` (boolean/`reblog`/`original`) and `original`
-settings. Single-post URLs bypass the `posts` filter, matching upstream.
-Failed token lookups fall back to the
-API rendition; upstream's delayed token refresh retries remain unimplemented.
-Remaining: OAuth and private/dashboard blogs, likes/search/day views, NPF posts,
-external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
-and custom-domain blogs.
+**Implemented experimental native Tumblr:** every upstream class via API v2:
+blog posts (`user`), single posts, tags, day views, likes, searches, and
+following/followers queued as `user` child jobs, with upstream keyword
+dictionaries and default paths. Upstream's `tumblr:` prefix selects custom blog
+domains, addressing the API by domain while archive identity keeps the post's
+blog name. OAuth 1.0a signing (`api-key`/`api-secret` defaulting to upstream's
+application plus `access-token`/`access-token-secret`) replaces `api_key` on API
+requests only, retries "no permission" blogs once with `api_key` as upstream, and
+reports dashboard-only blogs with fixed credential hints; HMAC-SHA1 is checked
+against RFC 2202/5849 vectors. Original-image token resolution for capped photos
+and modern inline images retries after `fallback-delay` up to `fallback-retries`,
+with the API rendition as fallback; legacy inline `_1280` rewriting and GIFV
+fallbacks remain. Options: `reblogs` (boolean/`same-blog`), `posts`, `inline`,
+`original`, `external`, `avatar`, `offset`, `pagination` and `ratelimit`. The
+exhausted default key falls back to the web client token (NPF converted).
+Remaining: the interactive `oauth:tumblr` flow and its token cache
+(`access-token: "cache"` means unset), NPF-only fields beyond the converted
+legacy media, and authenticated live verification of dashboard/private blogs.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
@@ -990,11 +1025,19 @@ searches starting at the URL's `page`. Default paths now follow upstream
 remain the wallpaper ID, so existing archives still match. Remaining:
 upstream's default API key and 1.4 s request interval.
 
-**Implemented experimental native Pinterest:** pins, boards, user pins and
-`pin.it` links via the resource API. Remaining: login/cookies and CSRF token,
-board sections, secret boards, search, related pins, created/saved/all-pins
-listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
-`videos` and `domain` options.
+**Implemented experimental native Pinterest:** every upstream class (pin,
+board with its sections queued, section by slug or `id:`, user boards
+(`/USER/`, `/_saved/`), all pins, created pins, search, related pins and
+related board pins, `pin.it` links) via the resource API with upstream's
+keywords, default paths and per-class archive formats; story pins, carousels,
+videos (HLS manifest preferred, MP4 fallback; HLS-only videos as manifests)
+and `images.orig`; the `sections`, `stories`, `videos` and `domain` options;
+session cookies from `--cookies` (secret boards, private pins) with the
+session's own `csrftoken` (else upstream's random one) mirrored in
+`X-CSRFToken`. Upstream has no external/embedded (ytdl) pin handling, so none
+is ported. Remaining: switching the API root after a cross-domain redirect
+(upstream follows `response.history`), interactive login and refreshing the
+pinned `X-APP-VERSION`.
 
 **Implemented experimental native VSCO:** upstream's user (`include`
 dispatch), gallery, collection, space, spaces, avatar, image and video classes
@@ -1074,22 +1117,42 @@ OAuth/private content, upstream's per-class archive formats (the photo ID is
 the archive identity) and `*.staticflickr.com` image URLs (kept as direct
 downloads).
 
-**Implemented experimental native Reddit:** submissions, galleries, subreddit
-and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
-DASH audio, comment scanning, external-site recursion, and reddit options.
+**Implemented experimental native Reddit:** every upstream class (submission,
+subreddit and its sub-listings/search, home and its listings, user and its
+sub-listings with `only`, image, share redirect) with upstream keywords and
+default paths; galleries, `media_metadata` embeds, v.redd.it videos per
+`videos` (DASH manifest with audio, falling back to the MP4; `ytdl` page or
+plain URL), comment scanning (`comments`, `morecomments`), self text links
+(`selftext`), external links queued to the site router, `recursion` into
+linked submissions, `previews` (a failed child job is followed by the
+submission's preview rendition), `embeds`, `id-min`/`id-max`,
+`date-min`/`date-max`, `limit`, and `api: "oauth"` with `client-id` and
+`refresh-token` (or a public token) on `oauth.reddit.com`. A public Atom-feed
+fallback covers logged-out networks behind Reddit's login wall. Remaining:
+the `oauth:reddit` token flow and its `refresh-token: "cache"`, preview
+fallbacks after child *download* failures (only extraction failures are
+seen), and `parent-directory`'s shared directory for child jobs.
 
-**Implemented experimental native Bluesky:** single posts, author media/posts
-feeds, public custom feeds and list feeds via the public AppView, with full-size
-`getBlob` images and videos. Custom feeds/lists resolve their record owner once,
-retain mixed post authors/reposts, follow opaque cursors lazily, and stop cursor
-cycles. `reposts`, `quoted`, and boolean `videos` match upstream defaults;
-quoted records retain their own media identity, validate reference/view
-identities, use hydrated data and fetch missing records lazily with cycle and
-depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
-requested; own pinned posts are retained. Ordered include, replies/video and
-profile-image and public likes views are described above. Not yet: searches,
-authentication, thread `depth`,
-metadata facets/user expansion, and newer multi-item media embeds.
+**Implemented experimental native Bluesky:** every upstream class: single posts,
+author media/posts/replies/video feeds, public custom feeds and list feeds,
+follows (queued user dispatcher children), searches and hashtags
+(`searchPosts`), bookmarks, info/avatar/background and likes, plus upstream's
+mirror hosts, with full-size `getBlob` images and videos. Custom feeds/lists
+resolve their record owner once, retain mixed post authors/reposts, follow opaque
+cursors lazily, and stop cursor cycles. `reposts`, `quoted`, and boolean `videos`
+match upstream defaults; quoted records retain their own media identity, validate
+reference/view identities, use hydrated data and fetch missing records lazily
+with cycle and depth bounds. Bare profiles switch to the posts feed when
+quotes/reposts are requested; own pinned posts are retained. Ordered include,
+replies/video, profile-image and public likes views are described above.
+`depth` emits reply levels of single and liked posts breadth-first. Upstream's
+`username`/`password` login creates an in-memory session on bsky.social (or
+`api-server`), refreshes an expired token once, attaches it only to the API
+origin and enables bookmarks (which fail without a login before any request).
+Not yet: the `metadata` option (`user`/`facets` keywords, which need upstream's
+keyword dictionary and would change default naming), upstream's persistent
+refresh-token cache, DID identifiers as login names, newer multi-item media
+embeds, and authenticated live verification.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook
 selections retain available file dimensions, original dimensions, seconds-based

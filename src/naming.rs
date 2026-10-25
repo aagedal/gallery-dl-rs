@@ -85,6 +85,8 @@ const FIELDS: &[&str] = &[
     "profile_publicity",
     "workspace",
     "comments",
+    "dms",
+    "announcements",
     "tags_bookmark",
     "frames",
     "_ugoira_frame_data",

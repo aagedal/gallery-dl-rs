@@ -5,7 +5,9 @@
 //! `section`, `user` (queuing its boards), `allpins`, `created`, `search`,
 //! `related-pin`, `related-board` and `pinit` short links. Requests use the
 //! web "resource" API (`resource/NAMEResource/get/?data={"options":..}&
-//! source_url=`) with upstream's header set and a random `csrftoken` cookie.
+//! source_url=`) with upstream's header set, the session cookies (`--cookies`,
+//! for secret boards) and a `csrftoken` cookie: the session's own, else a
+//! random one like upstream, echoed in `X-CSRFToken`.
 //! Feeds follow `resource.options.bookmarks` until it is missing, empty,
 //! `-end-` or starts with `Y2JOb25lO`, capped at 200 pages.
 //!
@@ -970,6 +972,8 @@ pub struct Pinterest {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    /// Session cookies (e.g. `_pinterest_sess` for secret boards).
+    cookies: std::sync::Mutex<crate::cookies::CookieJar>,
 }
 
 enum Mode<'a> {
@@ -993,6 +997,7 @@ impl Pinterest {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            cookies: std::sync::Mutex::new(crate::cookies::CookieJar::default()),
         })
     }
 
@@ -1024,6 +1029,13 @@ impl Pinterest {
             }
         };
         Ok(self)
+    }
+
+    /// Session cookies sent with every Pinterest request; a logged-in
+    /// session can read secret boards and its own private pins.
+    pub fn with_cookies(self, cookies: crate::cookies::CookieJar) -> Self {
+        *self.cookies.lock().unwrap() = cookies;
+        self
     }
 
     /// Additional attempts for HTTP 429/5xx and transport failures.
@@ -1398,17 +1410,34 @@ impl Pinterest {
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout);
+            let jar = self.cookies.lock().unwrap().header(&target);
             if let Mode::Api { root, .. } = mode {
                 for (name, value) in API_HEADERS {
                     request = request.header(name, value);
                 }
+                // Upstream's random `csrftoken`, unless the session brings
+                // its own; the header echoes it for authenticated calls.
+                let session = self.cookies.lock().unwrap().value(&target, "csrftoken");
+                let token = session.clone().unwrap_or_else(|| self.csrf_token.clone());
+                let cookie = match (jar, session) {
+                    (Some(jar), Some(_)) => jar,
+                    (Some(jar), None) => format!("{jar}; csrftoken={token}"),
+                    (None, _) => format!("csrftoken={token}"),
+                };
                 request = request
                     .header("Referer", root.as_str())
-                    .header("Cookie", format!("csrftoken={}", self.csrf_token));
+                    .header("X-CSRFToken", token)
+                    .header("Cookie", cookie);
+            } else if let Some(jar) = jar {
+                request = request.header("Cookie", jar);
             }
             let response = request.send().await.map_err(|_| {
                 Failure::transient("Pinterest request failed; check network access")
             })?;
+            self.cookies
+                .lock()
+                .unwrap()
+                .store_response(response.url(), response.headers());
             if capture && response.status().is_redirection() {
                 let location = response
                     .headers()
@@ -1452,7 +1481,7 @@ impl Pinterest {
             return Err(error(format!("Pinterest {what} not found")).into());
         }
         if matches!(status.as_u16(), 401 | 403) {
-            return Err(error("Pinterest refused access (private board or login required)").into());
+            return Err(error("Pinterest refused access (secret board or login required; pass pinterest.com cookies with --cookies)").into());
         }
         if !status.is_success() {
             return Err(error(format!("Pinterest returned HTTP {status}")).into());
@@ -2519,5 +2548,61 @@ mod tests {
             .to_string();
         assert_eq!(error, "Pinterest pin not found");
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_cookies_unlock_secret_boards_with_a_matching_csrf_token() {
+        let board = json!({"id": "901", "name": "Secret", "url": "/alice/secret/",
+            "privacy": "secret", "section_count": 0, "owner": {"username": "alice"}});
+        let (root, server) = serve(vec![
+            ok(board.clone(), None),
+            ok(json!([pin("1")]), None),
+            ok(board, None),
+            ok(json!([pin("2")]), None),
+            response("403 Forbidden", "", b"{}"),
+        ]);
+        let host = root.host_str().unwrap().to_owned();
+        let jar = |extra: &str| {
+            crate::cookies::CookieJar::parse(&format!(
+                "{host}\tFALSE\t/\tFALSE\t0\t_pinterest_sess\tsess1\n{extra}"
+            ))
+            .unwrap()
+        };
+        // Without its own token the session gets upstream's random one.
+        let native = pinterest(root.clone()).with_cookies(jar(""));
+        let events = run(&native, "https://www.pinterest.com/alice/secret/").await;
+        assert_eq!(labels(&events), ["P", "1.jpg", "."]);
+        let token = native.csrf_token.clone();
+        // A logged-in session's own token is used instead.
+        let own = jar(&format!("{host}\tFALSE\t/\tFALSE\t0\tcsrftoken\tusertok\n"));
+        let native = pinterest(root.clone()).with_cookies(own);
+        let events = run(&native, "https://www.pinterest.com/alice/secret/").await;
+        assert_eq!(labels(&events), ["P", "2.jpg", "."]);
+        let error = pinterest(root)
+            .events(&Url::parse("https://www.pinterest.com/pin/9/").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("--cookies"), "{error}");
+        let requests = server.join().unwrap();
+        for request in &requests[..2] {
+            let lower = request.to_ascii_lowercase();
+            assert!(lower.contains("_pinterest_sess=sess1"), "{request}");
+            assert!(lower.contains(&format!("csrftoken={token}")), "{request}");
+            assert!(
+                lower.contains(&format!("x-csrftoken: {token}")),
+                "{request}"
+            );
+        }
+        for request in &requests[2..4] {
+            let lower = request.to_ascii_lowercase();
+            assert!(lower.contains("_pinterest_sess=sess1"), "{request}");
+            assert_eq!(lower.matches("csrftoken=").count(), 1, "{request}");
+            assert!(lower.contains("csrftoken=usertok"), "{request}");
+            assert!(lower.contains("x-csrftoken: usertok"), "{request}");
+        }
+        assert!(!requests[4].contains("_pinterest_sess"));
     }
 }

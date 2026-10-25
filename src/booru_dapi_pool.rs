@@ -206,7 +206,12 @@ pub(super) async fn next(client: &Booru, state: &mut State) -> Result<()> {
     .await;
     state.dapi_listing = Some(listing);
     match result? {
-        Some(raw) => client.emit(state, &raw),
+        Some(mut raw) => {
+            client
+                .enrich(&state.root, "index.php", false, &mut raw)
+                .await?;
+            client.emit(state, &raw)
+        }
         None => state.done = true,
     }
     Ok(())

@@ -1,7 +1,10 @@
 //! Experimental native Reddit extraction.
 //!
-//! Mirrors gallery_dl/extractor/reddit.py with the unauthenticated REST API
-//! (`https://www.reddit.com/....json?raw_json=1`): the submission,
+//! Mirrors gallery_dl/extractor/reddit.py with the REST API
+//! (`https://www.reddit.com/....json?raw_json=1`), or with `api: "oauth"`
+//! `oauth.reddit.com` and a bearer token from the `refresh-token` (else a
+//! public `installed_client` token; tokens are cached in memory, sent only
+//! to the OAuth origin and never logged): the submission,
 //! subreddit (any listing such as `/top` or `/search`), home, user (any
 //! listing such as `/submitted` or `/comments`), image and share-redirect
 //! classes. Submission files are `i.redd.it`/`preview.redd.it` links,
@@ -9,7 +12,10 @@
 //! page or plain URL per the `videos` setting, with the MP4 rendition as a
 //! download fallback). Other links, from the submission, its self text and
 //! its comments, are queued as child jobs for the extractor of that site;
-//! links to other submissions are followed up to `recursion` levels.
+//! links to other submissions are followed up to `recursion` levels. With
+//! `previews`, a child job that fails is followed by the submission's preview
+//! rendition (upstream's queued `_fallback`). Listings honor `id-min`/`id-max`,
+//! `date-min`/`date-max` and `limit`.
 //!
 //! Every file carries the upstream keyword dictionary (the complete
 //! submission object plus `comment`, `date`, `num`, `filename`, `extension`
@@ -33,7 +39,10 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant, SystemTime},
 };
 use url::Url;
@@ -45,6 +54,13 @@ const USER_AGENT: &str = concat!(
     " (native Reddit extractor)"
 );
 const API_ROOT: &str = "https://www.reddit.com/";
+/// Upstream `RedditAPI.ROOT` and public OAuth application.
+const OAUTH_ROOT: &str = "https://oauth.reddit.com/";
+const CLIENT_ID: &str = "6N9uN0krSDE-ig";
+/// Upstream caches access tokens for an hour.
+const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
+/// Upstream lets public OAuth clients see quarantined subreddits.
+const QUARANTINE_OPTIN: &str = "_options=%7B%22pref_quarantine_optin%22%3A%20true%7D";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const LOGIN_REQUIRED: &str = "Reddit requires a logged-in session for its JSON API from this \
                               network; pass reddit.com cookies with --cookies";
@@ -286,7 +302,7 @@ pub struct Options {
     /// Levels of linked submissions to follow; negative is unlimited.
     pub recursion: i64,
     pub videos: Videos,
-    /// Accepted for compatibility; preview fallbacks of failed child jobs are not supported.
+    /// Download a queued link's submission preview when its child job fails.
     pub previews: bool,
     pub embeds: bool,
     /// Defaults to whether comments are enabled.
@@ -296,8 +312,33 @@ pub struct Options {
     pub id_min: Option<u128>,
     pub id_max: Option<u128>,
     pub limit: Option<u64>,
+    /// Upstream `date-min`/`date-max` bounds on listing items (Unix seconds).
+    pub date_min: Option<i64>,
+    pub date_max: Option<i64>,
     /// Accepted for compatibility; every file already carries its submission keywords.
     pub parent_directory: bool,
+    /// Upstream `api: "oauth"`: authenticated requests to `oauth.reddit.com`.
+    pub oauth: bool,
+    /// OAuth application ID (upstream's public client by default).
+    pub client_id: Option<String>,
+    /// OAuth refresh token for private access; a public token otherwise.
+    pub refresh_token: Option<Secret>,
+}
+
+/// A credential that never appears in debug output or error messages.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(..)")
+    }
 }
 
 impl Default for Options {
@@ -314,7 +355,12 @@ impl Default for Options {
             id_min: None,
             id_max: None,
             limit: None,
+            date_min: None,
+            date_max: None,
             parent_directory: false,
+            oauth: false,
+            client_id: None,
+            refresh_token: None,
         }
     }
 }
@@ -411,6 +457,68 @@ impl Options {
         if let Some(limit) = integer("limit")? {
             options.limit = (limit > 0).then_some(limit as u64);
         }
+        // Upstream `_get_date_min_max`: Unix seconds or ISO 8601 strings.
+        let date = |key: &str| -> Result<Option<i64>> {
+            let invalid = || {
+                error(format!(
+                    "Reddit {key} must be a Unix timestamp or an ISO 8601 date"
+                ))
+            };
+            match map.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Number(n)) => n
+                    .as_i64()
+                    .or_else(|| n.as_f64().filter(|f| f.is_finite()).map(|f| f as i64))
+                    .map(Some)
+                    .ok_or_else(invalid),
+                Some(Value::String(s)) => crate::source_date::parse_string(s.trim())
+                    .map(Some)
+                    .ok_or_else(invalid),
+                Some(_) => Err(invalid()),
+            }
+        };
+        options.date_min = date("date-min")?;
+        options.date_max = date("date-max")?;
+        options.oauth = match map.get("api") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(api)) => api == "oauth",
+            Some(_) => return Err(error("Reddit api must be \"rest\" or \"oauth\"")),
+        };
+        options.client_id = match map.get("client-id") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(id))
+                if (1..=64).contains(&id.len())
+                    && id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')) =>
+            {
+                Some(id.clone())
+            }
+            Some(_) => {
+                return Err(error(
+                    "Reddit client-id must be 1-64 ASCII letters, digits, '-' or '_'",
+                ));
+            }
+        };
+        // `"cache"` names upstream's token cache filled by `oauth:reddit`,
+        // which is not supported; like an empty cache, a public token is used.
+        options.refresh_token = match map.get("refresh-token") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(token)) if token.is_empty() || token == "cache" => None,
+            Some(Value::String(token))
+                if token.len() <= 512
+                    && token
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) =>
+            {
+                Some(Secret(token.clone()))
+            }
+            Some(_) => {
+                return Err(error(
+                    "Reddit refresh-token must be ASCII letters, digits, '-', '_' or '.'",
+                ));
+            }
+        };
         Ok(options)
     }
 }
@@ -654,6 +762,103 @@ fn video(media: &Value, mode: Videos) -> Option<File> {
     })
 }
 
+/// Upstream `_previews`: the submission's preview renditions, in order.
+fn preview_urls(post: &Map<String, Value>) -> Vec<String> {
+    let Some(preview) = post.get("preview") else {
+        return Vec::new();
+    };
+    let mut urls = Vec::new();
+    if let Some(video) = preview.get("reddit_video_preview") {
+        urls.extend(string(video, "fallback_url").map(str::to_owned));
+        urls.extend(string(video, "dash_url").map(|u| format!("ytdl:{u}")));
+        urls.extend(string(video, "hls_url").map(|u| format!("ytdl:{u}")));
+    }
+    for image in preview
+        .get("images")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(variants) = image.get("variants") {
+            for kind in ["gif", "mp4"] {
+                urls.extend(
+                    variants
+                        .get(kind)
+                        .and_then(|v| v.get("source"))
+                        .and_then(|s| string(s, "url"))
+                        .map(str::to_owned),
+                );
+            }
+        }
+        urls.extend(
+            image
+                .get("source")
+                .and_then(|s| string(s, "url"))
+                .map(str::to_owned),
+        );
+    }
+    urls
+}
+
+/// The file upstream downloads when a queued child job fails: the first
+/// preview rendition, with the remaining direct ones as `_fallback`.
+fn preview_file(post: &Map<String, Value>) -> Option<File> {
+    let mut urls =
+        preview_urls(post)
+            .into_iter()
+            .filter_map(|raw| match raw.strip_prefix("ytdl:") {
+                Some(base) => reddit_media_url(base).map(|url| (url, true)),
+                None => reddit_media_url(&raw).map(|url| (url, false)),
+            });
+    let (first, ytdl) = urls.next()?;
+    let rest: Vec<Value> = urls
+        .filter(|(_, ytdl)| !ytdl)
+        .map(|(url, _)| Value::String(url.to_string()))
+        .collect();
+    // Upstream names `HLS*`/`DASH*` files after their parent directory, and
+    // `ytdl:` files `.mp4`.
+    let (mut stem, ext) = crate::sites::nameext(&first);
+    if stem.starts_with("HLS") || stem.starts_with("DASH") {
+        stem = crate::sites::percent_decode(first.path().rsplit('/').nth(1).unwrap_or_default());
+    }
+    let mut name_url = first.clone();
+    name_url.set_query(None);
+    if let Ok(mut segments) = name_url.path_segments_mut() {
+        segments
+            .pop()
+            .push(&format!("{stem}.{}", if ytdl { "mp4" } else { &ext }));
+    }
+    let name_url = Some(name_url);
+    let mut file = if ytdl {
+        let (protocol, marker) = if ext == "m3u8" {
+            (ManifestProtocol::Hls, "hls")
+        } else {
+            (ManifestProtocol::Dash, "dash")
+        };
+        let mut handoff = BTreeMap::new();
+        handoff.insert("_ytdl_manifest".into(), Value::from(marker));
+        File {
+            url: Url::parse(&format!("ytdl:{first}")).ok()?,
+            job: MediaJob::Manifest {
+                protocol,
+                base_url: first.clone(),
+                inline_data: None,
+            },
+            name_url,
+            file: FileMetadata::default(),
+            handoff,
+        }
+    } else {
+        let mut file = File::direct(first);
+        file.name_url = name_url;
+        file
+    };
+    if !rest.is_empty() {
+        file.handoff.insert("_fallback".into(), Value::Array(rest));
+    }
+    Some(file)
+}
+
 /// `href` values in an HTML fragment (upstream `text.extract_iter`).
 fn hrefs(html: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -686,7 +891,9 @@ pub struct Context {
 #[derive(Default)]
 pub struct Output {
     pub media: Vec<Media>,
-    pub queue: Vec<(Url, Map<String, Value>)>,
+    /// Child URLs with their keywords and, with `previews`, the preview
+    /// file upstream downloads when the child job fails.
+    pub queue: Vec<(Url, Map<String, Value>, Option<Media>)>,
     pub extra: Vec<String>,
     pub visited: Option<String>,
 }
@@ -818,7 +1025,14 @@ pub fn process(unit: Unit, options: &Options, context: &Context) -> Output {
         match target(&url) {
             Ok(Target::Submission { id }) => out.extra.push(id),
             Ok(Target::User { .. } | Target::Subreddit { .. } | Target::Home { .. }) => {}
-            _ => out.queue.push((url, data)),
+            _ => {
+                let fallback = options
+                    .previews
+                    .then(|| preview_file(&data))
+                    .flatten()
+                    .map(|file| media(file, data.clone(), context, 1));
+                out.queue.push((url, data, fallback));
+            }
         }
     }
 
@@ -1004,6 +1218,10 @@ pub struct Reddit {
     last_request: tokio::sync::Mutex<Option<Instant>>,
     /// Session cookies, sent with API requests like upstream's REST mode.
     cookies: std::sync::Mutex<crate::cookies::CookieJar>,
+    /// `oauth.reddit.com`, used with the `api: "oauth"` setting.
+    oauth_root: Url,
+    /// Cached OAuth access token and its expiry; never logged.
+    token: tokio::sync::Mutex<Option<(Secret, Instant)>>,
 }
 
 /// Pending work of one extraction.
@@ -1061,6 +1279,8 @@ impl Reddit {
             interval: REQUEST_INTERVAL,
             last_request: tokio::sync::Mutex::new(None),
             cookies: std::sync::Mutex::new(crate::cookies::CookieJar::default()),
+            oauth_root: Url::parse(OAUTH_ROOT).unwrap(),
+            token: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -1110,14 +1330,119 @@ impl Reddit {
         self
     }
 
+    /// Override the OAuth API origin; intended for local tests.
+    pub fn with_oauth_root(mut self, root: Url) -> Self {
+        self.oauth_root = root;
+        self
+    }
+
+    /// Whether a request goes to the OAuth API and carries the access token.
+    fn authorized(&self, url: &Url) -> bool {
+        self.options.oauth && url.origin() == self.oauth_root.origin()
+    }
+
+    /// Upstream `RedditAPI.authenticate`: a cached bearer token from the
+    /// refresh token, or a public `installed_client` token without one.
+    async fn access_token(&self) -> std::result::Result<String, Failure> {
+        let mut slot = self.token.lock().await;
+        if let Some((token, expires)) = slot.as_ref()
+            && Instant::now() < *expires
+        {
+            return Ok(token.expose().to_owned());
+        }
+        let endpoint = self
+            .api_root
+            .join("api/v1/access_token")
+            .map_err(|_| Failure::from(error("invalid Reddit OAuth endpoint")))?;
+        let body = {
+            let mut form = url::form_urlencoded::Serializer::new(String::new());
+            match &self.options.refresh_token {
+                Some(token) => form
+                    .append_pair("grant_type", "refresh_token")
+                    .append_pair("refresh_token", token.expose()),
+                None => form
+                    .append_pair(
+                        "grant_type",
+                        "https://oauth.reddit.com/grants/installed_client",
+                    )
+                    .append_pair("device_id", "DO_NOT_TRACK_THIS_DEVICE"),
+            };
+            form.finish()
+        };
+        let client_id = self.options.client_id.as_deref().unwrap_or(CLIENT_ID);
+        self.rate_limits.wait(&endpoint, self.timeout).await?;
+        self.pace().await;
+        let response = self
+            .client
+            .post(endpoint)
+            .timeout(self.request_timeout)
+            .basic_auth(client_id, Some(""))
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(header::ACCEPT, "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|_| Failure::transient("Reddit OAuth request failed; check network access"))?;
+        let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            return Err(Failure::transient(format!(
+                "Reddit OAuth returned HTTP {status}"
+            )));
+        }
+        let mut raw = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| Failure::transient("could not read Reddit OAuth response"))?
+        {
+            if raw.len() + chunk.len() > 64 * 1024 {
+                return Err(error("Reddit OAuth response is too large").into());
+            }
+            raw.extend_from_slice(&chunk);
+        }
+        let data: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
+        let token = data
+            .get("access_token")
+            .and_then(Value::as_str)
+            .filter(|t| (1..=4096).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_graphic()));
+        let Some(token) = token.filter(|_| status.is_success()) else {
+            // Reddit's error codes are short identifiers such as `invalid_grant`.
+            let code = string(&data, "error")
+                .filter(|c| {
+                    c.len() <= 64 && c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                })
+                .unwrap_or("unknown error");
+            return Err(Failure {
+                error: error(format!(
+                    "Reddit OAuth authentication failed ({code}); check client-id and refresh-token"
+                )),
+                retry: false,
+                status: Some(status.as_u16()),
+            });
+        };
+        let lifetime = data
+            .get("expires_in")
+            .and_then(Value::as_u64)
+            .map(|s| Duration::from_secs(s.saturating_sub(60)))
+            .unwrap_or(TOKEN_LIFETIME)
+            .min(TOKEN_LIFETIME);
+        *slot = Some((Secret(token.to_owned()), Instant::now() + lifetime));
+        Ok(token.to_owned())
+    }
+
     /// Each API call is bounded by the overall timeout.
     async fn call(
         &self,
         path: &str,
         query: &[(&str, &str)],
     ) -> std::result::Result<Value, Failure> {
-        let mut endpoint = self
-            .api_root
+        let root = if self.options.oauth {
+            &self.oauth_root
+        } else {
+            &self.api_root
+        };
+        let mut endpoint = root
             .join(path)
             .map_err(|_| Failure::from(error("invalid Reddit path")))?;
         endpoint
@@ -1129,7 +1454,11 @@ impl Reddit {
             .map_err(|_| Failure::from(error("native Reddit extraction timed out")))?
         {
             Ok(body) => body,
-            Err(failure) if failure.error.to_string() == LOGIN_REQUIRED && !self.has_session() => {
+            Err(failure)
+                if failure.error.to_string() == LOGIN_REQUIRED
+                    && !self.has_session()
+                    && !self.options.oauth =>
+            {
                 return self.feed_fallback(path, query, failure).await;
             }
             Err(failure) => return Err(failure),
@@ -1259,8 +1588,21 @@ impl Reddit {
 
     fn in_range(&self, post: &Value) -> bool {
         let id = string(post, "id").and_then(b36decode).unwrap_or(0);
+        // Upstream compares the float `created_utc` with integer bounds.
+        let created = post
+            .get("created_utc")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
         self.options.id_min.is_none_or(|min| id >= min)
             && self.options.id_max.is_none_or(|max| id <= max)
+            && self
+                .options
+                .date_min
+                .is_none_or(|min| created >= min as f64)
+            && self
+                .options
+                .date_max
+                .is_none_or(|max| created <= max as f64)
     }
 
     /// Upstream `RedditAPI._pagination` for one page.
@@ -1367,11 +1709,37 @@ impl Reddit {
             let events = group_with_keywords(out.media, "reddit", KeywordPolicy::default());
             parts.push(stream::iter(events.into_iter().map(Ok)).boxed());
         }
-        for (url, data) in out.queue {
-            if let Some(child) = (walk.queue)(url) {
-                let metadata = ChildMetadata::from_raw("reddit", &walk.context.subcategory, &data);
-                parts.push(child_job(metadata, move || child));
-            }
+        for (url, data, fallback) in out.queue {
+            let Some(child) = (walk.queue)(url) else {
+                continue;
+            };
+            let metadata = ChildMetadata::from_raw("reddit", &walk.context.subcategory, &data);
+            let job = child_job(metadata, move || child);
+            let Some(mut fallback) = fallback else {
+                parts.push(job);
+                continue;
+            };
+            // Upstream `previews`: when the child job fails, download the
+            // submission's preview in the parent job instead.
+            self.network.apply_media(&mut fallback);
+            let failed = Arc::new(AtomicBool::new(false));
+            let flag = failed.clone();
+            let job = job.inspect(move |event| {
+                if event.is_err() {
+                    flag.store(true, Ordering::Relaxed);
+                }
+            });
+            let preview = stream::once(async move {
+                if failed.load(Ordering::Relaxed) {
+                    let events =
+                        group_with_keywords(vec![fallback], "reddit", KeywordPolicy::default());
+                    stream::iter(events.into_iter().map(Ok)).boxed()
+                } else {
+                    stream::empty().boxed()
+                }
+            })
+            .flatten();
+            parts.push(job.chain(preview).boxed());
         }
         stream::iter(parts).flatten().boxed()
     }
@@ -1665,6 +2033,10 @@ impl Reddit {
     ) -> std::result::Result<Vec<u8>, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
+        let bearer = match self.authorized(endpoint) {
+            true => Some(self.access_token().await?),
+            false => None,
+        };
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             self.pace().await;
@@ -1673,7 +2045,18 @@ impl Reddit {
                 .get(target.clone())
                 .timeout(self.request_timeout)
                 .header(header::ACCEPT, "application/json");
-            if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
+            let mut cookies = self.cookies.lock().unwrap().header(&target);
+            // The token only goes to the OAuth origin, never across redirects.
+            if let Some(token) = bearer.as_ref().filter(|_| self.authorized(&target)) {
+                request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+                if self.options.refresh_token.is_none() {
+                    cookies = Some(match cookies {
+                        Some(jar) => format!("{jar}; {QUARANTINE_OPTIN}"),
+                        None => QUARANTINE_OPTIN.to_owned(),
+                    });
+                }
+            }
+            if let Some(cookies) = cookies {
                 request = request.header(header::COOKIE, cookies);
             }
             let response = request
@@ -1754,8 +2137,23 @@ impl Reddit {
         if matches!(status.as_u16(), 404 | 410) {
             return Err(terminal("Reddit submission, subreddit or user not found"));
         }
+        if status == StatusCode::UNAUTHORIZED && bearer.is_some() {
+            // An expired or revoked token: drop it so a retry requests a new one.
+            *self.token.lock().await = None;
+            return Err(Failure {
+                error: error("Reddit rejected the OAuth access token"),
+                retry: true,
+                status: Some(401),
+            });
+        }
         if matches!(status.as_u16(), 401 | 403) {
             let root = Url::parse("https://www.reddit.com/").unwrap();
+            if bearer.is_some() {
+                return Err(terminal(
+                    "Reddit refused the OAuth request (private, quarantined or banned content, \
+                     or a client blocked from this network; a registered client-id may help)",
+                ));
+            }
             if self
                 .cookies
                 .lock()
@@ -2117,7 +2515,7 @@ mod tests {
         let post = json!({"id": "lnk1", "title": "L", "is_self": false, "is_video": false,
             "url": "https://imgur.com/a/AbCdE", "selftext_html": html});
         let out = run(post.clone(), &Options::default());
-        let queued: Vec<_> = out.queue.iter().map(|(u, _)| u.as_str()).collect();
+        let queued: Vec<_> = out.queue.iter().map(|(u, _, _)| u.as_str()).collect();
         assert_eq!(queued, ["https://imgur.com/a/AbCdE"]);
         assert!(out.extra.is_empty());
         let selftext = Options {
@@ -2125,7 +2523,7 @@ mod tests {
             ..Options::default()
         };
         let out = run(post, &selftext);
-        let queued: Vec<_> = out.queue.iter().map(|(u, _)| u.as_str()).collect();
+        let queued: Vec<_> = out.queue.iter().map(|(u, _, _)| u.as_str()).collect();
         assert_eq!(
             queued,
             [
@@ -2397,6 +2795,22 @@ mod tests {
                 let mut request = Vec::new();
                 let mut buffer = [0; 1024];
                 while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert_ne!(count, 0);
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                // Read a request body (OAuth token requests) completely.
+                let head = request.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+                let length = String::from_utf8_lossy(&request[..head])
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                while request.len() < head + length {
                     let count = stream.read(&mut buffer).unwrap();
                     assert_ne!(count, 0);
                     request.extend_from_slice(&buffer[..count]);
@@ -2827,5 +3241,274 @@ mod tests {
         assert!(error.to_string().contains("not found"));
         assert!(!error.to_string().contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn date_and_oauth_options_parse_and_hide_tokens() {
+        let parse = |value: Value| Options::parse(value.as_object().unwrap());
+        let options = parse(
+            json!({"date-min": "2024-01-02T03:04:05", "date-max": 1704164700,
+            "api": "oauth", "client-id": "my-app_1", "refresh-token": "123-abc.DEF"}),
+        )
+        .unwrap();
+        assert_eq!(
+            (options.date_min, options.date_max),
+            (Some(1704164645), Some(1704164700))
+        );
+        assert!(options.oauth);
+        assert_eq!(options.client_id.as_deref(), Some("my-app_1"));
+        assert_eq!(
+            options.refresh_token.as_ref().map(Secret::expose),
+            Some("123-abc.DEF")
+        );
+        assert!(!format!("{options:?}").contains("123-abc"));
+        let rest = parse(json!({"api": "rest", "refresh-token": "cache"})).unwrap();
+        assert!(!rest.oauth && rest.refresh_token.is_none());
+        for bad in [
+            json!({"date-min": "yesterday"}),
+            json!({"date-max": true}),
+            json!({"api": 1}),
+            json!({"client-id": "a b"}),
+            json!({"refresh-token": "se\ncret"}),
+        ] {
+            let message = parse(bad.clone()).unwrap_err().to_string();
+            assert!(!message.contains("cret"), "{message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn listings_apply_date_bounds() {
+        let mut old = image_post("o1");
+        old["created_utc"] = json!(1000.0);
+        let mut later = image_post("f1");
+        later["created_utc"] = json!(1904164645.0);
+        let (root, server) = serve(vec![ok(&listing(vec![old, image_post("n1"), later], None))]);
+        let native = with(
+            reddit(root),
+            json!({"date-min": 2000, "date-max": "2025-01-01"}),
+        );
+        let events: Vec<_> = native
+            .events(&Url::parse("https://www.reddit.com/r/pics/").unwrap())
+            .collect()
+            .await;
+        let ids: Vec<_> = files(&events)
+            .iter()
+            .map(|m| keywords(m)["id"].clone())
+            .collect();
+        assert_eq!(ids, [json!("n1")]);
+        server.join().unwrap();
+    }
+
+    fn preview_post() -> Value {
+        json!({"id": "pv1", "title": "P", "is_self": false, "is_video": false,
+            "subreddit": "x", "url": "https://www.redgifs.com/watch/clip",
+            "preview": {
+                "reddit_video_preview": {
+                    "fallback_url": "https://v.redd.it/vid9/DASH_480.mp4?source=fallback",
+                    "dash_url": "https://v.redd.it/vid9/DASHPlaylist.mpd",
+                    "hls_url": "https://v.redd.it/vid9/HLSPlaylist.m3u8"},
+                "images": [{
+                    "source": {"url": "https://external-preview.redd.it/img.jpg?auto=webp&s=1"},
+                    "variants": {"gif": {"source": {"url": "https://external-preview.redd.it/img.gif?s=2"}}}},
+                    {"source": {"url": "https://evil.example/x.jpg"}}]}})
+    }
+
+    #[test]
+    fn queued_links_carry_preview_fallbacks() {
+        let out = run(preview_post(), &Options::default());
+        let (url, data, fallback) = &out.queue[0];
+        assert_eq!(url.as_str(), "https://www.redgifs.com/watch/clip");
+        assert_eq!(data["id"], "pv1");
+        let fallback = fallback.as_ref().unwrap();
+        assert_eq!(
+            fallback.url.as_str(),
+            "https://v.redd.it/vid9/DASH_480.mp4?source=fallback"
+        );
+        assert!(matches!(fallback.job, MediaJob::DirectHttp));
+        assert_eq!(fallback.filename, "vid9.mp4");
+        assert_eq!(
+            fallback.handoff["_fallback"],
+            json!([
+                "https://external-preview.redd.it/img.gif?s=2",
+                "https://external-preview.redd.it/img.jpg?auto=webp&s=1"
+            ])
+        );
+        let k = keywords(fallback);
+        assert_eq!(
+            (&k["filename"], &k["extension"]),
+            (&json!("vid9"), &json!("mp4"))
+        );
+        assert_eq!(fallback.metadata.as_ref().unwrap().post_id, "pv1");
+        let (file, _) = crate::sites::default_templates(fallback).unwrap();
+        assert_eq!(file.render(fallback).unwrap(), "pv1 P.mp4");
+
+        // Manifest-only previews become `ytdl:` manifest jobs named `.mp4`.
+        let mut post = preview_post();
+        post["preview"] = json!({"reddit_video_preview": {
+            "hls_url": "https://v.redd.it/vid9/HLSPlaylist.m3u8?a=1"}});
+        let out = run(post, &Options::default());
+        let fallback = out.queue[0].2.as_ref().unwrap();
+        assert!(matches!(
+            &fallback.job,
+            MediaJob::Manifest { protocol: ManifestProtocol::Hls, base_url, .. }
+                if base_url.as_str() == "https://v.redd.it/vid9/HLSPlaylist.m3u8?a=1"
+        ));
+        assert_eq!(fallback.handoff["_ytdl_manifest"], "hls");
+        assert_eq!(fallback.filename, "vid9.mp4");
+
+        let off = Options {
+            previews: false,
+            ..Options::default()
+        };
+        assert!(run(preview_post(), &off).queue[0].2.is_none());
+        let mut bare = preview_post();
+        bare.as_object_mut().unwrap().remove("preview");
+        assert!(run(bare, &Options::default()).queue[0].2.is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_child_jobs_download_the_preview() {
+        let mut post = preview_post();
+        post["selftext_html"] = json!("<a href=\"https://ok.example/x\">ok</a>");
+        let (root, server) = serve(vec![ok(&submission(post))]);
+        let native = with(reddit(root), json!({"selftext": true}));
+        let queue: Queue<'_> = Arc::new(|url: Url| {
+            Some(if url.host_str() == Some("www.redgifs.com") {
+                stream::once(async { Err(error("child extraction failed")) }).boxed()
+            } else {
+                stream::empty().boxed()
+            })
+        });
+        let events: Vec<_> = native
+            .events_with_queue(&Url::parse("https://redd.it/pv1").unwrap(), queue)
+            .collect()
+            .await;
+        let labels: Vec<&str> = events
+            .iter()
+            .map(|event| match event {
+                Ok(ExtractionEvent::BeginChild(_)) => "+",
+                Ok(ExtractionEvent::EndChild(_)) => "-",
+                Ok(ExtractionEvent::Post(_)) => "P",
+                Ok(ExtractionEvent::Media(_)) => "M",
+                Ok(ExtractionEvent::EndPost) => ".",
+                Err(_) => "E",
+            })
+            .collect();
+        assert_eq!(labels, ["+", "E", "-", "P", "M", ".", "+", "-"]);
+        assert_eq!(
+            files(&events)[0].url.as_str(),
+            "https://v.redd.it/vid9/DASH_480.mp4?source=fallback"
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn oauth_api_sends_cached_bearer_tokens_only_to_its_origin() {
+        let token = json!({"access_token": "tok-1", "token_type": "bearer",
+            "expires_in": 3600})
+        .to_string();
+        let (root, server) = serve(vec![
+            ok(token.as_bytes()),
+            ok(&submission(image_post("abc12"))),
+            ok(&submission(image_post("abc13"))),
+        ]);
+        let native = with(
+            reddit(root.clone()).with_oauth_root(root),
+            json!({"api": "oauth"}),
+        );
+        for id in ["abc12", "abc13"] {
+            let events: Vec<_> = native
+                .events(&Url::parse(&format!("https://redd.it/{id}")).unwrap())
+                .collect()
+                .await;
+            assert_eq!(files(&events).len(), 1, "{events:?}");
+            assert!(files(&events)[0].headers.is_empty());
+        }
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        let token_request = requests[0].to_ascii_lowercase();
+        assert!(requests[0].starts_with("POST /api/v1/access_token "));
+        assert!(token_request.contains("authorization: basic nk45du4wa3jtreutawc6"));
+        assert!(requests[0].ends_with(
+            "grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client&device_id=DO_NOT_TRACK_THIS_DEVICE"
+        ));
+        for request in &requests[1..] {
+            assert!(request.starts_with("GET /comments/abc1"), "{request}");
+            let lower = request.to_ascii_lowercase();
+            assert!(lower.contains("authorization: bearer tok-1"), "{request}");
+            assert!(lower.contains("pref_quarantine_optin"), "{request}");
+        }
+    }
+
+    #[tokio::test]
+    async fn oauth_refresh_tokens_reauthenticate_after_rejection() {
+        let token = |value: &str| json!({"access_token": value}).to_string();
+        let (root, server) = serve(vec![
+            ok(token("tok-1").as_bytes()),
+            response("401 Unauthorized", "", b"{\"error\": 401}"),
+            ok(token("tok-2").as_bytes()),
+            ok(&submission(image_post("abc12"))),
+        ]);
+        let native = with(
+            reddit(root.clone()).with_oauth_root(root).with_retries(1),
+            json!({"api": "oauth", "client-id": "myapp", "refresh-token": "rt-1"}),
+        );
+        let events: Vec<_> = native
+            .events(&Url::parse("https://redd.it/abc12").unwrap())
+            .collect()
+            .await;
+        assert_eq!(files(&events).len(), 1, "{events:?}");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("authorization: basic bxlhcha6")
+        );
+        assert!(requests[0].ends_with("grant_type=refresh_token&refresh_token=rt-1"));
+        assert!(requests[1].to_ascii_lowercase().contains("bearer tok-1"));
+        assert!(!requests[1].contains("pref_quarantine_optin"));
+        assert!(requests[2].starts_with("POST /api/v1/access_token "));
+        assert!(requests[3].to_ascii_lowercase().contains("bearer tok-2"));
+
+        // Failed authentication names Reddit's error code, never the token.
+        let (root, server) = serve(vec![response(
+            "400 Bad Request",
+            "",
+            b"{\"error\": \"invalid_grant\"}",
+        )]);
+        let native = with(
+            reddit(root.clone()).with_oauth_root(root),
+            json!({"api": "oauth", "refresh-token": "rt-1"}),
+        );
+        let message = native
+            .events(&Url::parse("https://redd.it/abc12").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("invalid_grant"), "{message}");
+        assert!(!message.contains("rt-1"), "{message}");
+        server.join().unwrap();
+
+        // Refused OAuth calls do not ask for login cookies.
+        let (root, server) = serve(vec![
+            ok(token("tok-3").as_bytes()),
+            response("403 Forbidden", "Content-Type: text/html\r\n", b"<html>"),
+        ]);
+        let native = with(
+            reddit(root.clone()).with_oauth_root(root),
+            json!({"api": "oauth"}),
+        );
+        let message = native
+            .events(&Url::parse("https://redd.it/abc12").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("refused the OAuth request"), "{message}");
+        assert!(!message.contains("tok-3"), "{message}");
+        server.join().unwrap();
     }
 }

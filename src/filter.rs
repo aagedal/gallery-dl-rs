@@ -946,6 +946,11 @@ fn context_parts(
             }
             metadata.insert("revision".into(), map(fields));
         }
+        if let Some(extras) = &post.kemono_extras {
+            for (key, value) in extras.iter() {
+                metadata.insert(key.clone(), json_value(value));
+            }
+        }
         if let Some(frames) = &post.frames {
             let frames = Value::List(
                 frames

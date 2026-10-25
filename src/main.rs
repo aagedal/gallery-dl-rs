@@ -563,7 +563,8 @@ async fn run(args: Args) -> Result<()> {
                             )
                             || matches!(
                                 gallery_dl_rs::mastodon::target(&url),
-                                Ok(gallery_dl_rs::mastodon::Target::Collection { .. })
+                                Ok(gallery_dl_rs::mastodon::Target::Collection { .. }
+                                    | gallery_dl_rs::mastodon::Target::Following { .. })
                             )
                             || (extract::social_site(&url) == Some("twitter")
                                 && (settings["twitter"].options.quoted == Some(true)
@@ -1305,6 +1306,11 @@ fn extract_input<'a>(
                                     }
                                     native
                                         .with_api_server(options.api_server.as_deref())?
+                                        .with_credentials(
+                                            options.username.as_deref(),
+                                            options.password.as_deref(),
+                                        )?
+                                        .with_options(options.site_options.as_deref())?
                                         .with_likes_endpoint(
                                             options.bluesky_endpoint.unwrap_or_default(),
                                         )
@@ -1395,7 +1401,10 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native Mastodon initialization failed: {e}"))
                         })?;
-                    native.events(&url)
+                    native.events_with_queue(
+                        &url,
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if matches!(category, "kemono" | "coomer") => {
                     let native = extractors.kemono[usize::from(category == "coomer")]
@@ -1420,6 +1429,8 @@ fn extract_input<'a>(
                                     .with_favorites(options.favorites.unwrap_or_default())
                                     .with_max_posts(options.max_posts)
                                     .with_metadata(options.metadata.unwrap_or(true))
+                                    .with_comments(options.comments.unwrap_or(false))
+                                    .with_options(options.site_options.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -1620,9 +1631,11 @@ fn extract_input<'a>(
                     let native = extractors
                         .pinterest
                         .get_or_init(|| async {
+                            let jar = extractors.cookie_jar(configured, "pinterest.com").await?;
                             gallery_dl_rs::pinterest::Pinterest::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_cookies(jar)
                                         .with_options(options.site_options.as_deref())?
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
@@ -1834,6 +1847,7 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_pixeldrain_api_key(options.api_key.as_deref())?
+                                        .with_options(options.site_options.as_deref())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -1871,6 +1885,7 @@ fn extract_input<'a>(
                                         .with_artist_parent_metadata(
                                             options.artist_parent_metadata().cloned(),
                                         )
+                                        .with_options(options.site_options.as_deref())?
                                         .with_threshold(options.booru_threshold.flatten())
                                         .with_favorite_order(options.booru_favorite_order.clone())
                                         .with_pool_order(
@@ -1991,7 +2006,7 @@ fn extract_input<'a>(
                             reposts: (category == "bluesky").then_some(options.reposts).flatten(),
                             sanity: (category == "pixiv").then_some(options.sanity).flatten(),
                             captions: (category == "pixiv").then_some(options.captions).flatten(),
-                            comments: matches!(category, "pixiv" | "pixiv-novel")
+                            comments: matches!(category, "pixiv" | "pixiv-novel" | "kemono" | "coomer")
                                 .then_some(options.comments)
                                 .flatten(),
                             metadata_bookmark: matches!(category, "pixiv" | "pixiv-novel")

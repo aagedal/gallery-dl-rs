@@ -43,6 +43,11 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
             "id-max",
             "limit",
             "parent-directory",
+            "date-min",
+            "date-max",
+            "api",
+            "client-id",
+            "refresh-token",
         ],
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
@@ -83,9 +88,17 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("wallhaven", &["metadata"]),
+    ("pixeldrain", &["zip", "recursive"]),
+    ("kemono", &["dms", "announcements"]),
+    ("coomer", &["dms", "announcements"]),
+    ("danbooru", &["metadata"]),
+    ("e621", &["metadata"]),
+    ("gelbooru", &["tags", "notes"]),
+    ("safebooru", &["tags", "notes"]),
     ("furaffinity", &["descriptions", "external", "layout"]),
     ("weasyl", &["metadata"]),
     ("newgrounds", &["flash", "format"]),
+    ("bluesky", &["depth"]),
     (
         "tumblr",
         &[
@@ -96,6 +109,9 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
             "fallback-delay",
             "fallback-retries",
             "ratelimit",
+            "api-secret",
+            "access-token",
+            "access-token-secret",
         ],
     ),
 ];
@@ -1538,11 +1554,11 @@ impl Config {
                     "native configuration threshold is only supported for danbooru and e621",
                 ));
             }
-            if !matches!(name, "danbooru" | "e621")
+            if !matches!(name, "danbooru" | "e621" | "bluesky")
                 && (settings.username.0.is_some() || settings.password.0.is_some())
             {
                 return Err(error(
-                    "native configuration username/password are only supported for danbooru and e621",
+                    "native configuration username/password are only supported for danbooru, e621 and bluesky",
                 ));
             }
             if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
@@ -2883,7 +2899,8 @@ mod site_scope_tests {
         assert_eq!(options["lang"], serde_json::json!("en"));
         assert!(super::Config::parse_with_options(br#"{"a":1,"a":2}"#, &dir, &cli).is_err());
         let config = super::Config::parse_with_options(
-            br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3},
+            br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3,
+                "api":"oauth","refresh-token":"rt","client-id":"cid","date-min":"2024-01-01"},
                 "pinterest":{"sections":false},
                 "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
                 "vsco":{"videos":false,"include":"all"},
@@ -2893,7 +2910,9 @@ mod site_scope_tests {
                 "furaffinity":{"layout":"old","external":true,"descriptions":"html"},
                 "weasyl":{"metadata":true},
                 "newgrounds":{"flash":false,"format":"720p"},
-                "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
+                "tumblr":{"external":true,"posts":"photo","api-key":"k","api-secret":"s",
+                    "access-token":"t","access-token-secret":"ts"},
+                "bluesky":{"depth":2,"username":"alice.bsky.social","password":"pw"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
         )
@@ -2904,6 +2923,10 @@ mod site_scope_tests {
         assert_eq!(options["comments"], serde_json::json!(500));
         assert_eq!(options["videos"], serde_json::json!("ytdl"));
         assert_eq!(options["recursion"], serde_json::json!(2));
+        assert_eq!(options["refresh-token"], serde_json::json!("rt"));
+        assert_eq!(options["client-id"], serde_json::json!("cid"));
+        assert_eq!(options["api"], serde_json::json!("oauth"));
+        assert_eq!(options["date-min"], serde_json::json!("2024-01-01"));
         let options = config.resolve("pinterest").unwrap().site_options.unwrap();
         assert_eq!(options["sections"], serde_json::json!(false));
         let flickr = config.resolve("flickr").unwrap();
@@ -2942,6 +2965,22 @@ mod site_scope_tests {
         let options = tumblr.site_options.unwrap();
         assert_eq!(options["external"], serde_json::json!(true));
         assert!(!options.contains_key("posts"));
+        // Tumblr's OAuth 1.0a keys are site options, not Mastodon bearer tokens.
+        assert_eq!(options["api-secret"], serde_json::json!("s"));
+        assert_eq!(options["access-token"], serde_json::json!("t"));
+        assert_eq!(options["access-token-secret"], serde_json::json!("ts"));
+        assert_eq!(tumblr.access_token, None);
+        let bluesky = config.resolve("bluesky").unwrap();
+        assert_eq!(bluesky.username.as_deref(), Some("alice.bsky.social"));
+        assert_eq!(bluesky.password.as_deref(), Some("pw"));
+        assert_eq!(bluesky.site_options.unwrap()["depth"], serde_json::json!(2));
+        assert!(
+            super::Config::parse(
+                br#"{"extractor":{"tumblr":{"username":"u","password":"p"}}}"#,
+                &dir
+            )
+            .is_err()
+        );
         for bad in [
             &br#"{"extractor":{"4chan":{"retries":1},"4chan":{"retries":2}}}"#[..],
             br#"{"extractor":{"4chan":{"retries":1,"retries":2}}}"#,

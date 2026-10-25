@@ -557,7 +557,17 @@ impl Media {
                 if !crate::booru::valid_id(&post.post_id) {
                     return None;
                 }
-                (category, serde_json::json!([post.post_id]).to_string())
+                // Danbooru media assets have their own ID space (`m{id}`).
+                let identity = if post
+                    .source_defaults
+                    .as_ref()
+                    .is_some_and(|defaults| defaults.subcategory == "media-asset")
+                {
+                    serde_json::json!(["media-asset", post.post_id])
+                } else {
+                    serde_json::json!([post.post_id])
+                };
+                (category, identity.to_string())
             }
             category @ ("instagram" | "twitter" | "facebook") => {
                 let post = self.metadata.as_ref()?;
@@ -699,6 +709,9 @@ pub struct PostMetadata {
     pub creator: Option<crate::kemono::CreatorMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<crate::kemono::RevisionMetadata>,
+    /// Kemono/Coomer `comments`, `dms` and `announcements` API values.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub kemono_extras: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<crate::file_metadata::FileMetadata>,
     /// Ordered Pixiv ugoira ZIP member names and millisecond frame delays.
@@ -800,6 +813,9 @@ pub fn input_url(value: &str) -> Result<Url> {
             "generic"
         } else if matches!(prefix, "r" | "recursive") {
             "recursive"
+        } else if prefix == "tumblr" {
+            // Upstream's `tumblr:DOMAIN` selects Tumblr for custom blog domains.
+            "tumblr"
         } else {
             return None;
         };
@@ -870,6 +886,9 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     if let Some(site) = crate::sites::find(url) {
         return Some(site.category);
     }
+    if url.scheme() == "tumblr" {
+        return crate::tumblr::is_blog_url(url).then_some("tumblr");
+    }
     let host = url.host_str()?;
     if crate::mastodon::INSTANCES.contains(&host) {
         return Some("mastodon");
@@ -930,6 +949,8 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("danbooru.donmai.us", "danbooru"),
         ("e621.net", "e621"),
         ("e926.net", "e621"),
+        ("e621.cc", "e621"),
+        ("e621.anthro.fr", "e621"),
         ("gelbooru.com", "gelbooru"),
         ("safebooru.org", "safebooru"),
         ("imgur.io", "imgur"),
@@ -2306,6 +2327,9 @@ fn compatibility_metadata(
         discord: discord.clone(),
         creator,
         revision: compatibility_revision(data, category),
+        kemono_extras: matches!(category, "kemono" | "coomer")
+            .then(|| crate::kemono::extras_from_keywords(data))
+            .flatten(),
         rating: (category == "pixiv-novel"
             || crate::booru::Site::from_category(category).is_some())
         .then(|| string("rating"))

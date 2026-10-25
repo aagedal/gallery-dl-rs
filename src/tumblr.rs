@@ -2,7 +2,9 @@
 //!
 //! Mirrors gallery_dl/extractor/tumblr.py using the public API v2 with an
 //! `api_key` query parameter (upstream's default public key unless the
-//! `api-key` setting overrides it) and the legacy (non-NPF) post format.
+//! `api-key` setting overrides it) and the legacy (non-NPF) post format, or
+//! OAuth 1.0a signed requests once `access-token`/`access-token-secret` are
+//! set. Upstream's `tumblr:` prefix selects custom blog domains.
 //! Every upstream class is supported: blog posts (`user`), single posts,
 //! tagged posts, posts of one day, likes, followed blogs and followers
 //! (queued as child jobs) and searches. Files carry upstream's keyword
@@ -44,6 +46,11 @@ const USER_AGENT: &str = concat!(
 );
 /// Upstream gallery-dl's default public API key.
 pub const DEFAULT_API_KEY: &str = "O3hU2tMi5e4Qs5t3vezEi6L0qRORJ5y9oUpSGsrWu8iA3UCc3B";
+/// Upstream gallery-dl's default OAuth consumer secret (`TumblrAPI.API_SECRET`).
+pub const DEFAULT_API_SECRET: &str = "sFdsK3PDdP2QpYMRAoq0oDnw0sFS24XigXmdfnaeNZpJpqAn03";
+/// Tumblr's response to OAuth requests for blogs the token's account may not
+/// view; upstream retries such requests with `api_key` authentication.
+const NO_PERMISSION: &str = "You do not have permission to view this blog";
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const PAGE_SIZE: usize = 50;
 /// Upstream `_pagination_blogs` page size.
@@ -158,8 +165,37 @@ fn is_www(host: &str) -> bool {
     matches!(host, "www.tumblr.com" | "tumblr.com")
 }
 
-/// Whether a URL is a Tumblr blog or search page handled by this extractor.
+/// A custom blog domain accepted after upstream's `tumblr:` prefix.
+fn valid_domain(host: &str) -> bool {
+    let labels: Vec<_> = host.split('.').collect();
+    host.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|label| {
+            (1..=63).contains(&label.len())
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        })
+}
+
+/// The API blog identifier: `NAME.tumblr.com` for blog names, else the
+/// custom domain itself (upstream `self.blog`).
+fn blog_host(blog: &str) -> String {
+    if blog.contains('.') {
+        blog.to_owned()
+    } else {
+        format!("{blog}.tumblr.com")
+    }
+}
+
+/// Whether a URL is a Tumblr blog or search page handled by this extractor,
+/// including upstream's `tumblr:` prefix for custom blog domains.
 pub fn is_blog_url(url: &Url) -> bool {
+    if url.scheme() == "tumblr" {
+        return target(url).is_ok();
+    }
     match url.host_str() {
         Some(host) if is_www(host) => {
             let all = segments(url);
@@ -270,6 +306,29 @@ pub fn target(url: &Url) -> Result<Target> {
             "unsupported Tumblr URL; expected https://BLOG.tumblr.com[/post/ID|/tagged/TAG|/day/YYYY/MM/DD|/likes|/following|/followers], https://www.tumblr.com/BLOG[/ID] or https://www.tumblr.com/search/QUERY",
         )
     };
+    // Upstream `tumblr:(https?://)?DOMAIN`: any blog domain, usually custom.
+    if url.scheme() == "tumblr" {
+        let inner = crate::extract::prefixed_target(url).ok_or_else(unsupported)?;
+        if inner.scheme() == "tumblr" {
+            return Err(unsupported());
+        }
+        let host = inner
+            .host_str()
+            .ok_or_else(unsupported)?
+            .to_ascii_lowercase();
+        if is_www(&host) || host_blog(&host).is_some() {
+            return target(&inner);
+        }
+        if !valid_domain(&host)
+            || host.ends_with(".tumblr.com")
+            || inner.port().is_some()
+            || !inner.username().is_empty()
+            || inner.password().is_some()
+        {
+            return Err(unsupported());
+        }
+        return blog_target(host, &segments(&inner), unsupported);
+    }
     if !matches!(url.scheme(), "http" | "https")
         || url.port().is_some()
         || !url.username().is_empty()
@@ -315,7 +374,15 @@ pub fn target(url: &Url) -> Result<Target> {
     } else {
         (host_blog(host).ok_or_else(unsupported)?, &all[..])
     };
-    let blog = blog.to_ascii_lowercase();
+    blog_target(blog.to_ascii_lowercase(), rest, unsupported)
+}
+
+/// Classify the path below a blog root.
+fn blog_target(
+    blog: String,
+    rest: &[&str],
+    unsupported: impl Fn() -> crate::Error,
+) -> Result<Target> {
     match rest {
         [] | ["posts"] | ["archive"] => Ok(Target::Posts { blog }),
         ["page", page] if page.bytes().all(|b| b.is_ascii_digit()) && !page.is_empty() => {
@@ -1022,6 +1089,11 @@ struct Options {
     fallback_delay: Duration,
     fallback_retries: u64,
     ratelimit_wait: bool,
+    /// OAuth 1.0a consumer secret (`api-secret`); upstream's default if unset.
+    api_secret: Option<String>,
+    /// OAuth 1.0a user token (`access-token`) and its secret.
+    access_token: Option<String>,
+    access_token_secret: Option<String>,
 }
 
 impl Default for Options {
@@ -1034,6 +1106,9 @@ impl Default for Options {
             fallback_delay: Duration::from_secs(120),
             fallback_retries: 2,
             ratelimit_wait: false,
+            api_secret: None,
+            access_token: None,
+            access_token_secret: None,
         }
     }
 }
@@ -1087,6 +1162,26 @@ impl Options {
                         _ => return Err(invalid()),
                     }
                 }
+                "api-secret" | "access-token" | "access-token-secret" => {
+                    let value = match value {
+                        Value::Bool(false) => None,
+                        // Upstream's "cache" reads a stored OAuth token; no
+                        // token cache exists natively, so it means unset.
+                        Value::String(s) if s.is_empty() || s == "cache" => None,
+                        Value::String(s)
+                            if s.len() <= 1024 && s.bytes().all(|b| b.is_ascii_graphic()) =>
+                        {
+                            Some(s.clone())
+                        }
+                        _ => return Err(invalid()),
+                    };
+                    match key.as_str() {
+                        // An explicitly empty secret disables OAuth, as upstream.
+                        "api-secret" => out.api_secret = Some(value.unwrap_or_default()),
+                        "access-token" => out.access_token = value,
+                        _ => out.access_token_secret = value,
+                    }
+                }
                 _ => return Err(error(format!("unsupported Tumblr setting: {key}"))),
             }
         }
@@ -1111,6 +1206,129 @@ pub struct Tumblr {
     /// The page that embeds the token; unit tests leave it unset so they
     /// never reach Tumblr.
     web_root: Option<Url>,
+    /// Set once a blog refused OAuth access; later calls use `api_key`.
+    oauth_disabled: std::sync::atomic::AtomicBool,
+}
+
+/// OAuth 1.0a credentials signing API requests (upstream `OAuth1Client`).
+struct OAuth1<'a> {
+    consumer_key: &'a str,
+    consumer_secret: &'a str,
+    token: &'a str,
+    token_secret: &'a str,
+}
+
+/// RFC 3986 percent-encoding of everything but unreserved characters, as
+/// upstream's `oauth.quote`.
+fn oauth_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
+    use sha1::{Digest, Sha1};
+    let mut block = [0u8; 64];
+    if key.len() > block.len() {
+        block[..20].copy_from_slice(&Sha1::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let pad = |byte: u8| block.map(|b| b ^ byte);
+    let inner = Sha1::new()
+        .chain_update(pad(0x36))
+        .chain_update(message)
+        .finalize();
+    Sha1::new()
+        .chain_update(pad(0x5c))
+        .chain_update(inner)
+        .finalize()
+        .into()
+}
+
+/// HMAC-SHA1 `oauth_signature` (unquoted base64) over the request method,
+/// query-less URL and the sorted, encoded OAuth and query parameters.
+fn oauth_signature(
+    method: &str,
+    url: &Url,
+    oauth: &[(&str, String)],
+    consumer_secret: &str,
+    token_secret: &str,
+) -> String {
+    use base64::Engine;
+    let mut base = url.clone();
+    base.set_query(None);
+    base.set_fragment(None);
+    let mut params: Vec<(String, String)> = oauth
+        .iter()
+        .map(|(key, value)| (oauth_quote(key), oauth_quote(value)))
+        .chain(
+            url.query_pairs()
+                .map(|(key, value)| (oauth_quote(&key), oauth_quote(&value))),
+        )
+        .collect();
+    params.sort();
+    let query = params
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let message = [method, base.as_str(), &query].map(oauth_quote).join("&");
+    let key = format!(
+        "{}&{}",
+        oauth_quote(consumer_secret),
+        oauth_quote(token_secret)
+    );
+    base64::engine::general_purpose::STANDARD.encode(hmac_sha1(key.as_bytes(), message.as_bytes()))
+}
+
+/// A per-request nonce of 16 ASCII letters.
+fn oauth_nonce() -> String {
+    use sha1::{Digest, Sha1};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let digest = Sha1::new()
+        .chain_update(now.as_nanos().to_le_bytes())
+        .chain_update(COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes())
+        .chain_update(std::process::id().to_le_bytes())
+        .finalize();
+    const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    digest[..16]
+        .iter()
+        .map(|b| LETTERS[*b as usize % LETTERS.len()] as char)
+        .collect()
+}
+
+impl OAuth1<'_> {
+    /// The `Authorization` header value for a GET request of `url`.
+    fn authorization(&self, url: &Url, nonce: &str, timestamp: u64) -> String {
+        let mut params = vec![
+            ("oauth_consumer_key", self.consumer_key.to_owned()),
+            ("oauth_nonce", nonce.to_owned()),
+            ("oauth_signature_method", "HMAC-SHA1".to_owned()),
+            ("oauth_timestamp", timestamp.to_string()),
+            ("oauth_version", "1.0".to_owned()),
+            ("oauth_token", self.token.to_owned()),
+        ];
+        let signature =
+            oauth_signature("GET", url, &params, self.consumer_secret, self.token_secret);
+        params.push(("oauth_signature", signature));
+        let fields = params
+            .iter()
+            .map(|(key, value)| format!("{key}=\"{}\"", oauth_quote(value)))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("OAuth {fields}")
+    }
 }
 
 /// How a listing advances between pages.
@@ -1159,7 +1377,7 @@ impl Listing<'_> {
     /// identifies the listed blog by its host name.
     fn adopt_blog_info(&mut self, mut info: Value) {
         if let (Some(blog), Some(object)) = (&self.blog, info.as_object_mut()) {
-            object.insert("uuid".into(), format!("{blog}.tumblr.com").into());
+            object.insert("uuid".into(), blog_host(blog).into());
         }
         self.blog_info = Some(info);
     }
@@ -1197,6 +1415,29 @@ impl Tumblr {
             } else {
                 Url::parse("https://www.tumblr.com/").ok()
             },
+            oauth_disabled: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// Upstream signs API requests with OAuth 1.0a once `api-key`,
+    /// `api-secret` (both defaulting to upstream's application),
+    /// `access-token` and `access-token-secret` are all set.
+    fn oauth(&self) -> Option<OAuth1<'_>> {
+        if self
+            .oauth_disabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return None;
+        }
+        let consumer_secret = match &self.options.api_secret {
+            Some(secret) => secret.as_str(),
+            None => DEFAULT_API_SECRET,
+        };
+        Some(OAuth1 {
+            consumer_key: Some(self.api_key.as_str()).filter(|key| !key.is_empty())?,
+            consumer_secret: Some(consumer_secret).filter(|secret| !secret.is_empty())?,
+            token: self.options.access_token.as_deref()?,
+            token_secret: self.options.access_token_secret.as_deref()?,
         })
     }
 
@@ -1302,6 +1543,7 @@ impl Tumblr {
             Err(e)
                 if self.api_key == DEFAULT_API_KEY
                     && self.web_token().is_none()
+                    && self.oauth().is_none()
                     && e.to_string().starts_with("Tumblr daily API rate limit") =>
             {
                 if self.activate_web_token().await.is_err() {
@@ -1332,7 +1574,7 @@ impl Tumblr {
 
     /// Blog info (`/v2/blog/BLOG/info`), as upstream `TumblrAPI.info`.
     async fn info(&self, blog: &str) -> Result<Value> {
-        let url = self.endpoint(&format!("v2/blog/{blog}.tumblr.com/info"));
+        let url = self.endpoint(&format!("v2/blog/{}/info", blog_host(blog)));
         let mut response = self.api(&url).await?;
         match response.get_mut("blog") {
             Some(blog) if blog.is_object() => Ok(blog.take()),
@@ -1344,7 +1586,7 @@ impl Tumblr {
     /// `avatar_url`), which is resolved here so the API key never becomes
     /// part of a downloadable media URL.
     async fn avatar(&self, blog: &str) -> Result<Url> {
-        let url = self.endpoint(&format!("v2/blog/{blog}.tumblr.com/avatar/512"));
+        let url = self.endpoint(&format!("v2/blog/{}/avatar/512", blog_host(blog)));
         let reply = tokio::time::timeout(self.timeout, self.fetch(&url, None, false))
             .await
             .map_err(|_| error("native Tumblr extraction timed out"))??;
@@ -1510,7 +1752,7 @@ impl Tumblr {
             queue,
         };
         let posts_params = |listing: &mut Listing, blog: String| {
-            listing.path = format!("v2/blog/{blog}.tumblr.com/posts");
+            listing.path = format!("v2/blog/{}/posts", blog_host(&blog));
             listing.params = vec![
                 ("npf".into(), "false".into()),
                 ("reblog_info".into(), "true".into()),
@@ -1543,7 +1785,7 @@ impl Tumblr {
                 listing.before = Some(start + 86400);
             }
             Target::Likes { blog } => {
-                listing.path = format!("v2/blog/{blog}.tumblr.com/likes");
+                listing.path = format!("v2/blog/{}/likes", blog_host(&blog));
                 listing.key = "liked_posts";
                 listing.strategy = Strategy::Liked;
                 listing.page_blog = false;
@@ -1878,7 +2120,7 @@ impl Tumblr {
                 let Some(offset) = offset else {
                     return Ok(None);
                 };
-                let mut url = self.endpoint(&format!("v2/blog/{blog}.tumblr.com/{which}"));
+                let mut url = self.endpoint(&format!("v2/blog/{}/{which}", blog_host(&blog)));
                 url.query_pairs_mut()
                     .append_pair("limit", &BLOG_PAGE_SIZE.to_string())
                     .append_pair("offset", &offset.to_string());
@@ -1922,6 +2164,11 @@ impl Tumblr {
             match self.attempt(endpoint, attempt, accept, follow).await {
                 Ok(reply) => return Ok(reply),
                 Err(failure) if failure.wait && waits < MAX_RATE_WAITS => waits += 1,
+                // Upstream retries refused OAuth requests once with `api_key`.
+                Err(failure) if failure.key_fallback => {
+                    self.oauth_disabled
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
                     attempt += 1;
@@ -1973,13 +2220,19 @@ impl Tumblr {
     ) -> std::result::Result<Reply, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
+        let mut signed;
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             // With the web token, API calls authenticate by header instead.
             let token = self
                 .web_token()
                 .filter(|_| target.host_str() == self.api_root.host_str());
-            if token.is_some() {
+            // OAuth signs only API-origin requests, replacing `api_key`.
+            let oauth = self
+                .oauth()
+                .filter(|_| token.is_none() && target.origin() == self.api_root.origin());
+            signed = oauth.is_some();
+            if token.is_some() || oauth.is_some() {
                 let pairs: Vec<(String, String)> = target
                     .query_pairs()
                     .filter(|(key, _)| key != "api_key")
@@ -1998,6 +2251,19 @@ impl Tumblr {
                 request = request
                     .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
                     .header(reqwest::header::ORIGIN, "https://www.tumblr.com");
+            }
+            if let Some(oauth) = &oauth {
+                let timestamp = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map_or(0, |now| now.as_secs());
+                let mut value = reqwest::header::HeaderValue::from_str(&oauth.authorization(
+                    &target,
+                    &oauth_nonce(),
+                    timestamp,
+                ))
+                .map_err(|_| error("invalid Tumblr OAuth credentials"))?;
+                value.set_sensitive(true);
+                request = request.header(reqwest::header::AUTHORIZATION, value);
             }
             if let Some(accept) = accept {
                 request = request.header(reqwest::header::ACCEPT, accept);
@@ -2043,11 +2309,48 @@ impl Tumblr {
                 },
             ));
         }
+        if matches!(status.as_u16(), 403 | 404) {
+            // Upstream inspects the JSON error for OAuth fallbacks and
+            // dashboard-only blogs; only fixed messages are reported.
+            let body = small_body(&mut response).await;
+            let detail = |pointer: &str| {
+                body.as_ref()
+                    .and_then(|body| body.pointer(pointer))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            };
+            if status == StatusCode::FORBIDDEN
+                && signed
+                && detail("/response").as_deref() == Some(NO_PERMISSION)
+            {
+                return Err(Failure {
+                    key_fallback: true,
+                    ..error("Tumblr refused OAuth access to this blog").into()
+                });
+            }
+            if status == StatusCode::NOT_FOUND
+                && detail("/errors/0/detail").is_some_and(|detail| {
+                    detail.contains("only viewable within the Tumblr dashboard")
+                })
+            {
+                return Err(error(if signed {
+                    "Tumblr blog is only viewable within the Tumblr dashboard; ensure access-token and access-token-secret belong to the same application as api-key and api-secret"
+                } else {
+                    "Tumblr blog is only viewable within the Tumblr dashboard; configure access-token and access-token-secret"
+                })
+                .into());
+            }
+        }
         if matches!(status.as_u16(), 404 | 410) {
             return Err(error("Tumblr blog or post not found").into());
         }
         if matches!(status.as_u16(), 401 | 403) {
-            return Err(error("Tumblr refused access; check the api-key setting").into());
+            return Err(error(if signed {
+                "Tumblr refused access; check the api-key, api-secret, access-token and access-token-secret settings"
+            } else {
+                "Tumblr refused access; check the api-key setting"
+            })
+            .into());
         }
         if !status.is_success() {
             return Err(error(format!("Tumblr returned HTTP {status}")).into());
@@ -2225,11 +2528,25 @@ fn backoff(attempt: u8) -> Duration {
     Duration::from_millis(250 * (1u64 << attempt.min(6)))
 }
 
+/// A bounded JSON error body; oversized or invalid bodies are ignored.
+async fn small_body(response: &mut reqwest::Response) -> Option<Value> {
+    let mut body = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if body.len() + chunk.len() > 64 * 1024 {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).ok()
+}
+
 struct Failure {
     error: crate::Error,
     retry: bool,
     /// A rate-limit wait already registered with `RateLimits`.
     wait: bool,
+    /// OAuth was refused for this blog; retry with `api_key` authentication.
+    key_fallback: bool,
 }
 
 impl Failure {
@@ -2238,6 +2555,7 @@ impl Failure {
             error: error(message),
             retry: true,
             wait: false,
+            key_fallback: false,
         }
     }
 
@@ -2246,6 +2564,7 @@ impl Failure {
             error: error(message),
             retry: true,
             wait: true,
+            key_fallback: false,
         }
     }
 }
@@ -2256,6 +2575,7 @@ impl From<crate::Error> for Failure {
             error,
             retry: false,
             wait: false,
+            key_fallback: false,
         }
     }
 }
@@ -2452,6 +2772,93 @@ mod tests {
         ] {
             assert!(t(raw).is_err(), "{raw}");
         }
+    }
+
+    #[test]
+    fn tumblr_prefix_selects_custom_blog_domains() {
+        let input = |raw: &str| crate::extract::input_url(raw).unwrap();
+        let t = |raw: &str| target(&input(raw));
+        let custom = |blog: &str| Target::Posts { blog: blog.into() };
+        assert_eq!(
+            t("tumblr:https://blog.example.com/").unwrap(),
+            custom("blog.example.com")
+        );
+        assert_eq!(
+            t("tumblr:Blog.Example.com/post/123/slug").unwrap(),
+            Target::Post {
+                blog: "blog.example.com".into(),
+                id: "123".into()
+            }
+        );
+        assert_eq!(
+            t("tumblr:www.example.org/tagged/a-b").unwrap(),
+            Target::Tagged {
+                blog: "www.example.org".into(),
+                tag: "a b".into()
+            }
+        );
+        assert_eq!(
+            t("tumblr:example.org/likes").unwrap(),
+            Target::Likes {
+                blog: "example.org".into()
+            }
+        );
+        // Tumblr hosts keep their ordinary classification.
+        assert_eq!(t("tumblr:alice.tumblr.com").unwrap(), custom("alice"));
+        assert_eq!(
+            t("tumblr:https://www.tumblr.com/alice/123").unwrap(),
+            Target::Post {
+                blog: "alice".into(),
+                id: "123".into()
+            }
+        );
+        let url = input("tumblr:blog.example.com/123");
+        assert!(is_blog_url(&url));
+        assert_eq!(crate::extract::social_site(&url), Some("tumblr"));
+        for raw in [
+            "tumblr:https://blog.example.com:8443/",
+            "tumblr:https://localhost/",
+            "tumblr:https://media.tumblr.com/",
+            "tumblr:https://blog.example.com/about",
+        ] {
+            assert!(t(raw).is_err(), "{raw}");
+            assert_eq!(crate::extract::social_site(&input(raw)), None, "{raw}");
+        }
+        assert_eq!(blog_host("alice"), "alice.tumblr.com");
+        assert_eq!(blog_host("blog.example.com"), "blog.example.com");
+    }
+
+    #[tokio::test]
+    async fn custom_domains_address_the_api_by_domain() {
+        let body = json!({"response": {"blog": {"name": "alice", "uuid": "t:alice"},
+            "posts": [post(123)], "total_posts": 1}})
+        .to_string();
+        let (root, server) = serve(vec![response("200 OK", body.as_bytes())]);
+        let media: Vec<_> = tumblr(root)
+            .stream(&crate::extract::input_url("tumblr:blog.example.com").unwrap())
+            .collect()
+            .await;
+        assert!(
+            !media.is_empty() && media.iter().all(Result::is_ok),
+            "{media:?}"
+        );
+        // Archive identity follows the post's blog name, not the domain.
+        let first = media[0].as_ref().unwrap();
+        assert_eq!(
+            first.metadata.as_ref().unwrap().username.as_deref(),
+            Some("alice")
+        );
+        assert!(first.archive_key().is_some());
+        assert_eq!(
+            first.archive_key(),
+            parse_post(&post(123), "alice")[0].archive_key()
+        );
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /v2/blog/blog.example.com/posts?api_key="),
+            "{}",
+            requests[0]
+        );
     }
 
     fn response(status: &str, body: &[u8]) -> Vec<u8> {
@@ -3887,6 +4294,235 @@ mod tests {
                 .finish_original(&mut media, root.join("s99999x99999/one.jpg").unwrap())
                 .await;
             assert_eq!(media.handoff["_fallback"], json!([PHOTO]));
+            assert_eq!(server.join().unwrap().len(), 1);
+        }
+    }
+
+    /// Upstream `oauth.OAuth1Client` signing and `TumblrAPI._call` fallbacks.
+    mod oauth {
+        use super::*;
+
+        fn options(value: Value) -> Map<String, Value> {
+            value.as_object().unwrap().clone()
+        }
+
+        fn credentials() -> Map<String, Value> {
+            json!({"api-secret": "consumer-secret", "access-token": "user-token",
+                "access-token-secret": "tsecret-value"})
+            .as_object()
+            .unwrap()
+            .clone()
+        }
+
+        fn header_field<'r>(request: &'r str, key: &str) -> &'r str {
+            let start = request.find(&format!("{key}=\"")).unwrap() + key.len() + 2;
+            let end = request[start..].find('"').unwrap();
+            &request[start..start + end]
+        }
+
+        fn unquote(value: &str) -> String {
+            percent_decode(value).unwrap()
+        }
+
+        #[test]
+        fn hmac_and_signature_match_reference_vectors() {
+            // RFC 2202 test cases 1 and 6 (key longer than one block).
+            let hex = |bytes: [u8; 20]| bytes.map(|b| format!("{b:02x}")).concat();
+            assert_eq!(
+                hex(hmac_sha1(&[0x0b; 20], b"Hi There")),
+                "b617318655057264e28bc0b6fb378c8ef146be00"
+            );
+            assert_eq!(
+                hex(hmac_sha1(
+                    &[0xaa; 80],
+                    b"Test Using Larger Than Block-Size Key - Hash Key First"
+                )),
+                "aa4ae5e15272d00e95705637ce8a3b55ed402112"
+            );
+            // RFC 5849 section 1.2 (with its errata-corrected signature).
+            let url =
+                Url::parse("http://photos.example.net/photos?file=vacation.jpg&size=original")
+                    .unwrap();
+            let params = [
+                ("oauth_consumer_key", "dpf43f3p2l4k3l03".to_owned()),
+                ("oauth_token", "nnch734d00sl2jdk".to_owned()),
+                ("oauth_signature_method", "HMAC-SHA1".to_owned()),
+                ("oauth_timestamp", "137131202".to_owned()),
+                ("oauth_nonce", "chapoH".to_owned()),
+            ];
+            assert_eq!(
+                oauth_signature("GET", &url, &params, "kd94hf93k423kf44", "pfkkdhi9sl3r4s00"),
+                "MdpQcU8iPSUjWoN/UDMsK2sui9I="
+            );
+            assert_eq!(oauth_quote("a b/~+="), "a%20b%2F~%2B%3D");
+            let nonce = oauth_nonce();
+            assert_eq!(nonce.len(), 16);
+            assert!(nonce.bytes().all(|b| b.is_ascii_alphabetic()));
+            assert_ne!(nonce, oauth_nonce());
+        }
+
+        #[tokio::test]
+        async fn configured_tokens_sign_api_requests_instead_of_sending_api_key() {
+            let body = json!({"response": {"posts": [post(123)]}}).to_string();
+            let (root, server) = serve(vec![response("200 OK", body.as_bytes())]);
+            let events: Vec<_> = tumblr(root.clone())
+                .with_options(Some(&credentials()))
+                .unwrap()
+                .with_api_key(Some("consumer-key"))
+                .events(&Url::parse("https://www.tumblr.com/alice/123").unwrap())
+                .collect()
+                .await;
+            assert!(events.iter().all(Result::is_ok), "{events:?}");
+            let request = &server.join().unwrap()[0];
+            let line = request.lines().next().unwrap();
+            assert_eq!(
+                line,
+                "GET /v2/blog/alice.tumblr.com/posts?npf=false&reblog_info=true&id=123 HTTP/1.1"
+            );
+            assert!(!request.contains("consumer-secret") && !request.contains("tsecret-value"));
+            assert!(request.contains("authorization: OAuth oauth_consumer_key=\"consumer-key\","));
+            assert_eq!(header_field(request, "oauth_token"), "user-token");
+            assert_eq!(header_field(request, "oauth_signature_method"), "HMAC-SHA1");
+            assert_eq!(header_field(request, "oauth_version"), "1.0");
+            // The signature verifies over the request actually sent.
+            let url = root
+                .join("v2/blog/alice.tumblr.com/posts?npf=false&reblog_info=true&id=123")
+                .unwrap();
+            let params = [
+                ("oauth_consumer_key", "consumer-key".to_owned()),
+                (
+                    "oauth_nonce",
+                    header_field(request, "oauth_nonce").to_owned(),
+                ),
+                ("oauth_signature_method", "HMAC-SHA1".to_owned()),
+                (
+                    "oauth_timestamp",
+                    header_field(request, "oauth_timestamp").to_owned(),
+                ),
+                ("oauth_version", "1.0".to_owned()),
+                ("oauth_token", "user-token".to_owned()),
+            ];
+            assert_eq!(
+                unquote(header_field(request, "oauth_signature")),
+                oauth_signature("GET", &url, &params, "consumer-secret", "tsecret-value")
+            );
+        }
+
+        #[tokio::test]
+        async fn incomplete_or_disabled_credentials_keep_api_key_authentication() {
+            for settings in [
+                json!({"access-token": "user-token"}),
+                json!({"access-token-secret": "tsecret-value"}),
+                json!({"api-secret": "", "access-token": "t", "access-token-secret": "s"}),
+                json!({"access-token": "cache", "access-token-secret": "s"}),
+                json!({"access-token": false, "access-token-secret": "s"}),
+            ] {
+                let body = json!({"response": {"posts": [post(123)]}}).to_string();
+                let (root, server) = serve(vec![response("200 OK", body.as_bytes())]);
+                let _: Vec<_> = tumblr(root)
+                    .with_options(Some(&options(settings.clone())))
+                    .unwrap()
+                    .events(&Url::parse("https://www.tumblr.com/alice/123").unwrap())
+                    .collect()
+                    .await;
+                let request = &server.join().unwrap()[0];
+                assert!(
+                    request.contains(&format!("api_key={DEFAULT_API_KEY}")),
+                    "{settings}"
+                );
+                assert!(!request.contains("authorization:"), "{settings}");
+            }
+            // The default application secret signs when only tokens are given.
+            let body = json!({"response": {"posts": [post(123)]}}).to_string();
+            let (root, server) = serve(vec![response("200 OK", body.as_bytes())]);
+            let _: Vec<_> = tumblr(root)
+                .with_options(Some(&options(
+                    json!({"access-token": "t", "access-token-secret": "s"}),
+                )))
+                .unwrap()
+                .events(&Url::parse("https://www.tumblr.com/alice/123").unwrap())
+                .collect()
+                .await;
+            let request = &server.join().unwrap()[0];
+            assert!(!request.contains("api_key="));
+            assert_eq!(header_field(request, "oauth_consumer_key"), DEFAULT_API_KEY);
+            for bad in [json!(1), json!(true), json!("bad value"), json!(["x"])] {
+                let error = Tumblr::new(Duration::from_secs(5))
+                    .unwrap()
+                    .with_options(Some(&options(json!({"access-token-secret": bad}))))
+                    .err()
+                    .unwrap()
+                    .to_string();
+                assert!(error.contains("access-token-secret") && !error.contains("bad value"));
+            }
+        }
+
+        #[tokio::test]
+        async fn refused_oauth_blogs_retry_once_with_api_key() {
+            let refused = json!({"meta": {"status": 403, "msg": "Forbidden"},
+                "response": NO_PERMISSION})
+            .to_string();
+            let body = json!({"response": {"posts": [post(123)]}}).to_string();
+            let (root, server) = serve(vec![
+                response("403 Forbidden", refused.as_bytes()),
+                response("200 OK", body.as_bytes()),
+                response("200 OK", body.as_bytes()),
+            ]);
+            let native = tumblr(root)
+                .with_options(Some(&credentials()))
+                .unwrap()
+                .with_api_key(Some("consumer-key"));
+            for _ in 0..2 {
+                let events: Vec<_> = native
+                    .events(&Url::parse("https://www.tumblr.com/alice/123").unwrap())
+                    .collect()
+                    .await;
+                assert!(events.iter().all(Result::is_ok), "{events:?}");
+            }
+            let requests = server.join().unwrap();
+            assert!(requests[0].contains("authorization: OAuth "));
+            assert!(!requests[0].contains("api_key="));
+            for request in &requests[1..] {
+                assert!(request.contains("api_key=consumer-key"), "{request}");
+                assert!(!request.contains("authorization:"), "{request}");
+            }
+        }
+
+        #[tokio::test]
+        async fn dashboard_only_blogs_report_fixed_authorization_hints() {
+            let dashboard = json!({"meta": {"status": 404}, "errors": [{"title": "Not Found",
+                "detail": "This Tumblr is only viewable within the Tumblr dashboard"}]})
+            .to_string();
+            for oauth in [false, true] {
+                let (root, server) = serve(vec![response("404 Not Found", dashboard.as_bytes())]);
+                let mut native = tumblr(root).with_retries(2);
+                if oauth {
+                    native = native.with_options(Some(&credentials())).unwrap();
+                }
+                let error = native
+                    .events(&Url::parse("https://alice.tumblr.com/").unwrap())
+                    .collect::<Vec<_>>()
+                    .await
+                    .remove(0)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("only viewable within the Tumblr dashboard"));
+                assert_eq!(error.contains("same application"), oauth, "{error}");
+                assert!(!error.contains("tsecret-value") && !error.contains("user-token"));
+                assert_eq!(server.join().unwrap().len(), 1);
+            }
+            // Other refusals remain terminal and are not retried with api_key.
+            let (root, server) = serve(vec![response("403 Forbidden", b"{\"response\":\"x\"}")]);
+            let error = tumblr(root)
+                .with_options(Some(&credentials()))
+                .unwrap()
+                .events(&Url::parse("https://alice.tumblr.com/").unwrap())
+                .collect::<Vec<_>>()
+                .await
+                .remove(0)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("access-token-secret settings"), "{error}");
             assert_eq!(server.join().unwrap().len(), 1);
         }
     }

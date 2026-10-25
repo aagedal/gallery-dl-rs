@@ -20,7 +20,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode, header};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
@@ -56,14 +56,21 @@ const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const PAGE_SIZE: usize = 50;
 const MAX_PAGES: usize = 200;
 /// Site domains (without optional `www.`/`beta.` prefixes) and categories.
-pub const HOSTS: [(&str, &str); 6] = [
+/// Upstream matches `(kemono|coomer).(cr|st|su|party)`.
+pub const HOSTS: [(&str, &str); 8] = [
     ("kemono.cr", "kemono"),
+    ("kemono.st", "kemono"),
     ("kemono.su", "kemono"),
     ("kemono.party", "kemono"),
+    ("coomer.cr", "coomer"),
     ("coomer.st", "coomer"),
     ("coomer.su", "coomer"),
     ("coomer.party", "coomer"),
 ];
+/// Host, service and creator ID.
+type CreatorKey = (String, String, String);
+/// Bound for each `comments`, `dms` or `announcements` API value.
+const MAX_EXTRA_BYTES: usize = 8 * 1024 * 1024;
 
 /// Category for a supported site host; CDN subdomains (`n1.kemono.cr`) are
 /// not site hosts.
@@ -189,7 +196,7 @@ pub fn valid_hash(hash: &str) -> bool {
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Kemono/Coomer URL; expected /posts, /artists, /favorites, /account/favorites, /SERVICE/user/USER_ID[/post/POST_ID] or /discord/server/SERVER_ID[/CHANNEL_ID] on kemono.cr, kemono.su, coomer.st or coomer.su",
+            "unsupported Kemono/Coomer URL; expected /posts, /artists, /favorites, /account/favorites, /SERVICE/user/USER_ID[/post/POST_ID] or /discord/server/SERVER_ID[/CHANNEL_ID] on kemono.cr/.st/.su/.party or coomer.st/.cr/.su/.party",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -877,6 +884,24 @@ pub struct Kemono {
     post_order: PostOrder,
     endpoint: Endpoint,
     favorites: Favorites,
+    comments: bool,
+    dms: bool,
+    announcements: bool,
+    /// Per-creator `dms`/`announcements` values, fetched once per creator.
+    creator_extras: tokio::sync::Mutex<HashMap<CreatorKey, Arc<Map<String, Value>>>>,
+}
+
+/// Upstream's optional per-post `comments`, `dms` and `announcements`
+/// keywords from compatibility output, bounded like native responses.
+pub(crate) fn extras_from_keywords(data: &Map<String, Value>) -> Option<Arc<Map<String, Value>>> {
+    let extras: Map<String, Value> = ["comments", "dms", "announcements"]
+        .into_iter()
+        .filter_map(|key| Some((key.to_owned(), data.get(key)?.clone())))
+        .filter(|(_, value)| {
+            serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_EXTRA_BYTES)
+        })
+        .collect();
+    (!extras.is_empty()).then(|| Arc::new(extras))
 }
 
 struct ListingState {
@@ -891,6 +916,7 @@ struct ListingState {
     revisions: VecDeque<RevisionPost>,
     revision_identity: Option<Identity>,
     revision_creator: Option<Arc<CreatorMetadata>>,
+    revision_extras: Option<Arc<Map<String, Value>>>,
     seen_pages: HashSet<[u8; 32]>,
     pending: VecDeque<ExtractionEvent>,
 }
@@ -916,7 +942,102 @@ impl Kemono {
             post_order: PostOrder::Forward,
             endpoint: Endpoint::Posts,
             favorites: Favorites::Artist,
+            comments: false,
+            dms: false,
+            announcements: false,
+            creator_extras: tokio::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Upstream `comments`: fetch each post's comments (non-fatal).
+    pub fn with_comments(mut self, comments: bool) -> Self {
+        self.comments = comments;
+        self
+    }
+
+    /// Apply upstream extractor settings: `dms` and `announcements` attach
+    /// each creator's DMs and announcements to its posts (Python truthiness).
+    pub fn with_options(mut self, options: Option<&Map<String, Value>>) -> Self {
+        if let Some(options) = options {
+            if let Some(value) = options.get("dms") {
+                self.dms = crate::postprocess::truthy(value);
+            }
+            if let Some(value) = options.get("announcements") {
+                self.announcements = crate::postprocess::truthy(value);
+            }
+        }
+        self
+    }
+
+    /// The optional `comments`/`dms`/`announcements` keywords of one source
+    /// post. Comments are non-fatal like upstream (`fatal=False`; a non-list
+    /// response becomes an empty list); creator DM and announcement failures
+    /// end extraction. Creator values are fetched once per creator.
+    async fn post_extras(
+        &self,
+        host: &str,
+        identity: &Identity,
+    ) -> Result<Option<Arc<Map<String, Value>>>> {
+        if !(self.comments || self.dms || self.announcements) {
+            return Ok(None);
+        }
+        let bounded = |value: Value| {
+            serde_json::to_vec(&value)
+                .is_ok_and(|bytes| bytes.len() <= MAX_EXTRA_BYTES)
+                .then_some(value)
+                .ok_or_else(|| error("Kemono response exceeds limit"))
+        };
+        let mut extras = Map::new();
+        if self.comments {
+            let path = format!(
+                "api/v1/{}/user/{}/post/{}/comments",
+                identity.service, identity.user, identity.id
+            );
+            let comments = match self.call(host, &path, &[]).await {
+                Ok(bytes) => json(&bytes).ok().filter(Value::is_array),
+                Err(_) => None,
+            };
+            extras.insert(
+                "comments".into(),
+                bounded(comments.unwrap_or_else(|| Value::Array(Vec::new())))
+                    .unwrap_or_else(|_| Value::Array(Vec::new())),
+            );
+        }
+        if self.dms || self.announcements {
+            let key = (
+                host.to_owned(),
+                identity.service.clone(),
+                identity.user.clone(),
+            );
+            let mut cache = self.creator_extras.lock().await;
+            let creator = match cache.get(&key) {
+                Some(creator) => creator.clone(),
+                None => {
+                    let mut creator = Map::new();
+                    for (enabled, name) in
+                        [(self.dms, "dms"), (self.announcements, "announcements")]
+                    {
+                        if enabled {
+                            let path = format!(
+                                "api/v1/{}/user/{}/{name}",
+                                identity.service, identity.user
+                            );
+                            let bytes = self.call(host, &path, &[]).await?;
+                            creator.insert(name.into(), bounded(json(&bytes)?)?);
+                        }
+                    }
+                    let creator = Arc::new(creator);
+                    cache.insert(key, creator.clone());
+                    creator
+                }
+            };
+            extras.extend(
+                creator
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+        }
+        Ok(Some(Arc::new(extras)))
     }
 
     pub fn with_favorites(mut self, favorites: Favorites) -> Self {
@@ -1074,6 +1195,7 @@ impl Kemono {
         post: RevisionPost,
         identity: &Identity,
         creator: &CreatorMetadata,
+        extras: Option<&Arc<Map<String, Value>>>,
     ) -> VecDeque<ExtractionEvent> {
         let mut events = self.finish(host, &post.post, identity);
         for event in &mut events {
@@ -1083,6 +1205,7 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
+                        metadata.kemono_extras = extras.cloned();
                     }
                 }
                 ExtractionEvent::Media(media) => {
@@ -1090,6 +1213,7 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
+                        metadata.kemono_extras = extras.cloned();
                     }
                     if let Some(id) = post
                         .metadata
@@ -1166,27 +1290,37 @@ impl Kemono {
             let revisions = self
                 .prepare_revisions(&host, body, &identity, explicit)
                 .await?;
-            let creator = if revisions.is_empty() {
-                None
+            let (creator, extras) = if revisions.is_empty() {
+                (None, None)
             } else {
-                Some(self.creator(&host, &identity).await)
+                (
+                    Some(self.creator(&host, &identity).await),
+                    self.post_extras(&host, &identity).await?,
+                )
             };
             Ok::<_, crate::Error>(
                 stream::unfold(
-                    (host, identity, creator, revisions, VecDeque::new()),
-                    move |(host, identity, creator, mut revisions, mut pending)| async move {
+                    (
+                        host,
+                        identity,
+                        (creator, extras),
+                        revisions,
+                        VecDeque::new(),
+                    ),
+                    move |(host, identity, prepared, mut revisions, mut pending)| async move {
                         loop {
                             if let Some(event) = pending.pop_front() {
                                 return Some((
                                     Ok(event),
-                                    (host, identity, creator, revisions, pending),
+                                    (host, identity, prepared, revisions, pending),
                                 ));
                             }
                             pending = self.finish_revision(
                                 &host,
                                 revisions.pop_front()?,
                                 &identity,
-                                creator.as_deref().expect("prepared creator"),
+                                prepared.0.as_deref().expect("prepared creator"),
+                                prepared.1.as_ref(),
                             );
                         }
                     },
@@ -1303,6 +1437,7 @@ impl Kemono {
             revisions: VecDeque::new(),
             revision_identity: None,
             revision_creator: None,
+            revision_extras: None,
             seen_pages: HashSet::new(),
             pending: VecDeque::new(),
         };
@@ -1322,6 +1457,7 @@ impl Kemono {
                         revision,
                         identity,
                         state.revision_creator.as_deref().expect("prepared creator"),
+                        state.revision_extras.as_ref(),
                     );
                     continue;
                 }
@@ -1365,6 +1501,14 @@ impl Kemono {
                         None
                     } else {
                         Some(self.creator(&state.host, &identity).await)
+                    };
+                    state.revision_extras = if state.revisions.is_empty() {
+                        None
+                    } else {
+                        match self.post_extras(&state.host, &identity).await {
+                            Ok(extras) => extras,
+                            Err(e) => return Some((Err(e), None)),
+                        }
                     };
                     state.revision_identity = Some(identity);
                     continue;
@@ -3445,6 +3589,141 @@ mod tests {
                 .iter()
                 .all(|request| request.starts_with("GET /api/v1/patreon/user/42/profile "))
         );
+    }
+
+    fn post_extras_of(events: &[Result<ExtractionEvent>]) -> Vec<Map<String, Value>> {
+        events
+            .iter()
+            .filter_map(|event| match event.as_ref().unwrap() {
+                ExtractionEvent::Post(post) => post.metadata.as_ref(),
+                ExtractionEvent::Media(media) => media.metadata.as_ref(),
+                _ => None,
+            })
+            .map(|metadata| {
+                metadata
+                    .kemono_extras
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn comments_dms_and_announcements_are_optional_post_keywords() {
+        let (root, server) = serve(vec![
+            response("200 OK", json!({"post": post("7")}).to_string().as_bytes()),
+            response("404 Not Found", br#"{"error":"no comments"}"#),
+            response("200 OK", br#"[{"content":"hi"}]"#),
+            response("200 OK", br#"[{"content":"news"}]"#),
+        ]);
+        let options = json!({"dms": true, "announcements": 1});
+        let events: Vec<_> = kemono(root)
+            .with_comments(true)
+            .with_options(options.as_object())
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        let extras = post_extras_of(&events);
+        assert_eq!(extras.len(), 3, "{events:?}");
+        for extras in extras {
+            assert_eq!(extras["comments"], json!([]));
+            assert_eq!(extras["dms"], json!([{"content": "hi"}]));
+            assert_eq!(extras["announcements"], json!([{"content": "news"}]));
+        }
+        let ExtractionEvent::Media(media) = events[1].as_ref().unwrap() else {
+            panic!("expected media");
+        };
+        let values = crate::filter::context(media);
+        assert!(values.contains_key("dms") && values.contains_key("comments"));
+        let public = serde_json::to_value(media.metadata.as_ref().unwrap()).unwrap();
+        assert_eq!(public["announcements"], json!([{"content": "news"}]));
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/post/7/comments "));
+        assert!(requests[2].starts_with("GET /api/v1/patreon/user/42/dms "));
+        assert!(requests[3].starts_with("GET /api/v1/patreon/user/42/announcements "));
+    }
+
+    #[tokio::test]
+    async fn creator_dms_are_fetched_once_and_comments_follow_each_post() {
+        let page = json!([post("1"), post("2")]).to_string();
+        let (root, server) = serve(vec![
+            response("200 OK", page.as_bytes()),
+            response("200 OK", br#"[{"id":"c1"}]"#),
+            response("200 OK", br#"[{"id":"dm"}]"#),
+            response("200 OK", br#"{"unexpected":"object"}"#),
+        ]);
+        let options = json!({"dms": "yes"});
+        let events: Vec<_> = kemono(root)
+            .with_comments(true)
+            .with_options(options.as_object())
+            .events(&Url::parse("https://kemono.cr/patreon/user/42").unwrap())
+            .collect()
+            .await;
+        let extras = post_extras_of(&events);
+        assert_eq!(extras.len(), 6, "{events:?}");
+        assert_eq!(extras[0]["comments"], json!([{"id": "c1"}]));
+        assert_eq!(extras[5]["comments"], json!([]));
+        assert!(
+            extras
+                .iter()
+                .all(|extras| extras["dms"] == json!([{"id": "dm"}]))
+        );
+        assert!(
+            extras
+                .iter()
+                .all(|extras| !extras.contains_key("announcements"))
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[3].starts_with("GET /api/v1/patreon/user/42/post/2/comments "));
+    }
+
+    #[tokio::test]
+    async fn failed_creator_dms_end_extraction_and_disabled_extras_send_no_requests() {
+        let (root, server) = serve(vec![
+            response("200 OK", json!({"post": post("7")}).to_string().as_bytes()),
+            response("403 Forbidden", b""),
+        ]);
+        let options = json!({"dms": true});
+        let events: Vec<_> = kemono(root)
+            .with_options(options.as_object())
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_err());
+        assert_eq!(server.join().unwrap().len(), 2);
+
+        let (root, server) = serve(vec![response(
+            "200 OK",
+            json!({"post": post("7")}).to_string().as_bytes(),
+        )]);
+        let options = json!({"dms": false, "announcements": null});
+        let events: Vec<_> = kemono(root)
+            .with_options(options.as_object())
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert!(post_extras_of(&events).iter().all(Map::is_empty));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn upstream_domains_and_compatibility_extras_are_recognized() {
+        for (host, expected) in [
+            ("kemono.st", "kemono"),
+            ("www.kemono.st", "kemono"),
+            ("coomer.cr", "coomer"),
+            ("beta.coomer.cr", "coomer"),
+        ] {
+            assert_eq!(category(host), Some(expected), "{host}");
+        }
+        assert_eq!(category("kemono.example"), None);
+        let data = json!({"comments": [], "dms": [{"a": 1}], "title": "x"});
+        let extras = extras_from_keywords(data.as_object().unwrap()).unwrap();
+        assert_eq!(extras.keys().collect::<Vec<_>>(), ["comments", "dms"]);
+        assert!(extras_from_keywords(&Map::new()).is_none());
     }
 
     #[tokio::test]

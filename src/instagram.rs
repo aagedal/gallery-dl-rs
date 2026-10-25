@@ -1145,6 +1145,7 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                     rating: None,
                     score: None,
                     revision: None,
+                    kemono_extras: None,
                     discord: None,
                     creator: None,
                     community: None,
