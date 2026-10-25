@@ -4,6 +4,7 @@ mod backend;
 pub mod bluesky;
 pub mod booru;
 pub mod browser;
+pub mod cache;
 pub mod config;
 pub mod cookies;
 pub mod date;
