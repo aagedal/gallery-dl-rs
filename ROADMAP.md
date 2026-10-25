@@ -872,6 +872,22 @@ current-version thumbnail job, whose hash matched the Python calculation on a
 separate API response. Successful live historical-version extraction remains
 unverified.
 
+**Implemented experimental native pixivFANBOX:** every upstream class
+(`creator` with `offset`, `tag`, `post`, `home`, `supporting` and pixiv's
+`fanbox/creator/ID` `redirect`) through `api.fanbox.cc` with upstream's
+Origin/Referer/Sec-Fetch headers, keywords (`content`, `archives`,
+`articleBody`, `isCoverImage`, `fileUrl`, `fileId`) and default paths, the
+`embeds` (queued to the site router, or `ytdl` files for video providers),
+`metadata` (`user`, `plan`, `comments`), `comments` and `fee-max` options.
+A `FANBOXSESSID` cookie from `--cookies` unlocks paid posts and the feeds;
+restricted single posts and feeds without it end in an error naming the
+cookie. The current API's wrapped bodies (`post`, `pageUrls`, `posts`,
+`plans`, listing `cover`) are read beside upstream's shapes, guest sessions
+the API assigns are not sent back (it refuses this client's later requests
+carrying them), and calls are spaced 0.5 s apart. Public posts, creators,
+tags and the redirect were checked live on 2026-10-25; paid content is
+fixture-tested only.
+
 **Implemented experimental native Pixeldrain/Catbox/imgbox/Postimg:** files,
 lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
 and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`

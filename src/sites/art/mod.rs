@@ -18,6 +18,7 @@ mod booth;
 mod cien;
 mod civitai;
 mod comedywildlifephoto;
+mod fanbox;
 mod fantia;
 mod fivehundredpx;
 mod foriio;
@@ -67,6 +68,7 @@ pub(super) static SITES: &[&Site] = &[
     &booth::SITE,
     &cien::SITE,
     &civitai::SITE,
+    &fanbox::SITE,
     &fantia::SITE,
     &fivehundredpx::SITE,
     &inkbunny::SITE,
