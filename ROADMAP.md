@@ -634,23 +634,28 @@ media metadata. API-reported file size, rating and signed score are exposed.
 Remaining: other favorites, notes,
 `tags`/`metadata` options, per-category tags and authenticated live verification.
 
-**Implemented experimental native Mastodon:** statuses, user timelines,
-bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
-pawoo.net and baraag.net. Instance scopes (`mastodon.social`/`pawoo`/`baraag`)
-inherit shared `mastodon` settings; tokens bind explicitly to an instance API
-origin and stay out of media requests. Instance output categories now match
+**Implemented experimental native Mastodon:** every upstream class (statuses,
+ActivityPub `/objects/ID` resolved by redirect, user timelines, followed accounts
+queued as user child jobs, bookmarks, favourites, list timelines and Unicode
+hashtags) on mastodon.social, pawoo.net and baraag.net, which are all instances
+upstream ships. Instance scopes (`mastodon.social`/`pawoo`/`baraag`) inherit
+shared `mastodon` settings; tokens bind explicitly to an instance API origin and
+stay out of media and object requests. Instance output categories now match
 upstream; existing attachment archive identities remain stable, while default
 category directories change without migrating files. Numeric account IDs skip
-lookup. Collection paging follows server bookmark/status cursors from all Link
-fields, detects cycles, and stops lazily; collection dates are non-terminating.
+lookup, and failed lookups fall back to an exact-`acct` account search as
+upstream. Collection and following paging follow server cursors from all Link
+fields, detect cycles, and stop lazily; collection dates are non-terminating.
 `reblogs`/`replies`/`text-posts` preserve outer repost metadata, attachment IDs,
 and empty post boundaries. Optional card images append outer-post previews with
 upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
-Scoped config, compatibility forwarding, header
-privacy, split Link fields, date ordering and cancellation have local coverage.
-Remaining: OAuth/cache discovery, arbitrary/additional instances, followed views,
-account-search fallback/moved handling, and fuller metadata/default
-naming. Authenticated live verification and real captures remain required.
+Scoped config, compatibility forwarding, header privacy, split Link fields, date
+ordering and cancellation have local coverage. Remaining: OAuth/cache discovery,
+upstream's built-in per-instance application tokens (not embedded natively; some
+instances need a configured `access-token`, e.g. baraag.net hashtags),
+user-configured instances and the `mastodon:URL` prefix, the moved-account
+warning, and fuller metadata/default naming. Authenticated live verification and
+real captures remain required.
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept

@@ -531,9 +531,18 @@ links stay direct downloads.
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
 `mastodon.social`, `pawoo` and `baraag`; the host is also exposed as `instance`.
-Supported: statuses (`/@USER/ID`, `/web/statuses/ID`), user timelines
-(`/@USER`, `/@USER/media`, `/users/USER`, including `@user@remote` and numeric
-`id:ID` accounts), `/bookmarks`, `/favourites`, `/lists/ID`, and `/tags/TAG`.
+Supported: statuses (`/@USER/ID`, `/web/statuses/ID`, `/notice/ID`,
+`/users/USER/statuses/ID`), ActivityPub objects (`/objects/ID`,
+`/users/USER/objects/ID`, resolved to their status through the redirect
+`Location` without credentials), user timelines (`/@USER`, `/@USER/media`,
+`/users/USER`, including `@user@remote` and numeric `id:ID` accounts),
+followed accounts (`/@USER/following`, `/users/USER/following`; `following`),
+`/bookmarks`, `/favourites`, `/lists/ID`, and `/tags/TAG`. As upstream, a failed
+account lookup falls back to `/api/v1/accounts/search` for `@USER@INSTANCE` and
+accepts only an exact `acct` match. Following lists page
+`/api/v1/accounts/ID/following` lazily and queue each account's `url` as a child
+job when it is a user page on a supported instance (accounts elsewhere are skipped,
+like upstream's unsupported URLs); child jobs use their own instance settings.
 Hashtags accept Unicode letters/numbers and underscores. Pages contain up to 40
 statuses and traverse lazily, capped at 100 pages. Collection cursors come from
 all `Link` headers, including bookmark cursors distinct from status IDs. Date
@@ -544,8 +553,11 @@ Shared options belong under `extractor.mastodon`; instance settings under
 them. Set `access-token` only in an instance scope; the token is bound to that
 instance's HTTPS API origin and never attached to media or other instances.
 An empty string or false disables the native token. OAuth login/cache discovery
-is not implemented. Explicit credentials and selection options also forward to
-the compatibility backend for their input instance.
+is not implemented, and upstream's built-in per-instance application tokens are
+not embedded, so endpoints an instance restricts to authenticated clients (for
+example baraag.net hashtag timelines) need a configured `access-token`. Explicit
+credentials and selection options also forward to the compatibility backend for
+their input instance.
 
 `reblogs` and `cards` default to false, `replies` to true, and `text-posts` to false.
 Enabling reblogs includes original attachments under the outer status identity;
