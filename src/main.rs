@@ -1631,6 +1631,8 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_api_key(options.api_key.as_deref())
+                                        .with_options(options.site_options.as_deref())?
+                                        .with_include(options.include.clone())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)

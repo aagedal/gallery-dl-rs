@@ -202,9 +202,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     }
     if let Ok(target) = crate::wallhaven::target(url) {
         let format = match target {
-            crate::wallhaven::Target::Search { .. } if path.ends_with("/uploads") => {
-                "u_{username}_{id}"
-            }
+            crate::wallhaven::Target::Uploads { .. } => "u_{username}_{id}",
             crate::wallhaven::Target::Search { .. } => "s_{search[q]}_{id}",
             _ => "{id}",
         };

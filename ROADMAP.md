@@ -958,10 +958,17 @@ content, literature/journal text, favorites, collections, scraps, stash, tags,
 search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
 and metadata options, and upstream's `{title}_{index}` filenames.
 
-**Implemented experimental native Wallhaven:** wallpapers, searches, user
-uploads and collections via the API (optional `api-key`). Remaining: per-item
-`w/ID` metadata (tags/uploader) for listings, collection lists, upstream's
-`{category}_{id}_{resolution}` filenames and `metadata` option.
+**Implemented experimental native Wallhaven:** upstream's `image` (including
+`w.wallhaven.cc` file URLs), `search`, `uploads`, `collection`, `collections`
+(queued children) and `user` (`include` dispatch) classes via the API
+(optional `api-key`), with upstream keyword dictionaries (`search[tags]`/
+`tag_id` from `meta.query`, `username`, `collection_id`, `wh_category`, tag
+names), the `metadata` option (per-item `w/ID` objects with tags/uploader) and
+searches starting at the URL's `page`. Default paths now follow upstream
+(`{category}_{id}_{resolution}.{extension}` in each class's directory, e.g.
+`wallhaven/{username}/`) instead of `wallhaven/wallhaven-ID.ext`; archive keys
+remain the wallpaper ID, so existing archives still match. Remaining:
+upstream's default API key and 1.4 s request interval.
 
 **Implemented experimental native Pinterest:** pins, boards, user pins and
 `pin.it` links via the resource API. Remaining: login/cookies and CSRF token,

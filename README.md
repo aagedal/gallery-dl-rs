@@ -1112,18 +1112,27 @@ date, with width/height and photo/video type. Default filenames are
 `staticflickr.com` links stay direct downloads.
 
 Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
-category) uses the public API (`/api/v1`). Supported: `wallhaven.cc/w/ID` and
-`whvn.cc/ID` (`w/ID`), `wallhaven.cc/search?...` (same query forwarded to
-`search`), `user/USER/uploads` (search `q=@USER`) and
-`user/USER/favorites/ID` (`collections/USER/ID`); listings follow
-`meta.last_page`, capped at 200 pages. An optional `extractor.wallhaven.api-key`
-is sent as `X-API-Key` (never echoed); NSFW and private collections require it
-(HTTP 401 maps to an api-key hint). Media are `data.path`, HTTPS on
-`w.wallhaven.cc` only. `post_id`/`media_id`/`id` is the wallpaper ID,
-`username` the uploader and caption the space-joined tags (single wallpapers
-only; listing items carry neither), timestamp `created_at`, with
-width/height. Default filenames are `wallhaven-{id}.{extension}`; archive
-identity is the wallpaper ID. Plain `w.wallhaven.cc` links stay direct.
+category) uses the public API (`/api/v1`) and mirrors upstream's classes:
+`wallhaven.cc/w/ID`, `whvn.cc/ID` and `w.wallhaven.cc` file URLs (`image`,
+`w/ID`), `wallhaven.cc/search?...` (`search`; the query is forwarded and the
+URL's `page` is the first page), `user/USER/uploads` (`uploads`, search
+`q=@USER`), `user/USER/favorites/ID` (`collection`), `user/USER/favorites`
+(`collections`, one queued child per collection) and `user/USER` (`user`,
+`include` of `uploads` (default) and `collections`). Listings follow
+`meta.last_page`, capped at 200 pages; `extractor.wallhaven.metadata: true`
+fetches every listed wallpaper's `w/ID` object (tags, uploader). An optional
+`extractor.wallhaven.api-key` is sent as `X-API-Key` (never echoed); NSFW and
+private collections require it (HTTP 401 maps to an api-key hint). Media are
+`data.path`, HTTPS on `w.wallhaven.cc` only. Files carry upstream's keywords
+(the API object with `url`, `date`, `width`, `height`, `wh_category`, tag
+names, and `search` (with `tags`/`tag_id` from `meta.query`), `username` or
+`collection_id`); `post_id`/`media_id` is the wallpaper ID, `username` the
+uploader (or listing user), caption the space-joined tags. Default paths
+follow upstream: `{category}_{id}_{resolution}.{extension}` in `wallhaven/`,
+`wallhaven/{search[tags]}/`, `wallhaven/{username}/` or
+`wallhaven/{username}/{collection_id}/` (previously
+`wallhaven/wallhaven-{id}.{extension}`); archive identity is still the
+wallpaper ID.
 
 Experimental native ArtStation extraction (`--extractor native`, `artstation`
 category) uses the site JSON: `www.artstation.com/artwork/HASH` and
