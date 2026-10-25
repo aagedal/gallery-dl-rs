@@ -137,6 +137,9 @@ fn with_query(http: &Http, url: &str, params: &[(String, String)]) -> Result<Url
     Ok(url)
 }
 
+/// Families with configurable instances (`crate::sites::instances`).
+pub(super) static FAMILIES: &[&crate::sites::instances::Family] = &[&hentaicosplays::FAMILY];
+
 #[cfg(test)]
 mod tests {
     use super::*;

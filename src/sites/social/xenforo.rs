@@ -176,6 +176,32 @@ instance!(
     }
 );
 
+/// Configured `extractor.xenforo.<category>` instances. Upstream's
+/// `cookies` instance option names the login cookies, which only matter for
+/// its username/password login (not supported here).
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "xenforo",
+    builtin: &[
+        &SIMPCITY,
+        &NUDOSTARFORUM,
+        &ATFFORUM,
+        &CELEBFORUM,
+        &TITSINTOPS,
+        &SOCIALMEDIAGIRLSFORUM,
+        &BLACKTOWHITE,
+    ],
+    related: &[],
+    template: &SIMPCITY,
+    matches: |category, url| configured_target(category, url).is_some(),
+    extract: |category, http, url| match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => match configured_target(category, &url) {
+            Some(target) => run(&instance.site, instance.root, target, http),
+            None => crate::sites::fail(error("unsupported XenForo URL")),
+        },
+        None => crate::sites::fail(error("unsupported XenForo URL")),
+    },
+};
+
 #[derive(Debug, PartialEq)]
 enum Target {
     /// Path up to the post ID, and the ID.
@@ -232,6 +258,22 @@ fn target(instance: &Instance, url: &Url) -> Option<Target> {
     if let Some(query) = url.query() {
         rest = format!("{rest}?{query}");
     }
+    classify(rest, url)
+}
+
+/// [`target`] below a configured instance's `host[:port][/prefix]`.
+fn configured_target(category: &str, url: &Url) -> Option<Target> {
+    let instance = crate::sites::instances::configured(&FAMILY, category)?;
+    let rest = crate::sites::instances::below(url, instance.spec)?;
+    if !rest.starts_with('/') {
+        return None;
+    }
+    classify(rest, url)
+}
+
+/// The remainder `/path?query` (the URL's fragment is appended) matched in
+/// upstream's class order.
+fn classify(mut rest: String, url: &Url) -> Option<Target> {
     if let Some(fragment) = url.fragment() {
         rest = format!("{rest}#{fragment}");
     }
@@ -336,6 +378,14 @@ fn target(instance: &Instance, url: &Url) -> Option<Target> {
     None
 }
 
+/// A file URL: HTTP(S) without credentials, on a default port unless it
+/// is on the instance root's origin.
+fn media_url(ctx: &Ctx<'_>, raw: &str) -> Option<Url> {
+    Url::parse(raw.trim())
+        .ok()
+        .filter(|url| crate::sites::instances::plain_or_root(url, ctx.root))
+}
+
 /// Per-extraction settings.
 struct Ctx<'a> {
     site: &'static Site,
@@ -359,8 +409,12 @@ fn extract<'a>(
     let Some(target) = target(instance, &url) else {
         return crate::sites::fail(error("unsupported XenForo URL"));
     };
-    let root = instance.root;
-    let base = root[..root[8..].find('/').map_or(root.len(), |i| i + 8)].to_owned();
+    run(site, instance.root, target, http)
+}
+
+fn run<'a>(site: &'static Site, root: &'static str, target: Target, http: &'a Http) -> Events<'a> {
+    let start = root.find("://").map_or(0, |i| i + 3);
+    let base = root[..root[start..].find('/').map_or(root.len(), |i| i + start)].to_owned();
     let ctx = Arc::new(Ctx {
         site,
         root,
@@ -1238,7 +1292,7 @@ fn post_events<'a>(
             } else {
                 src.to_owned()
             };
-            if let Some(url) = crate::sites::media::web_url(&url) {
+            if let Some(url) = media_url(ctx, &url) {
                 items.push(file_item(
                     url,
                     &data,
@@ -1289,7 +1343,7 @@ fn post_events<'a>(
             } else {
                 url.to_owned()
             };
-            if let Some(url) = crate::sites::media::web_url(&url) {
+            if let Some(url) = media_url(ctx, &url) {
                 items.push(file_item(
                     url,
                     &data,
@@ -1761,6 +1815,53 @@ mod tests {
         assert_eq!(children.len(), 1);
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /threads/title.12345/post-54321/ "));
+    }
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        crate::sites::instances::define(
+            "xenforo",
+            "xenforo-configured",
+            serde_json::json!({
+                "root": "http://forum.configured.test:8080/community",
+                "pattern": r"(?:www\.)?forum\.configured\.test(?::8080)?/community",
+            }),
+        );
+        let body = r#"<video loop><source src="/data/video/1/555-clip.mp4" /></video>"#;
+        let page = format!("{THREAD_LD}<div>{}", article(54321, body));
+        let (root, server) = serve(vec![html(&page)]);
+        let http = http("xenforo-configured", root);
+        let url = Url::parse("http://www.forum.configured.test/community/threads/t.1/post-54321")
+            .unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "xenforo-configured");
+        assert_eq!(site.cookies, Some("forum.configured.test"));
+        let files = media((site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|f| {
+            f.url
+                .as_str()
+                .starts_with("http://forum.configured.test:8080/")
+        }));
+        assert_eq!(
+            files[0].url.as_str(),
+            "http://forum.configured.test:8080/data/video/1/555-clip.mp4"
+        );
+        let k = keywords(&files[0]);
+        assert_eq!(k["category"], "xenforo-configured");
+        assert_eq!(k["subcategory"], "post");
+        assert_eq!(k["type"], "video");
+        assert_eq!(k["post"]["id"], "54321");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /community/threads/t.1/post-54321/ "),
+            "{}",
+            requests[0]
+        );
+        assert!(
+            crate::sites::find(&Url::parse("http://forum.configured.test/threads/t.1/").unwrap())
+                .is_none_or(|site| site.category != "xenforo-configured")
+        );
     }
 
     #[tokio::test]

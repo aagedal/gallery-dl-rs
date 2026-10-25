@@ -2477,6 +2477,64 @@ discovery. Upstream gallery-dl configuration files are never read natively. Full
 configuration compatibility and additional postprocessor types remain
 unimplemented.
 
+### Custom instances
+
+Like upstream's `BaseExtractor` families, native site families that serve many
+hosts accept additional instances. An object with a `root` under the family's
+base category adds an instance named by its key, next to the built-in ones:
+
+```json
+{
+  "extractor": {
+    "moebooru": {
+      "retries": 4,
+      "mybooru": {
+        "root": "https://booru.example.org",
+        "pattern": "(?:www\\.)?booru\\.example\\.(?:org|net)"
+      }
+    },
+    "mybooru": {"filename": "{category}_{id}.{extension}"}
+  }
+}
+```
+
+- `root` must be an `http`/`https` URL without credentials, query or
+  fragment; it may name a port and a path prefix (`https://host/booru`).
+- `pattern` is an optional regular expression (at most 1024 characters, no
+  look-around or back-references) matched against the URL after `http(s)://`;
+  it defaults to the root without its scheme. The match must end where the
+  URL's path or query begins. Matched URLs are extracted on the instance's
+  root, so an alias host in `pattern` is requested from `root`.
+- Other fields of the object are upstream's per-instance options where the
+  family reads them (for example Shimmie2 `file_url`/`quote`/`cookies`,
+  Wikimedia `api-path`/`useragent`, Gelbooru v0.2 `root-api`/
+  `request-interval`, Philomena `filter_id`, szurubooru `query-all`, URL
+  shortener `headers`).
+- Naming a built-in instance (`"moebooru": {"yandere": {"root": ...}}`)
+  replaces its root and pattern; names of other extractors are rejected.
+- `<basecategory>:https://host/path` uses the family for any host, as
+  upstream does; the instance's category is the host (`host:port` with a
+  port) and its root `https://host`. Such an input takes precedence over
+  other instances for that host for the rest of the run.
+
+Each instance is its own category: its settings scope is
+`extractor.<category>`, falling back to `extractor.<basecategory>` (built-in
+instances fall back to their base category too, e.g. `extractor.moebooru`
+for yande.re), and it gets its own HTTP session and cookies, which are only
+loaded for and sent to the instance's own host. Host-named scopes such as
+`extractor."booru.example.org"` are accepted for prefixed inputs; when such an
+input is first seen in an input file (after settings were resolved) it uses
+its base category's settings. In compatibility mode prefixed inputs are
+passed to gallery-dl with their prefix.
+
+Families and base categories: `2chen`, `blogger`, `chevereto`, `foolfuuka`,
+`gelbooru_v01`, `gelbooru_v02`, `hentaicosplays`, `IMHentai`, `jschan`,
+`lolisafe` (no built-in instances; `/a/ID` albums), `lynxchan`, `manganelo`,
+`misskey`, `moebooru`, `Nijie`, `nitter`, `philomena`, `postmill`, `reactor`,
+`shimmie2`, `shopify`, `szurubooru`, `urlshortener`, `vichan`, `wikimedia` and
+`xenforo`. Danbooru, e621 and Mastodon instances are handled by their
+dedicated extractors (see their sections); FoOlSlide has no native port.
+
 ## Native postprocessors
 
 Native configuration accepts `ugoira`, `metadata`, `mtime` and `hash` processors.
@@ -2866,9 +2924,10 @@ forum or list linking to X, Instagram, Reddit or any other supported site is
 extracted by that site's extractor. With `extractor.generic.enabled` set,
 native mode sends URLs no other extractor matches to `generic` without the
 prefix, as upstream does. `recursive:` with local `file://` sources is not
-supported (use `--input-file`). Gallery-dl's
-`shopify:`/`xenforo:` URL prefixes and extra configured instances are not
-supported, and all `*.reactor.cc` subdomains share the `reactor` category.
+supported (use `--input-file`). Family prefixes such as `shopify:` and
+`xenforo:` and extra configured instances work as described under
+[Custom instances](#custom-instances); all `*.reactor.cc` subdomains share the
+`reactor` category.
 SmugMug signs its API v2 requests with OAuth 1.0a like upstream's
 `SmugmugAPI` once `access-token`/`access-token-secret` are set (an unset or
 `"cache"` `access-token` uses the pair `oauth:smugmug` cached for the

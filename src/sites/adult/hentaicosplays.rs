@@ -2,8 +2,8 @@
 //! porn-image.com, mirroring gallery_dl/extractor/hentaicosplays.py: a
 //! gallery's story-viewer page lists every image.
 //!
-//! Only upstream's built-in instances are supported; configured extra
-//! instances and `hentaicosplays:URL` are not.
+//! Configured `extractor.hentaicosplays.<category>` instances and
+//! `hentaicosplays:URL` inputs go through `crate::sites::instances`.
 use crate::error;
 use crate::sites::art::{extr, extract_iter};
 use crate::sites::filehosts::rpartition;
@@ -62,7 +62,65 @@ fn target(stem: &str, plural: &str, url: &Url) -> Option<String> {
     if !crate::sites::plain(url) {
         return None;
     }
-    let host = url.host_str()?;
+    if !stem_host(stem, plural, url) {
+        return None;
+    }
+    slug(url.path())
+}
+
+/// Configured `extractor.hentaicosplays.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "hentaicosplays",
+    builtin: &[&HENTAICOSPLAY, &HENTAIIMG, &PORNIMAGE],
+    related: &[],
+    template: &HENTAICOSPLAY,
+    matches: |category, url| configured_target(category, url).is_some(),
+    extract: |category, http, url| match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => match configured_target(category, &url) {
+            Some(slug) => gallery(&instance.site, instance.root, slug, http),
+            None => crate::sites::fail(error("unsupported hentaicosplays URL")),
+        },
+        None => {
+            let site = FAMILY
+                .builtin
+                .iter()
+                .copied()
+                .find(|site| site.category == category)
+                .unwrap_or(&HENTAICOSPLAY);
+            (site.extract)(http, url)
+        }
+    },
+};
+
+/// The gallery slug of a URL below a configured instance's root.
+fn configured_target(category: &str, url: &Url) -> Option<String> {
+    match crate::sites::instances::configured(&FAMILY, category) {
+        Some(instance) => {
+            let rest = crate::sites::instances::below(url, instance.spec)?;
+            slug(rest.split('?').next().unwrap_or_default())
+        }
+        None => None,
+    }
+}
+
+/// `/(?:image|story)/([\w-]+)`.
+fn slug(path: &str) -> Option<String> {
+    let raw: Vec<&str> = path.split('/').skip(1).collect();
+    let ["image" | "story", slug, ..] = raw.as_slice() else {
+        return None;
+    };
+    let len = slug
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        .count();
+    (len > 0).then(|| slug[..len].to_owned())
+}
+
+/// `(?:\w\w\.)?STEM(?:-xxx)?\.com`.
+fn stem_host(stem: &str, plural: &str, url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
     let host = match host.split_once('.') {
         Some((label, rest))
             if label.len() == 2
@@ -76,20 +134,11 @@ fn target(stem: &str, plural: &str, url: &Url) -> Option<String> {
         }
         _ => host,
     };
-    let name = host.strip_suffix(".com")?;
-    let name = name.strip_suffix("-xxx").unwrap_or(name);
-    if name != stem && name != plural {
-        return None;
-    }
-    let raw: Vec<&str> = url.path().split('/').skip(1).collect();
-    let ["image" | "story", slug, ..] = raw.as_slice() else {
-        return None;
+    let Some(name) = host.strip_suffix(".com") else {
+        return false;
     };
-    let len = slug
-        .bytes()
-        .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-        .count();
-    (len > 0).then(|| slug[..len].to_owned())
+    let name = name.strip_suffix("-xxx").unwrap_or(name);
+    name == stem || name == plural
 }
 
 fn extract<'a>(
@@ -103,6 +152,16 @@ fn extract<'a>(
     let Some(slug) = target(stem, plural, &url) else {
         return crate::sites::fail(error(format!("unsupported {} URL", site.name)));
     };
+    gallery(site, root, slug, http)
+}
+
+/// The gallery's story-viewer page below `root`.
+fn gallery<'a>(
+    site: &'static Site,
+    root: &'static str,
+    slug: String,
+    http: &'a Http,
+) -> Events<'a> {
     crate::sites::once(async move {
         let page_url = format!("{root}/story/{slug}/");
         let page = super::page(http, &page_url, &[("Referer", &page_url)]).await?;
@@ -166,6 +225,32 @@ mod tests {
         ] {
             assert_eq!(slug(raw), None, "{raw}");
         }
+    }
+
+    #[tokio::test]
+    async fn configured_instance_uses_its_root() {
+        crate::sites::instances::define(
+            "hentaicosplays",
+            "hentaicosplays-configured",
+            serde_json::json!({"root": "https://cos.test", "pattern": r"(?:\w\w\.)?cos\.test"}),
+        );
+        let url = Url::parse("https://jp.cos.test/image/garden-park/").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "hentaicosplays-configured");
+        let page = "<title>Garden Story Viewer - X</title>\
+            <amp-img class=\"auto-style\" src=\"https://static.test/a/01.jpg\"></amp-img>";
+        let (root, server) = serve(vec![html(page)]);
+        let http = http("hentaicosplays-configured", root);
+        let files = media((site.extract)(&http, url)).await;
+        let k = kw(&files[0]);
+        assert_eq!(k["category"], "hentaicosplays-configured");
+        assert_eq!(k["site"], "cos");
+        assert_eq!(
+            files[0].headers["Referer"],
+            "https://cos.test/story/garden-park/"
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /story/garden-park/ "));
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 //! vichan imageboards (8kun, smugloli, gurochan), mirroring
 //! gallery_dl/extractor/vichan.py through the board JSON API.
-use super::{component, digits, host_in, rest};
+use super::{component, digits, instance_rest};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -31,7 +31,20 @@ instance!(EIGHTKUN, "8kun", "8kun");
 instance!(SMUGLOLI, "smugloli", "smugloli");
 instance!(GUROCHAN, "gurochan", "gurochan");
 
+/// Configured `extractor.vichan.<category>` instances.
+pub(crate) static FAMILY: crate::sites::instances::Family = crate::sites::instances::Family {
+    basecategory: "vichan",
+    builtin: &[&EIGHTKUN, &SMUGLOLI, &GUROCHAN],
+    related: &[],
+    template: &GUROCHAN,
+    matches: |category, url| target(category, url).is_some(),
+    extract,
+};
+
 fn site(category: &str) -> &'static Site {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return &instance.site;
+    }
     match category {
         "8kun" => &EIGHTKUN,
         "smugloli" => &SMUGLOLI,
@@ -49,6 +62,9 @@ fn hosts(category: &str) -> &'static [&'static str] {
 
 /// Upstream instance root; `smugloli` has none and uses the matched origin.
 fn root(category: &str, url: &Url) -> String {
+    if let Some(instance) = crate::sites::instances::configured(&FAMILY, category) {
+        return instance.root.into();
+    }
     match category {
         "8kun" => "https://8kun.top".into(),
         "gurochan" => "https://boards.guro.cx".into(),
@@ -63,10 +79,7 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !host_in(url, hosts(category)) {
-        return None;
-    }
-    let (board, tail) = component(rest(url))?;
+    let (board, tail) = component(instance_rest(&FAMILY, category, url, || hosts(category))?)?;
     if let Some((thread, _)) = tail.strip_prefix("/res/").and_then(digits) {
         return Some(Target::Thread {
             board,
@@ -203,7 +216,9 @@ fn process(category: &str, root: &str, post: &mut Map<String, Value>) -> Option<
     } else {
         format!("{root}/{board}/src/{tim}{ext}")
     };
-    let url = Url::parse(&raw).ok().filter(crate::sites::plain)?;
+    let url = Url::parse(&raw)
+        .ok()
+        .filter(|url| crate::sites::instances::plain_or_root(url, root))?;
     post.insert("url".into(), raw.into());
     post.insert("extension".into(), ext[1..].into());
     let thread = post
@@ -342,6 +357,47 @@ mod tests {
         assert_eq!(
             items[1].url.as_str(),
             "https://media.128ducks.com/v/src/1500000000.gif"
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_instance_extracts_on_its_root() {
+        let instance = crate::sites::instances::define(
+            "vichan",
+            "vichan-configured",
+            json!({"root": "http://vichan.test:8080/chan", "pattern": r"(?:www\.)?vichan\.test:8080/chan|vichan-alias\.test"}),
+        );
+        let url = Url::parse("https://vichan-alias.test/g/res/100.html#q").unwrap();
+        let site = crate::sites::find(&url).unwrap();
+        assert_eq!(site.category, "vichan-configured");
+        assert!(
+            crate::sites::find(&Url::parse("http://vichan.test/chan/g/res/1.html").unwrap())
+                .is_none_or(|site| site.category != "vichan-configured")
+        );
+        assert_eq!(
+            target(
+                "vichan-configured",
+                &Url::parse("http://vichan.test:8080/chan/g/").unwrap()
+            ),
+            Some(Target::Board { board: "g".into() })
+        );
+        let (origin, server) = serve(vec![json(thread())]);
+        let http = http("vichan-configured", origin);
+        let files = media((instance.site.extract)(&http, url)).await;
+        assert_eq!(files.len(), 2);
+        assert_eq!(
+            files[0].url.as_str(),
+            "http://vichan.test:8080/chan/g/src/1500000000123.jpg"
+        );
+        let k = keywords(&files[1]);
+        assert_eq!(k["category"], "vichan-configured");
+        assert_eq!(k["subcategory"], "thread");
+        assert_eq!(k["title"], "Op & text");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /chan/g/res/100.json "),
+            "{}",
+            requests[0]
         );
     }
 

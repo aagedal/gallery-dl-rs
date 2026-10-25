@@ -728,6 +728,33 @@ the moved-account
 warning, and fuller metadata/default naming. Authenticated live verification and
 real captures remain required.
 
+**Implemented experimental configurable registry instances:** upstream's
+`BaseExtractor.update`/`_init_category` for the registry families (2chen,
+blogger, chevereto, foolfuuka, gelbooru_v01, gelbooru_v02, hentaicosplays,
+IMHentai, jschan, lolisafe, lynxchan, manganelo, misskey, moebooru, Nijie,
+nitter, philomena, postmill, reactor, shimmie2, shopify, szurubooru,
+urlshortener, vichan, wikimedia, xenforo). `extractor.<basecategory>.<category>`
+objects with a `root` (http(s), no credentials; optional bounded `pattern`
+regular expression, default the escaped root) add or replace instances, and
+`<basecategory>:https://host/...` inputs make the host an instance.
+`crate::sites::instances` leaks one `Site` per instance for the process,
+consults instances before built-in sites, rewrites matched URLs onto the
+instance root so each family's URL parsing is reused, and gives each instance
+its own HTTP state, cookie domain and settings scope with `basecategory`
+fallback (also for built-in instances and related classes such as paheal,
+twibooru, joyreactor, imagepond and cyberdrop). Per-instance options upstream
+reads through `config_instance` are honoured where the port has the feature
+(Shimmie2 `file_url`/`quote`/`cookies`, Wikimedia `api-path`/`useragent` with
+API-path probing, Gelbooru v0.2 `root-api`/`request-interval`, Philomena
+`filter_id`, szurubooru `query-all`, URL shortener `headers`); lolisafe gained
+a generic album extractor for configured instances. Remaining: FoOlSlide (no
+port), upstream's `root: null` configured instances (roots are required),
+regex-level backtracking between an instance pattern and the family suffix
+(the pattern must end at a path boundary), xenforo's `cookies` login names,
+lolisafe's `domain` option, ports in embedded-video URLs handed to yt-dlp, and
+host-named settings scopes for prefixed inputs first seen in input files (they
+use the base scope).
+
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept
 query/tag/initial offset parameters and paginate lazily in batches of 50.

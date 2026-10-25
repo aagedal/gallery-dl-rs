@@ -310,7 +310,7 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
 fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
     match routed_site(url, extractor) {
         Some("mastodon") => scope_key(mastodon_category(url)),
-        Some(category) => scope_key(category),
+        Some(category) => instance_settings(scope_key(category)),
         None => "direct",
     }
 }
@@ -339,6 +339,15 @@ fn routing_url(source: &str) -> Option<url::Url> {
         gallery_dl_rs::base_instances::prefixed(&url)?;
         gallery_dl_rs::base_instances::unprefix(url).ok()
     })
+}
+
+/// Instances selected with a `<basecategory>:` prefix after settings were
+/// resolved use their family's base scope.
+fn instance_settings(category: &'static str) -> &'static str {
+    match gallery_dl_rs::sites::instances::get(category) {
+        Some(instance) if instance.late => instance.family.basecategory,
+        _ => category,
+    }
 }
 
 fn booru_subcategory(url: &url::Url) -> Option<&'static str> {
@@ -414,6 +423,11 @@ fn media_settings_key<'a>(
             && settings.contains_key(instance.base.scope())
         {
             return instance.base.scope();
+        }
+        if let Some(base) = gallery_dl_rs::sites::instances::basecategory(&media.category)
+            && settings.contains_key(base)
+        {
+            return base;
         }
         // Generic compatibility output from other gallery-dl extractors.
         return "direct";
@@ -2418,6 +2432,13 @@ async fn resolved_settings(
             std::iter::once(instance.category).chain(classes)
         })
         .collect();
+    // Configured instances, and the hosts of `<basecategory>:` inputs on the
+    // command line, get their own settings scopes.
+    gallery_dl_rs::sites::instances::register(config.site_instances())?;
+    for url in &args.urls {
+        // Invalid inputs are reported when they are extracted.
+        let _ = gallery_dl_rs::sites::instances::prefixed_input(url);
+    }
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
         retries: Some(2),
@@ -2584,7 +2605,11 @@ async fn resolved_settings(
     .chain(gallery_dl_rs::sites::categories())
     .chain(["Danbooru", "E621"])
     .chain(configured)
-    {
+    .chain(
+        gallery_dl_rs::sites::instances::families()
+            .iter()
+            .map(|family| family.basecategory),
+    ) {
         let class = category
             .rsplit_once('.')
             .filter(|(_, class)| matches!(*class, "artist" | "artist-search" | "tag"))
@@ -2702,6 +2727,8 @@ async fn resolved_settings(
             },
         );
     }
+    // Instances registered from now on resolve their base scope's settings.
+    gallery_dl_rs::sites::instances::freeze();
     Ok((
         settings,
         config.cache_location().clone(),

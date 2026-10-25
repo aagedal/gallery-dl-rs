@@ -103,6 +103,79 @@ fn configured_mastodon(instances: &[crate::base_instances::Definition], name: &s
     })
 }
 
+/// Remove the instance objects (objects with a `root`) from every
+/// `extractor.<basecategory>` scope of a registry family.
+fn take_instances(root: &mut Value) -> Result<Vec<crate::sites::instances::InstanceDef>> {
+    let mut defs = Vec::new();
+    let Some(extractor) = root.get_mut("extractor").and_then(Value::as_object_mut) else {
+        return Ok(defs);
+    };
+    for family in crate::sites::instances::families() {
+        let Some(scope) = extractor.get_mut(family.basecategory) else {
+            continue;
+        };
+        let scope = scope
+            .as_object_mut()
+            .ok_or_else(|| error("native configuration category must be a JSON object"))?;
+        let mut taken = Vec::new();
+        for (category, value) in scope.iter() {
+            if let Some(def) =
+                crate::sites::instances::parse_def(family.basecategory, category, value)?
+            {
+                taken.push(category.clone());
+                defs.push(def);
+            }
+        }
+        for category in taken {
+            scope.remove(&category);
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    if defs.iter().any(|def| !seen.insert(def.category.as_str())) {
+        return Err(error(
+            "configured instance category is defined by more than one family",
+        ));
+    }
+    Ok(defs)
+}
+
+/// Whether `api-key` applies to a configured instance or family scope.
+fn instance_api_key(name: &str, defs: &[crate::sites::instances::InstanceDef]) -> bool {
+    let family = defs
+        .iter()
+        .find(|def| def.category == name)
+        .map_or(name, |def| def.basecategory.as_str());
+    crate::sites::instances::family(family).is_some_and(|family| family.template.api_key)
+}
+
+/// Registry scopes besides the built-in categories: every family's
+/// `basecategory`, configured instance categories, and host-named scopes
+/// for `<basecategory>:https://host/` inputs.
+fn instance_scopes(root: &Value, defs: &[crate::sites::instances::InstanceDef]) -> Vec<String> {
+    let typed = |name: &str| {
+        crate::extract::is_dedicated_category(name)
+            || matches!(name, "Danbooru" | "E621" | "oauth")
+            || crate::sites::categories().any(|category| category == name)
+    };
+    let hosts = root
+        .get("extractor")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|extractor| extractor.keys())
+        .filter(|name| name.contains('.') && crate::sites::instances::host_scope(name))
+        .cloned();
+    let mut names: Vec<String> = crate::sites::instances::families()
+        .iter()
+        .map(|family| family.basecategory.to_owned())
+        .chain(defs.iter().map(|def| def.category.clone()))
+        .chain(hosts)
+        .filter(|name| !typed(name))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     (
         "reddit",
@@ -709,6 +782,8 @@ pub struct Config {
     oauth: crate::oauth::Settings,
     /// User-configured Danbooru/e621/Mastodon instances.
     instances: Vec<crate::base_instances::Definition>,
+    /// `extractor.<basecategory>.<category>` registry instance definitions.
+    site_instances: Vec<crate::sites::instances::InstanceDef>,
 }
 
 /// Upstream `cache`: an object whose `file` is a path or null (disabled).
@@ -1278,6 +1353,20 @@ impl Config {
         // every configuration scope to JSON objects before typed decoding.
         let mut shape: Value = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
+        if !shape.is_object() {
+            return Err(error("native configuration must be a JSON object"));
+        }
+        if shape
+            .get("extractor")
+            .is_some_and(|value| !value.is_object())
+        {
+            return Err(error(
+                "native configuration extractor must be a JSON object",
+            ));
+        }
+        // `extractor.<basecategory>.<category>` instance definitions.
+        let site_instances = take_instances(&mut shape)?;
+        let instance_scopes = instance_scopes(&shape, &site_instances);
         let object = shape
             .as_object()
             .ok_or_else(|| error("native configuration must be a JSON object"))?;
@@ -1329,6 +1418,8 @@ impl Config {
             ]
             .into_iter()
             .chain(crate::sites::categories())
+            .map(|name| -> &str { name })
+            .chain(instance_scopes.iter().map(String::as_str))
             {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
@@ -1453,6 +1544,7 @@ impl Config {
             Some(value) => cache_location(value, directory)?,
         };
         let oauth = oauth_settings(&mut original)?;
+        take_instances(&mut original)?;
         if let Some(extractor) = original.get_mut("extractor").and_then(Value::as_object_mut) {
             // Shared job options keep their typed meaning; all other keys
             // belong to the site, even where another site uses the name.
@@ -1485,7 +1577,10 @@ impl Config {
                 "timeout",
                 "api-key",
             ];
-            for category in crate::sites::categories() {
+            for category in crate::sites::categories()
+                .map(|name| -> &str { name })
+                .chain(instance_scopes.iter().map(String::as_str))
+            {
                 if let Some(mut value) = extractor.remove(category) {
                     // Keys outside the shared option set are site options.
                     if let Some(fields) = value.as_object_mut() {
@@ -1820,6 +1915,7 @@ impl Config {
                     | "gelbooru"
                     | "safebooru"
             ) && !crate::sites::site(name).is_some_and(|site| site.api_key)
+                && !instance_api_key(name, &site_instances)
                 && settings.api_key.0.is_some()
             {
                 return Err(error(
@@ -1993,6 +2089,7 @@ impl Config {
             cache,
             oauth,
             instances,
+            site_instances,
         })
     }
 
@@ -2068,6 +2165,11 @@ impl Config {
                     | "direct"
             )
             && !crate::sites::is_category(category)
+            && crate::sites::instances::family(category).is_none()
+            && !self
+                .site_instances
+                .iter()
+                .any(|def| def.category == category)
         {
             return Err(error("unsupported native configuration category"));
         }
@@ -2076,6 +2178,13 @@ impl Config {
 
     fn resolve_unchecked(&self, category: &str) -> Result<Options> {
         let mut settings = self.extractor.clone();
+        // Upstream's `basecategory` scope of a registry family instance.
+        if let Some(base) = self.instance_base(category)
+            && base != category
+            && let Some(base) = self.categories.get(base)
+        {
+            settings = settings.overlay(base);
+        }
         if (matches!(category, "mastodon.social" | "pawoo" | "baraag")
             || configured_mastodon(&self.instances, category))
             && let Some(base) = self.categories.get("mastodon")
@@ -2100,6 +2209,20 @@ impl Config {
     }
     pub fn parent_keywords(&self) -> &[String] {
         &self.parent_keywords
+    }
+    /// `extractor.<basecategory>.<category>` instance definitions, to be
+    /// registered with [`crate::sites::instances::register`].
+    pub fn site_instances(&self) -> &[crate::sites::instances::InstanceDef] {
+        &self.site_instances
+    }
+    /// The registry family `basecategory` of a built-in, configured or
+    /// prefixed instance category.
+    fn instance_base(&self, category: &str) -> Option<&str> {
+        self.site_instances
+            .iter()
+            .find(|def| def.category == category)
+            .map(|def| def.basecategory.as_str())
+            .or_else(|| crate::sites::instances::basecategory(category))
     }
     /// Upstream's `basecategory` scope of a Danbooru/e621 instance: the
     /// instance's own scope is consulted first, then `Danbooru`/`E621`.
@@ -3444,5 +3567,78 @@ mod site_scope_tests {
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn registry_family_instances_and_base_scopes() {
+        let dir = std::env::temp_dir();
+        let config = super::Config::parse(
+            br#"{"extractor":{
+                "moebooru":{"retries":4,"notes":true,"lang":"de",
+                    "cfgbooru":{"root":"https://cfg.test/","pattern":"(?:www\\.)?cfg\\.test","extra":1}},
+                "cfgbooru":{"timeout":9,"notes":false},
+                "yandere":{"lang":"en"},
+                "example.test":{"retries":1}
+            }}"#,
+            &dir,
+        )
+        .unwrap();
+        let defs = config.site_instances();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].category, "cfgbooru");
+        assert_eq!(defs[0].basecategory, "moebooru");
+        assert_eq!(defs[0].root, "https://cfg.test");
+        assert_eq!(defs[0].info["extra"], 1);
+        // The instance scope applies first, then the base category scope.
+        let instance = config.resolve("cfgbooru").unwrap();
+        assert_eq!(instance.retries, Some(4));
+        assert_eq!(instance.timeout, Some(std::time::Duration::from_secs(9)));
+        let options = instance.site_options.unwrap();
+        assert_eq!(options["notes"], false);
+        assert_eq!(options["lang"], "de");
+        assert!(!options.contains_key("cfgbooru"));
+        // Built-in instances fall back to the base scope too.
+        let yandere = config.resolve("yandere").unwrap();
+        assert_eq!(yandere.retries, Some(4));
+        let options = yandere.site_options.unwrap();
+        assert_eq!(options["lang"], "en");
+        assert_eq!(options["notes"], true);
+        assert_eq!(config.resolve("moebooru").unwrap().retries, Some(4));
+        assert_eq!(config.resolve("konachan").unwrap().retries, Some(4));
+        // Unrelated families keep their own settings.
+        assert_eq!(config.resolve("rule34").unwrap().retries, None);
+        // `-o` can define instances as well.
+        let cli =
+            [super::parse_option("extractor.shimmie2.optbooru.root=https://opt.test").unwrap()];
+        let config = super::Config::parse_with_options(b"{}", &dir, &cli).unwrap();
+        assert_eq!(config.site_instances()[0].category, "optbooru");
+        assert_eq!(config.site_instances()[0].basecategory, "shimmie2");
+        assert!(config.resolve("optbooru").is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_registry_family_instances() {
+        let dir = std::env::temp_dir();
+        let parse = |json: &str| super::Config::parse(json.as_bytes(), &dir);
+        for bad in [
+            r#"{"extractor":{"moebooru":{"x":{"root":"ftp://x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://u:p@x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://x.test","pattern":"("}}}}"#,
+            r#"{"extractor":{"moebooru":{"twitter":{"root":"https://x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"rule34":{"root":"https://x.test"}}}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://a.test"}},
+                "szurubooru":{"x":{"root":"https://b.test"}}}}"#,
+            r#"{"extractor":{"moebooru":[]}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://x.test"}},"x":1}}"#,
+            r#"{"extractor":{"moebooru":{"x":{"root":"https://x.test"}},"x":{"api-key":"k"}}}"#,
+            r#"{"extractor":{"nosuchsite":{}}}"#,
+            r#"{"extractor":{"bad host.test":{}}}"#,
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        // Objects without a root stay ordinary settings of the base scope.
+        let config = parse(r#"{"extractor":{"moebooru":{"x":{"pattern":"y"}}}}"#).unwrap();
+        assert!(config.site_instances().is_empty());
+        assert!(config.resolve("yandere").unwrap().site_options.unwrap()["x"].is_object());
     }
 }
