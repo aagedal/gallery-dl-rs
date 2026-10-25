@@ -80,7 +80,9 @@ pub(crate) fn serve(replies: Vec<Vec<u8>>) -> (Url, std::thread::JoinHandle<Vec<
     (root, task)
 }
 fn templates(case: &Value, root: &Path) -> (Option<FilenameTemplate>, Option<DirectoryTemplate>) {
-    let family = case["family"].as_str().unwrap();
+    let family = case["category"]
+        .as_str()
+        .unwrap_or_else(|| case["family"].as_str().unwrap());
     let cfg = Config::parse(
         &serde_json::to_vec(&json!({"extractor":{family:case["overrides"]}})).unwrap(),
         root,
@@ -110,11 +112,11 @@ fn templates(case: &Value, root: &Path) -> (Option<FilenameTemplate>, Option<Dir
 pub(crate) fn replies(case: &Value, site: Site, source: &Url) -> Vec<Vec<u8>> {
     let target = target(site, source).unwrap().0;
     let posts = case["input_posts"].as_array().unwrap();
-    let body = match (&target, site) {
-        (Target::Post { .. }, Site::Danbooru) => posts[0].clone(),
-        (Target::Post { .. }, Site::E621) => json!({"post":posts[0]}),
-        (_, Site::E621) => json!({"posts":posts}),
-        (_, Site::Gelbooru) => json!({"post":posts}),
+    let body = match (&target, site.dialect()) {
+        (Target::Post { .. }, Dialect::Danbooru) => posts[0].clone(),
+        (Target::Post { .. }, Dialect::E621) => json!({"post":posts[0]}),
+        (_, Dialect::E621) => json!({"posts":posts}),
+        (_, Dialect::Gelbooru) => json!({"post":posts}),
         _ => json!(posts),
     };
     let mut replies = Vec::new();
@@ -169,9 +171,9 @@ fn artifacts(root: &Path) -> Value {
 async fn replay(case: &Value, archived: bool, scoped: bool) {
     let name = case["name"].as_str().unwrap();
     assert!(case["error"].is_null(), "{name}: source must succeed");
-    let family = case["family"].as_str().unwrap();
-    let site = Site::from_category(family).unwrap();
     let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
+    let site = site_for_url(&source).unwrap();
+    let family = site.category();
     let (api_root, server) = serve(replies(case, site, &source));
     let root = tempfile::tempdir().unwrap();
     let (filename, directory) = templates(case, root.path());

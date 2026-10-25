@@ -566,7 +566,8 @@ async fn collection_routes_and_wire_identities_match_actual_source_constructor_p
     for case in cases {
         let name = case["name"].as_str().unwrap();
         let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
-        let site = Site::from_category(case["family"].as_str().unwrap()).unwrap();
+        let site = site_for_url(&source)
+            .unwrap_or_else(|| Site::from_category(case["family"].as_str().unwrap()).unwrap());
         if case["extractor"].is_null() {
             assert!(
                 target(site, &source).is_err(),
@@ -606,7 +607,7 @@ async fn collection_routes_and_wire_identities_match_actual_source_constructor_p
         );
         let mut post = input_post(case["family"].as_str().unwrap());
         post["id"] = case["posts"][0]["id"].clone();
-        let body = if site == Site::E621 {
+        let body = if site.dialect() == Dialect::E621 {
             json!({"posts":[post]})
         } else {
             json!([post])

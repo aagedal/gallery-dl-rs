@@ -161,10 +161,8 @@ pub(super) fn assert_requests(case: &Value, root: &Url, requests: Vec<String>) {
     }
 }
 pub(super) fn native_category(case: &Value) -> &str {
-    match case["family"].as_str().unwrap() {
-        "e926" => "e621",
-        family => family,
-    }
+    // e926 is its own instance, as upstream.
+    case["family"].as_str().unwrap()
 }
 pub(super) fn client(case: &Value, root: Url) -> Booru {
     booru(Site::from_category(native_category(case)).unwrap(), root).with_threshold(
@@ -297,11 +295,7 @@ fn artist_constructor_retains_source_lexical_id_and_query() {
     assert_eq!(routes.len(), 24);
     for case in routes {
         let url = Url::parse(case["url"].as_str().unwrap()).unwrap();
-        let site = if url.host_str() == Some("danbooru.donmai.us") {
-            Site::Danbooru
-        } else {
-            Site::E621
-        };
+        let site = site_for_url(&url).unwrap_or(Site::E621);
         if case["extractor"].is_null() {
             assert!(target(site, &url).is_err(), "{url}");
             continue;

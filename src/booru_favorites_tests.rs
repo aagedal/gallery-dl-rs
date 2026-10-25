@@ -124,7 +124,8 @@ fn assert_requests(case: &Value, root: &Url, requests: Vec<String>) {
     }
 }
 fn client(case: &Value, root: Url) -> Booru {
-    booru(Site::E621, root).with_threshold(
+    let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
+    booru(site_for_url(&source).unwrap(), root).with_threshold(
         case["options"]
             .get("threshold")
             .map(|v| usize::try_from(v.as_u64().unwrap()).unwrap()),
@@ -186,7 +187,7 @@ fn favorite_constructor_queries_and_source_archive_descriptors_match_source() {
         let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
         assert!(
             matches!(
-                target(Site::E621, &source).unwrap().0,
+                target(site_for_url(&source).unwrap(), &source).unwrap().0,
                 Target::Favorites { .. }
             ),
             "{source}"
@@ -197,7 +198,9 @@ fn favorite_constructor_queries_and_source_archive_descriptors_match_source() {
     }
     for case in fixture["cases"].as_array().unwrap() {
         let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
-        let Target::Favorites { params } = target(Site::E621, &source).unwrap().0 else {
+        let Target::Favorites { params } =
+            target(site_for_url(&source).unwrap(), &source).unwrap().0
+        else {
             panic!("wrong favorite constructor");
         };
         if case["parsed_query_initial"].is_null() {
@@ -289,6 +292,8 @@ async fn favorite_job_owners_paths_and_sqlite_archive_keys_match_source_hooks() 
         let (api_root, server) = serve(case);
         let native = client(case, api_root.clone());
         let source = Url::parse(case["url"].as_str().unwrap()).unwrap();
+        // e926 is its own instance (and native archive category), as upstream.
+        let category = site_for_url(&source).unwrap().category();
         let root = tempfile::tempdir().unwrap();
         let mut specifications = case["hook_options"].as_array().unwrap().clone();
         specifications.push(json!({"name":"metadata","mode":"custom","event":"file","format":"","empty":false,"filename":"unused","archive":root.path().join("metadata.sqlite3")}));
@@ -348,8 +353,8 @@ async fn favorite_job_owners_paths_and_sqlite_archive_keys_match_source_hooks() 
         .boxed();
         let mut jobs = jobs::apply_with_descriptor(
             input,
-            Arc::new(BTreeMap::from([("e621".into(), config)])),
-            Some("e621".into()),
+            Arc::new(BTreeMap::from([(category.into(), config)])),
+            Some(category.into()),
             crate::source_archive::for_url(&source),
         );
         let download = download::client(Duration::from_secs(30)).unwrap();
@@ -384,7 +389,7 @@ async fn favorite_job_owners_paths_and_sqlite_archive_keys_match_source_hooks() 
             );
             let identity = item.media.archive_key().unwrap();
             assert!(
-                identity.starts_with("e621:v1:"),
+                identity.starts_with(&format!("{category}:v1:")),
                 "{name}: internal archive category is canonical"
             );
             let result = archive
@@ -485,7 +490,7 @@ async fn favorite_job_owners_paths_and_sqlite_archive_keys_match_source_hooks() 
             .map(|post| {
                 let id = post["id"].as_u64().unwrap().to_string();
                 format!(
-                    "e621:v1:{:x}",
+                    "{category}:v1:{:x}",
                     Sha256::digest(json!([id]).to_string().as_bytes())
                 )
             })

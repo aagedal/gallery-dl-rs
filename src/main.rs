@@ -351,6 +351,9 @@ const BOORU_CLASS_KEYS: &[&str] = &[
     "e6ai.artist",
     "e6ai.artist-search",
     "e6ai.tag",
+    "e926.artist",
+    "e926.artist-search",
+    "e926.tag",
 ];
 fn class_key(category: &str, subcategory: &str) -> Option<&'static str> {
     BOORU_CLASS_KEYS
@@ -1034,6 +1037,7 @@ fn list_extractors(detailed: bool) {
         "aibooru",
         "booruvar",
         "e6ai",
+        "e926",
         "gelbooru",
         "safebooru",
         "mastodon.social",
@@ -2448,6 +2452,7 @@ async fn resolved_settings(
         "aibooru",
         "booruvar",
         "e6ai",
+        "e926",
         "gelbooru",
         "safebooru",
         "mastodon",

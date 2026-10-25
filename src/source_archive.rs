@@ -281,19 +281,14 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 "danbooru" => !url.host_str().is_some_and(crate::booru::danbooru_host),
                 "e621" => !matches!(
                     url.host_str(),
-                    Some("e621.net" | "e926.net" | "e621.cc" | "e621.anthro.fr")
+                    Some("e621.net" | "e621.cc" | "e621.anthro.fr")
                 ),
+                "e926" => url.host_str() != Some("e926.net"),
                 "safebooru" => url.host_str() != Some("safebooru.org"),
                 _ => false,
             } {
                 return None;
             }
-            let category =
-                if url.host_str().map(|host| host.trim_start_matches("www.")) == Some("e926.net") {
-                    "e926"
-                } else {
-                    category
-                };
             let format = match target {
                 crate::booru::Target::Post { .. } => "{id}",
                 crate::booru::Target::Tags { .. } => {

@@ -3956,6 +3956,38 @@ fn booru_instances_consult_their_own_scope_then_the_upstream_basecategory() {
 }
 
 #[test]
+fn e926_has_its_own_scope_falling_back_to_the_e621_basecategory() {
+    let cfg = parse(
+        r#"{"extractor":{
+            "e621":{"username":"e621-user","password":"e621-key","retries":4},
+            "E621":{"metadata":"notes","threshold":30},
+            "e926":{"username":"e926-user","password":"e926-key",
+                "tag":{"metadata-parent":"tagged"}}}}"#,
+    )
+    .unwrap();
+    let e926 = cfg.resolve("e926").unwrap();
+    assert_eq!(e926.username.as_deref(), Some("e926-user"));
+    assert_eq!(e926.password.as_deref(), Some("e926-key"));
+    // e926 consults `extractor.E621`, never `extractor.e621`.
+    assert_eq!(e926.retries, None);
+    assert_eq!(e926.booru_threshold, Some(Some(30)));
+    assert_eq!(e926.site_options.unwrap()["metadata"], "notes");
+    let e621 = cfg.resolve("e621").unwrap();
+    assert_eq!(e621.username.as_deref(), Some("e621-user"));
+    assert_eq!(e621.retries, Some(4));
+    assert_eq!(
+        cfg.resolve_class("e926", "tag")
+            .unwrap()
+            .artist_parent_metadata(),
+        Some(&serde_json::json!("tagged"))
+    );
+    // Without its own credentials e926 does not borrow e621's.
+    let cfg = parse(r#"{"extractor":{"e621":{"username":"e621-user","password":"k"}}}"#).unwrap();
+    assert_eq!(cfg.resolve("e926").unwrap().username, None);
+    assert!(parse(r#"{"extractor":{"e926":{"user-id":"1"}}}"#).is_err());
+}
+
+#[test]
 fn booru_instance_and_base_scopes_validate_like_their_family() {
     for document in [
         // Base scopes accept no class settings.

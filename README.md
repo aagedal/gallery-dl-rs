@@ -382,7 +382,7 @@ stay direct downloads in both modes.
 Experimental native booru extraction (`--extractor native`) covers categories
 `danbooru` (danbooru.donmai.us and upstream's other `danbooru` hosts
 hijiribe.donmai.us, sonohara.donmai.us, safebooru.donmai.us and donmai.moe,
-each using its own host as API root), `e621` (e621.net, e926.net), `gelbooru` and
+each using its own host as API root), `e621` (e621.net), `e926` (e926.net), `gelbooru` and
 `safebooru` (safebooru.org), plus upstream's other Danbooru instances
 `atfbooru` (booru.allthefallen.moe), `aibooru` (aibooru.online,
 aibooru.download and their `safe.`/`general.` hosts) and `booruvar`
@@ -527,8 +527,8 @@ category directory; tag searches add `search_tags`. Danbooru/e621 filenames are
 `{category}/pool/{pool[id]} {pool[name]}` and
 `{num:>04}_{id}_{filename}.{extension}`. Danbooru favorite groups use
 `{category}/Favorite Groups/{favgroup[id]} {favgroup[name]}` with the pool filename.
-E926 source keywords and paths retain `e926` while its native settings remain
-under `e621`. Spaces and Unicode are preserved, path separators are replaced,
+e926 is upstream's separate `e926` instance of the e621 family, with its own
+category in keywords, paths and archive identities. Spaces and Unicode are preserved, path separators are replaced,
 control characters are removed, and empty directory segments are omitted.
 Explicit filename and directory overrides apply independently; unmatched
 conditional templates use the class default. Directories freeze before Post
@@ -593,10 +593,16 @@ Each instance has its own settings scope (`extractor.aibooru`, ...), its own
 `tag`/`artist`/`artist-search` class scopes and its own credentials, sent only
 to that instance's API origin. As upstream's `basecategory`, every Danbooru
 instance (danbooru included) consults `extractor.Danbooru` and every e621
-instance (e621/e926 included) `extractor.E621` for settings its own scope does
+instance (e621 and e926 included) `extractor.E621` for settings its own scope does
 not set; these base scopes accept category-level settings (including
 credentials, which then apply to every instance of the family) but no class
-scopes. Upstream e926 output keeps using the `e621` category natively.
+scopes. e926 settings and credentials live in `extractor.e926` (falling back to
+`extractor.E621`, not `extractor.e621`), and e926 credentials are sent only to
+e926.net. Changed for e926 input in this release: native archive identities use
+`e926:` instead of `e621:` (files downloaded before are not recognized as
+archived), `extractor.e621` settings and credentials no longer apply to it,
+hidden e926 files are rebuilt on `static1.e926.net` as upstream, and its
+artist children run under the `e926` scope. e621.net output is unchanged.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories

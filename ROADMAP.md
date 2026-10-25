@@ -683,8 +683,10 @@ and safebooru output, archive identities and paths are unchanged.
 Upstream's other `danbooru` hosts (hijiribe, sonohara and safebooru.donmai.us,
 donmai.moe) route to the danbooru instance with their own host as API root,
 exactly as upstream's instance pattern (no `www.` or other subdomains).
-Remaining: the DAPI `url` option, upstream's separate `e926` category (e926
-still shares e621's category and credentials natively), user-configured
+e926 is now upstream's separate `e926` instance (own category, settings scope
+falling back to `extractor.E621`, credentials, archive identity `e926:` and
+`static1.e926.net` hidden-file host); e621.net output is unchanged.
+Remaining: the DAPI `url` option, user-configured
 instances and the `Danbooru:URL`/`E621:URL` prefixes, class scopes under the
 base scopes, recorded source-oracle fixtures for the new instances, per-post
 laziness of option requests (they run per page), and authenticated live
@@ -1417,8 +1419,8 @@ serialization, raw field presence and stable initial directories.
 
 **Implemented booru source paths:** native post/tag/pool/favorite-group routes
 retain immutable source class templates privately alongside the raw keyword
-snapshot. Source category `e926` is preserved independently of native e621
-settings and identity. Filename/directory overrides resolve independently, and
+snapshot. Source category `e926` is preserved; e926 is now its own native
+instance with its own settings and identity. Filename/directory overrides resolve independently, and
 conditional templates without a matching branch fall back to the source class
 default; an explicit empty directory remains empty. Directories freeze before
 Init/Post and after the preceding PostAfter, including implicit class defaults.

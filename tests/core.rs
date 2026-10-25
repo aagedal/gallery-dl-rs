@@ -352,7 +352,7 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://notreddit.com/r/pics", None),
         ("https://danbooru.donmai.us/posts/1", Some("danbooru")),
         ("https://e621.net/posts/1", Some("e621")),
-        ("https://e926.net/pools/1", Some("e621")),
+        ("https://e926.net/pools/1", Some("e926")),
         (
             "https://gelbooru.com/index.php?page=post&s=view&id=1",
             Some("gelbooru"),

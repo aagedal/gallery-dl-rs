@@ -579,3 +579,94 @@ async fn danbooru_alias_hosts_extract_as_danbooru() {
         requests[0]
     );
 }
+
+#[test]
+fn e926_is_its_own_e621_dialect_instance() {
+    assert_eq!(Site::from_category("e926"), Some(Site::E926));
+    assert_eq!(Site::E926.dialect(), Dialect::E621);
+    assert_eq!(category_dialect("e926"), Some(Dialect::E621));
+    let url = Url::parse("https://e926.net/posts?tags=cat").unwrap();
+    assert_eq!(crate::extract::social_site(&url), Some("e926"));
+    assert_eq!(site_for_url(&url), Some(Site::E926));
+    assert_eq!(
+        target(Site::E926, &url).unwrap(),
+        (
+            Target::Tags { tags: "cat".into() },
+            Url::parse("https://e926.net/").unwrap()
+        )
+    );
+    assert_eq!(source_search_tags(Site::E926, &url).as_deref(), Some("cat"));
+    // Neither instance accepts the other's host.
+    assert!(t(Site::E621, "https://e926.net/posts/1").is_err());
+    assert!(t(Site::E926, "https://e621.net/posts/1").is_err());
+    assert!(t(Site::E926, "https://e621.cc/?tags=cat").is_err());
+    assert_eq!(source_search_tags(Site::E621, &url), None);
+    // e621.net output keeps its category and identity.
+    let e621 = parse_post(
+        Site::E621,
+        &e6ai_post(
+            5,
+            json!(format!("https://static1.e621.net/data/01/23/{MD5}.png")),
+        ),
+    )
+    .unwrap();
+    assert_eq!(e621.category, "e621");
+    assert!(e621.archive_key().unwrap().starts_with("e621:"));
+    // e926 accepts e621's CDN and its own, keyed by its own category.
+    let e926 = parse_post(
+        Site::E926,
+        &e6ai_post(
+            5,
+            json!(format!("https://static1.e621.net/data/01/23/{MD5}.png")),
+        ),
+    )
+    .unwrap();
+    assert_eq!(e926.category, "e926");
+    assert_eq!(e926.filename, format!("e926_5_{MD5}.png"));
+    assert!(e926.archive_key().unwrap().starts_with("e926:"));
+    assert_ne!(e926.archive_key(), e621.archive_key());
+    // Hidden e926 files are rebuilt on upstream's `static1.{root host}`.
+    let hidden = parse_post(Site::E926, &e6ai_post(5, Value::Null)).unwrap();
+    assert_eq!(
+        hidden.url.as_str(),
+        format!("https://static1.e926.net/data/01/23/{MD5}.png")
+    );
+    let hidden = parse_post(Site::E621, &e6ai_post(5, Value::Null)).unwrap();
+    assert_eq!(
+        hidden.url.as_str(),
+        format!("https://static1.e621.net/data/01/23/{MD5}.png")
+    );
+}
+
+#[tokio::test]
+async fn e926_extracts_under_its_own_category_and_credentials() {
+    let body = json!({"post": e6ai_post(5, Value::Null)}).to_string();
+    let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+    let events: Vec<_> = booru(Site::E926, root)
+        .with_credentials(Some("nine"), Some("nine-key"))
+        .unwrap()
+        .events(&Url::parse("https://e926.net/posts/5").unwrap())
+        .collect()
+        .await;
+    let files = media(&events);
+    assert_eq!(files.len(), 1, "{events:?}");
+    assert_eq!(files[0].category, "e926");
+    assert_eq!(
+        paths(files[0]),
+        (format!("e926_5_{MD5}.png"), "e926".into())
+    );
+    assert_eq!(crate::postprocess::context(files[0])["category"], "e926");
+    let descriptor = crate::source_archive::for_media(files[0]).unwrap();
+    assert_eq!(
+        (descriptor.category.as_str(), descriptor.format.as_str()),
+        ("e926", "{id}")
+    );
+    let requests = server.join().unwrap();
+    assert!(requests[0].starts_with("GET /posts/5.json "));
+    use base64::Engine;
+    let basic = base64::engine::general_purpose::STANDARD.encode("nine:nine-key");
+    assert!(requests[0].to_ascii_lowercase().contains(&format!(
+        "authorization: basic {}",
+        basic.to_ascii_lowercase()
+    )));
+}

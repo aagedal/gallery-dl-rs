@@ -30,7 +30,7 @@ pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 /// Danbooru/e621 instance scopes; they also accept upstream's per-class
 /// (`tag`, `artist`, `artist-search`) settings.
 const BOORU_CLASS_CATEGORIES: &[&str] = &[
-    "danbooru", "e621", "atfbooru", "aibooru", "booruvar", "e6ai",
+    "danbooru", "e621", "atfbooru", "aibooru", "booruvar", "e6ai", "e926",
 ];
 /// Upstream `basecategory` scopes (`extractor.Danbooru`, `extractor.E621`):
 /// every instance of the family falls back to them, after its own scope.
@@ -134,6 +134,7 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ("aibooru", &["metadata", "external"]),
     ("booruvar", &["metadata", "external"]),
     ("e6ai", &["metadata"]),
+    ("e926", &["metadata"]),
     ("Danbooru", &["metadata", "external"]),
     ("E621", &["metadata"]),
     ("gelbooru", &["tags", "notes"]),
@@ -909,6 +910,7 @@ struct RawExtractor {
     aibooru: Box<RawOptions>,
     booruvar: Box<RawOptions>,
     e6ai: Box<RawOptions>,
+    e926: Box<RawOptions>,
     /// Upstream `basecategory` scopes shared by every Danbooru/e621 instance.
     #[serde(rename = "Danbooru")]
     danbooru_base: Box<RawOptions>,
@@ -1240,6 +1242,7 @@ impl Config {
                 "aibooru",
                 "booruvar",
                 "e6ai",
+                "e926",
                 "Danbooru",
                 "E621",
                 "gelbooru",
@@ -1285,7 +1288,7 @@ impl Config {
                         })
                 {
                     return Err(error(
-                        "native class settings are only supported for danbooru, e621 and their instances (atfbooru, aibooru, booruvar, e6ai)",
+                        "native class settings are only supported for danbooru, e621 and their instances (atfbooru, aibooru, booruvar, e6ai, e926)",
                     ));
                 }
             }
@@ -1651,6 +1654,7 @@ impl Config {
             ("aibooru", extractor.aibooru),
             ("booruvar", extractor.booruvar),
             ("e6ai", extractor.e6ai),
+            ("e926", extractor.e926),
             ("Danbooru", extractor.danbooru_base),
             ("E621", extractor.e621_base),
             ("gelbooru", extractor.gelbooru),
@@ -1688,7 +1692,7 @@ impl Config {
                     || settings.artist_search.is_some())
             {
                 return Err(error(
-                    "native class settings are only supported for danbooru, e621 and their instances (atfbooru, aibooru, booruvar, e6ai)",
+                    "native class settings are only supported for danbooru, e621 and their instances (atfbooru, aibooru, booruvar, e6ai, e926)",
                 ));
             }
             if !matches!(
@@ -1898,6 +1902,7 @@ impl Config {
                 | "aibooru"
                 | "booruvar"
                 | "e6ai"
+                | "e926"
                 | "gelbooru"
                 | "safebooru"
                 | "mastodon"

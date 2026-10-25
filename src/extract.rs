@@ -981,7 +981,7 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("safebooru.donmai.us", "danbooru"),
         ("donmai.moe", "danbooru"),
         ("e621.net", "e621"),
-        ("e926.net", "e621"),
+        ("e926.net", "e926"),
         ("e621.cc", "e621"),
         ("e621.anthro.fr", "e621"),
         ("gelbooru.com", "gelbooru"),
@@ -1945,7 +1945,7 @@ fn compatibility_metadata(
         .and_then(Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
         .unwrap_or(0);
-    let index = if crate::booru::Site::from_category(category).is_some() || category == "e926" {
+    let index = if crate::booru::Site::from_category(category).is_some() {
         1
     } else if matches!(category, "pixiv" | "pixiv-novel") {
         data.get("num")

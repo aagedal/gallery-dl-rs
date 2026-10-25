@@ -62,7 +62,8 @@ async fn artist_dedup_runs_after_predicates_and_consumes_range_positions() {
     let ExtractionEvent::BeginChild(scope) = &events[0] else {
         panic!()
     };
-    assert_eq!(scope.metadata.target_category(), "e621");
+    // e926 tag children run under e926's own settings scope, as upstream.
+    assert_eq!(scope.metadata.target_category(), "e926");
     assert_eq!(scope.metadata.fields()["_extractor"], "E621TagExtractor");
     assert_eq!(
         scope.metadata.fields()["_url"],
