@@ -46,6 +46,46 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
+    ("vsco", &["videos", "include"]),
+    ("imgur", &["client-id"]),
+    (
+        "artstation",
+        &[
+            "mviews",
+            "videos",
+            "external",
+            "previews",
+            "max-posts",
+            "pro-first",
+        ],
+    ),
+    (
+        "flickr",
+        &[
+            "videos", "exif", "info", "contexts", "profile", "metadata", "size-max",
+        ],
+    ),
+    (
+        "deviantart",
+        &[
+            "include",
+            "journals",
+            "original",
+            "quality",
+            "intermediary",
+            "mature",
+            "metadata",
+            "flat",
+            "public",
+            "group",
+            "folder",
+            "avatar",
+        ],
+    ),
+    ("wallhaven", &["metadata"]),
+    ("furaffinity", &["descriptions", "external", "layout"]),
+    ("weasyl", &["metadata"]),
+    ("newgrounds", &["flash", "format"]),
     (
         "tumblr",
         &[
@@ -191,7 +231,7 @@ pub struct Options {
     pub metadata_bookmark: Option<bool>,
     /// API key for supported API-based extractors, including Pixeldrain.
     pub api_key: Option<String>,
-    /// Pixiv OAuth refresh token; accepted in pixiv and pixiv-novel scopes.
+    /// OAuth refresh token; accepted in pixiv, pixiv-novel and deviantart scopes.
     pub refresh_token: Option<String>,
     pub covers: Option<bool>,
     pub full_series: Option<bool>,
@@ -1561,9 +1601,11 @@ impl Config {
                     "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
                 ));
             }
-            if !matches!(name, "pixiv" | "pixiv-novel") && settings.refresh_token.0.is_some() {
+            if !matches!(name, "pixiv" | "pixiv-novel" | "deviantart")
+                && settings.refresh_token.0.is_some()
+            {
                 return Err(error(
-                    "native configuration refresh-token is only supported for pixiv or pixiv-novel",
+                    "native configuration refresh-token is only supported for pixiv, pixiv-novel or deviantart",
                 ));
             }
             if name != "deviantart"
@@ -2843,6 +2885,14 @@ mod site_scope_tests {
         let config = super::Config::parse_with_options(
             br#"{"extractor":{"reddit":{"comments":500,"videos":"ytdl","retries":3},
                 "pinterest":{"sections":false},
+                "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
+                "vsco":{"videos":false,"include":"all"},
+                "artstation":{"external":true,"max-posts":3},
+                "imgur":{"client-id":"abc123","mp4":false},
+                "wallhaven":{"metadata":true,"retries":4},
+                "furaffinity":{"layout":"old","external":true,"descriptions":"html"},
+                "weasyl":{"metadata":true},
+                "newgrounds":{"flash":false,"format":"720p"},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -2856,6 +2906,36 @@ mod site_scope_tests {
         assert_eq!(options["recursion"], serde_json::json!(2));
         let options = config.resolve("pinterest").unwrap().site_options.unwrap();
         assert_eq!(options["sections"], serde_json::json!(false));
+        let flickr = config.resolve("flickr").unwrap();
+        assert_eq!(flickr.api_key.as_deref(), Some("fk"));
+        let options = flickr.site_options.unwrap();
+        assert_eq!(options["size-max"], serde_json::json!("k"));
+        assert_eq!(options["metadata"], serde_json::json!(["geo"]));
+        let options = config.resolve("vsco").unwrap().site_options.unwrap();
+        assert_eq!(options["videos"], serde_json::json!(false));
+        assert_eq!(options["include"], serde_json::json!("all"));
+        let options = config.resolve("artstation").unwrap().site_options.unwrap();
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert_eq!(options["max-posts"], serde_json::json!(3));
+        let imgur = config.resolve("imgur").unwrap();
+        assert_eq!(imgur.mp4, Some(false));
+        let options = imgur.site_options.unwrap();
+        assert_eq!(options["client-id"], serde_json::json!("abc123"));
+        let wallhaven = config.resolve("wallhaven").unwrap();
+        assert_eq!(wallhaven.retries, Some(4));
+        assert_eq!(
+            wallhaven.site_options.unwrap()["metadata"],
+            serde_json::json!(true)
+        );
+        let options = config.resolve("furaffinity").unwrap().site_options.unwrap();
+        assert_eq!(options["layout"], serde_json::json!("old"));
+        assert_eq!(options["external"], serde_json::json!(true));
+        assert_eq!(options["descriptions"], serde_json::json!("html"));
+        let options = config.resolve("weasyl").unwrap().site_options.unwrap();
+        assert_eq!(options["metadata"], serde_json::json!(true));
+        let options = config.resolve("newgrounds").unwrap().site_options.unwrap();
+        assert_eq!(options["flash"], serde_json::json!(false));
+        assert_eq!(options["format"], serde_json::json!("720p"));
         let tumblr = config.resolve("tumblr").unwrap();
         assert_eq!(tumblr.api_key.as_deref(), Some("k"));
         assert_eq!(tumblr.posts.as_deref(), Some(&["photo".to_owned()][..]));

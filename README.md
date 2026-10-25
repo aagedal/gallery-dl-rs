@@ -246,9 +246,15 @@ defaults with the usual configuration precedence. Each post is one
 group: `post_id` is the album/gallery ID (or image ID), `media_id`/`id` the image
 ID, `index` is 1-based, `timestamp` comes from `created_at`, `username` from the
 account and `caption` from the image or post description/title. Default
-filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. User
-profiles, favorites, subreddit listings, searches and tag listings are rejected
-as unsupported. Compatibility mode sends Imgur URLs to the backend.
+filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. Upstream's
+listing classes page lazily through the `3` API with the `Client-ID` header
+(`extractor.imgur.client-id` overrides the default) and queue every post as an
+album (`/a/ID`) or image child job: `user` (`/user/NAME[/posts|/submitted]`),
+`favorite` (`/user/NAME/favorites`), `favorite-folder`
+(`/user/NAME/favorites/folder/ID`, `post/v1`-style paging), `subreddit`
+(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). The
+cookie-only `/user/me` listings are not supported. Compatibility mode sends
+Imgur URLs to the backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
@@ -724,7 +730,7 @@ ignore `posts`, matching upstream. Disabling `original` avoids token lookups;
 legacy inline `_1280` rewriting remains enabled. Plain media links stay direct downloads.
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
-requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
+requires `extractor.pixiv.refresh-token` (accepted in the `pixiv`, `pixiv-novel` or `deviantart`
 category, never echoed); without it selected Pixiv jobs fail before any network access,
 except for public Pixiv Sketch feeds and the Pixivision article request described below.
 The token is exchanged via upstream's iOS App OAuth refresh grant and the
@@ -1083,62 +1089,97 @@ Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
 category) uses the OAuth2 API with a client-credentials token (upstream's public
 client unless `extractor.deviantart.client-id`/`client-secret` are set; accepted
 only in the `deviantart` category, never echoed), cached for the run and
-refreshed once on HTTP 401. Supported: `www.deviantart.com/USER/art/SLUG-ID`
-(UUID from the page's `DeviantArt://deviation/UUID` app link, then
-`deviation/UUID`), `USER`, `USER/gallery[/all]` (`gallery/all`) and
-`USER/gallery/FOLDER/NAME` (folder UUID matched by name via `gallery/folders`);
-legacy `USER.deviantart.com` hosts are normalized. Listings use offset paging
-capped at 200 pages. Media are `content.src`, or the `deviation/download`
-original for downloadable deviations; HTTPS on `*.wixmp.com`/`*.deviantart.net`
-only. Deviations without image content (literature, journals) are skipped.
-`post_id`/`media_id`/`id` is the deviation UUID, `username` the author, caption
-the title, with `published_time` and width/height. Default filenames are
-`{post_id}.{extension}`; archive identity is the UUID.
+refreshed once on HTTP 401. `extractor.deviantart.refresh-token` enables
+upstream's private token where upstream uses one (short or mature listing
+pages, mature deviations, downloads, `public: false`); DeviantArt may rotate
+it, and the rotated token is kept only in memory for the run. Supported:
+deviations (`USER/art|journal/SLUG-ID`, `view/ID`, `fav.me/dID`), user profiles
+(`include` children; default `gallery`), galleries, folders (by name or UUID,
+subfolders as child jobs), scraps and gallery searches (web "Eclipse"
+endpoints with a CSRF token and session cookies), favourites, collections,
+journals, status updates, avatars, banners, tags, searches (logged-out HTML
+results) and stash links; legacy `USER.deviantart.com` and `fxdeviantart.com`
+hosts are normalized. Listings page lazily (offset or cursor, capped at 200
+pages); web page requests are spaced two seconds apart like upstream. Files use
+upstream's `content` handling: preview URLs with `quality`/`intermediary`
+rewriting by default, originals via `deviation/download` only with `original`
+(upstream's default `false`; `"images"` supported); videos and flash files are
+added; literature, journals and statuses become `.htm` (default) or `.txt`
+files per `journals`. HTTPS media on `*.wixmp.com`/`*.deviantart.net` only.
+Files carry upstream's keywords (`index`, `index_base36`, `username`,
+`filename`, `target`, `folder`, `collection`, `search_tags`, ...) and default
+paths such as `deviantart/USER/deviantart_{index}_{title}.{extension}`.
+Archive identity is the deviation (or status) UUID, unchanged from earlier
+releases for primary files, plus the file kind for secondary files.
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
-uses the REST API with upstream's default public key unless
-`extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
-echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
-`photos.getSizes`: "Original" or the largest photo; videos pick the best
-stream, "Video Original" first), `photos/USER/albums/ID` (`photosets.getPhotos`),
-`photos/USER` (`urls.lookupUser` + `people.getPhotos`) and `flic.kr/p/CODE`
-(base58 photo ID). Listings page 500 per page, capped at 200 pages, using
-`url_o/k/h/l` extras; videos cost one `getSizes` call each. Media must be HTTPS
-on `*.staticflickr.com` (videos also `*.flickr.com`). API `stat: fail` replies
-map to errors (code 1 not found, 100 invalid key). `post_id`/`media_id`/`id` is
-the photo ID, `username` the owner, caption the title, timestamp the upload
-date, with width/height and photo/video type. Default filenames are
-`{post_id}.{extension}`; archive identity is the photo ID. Plain
-`staticflickr.com` links stay direct downloads.
+uses the REST API with the public site key upstream reads from
+`www.flickr.com/prints` (fetched once) unless `extractor.flickr.api-key` is set
+(accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
+echoed). Supported upstream classes: `image` (`photos/USER/ID`, `flic.kr/p/CODE`),
+`album` (`photos/USER/albums/ID`; `photos/USER/albums` queues every album),
+`gallery` (`photos/USER/galleries/ID`), `group` (`groups/NAME`), `user`
+(`photos/USER`), `favorite` (`photos/USER/favorites`) and `search`
+(`search/?text=...&tags=...`, query passed to `photos.search`). Files carry
+upstream's keyword dictionaries (`id`, `title`, `description`, `tags`, `date`,
+`views`, `owner`, `user`, `album`, `gallery`, `group`, `search`, `url`,
+`label`, `width`, `height`, ...) and default formats
+(`flickr_{id}.{extension}` under `flickr/{user[username]}` and the per-class
+`Albums`/`Galleries`/`Groups`/`Favorites`/`Search` directories). Photos use the
+largest listed `url_*` size (or the last `getSizes` entry) with upstream's `_d`
+download suffix; videos use `video.getStreamInfo`. Settings: `videos`
+(default true), `size-max`, `metadata` (extra listing fields), `info`, `exif`,
+`contexts` and `profile`. Listings page 500 per page, capped at 200 pages.
+Media must be HTTPS on `*.staticflickr.com` (videos also `*.flickr.com`). API
+`stat: fail` replies map to errors without echoing details. Archive identity is
+the photo ID. Plain `staticflickr.com` links stay direct downloads.
 
 Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
-category) uses the public API (`/api/v1`). Supported: `wallhaven.cc/w/ID` and
-`whvn.cc/ID` (`w/ID`), `wallhaven.cc/search?...` (same query forwarded to
-`search`), `user/USER/uploads` (search `q=@USER`) and
-`user/USER/favorites/ID` (`collections/USER/ID`); listings follow
-`meta.last_page`, capped at 200 pages. An optional `extractor.wallhaven.api-key`
-is sent as `X-API-Key` (never echoed); NSFW and private collections require it
-(HTTP 401 maps to an api-key hint). Media are `data.path`, HTTPS on
-`w.wallhaven.cc` only. `post_id`/`media_id`/`id` is the wallpaper ID,
-`username` the uploader and caption the space-joined tags (single wallpapers
-only; listing items carry neither), timestamp `created_at`, with
-width/height. Default filenames are `wallhaven-{id}.{extension}`; archive
-identity is the wallpaper ID. Plain `w.wallhaven.cc` links stay direct.
+category) uses the public API (`/api/v1`) and mirrors upstream's classes:
+`wallhaven.cc/w/ID`, `whvn.cc/ID` and `w.wallhaven.cc` file URLs (`image`,
+`w/ID`), `wallhaven.cc/search?...` (`search`; the query is forwarded and the
+URL's `page` is the first page), `user/USER/uploads` (`uploads`, search
+`q=@USER`), `user/USER/favorites/ID` (`collection`), `user/USER/favorites`
+(`collections`, one queued child per collection) and `user/USER` (`user`,
+`include` of `uploads` (default) and `collections`). Listings follow
+`meta.last_page`, capped at 200 pages; `extractor.wallhaven.metadata: true`
+fetches every listed wallpaper's `w/ID` object (tags, uploader). An optional
+`extractor.wallhaven.api-key` is sent as `X-API-Key` (never echoed); NSFW and
+private collections require it (HTTP 401 maps to an api-key hint). Media are
+`data.path`, HTTPS on `w.wallhaven.cc` only. Files carry upstream's keywords
+(the API object with `url`, `date`, `width`, `height`, `wh_category`, tag
+names, and `search` (with `tags`/`tag_id` from `meta.query`), `username` or
+`collection_id`); `post_id`/`media_id` is the wallpaper ID, `username` the
+uploader (or listing user), caption the space-joined tags. Default paths
+follow upstream: `{category}_{id}_{resolution}.{extension}` in `wallhaven/`,
+`wallhaven/{search[tags]}/`, `wallhaven/{username}/` or
+`wallhaven/{username}/{collection_id}/` (previously
+`wallhaven/wallhaven-{id}.{extension}`); archive identity is still the
+wallpaper ID.
 
 Experimental native ArtStation extraction (`--extractor native`, `artstation`
-category) uses the site JSON: `www.artstation.com/artwork/HASH` and
-`USER.artstation.com/projects/HASH` (`projects/HASH.json`), and portfolios
-`www.artstation.com/USER[/albums/all]` or `USER.artstation.com`
-(`users/USER/projects.json?page=N` until `total_count`, capped at 200 pages,
-then each project's JSON). ArtStation sits behind Cloudflare: requests send a
-browser User-Agent, Accept and Referer, but may still be blocked (HTTP 403
-reports this). Only `image` assets are downloaded, using `image_url` as-is
-(no `4k` rewrite), HTTPS on `cdn*.artstation.com` only; covers, video/player
-embeds (YouTube etc.) and 3D/other assets are skipped. `post_id`/`id` is the
-project hash, `media_id` the asset ID, `username` the artist, caption the
-title, timestamp `published_at`, index 1-based per project, with width/height.
-Default filenames are `{post_id}_{media_id}.{extension}`; archive identity is
-the asset ID. Plain CDN links stay direct.
+category) uses the site JSON. Upstream classes: `image` (`/artwork/HASH`,
+`USER.artstation.com/projects/HASH`, `artstn.co/p/HASH`), `user`
+(`www.artstation.com/USER[/albums/all]`, `USER.artstation.com`), `album`
+(`/USER/albums/ID`), `likes`, `collection` (`/USER/collections/ID`),
+`collections` and `following` (queued as child jobs), `challenge`
+(`/contests/NAME/challenges/ID[?sorting=...]`), `search` (`/search?query=...`,
+POSTed with a CSRF token) and `artwork` (`/artwork?sorting=...`). Listings page
+until `total_count` (capped at 200 pages) and fetch each project lazily.
+ArtStation sits behind Cloudflare: requests send a browser User-Agent, Accept
+and Referer, but may still be blocked (HTTP 403 reports this). Every asset with
+an image is downloaded; `/images/images/` URLs are upgraded to `8k` with `4k`,
+`large`, `medium` and `small` download fallbacks. Embedded players: on-site
+video clips (`videos`) and Marmoset viewers (`mviews`) are read from their
+embed pages, external embeds go to yt-dlp (`ytdl:`) when `external` is true,
+and `previews` also keeps their preview images. Settings: `videos`, `mviews`,
+`external`, `previews`, `max-posts`, `pro-first`. Files carry upstream's
+keywords (project fields, `asset`, `num`, `count`, `userinfo`, `album`,
+`collection`, `search`, `artwork`, `challenge`) and default formats
+(`artstation/{userinfo[username]}/artstation_{id}_{asset[id]}_{title}.{extension}`
+and per-class directories). HTTPS on `cdn*.artstation.com` only; archive
+identity is the asset ID (challenge images: challenge and URL-derived ID).
+Plain CDN links stay direct.
 
 Experimental native Pinterest extraction (`--extractor native`, `pinterest`
 category) uses the web resource API (`resource/NAME/get/?source_url=..&data=..`
@@ -1158,47 +1199,98 @@ archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
 
 Experimental native VSCO extraction (`--extractor native`, `vsco` category)
 reads the page-embedded `window.__PRELOADED_STATE__` JSON, which is
-undocumented and fragile. `vsco.co/USER/media/ID` uses `medias.byId`;
-`vsco.co/USER` and `/USER/gallery` take the site ID and anonymous `tkn` bearer
-token from that state and page `api/3.0/medias/profile` by cursor (capped at
-200 pages). Images use `responsiveUrl` with an `https://` prefix; videos are
-kept only as progressive MP4 (HLS is skipped). HTTPS on `*.vsco.co` only.
-`post_id`/`media_id` is the media ID, `username` the `permaSubdomain`, caption
-the description, timestamp `uploadDate`, with width/height. Default filenames
-are `{media_id}.{extension}`; archive identity is the media ID.
+undocumented and fragile, plus the APIs authorized by its anonymous `tkn`
+bearer token. Upstream classes: `user` (`vsco.co/USER`, queues the `include`
+extractors: `avatar`, `gallery`, `spaces`, `collection`; default `gallery`),
+`gallery` (`/USER/gallery`, `api/3.0/medias/profile` by cursor), `collection`
+(`/USER/collection/1`, page state then `api/2.0/collections/ID/medias`),
+`space` (`vsco.co/spaces/ID`, `grpc/spaces/ID/posts` by post cursor), `spaces`
+(`/USER/spaces`, queues each space), `avatar` (the `im.vsco.co` profile image
+redirect), `image` (`/USER/media/ID`) and `video` (`/USER/video/ID`). Listings
+are capped at 200 pages. Images use upstream's `image-CDN.vsco.co` URLs; HLS
+videos go to the manifest downloader (`_ytdl_manifest: hls`, extension
+`mp4`), and `videos: false` skips videos. Files carry upstream's keywords
+(`id`, `user`, `grid`, `meta`, `tags`, `date`, `video`, `width`, `height`,
+`description`) and default formats (`vsco/{user}/{id}.{extension}`,
+`vsco/{user}/collection`, `vsco/space/{user}`). HTTPS on `*.vsco.co` only;
+archive identity is the media ID.
 
 Experimental native Newgrounds extraction (`--extractor native`, `newgrounds`
-category) scrapes art pages `www.newgrounds.com/art/view/USER/SLUG` (main
-image from `<div class="image">` or `og:image`, extra images from `imageData`
-/`art-images`, title from `og:title`, date from `itemprop="datePublished"`).
-`USER.newgrounds.com/art` pages `art/page/N` with `X-Requested-With:
-XMLHttpRequest` (capped at 200 pages) and fetches every listed post. Audio,
-movies and games are unsupported; there is no login, so adult-rated posts are
-skipped. HTTPS on `*.ngfiles.com` only. `post_id` is the image's numeric ID,
-`media_id` `POSTID_INDEX`, `username` the URL user, caption the title. Default
-filenames are `{post_id}_{index}.{extension}`; archive identity is `media_id`.
+category) mirrors upstream's classes: art posts
+`www.newgrounds.com/art/view/USER/SLUG` and `art.ngfiles.com/images/...` file
+URLs (`image`), `/portal/view/ID` and `/audio/listen/ID` (`media`),
+`USER.newgrounds.com/art|audio|movies|games[/page/N]` (XHR listing pages,
+capped at 200), `/favorites[/art|audio|movies]` (`favorite`),
+`/favorites/following` (`following`, queued profiles),
+`www.newgrounds.com/search/conduct/KIND?terms=...` (`search`) and
+`USER.newgrounds.com` (`user`, `include` of `art` (default), `audio`, `games`,
+`movies`). Post pages are scraped like upstream: art from
+`full_image_text` plus `imageData`/`art-images` extras, audio from the page's
+file URL, movies from `portal/video/ID` sources chosen by
+`extractor.newgrounds.format` (`original` list, a list, or a maximum height
+such as `720p`; the other candidates become download fallbacks), and games/
+flash from the page (`extractor.newgrounds.flash`, default true, requests
+`/format/flash`); author-comment images follow. The `ng_session` cookie from
+`--cookies` or `--cookies-from-browser` is sent to newgrounds.com only; posts
+behind the adult wall are skipped without it. Newgrounds' "NG Guard" bot check
+answers unrecognized clients with HTTP 403, reported as an error that suggests
+browser cookies (it blocked live checks on 2026-10-25). HTTPS on `*.ngfiles.com` and
+`*.ungrounded.net` only. Files carry upstream's keywords (title, description,
+date, type, rating, score, favorites, sorted tags, `artist` list, `user`,
+comment, `_type`/`_index`, `num`); `media_id` is `INDEX_N` for art (unchanged),
+`aINDEX_N` for audio and `pINDEX_N` for portal files. Default paths follow
+upstream: `{category}_{_index}_{title}.{extension}` in
+`newgrounds/{artist[:10]:J, }/`, `newgrounds/{user}/Favorites/` or
+`newgrounds/search/{search_tags}/` (previously
+`newgrounds/{post_id}_{index}.{extension}`); archive identity is `media_id`.
 
 Experimental native Fur Affinity extraction (`--extractor native`,
-`furaffinity` category) scrapes `www.furaffinity.net/view/ID/` and `/full/ID/`
-(the `Download` link, title, `/user/` artist, `popup_date` and rating).
-`/gallery/USER/` and `/scraps/USER/` page `/gallery/USER/N/` `<figure
-id="sid-ID">` items until a page adds no new IDs (capped at 200 pages) and
-fetch every submission. Session cookies `a`/`b` from `--cookies` or
+`furaffinity` category) mirrors upstream's classes on `furaffinity.net` and its
+`fx`/`xfu`/`fxfu` mirrors: `/view/ID/` and `/full/ID/` (`post`),
+`/gallery/USER/` and `/scraps/USER/` (`/PATH/USER/N/`), `/gallery/USER/folder/
+ID[/NAME]` (`folder`), `/favorites/USER/[ID/next]` (`favorite`, with
+`favorite_id`), `/search/?q=...` (`search`, POSTed like upstream),
+`/msg/submissions` (`submissions`, needs cookies), `/watchlist/by/USER/`
+(`following`, queued profiles) and `/user/USER/` (`user`, `include` of
+`gallery` (default), `scraps`, `favorite`). Listings page until a page adds no
+new IDs (capped at 200) and fetch every submission. Submission pages are
+parsed like upstream's `_parse_post` for the new and old layouts
+(`extractor.furaffinity.layout`: `auto`, `new` or `old`; `auto` also reads
+the current page layout, which upstream's markers no longer match, and skips
+`d.furaffinity.net` stylesheet links before the file): file URL, title,
+artist, tags, description (text, or HTML with
+`extractor.furaffinity.descriptions: "html"`), views/favorites/comments,
+rating, category/theme, species, gender, size, folders and thumbnail;
+`extractor.furaffinity.external: true` queues description links to other
+extractors. Session cookies `a`/`b` from `--cookies` or
 `--cookies-from-browser` are sent to the site only; without them mature
 submissions are skipped. HTTPS on `d.furaffinity.net`/`*.facdn.net` only.
-`post_id`/`media_id` is the submission ID, `username` the artist, caption the
-title. Default filenames are `{post_id}.{extension}`; archive identity is the
-submission ID.
+`post_id`/`media_id` is the submission ID, `username` the user, caption the
+title. Default paths follow upstream: `{id}{title:? //}.{extension}` in
+`furaffinity/{user!l}/` (plus `Scraps`, `Favorites`, `Folders/{folder_id}
+{folder_name}` or `furaffinity/Search/{search}/`; previously
+`furaffinity/{post_id}.{extension}`); archive identity is the submission ID.
 
 Experimental native Weasyl extraction (`--extractor native`, `weasyl`
-category) uses the API: `weasyl.com/~USER/submissions/ID/...` and
-`/submission/ID` read `api/submissions/ID/view`; `/~USER` and `/~USER/gallery`
-page `api/users/USER/gallery?nextid=N` until `nextid` is null (capped at 200
-pages). An optional `extractor.weasyl.api-key` is sent as `X-Weasyl-API-Key`
-(never echoed). Submissions without `media.submission` are skipped; HTTPS on
-`*.weasyl.com` only. `post_id`/`media_id` is `submitid`, `username`
-`owner_login`, caption the title, timestamp `posted_at`. Default filenames are
-`{post_id}.{extension}`; archive identity is the submission ID.
+category) mirrors upstream's classes: `weasyl.com/~USER/submissions/ID/...`,
+`/submission/ID` and `/view/ID` (`submission`, `api/submissions/ID/view`),
+`/~USER`, `/~USER/gallery` and `/submissions/USER` (`submissions`) and
+`/submissions/USER?folderid=N` (`folder`), paging
+`api/users/USER/gallery?nextid=N` until `nextid` is null (capped at 200
+pages); `/journal/ID` and `/journals/USER` (`journal`/`journals`, saved as
+`.html` text from `api/journals/ID/view`); and `/favorites/USER` or
+`/favorites?userid=N` (`favorite`, scraped pages). An optional
+`extractor.weasyl.api-key` is sent as `X-Weasyl-API-Key` (never echoed);
+`extractor.weasyl.metadata: true` fetches every gallery item's full
+submission. Like upstream, submissions without `media.submission` are skipped
+and only its first file is used; HTTPS on `*.weasyl.com` only. Files carry the
+API object as upstream's keywords (`url`, `date`, `filename`, `extension`,
+`folderid`, `folder_name`, `user`); `post_id`/`media_id` is `submitid`
+(journals `jID`), `username` `owner_login`, caption the title. Default paths
+follow upstream: `{submitid} {title}.{extension}` (journals
+`{journalid} {title}.html`) in `weasyl/{owner_login}/` (plus `{folder_name}`,
+or `weasyl/{user}/Favorites/`; previously `weasyl/{post_id}.{extension}`);
+archive identity is the submission ID.
 
 XML parsing is bounded to 2 MiB and 65,536 nodes, with DTD processing disabled.
 Static, single-period manifests with complete-resource BaseURLs are supported;
@@ -1576,8 +1668,8 @@ Native mode can import an explicitly selected Firefox profile:
   -j 'https://www.instagram.com/p/SHORTCODE/'
 ```
 
-Native imports support Instagram, Facebook, X, Pixiv web requests, Kemono/Coomer
-and FurAffinity. Log in to the site in that Firefox profile first (use `x.com`
+Native imports support Instagram, Facebook, X, Pixiv web requests, Kemono/Coomer,
+FurAffinity and Newgrounds. Log in to the site in that Firefox profile first (use `x.com`
 for X). Supply the
 profile directory containing `cookies.sqlite`, or that database file itself.
 Relative paths use the working directory; `~` expansion, automatic profile

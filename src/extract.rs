@@ -265,10 +265,10 @@ impl Media {
                 }
                 ("vsco", serde_json::json!([post.media_id]).to_string())
             }
-            // Weasyl files are identified by submission ID.
+            // Weasyl files are identified by submission ID (journals by `jID`).
             "weasyl" => {
                 let post = self.metadata.as_ref()?;
-                if !crate::weasyl::valid_id(&post.media_id) {
+                if !crate::weasyl::valid_media_id(&post.media_id) {
                     return None;
                 }
                 ("weasyl", serde_json::json!([post.media_id]).to_string())
@@ -292,13 +292,28 @@ impl Media {
                 }
                 ("newgrounds", serde_json::json!([post.media_id]).to_string())
             }
-            // ArtStation files are identified by asset ID.
+            // ArtStation files are identified by asset ID; challenge
+            // submission images by challenge and their URL-derived ID.
             "artstation" => {
                 let post = self.metadata.as_ref()?;
                 if !crate::artstation::valid_id(&post.media_id) {
                     return None;
                 }
-                ("artstation", serde_json::json!([post.media_id]).to_string())
+                let challenge = post
+                    .site_keywords
+                    .as_ref()
+                    .is_some_and(|k| k.route.subcategory == "challenge");
+                if challenge {
+                    if !crate::artstation::valid_id(&post.post_id) {
+                        return None;
+                    }
+                    (
+                        "artstation",
+                        serde_json::json!(["challenge", post.post_id, post.media_id]).to_string(),
+                    )
+                } else {
+                    ("artstation", serde_json::json!([post.media_id]).to_string())
+                }
             }
             // Wallhaven files are identified by wallpaper ID.
             "wallhaven" => {
@@ -316,14 +331,11 @@ impl Media {
                 }
                 ("flickr", serde_json::json!([post.post_id]).to_string())
             }
-            // DeviantArt files are identified by deviation UUID.
-            "deviantart" => {
-                let post = self.metadata.as_ref()?;
-                if !crate::deviantart::valid_uuid(&post.post_id) {
-                    return None;
-                }
-                ("deviantart", serde_json::json!([post.post_id]).to_string())
-            }
+            // DeviantArt files are identified by deviation UUID (plus file kind).
+            "deviantart" => (
+                "deviantart",
+                crate::deviantart::archive_identity(self.metadata.as_ref()?)?,
+            ),
             // Pixiv files are identified by illustration ID and page.
             "pixiv" => {
                 let post = self.metadata.as_ref()?;

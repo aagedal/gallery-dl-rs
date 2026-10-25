@@ -174,20 +174,29 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         let format = match target {
             crate::imgur::Target::Image(_) => "{id}",
             crate::imgur::Target::Album(_) => "{album[id]}_{id}",
-            crate::imgur::Target::Gallery(_) => "",
+            // Galleries and listings are queue-only; their format is the
+            // inherited empty default.
+            _ => "",
         };
         return Some(descriptor("imgur", format));
     }
     if let Ok(target) = crate::deviantart::target(url) {
+        use crate::deviantart::Target;
         let format = match target {
-            crate::deviantart::Target::Folder { .. } => "F_{folder[uuid]}_{index}.{extension}",
-            crate::deviantart::Target::Deviation { .. } => "g_{_username}_{index}.{extension}",
-            crate::deviantart::Target::Gallery(_) => {
-                if path.split('/').any(|part| part == "gallery") {
-                    "g_{_username}_{index}.{extension}"
-                } else {
-                    ""
-                }
+            Target::User(_) => "",
+            Target::Folder { .. } => "F_{folder[uuid]}_{index}.{extension}",
+            Target::Collection { .. } => "C_{collection[uuid]}_{index}.{extension}",
+            Target::Favorite(_) => "f_{_username}_{index}.{extension}",
+            Target::Scraps(_) => "s_{_username}_{index}.{extension}",
+            Target::Journal(_) => "j_{_username}_{index}.{extension}",
+            Target::Status(_) => "S_{_username}_{index}.{extension}",
+            Target::Avatar(_) => "a_{_username}_{index}",
+            Target::Background(_) => "b_{index}",
+            Target::Tag(_) => "T_{search_tags}_{index}.{extension}",
+            Target::Search(_) => "Q_{search_tags}_{index}.{extension}",
+            Target::Stash(_) => "{index}.{extension}",
+            Target::Gallery(_) | Target::GallerySearch { .. } | Target::Deviation { .. } => {
+                "g_{_username}_{index}.{extension}"
             }
         };
         return Some(descriptor("deviantart", format));
@@ -197,21 +206,23 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             crate::flickr::Target::Photo { .. } => "{id}",
             crate::flickr::Target::Album { .. } => "a_{album[id]}_{id}",
             crate::flickr::Target::User { .. } => "u_{user[nsid]}_{id}",
+            crate::flickr::Target::Gallery { .. } => "g_{gallery[id]}_{id}",
+            crate::flickr::Target::Group { .. } => "G_{group[nsid]}_{id}",
+            crate::flickr::Target::Favorite { .. } => "f_{user[nsid]}_{id}",
+            crate::flickr::Target::Search { .. } => "s_{search}_{id}",
         };
         return Some(descriptor("flickr", format));
     }
     if let Ok(target) = crate::wallhaven::target(url) {
         let format = match target {
-            crate::wallhaven::Target::Search { .. } if path.ends_with("/uploads") => {
-                "u_{username}_{id}"
-            }
+            crate::wallhaven::Target::Uploads { .. } => "u_{username}_{id}",
             crate::wallhaven::Target::Search { .. } => "s_{search[q]}_{id}",
             _ => "{id}",
         };
         return Some(descriptor("wallhaven", format));
     }
-    if crate::artstation::target(url).is_ok() {
-        return Some(descriptor("artstation", "{asset[id]}"));
+    if let Ok(target) = crate::artstation::target(url) {
+        return Some(descriptor("artstation", target.route().archive));
     }
     if let Ok(target) = crate::pinterest::target(url) {
         let format = if matches!(target, crate::pinterest::Target::Board { .. }) {
@@ -230,8 +241,13 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if crate::weasyl::target(url).is_ok() {
         return Some(descriptor("weasyl", "{submitid}"));
     }
-    if crate::vsco::target(url).is_ok() {
-        return Some(descriptor("vsco", "{id}"));
+    if let Ok(target) = crate::vsco::target(url) {
+        let format = match target {
+            crate::vsco::Target::Collection { .. } => "c_{user}_{id}",
+            crate::vsco::Target::Space { .. } => "s_{user}_{id}",
+            _ => "{id}",
+        };
+        return Some(descriptor("vsco", format));
     }
     if let Ok(target) = crate::imagehosts::target(url) {
         use crate::imagehosts::Target;
@@ -520,7 +536,7 @@ mod tests {
             for_url(&Url::parse("https://example.invalid/not-a-native-route").unwrap()).is_none()
         );
         assert!(
-            for_url(&Url::parse("https://www.flickr.com/photos/example/favorites").unwrap())
+            for_url(&Url::parse("https://www.flickr.com/photos/example/galleries").unwrap())
                 .is_none()
         );
         assert!(for_url(&Url::parse("https://user:PRIVATE@imgur.com/abcde").unwrap()).is_none());
@@ -682,7 +698,7 @@ mod tests {
         let template = crate::postprocess::template::Template::parse("{submitid}").unwrap();
         assert_eq!(template.render(&context).unwrap(), "123");
         // Source Weasyl.populate_submission retains submitid without rewriting.
-        assert_eq!(context["submitid"], submission["submitid"].to_string());
+        assert_eq!(context["submitid"], submission["submitid"]);
         let status = json!({"id":"42","account":{"acct":"artist"},"reblog":null,
             "media_attachments":[{"id":"77","type":"image","url":"https://mastodon.social/example.jpg"}]});
         let mut media = crate::mastodon::parse_status(&status, "mastodon.social")
