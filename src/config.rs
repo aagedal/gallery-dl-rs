@@ -47,6 +47,7 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
     ("vsco", &["videos", "include"]),
+    ("imgur", &["client-id"]),
     (
         "artstation",
         &[
@@ -2864,6 +2865,7 @@ mod site_scope_tests {
                 "flickr":{"size-max":"k","metadata":["geo"],"api-key":"fk"},
                 "vsco":{"videos":false,"include":"all"},
                 "artstation":{"external":true,"max-posts":3},
+                "imgur":{"client-id":"abc123","mp4":false},
                 "tumblr":{"external":true,"posts":"photo","api-key":"k"}}}"#,
             &dir,
             &[super::parse_option("extractor.reddit.recursion=2").unwrap()],
@@ -2888,6 +2890,10 @@ mod site_scope_tests {
         let options = config.resolve("artstation").unwrap().site_options.unwrap();
         assert_eq!(options["external"], serde_json::json!(true));
         assert_eq!(options["max-posts"], serde_json::json!(3));
+        let imgur = config.resolve("imgur").unwrap();
+        assert_eq!(imgur.mp4, Some(false));
+        let options = imgur.site_options.unwrap();
+        assert_eq!(options["client-id"], serde_json::json!("abc123"));
         let tumblr = config.resolve("tumblr").unwrap();
         assert_eq!(tumblr.api_key.as_deref(), Some("k"));
         assert_eq!(tumblr.posts.as_deref(), Some(&["photo".to_owned()][..]));

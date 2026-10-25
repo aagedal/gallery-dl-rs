@@ -246,9 +246,15 @@ defaults with the usual configuration precedence. Each post is one
 group: `post_id` is the album/gallery ID (or image ID), `media_id`/`id` the image
 ID, `index` is 1-based, `timestamp` comes from `created_at`, `username` from the
 account and `caption` from the image or post description/title. Default
-filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. User
-profiles, favorites, subreddit listings, searches and tag listings are rejected
-as unsupported. Compatibility mode sends Imgur URLs to the backend.
+filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. Upstream's
+listing classes page lazily through the `3` API with the `Client-ID` header
+(`extractor.imgur.client-id` overrides the default) and queue every post as an
+album (`/a/ID`) or image child job: `user` (`/user/NAME[/posts|/submitted]`),
+`favorite` (`/user/NAME/favorites`), `favorite-folder`
+(`/user/NAME/favorites/folder/ID`, `post/v1`-style paging), `subreddit`
+(`/r/NAME`), `tag` (`/t/TAG`) and `search` (`/search?q=QUERY`). The
+cookie-only `/user/me` listings are not supported. Compatibility mode sends
+Imgur URLs to the backend.
 
 Experimental native Bluesky extraction (`--extractor native`, category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author

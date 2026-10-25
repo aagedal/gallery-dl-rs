@@ -174,7 +174,9 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         let format = match target {
             crate::imgur::Target::Image(_) => "{id}",
             crate::imgur::Target::Album(_) => "{album[id]}_{id}",
-            crate::imgur::Target::Gallery(_) => "",
+            // Galleries and listings are queue-only; their format is the
+            // inherited empty default.
+            _ => "",
         };
         return Some(descriptor("imgur", format));
     }

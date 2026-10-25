@@ -1278,6 +1278,7 @@ fn extract_input<'a>(
                         .get_or_init(|| async {
                             gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_options(options.site_options.as_deref())?
                                     .with_mp4(options.mp4.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
