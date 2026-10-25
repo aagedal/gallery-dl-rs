@@ -1219,10 +1219,14 @@ async fn request_media(
     headers: &HeaderMap,
 ) -> std::result::Result<reqwest::Response, Failure> {
     let mut target = media.url.clone();
-    // Kemono/Coomer serve files through CDN redirects. Only their public
-    // resource headers may cross that origin boundary.
-    let mut redirects =
-        Redirects::new(&target).allow_subdomains(kemono_public_redirects(media, headers));
+    // Redirects to other origins are followed like upstream's downloader,
+    // but only public resource headers cross that boundary; credentials and
+    // custom headers stay with the requested origin.
+    let mut redirects = Redirects::new(&target)
+        .allow_subdomains(kemono_public_redirects(media, headers))
+        .allow_cross_origin(true);
+    let public = public_headers(headers);
+    let mut left_origin = false;
     let response = loop {
         client
             .rate_limits
@@ -1243,7 +1247,11 @@ async fn request_media(
             } else {
                 client.wait_limit
             })
-            .headers(headers.clone())
+            .headers(if left_origin {
+                public.clone()
+            } else {
+                headers.clone()
+            })
             .send()
             .await?;
         match redirects
@@ -1253,11 +1261,33 @@ async fn request_media(
                 retry: false,
                 fallback: true,
             })? {
-            Some(next) => target = next,
+            Some(next) => {
+                left_origin |= next.origin() != media.url.origin();
+                target = next;
+            }
             None => break response,
         }
     };
     Ok(response)
+}
+
+/// The request headers that may follow a redirect to another origin.
+fn public_headers(headers: &HeaderMap) -> HeaderMap {
+    use reqwest::header::{ACCEPT, ACCEPT_ENCODING, IF_RANGE, RANGE, REFERER, USER_AGENT};
+    let mut public = HeaderMap::new();
+    for name in [
+        USER_AGENT,
+        ACCEPT,
+        ACCEPT_ENCODING,
+        RANGE,
+        IF_RANGE,
+        REFERER,
+    ] {
+        for value in headers.get_all(&name) {
+            public.append(name.clone(), value.clone());
+        }
+    }
+    public
 }
 
 fn kemono_public_redirects(media: &Media, headers: &HeaderMap) -> bool {

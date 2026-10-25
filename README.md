@@ -2569,16 +2569,20 @@ With `--resume`, the final failed candidate's checkpoint is retained for a later
 run. Explicit
 cross-origin fallbacks clear every per-item header, including authorization,
 referer, user-agent, and custom headers. Configured HTTP-client defaults still
-apply. This does not enable cross-origin redirects or import browser/session
-cookies into media requests. Fallback URLs remain private in inspection output
+apply. Fallbacks do not import browser/session cookies into media requests. Fallback URLs remain private in inspection output
 and metadata sidecars. Signed-URL/header changes and changed fallback context
 can create separate request paths/checkpoints while stable social archive keys
 remain unchanged.
 
-Media downloads follow up to five redirects within the same origin (scheme,
-host, and effective port), retaining the original destination name and request
-headers. Cross-origin redirects, HTTPS downgrades, URL credentials, malformed
-redirects, and loops fail without requesting the target. The Rust downloader
+Media downloads follow up to five redirects, retaining the original
+destination name. Within the same origin (scheme, host, and effective port)
+all request headers are kept; once a redirect leaves that origin, only
+`User-Agent`, `Accept`, `Accept-Encoding`, `Range`, `If-Range` and `Referer`
+are sent, so cookies, authorization and custom headers never reach another
+host. HTTPS downgrades, URL credentials, malformed redirects, and loops fail
+without requesting the target. Registry site page and API requests follow
+redirects the same way (GET/HEAD only), dropping credential headers on leaving
+the requested origin. The Rust downloader
 forwards per-item `_http_headers`, but does not import the backend's session cookie
 jar or TLS/browser impersonation. Media requiring those features may fail even
 when extraction succeeds.

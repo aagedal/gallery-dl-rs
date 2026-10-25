@@ -383,6 +383,52 @@ async fn fallback_same_origin_keeps_headers_and_cross_origin_clears_all_item_hea
 }
 
 #[tokio::test]
+async fn cross_origin_redirects_carry_only_public_headers() {
+    let cdn = Server::new(vec![reply("200 OK", b"moved")]);
+    let origin = Server::new(vec![Response {
+        status: "302 Found",
+        headers: format!(
+            "Location: {}\r\nContent-Length: 0\r\n",
+            cdn.url("/moved.jpg")
+        ),
+        body: Vec::new(),
+        stall: Duration::from_millis(80),
+        response_gate: None,
+    }]);
+    let mut media = item(&origin.url("/file.jpg"), json!([]));
+    for (key, value) in [
+        ("Cookie", "secret-cookie"),
+        ("Authorization", "Bearer secret"),
+        ("X-Custom-Token", "private"),
+        ("Referer", "https://site.invalid/post"),
+        ("User-Agent", "public-agent"),
+    ] {
+        media.headers.insert(key.into(), value.into());
+    }
+    let root = tempfile::tempdir().unwrap();
+    let result = download::download(&client(), root.path(), &media, 0)
+        .await
+        .unwrap();
+    // The destination keeps the requested file's name.
+    let saved = result.saved_path().unwrap();
+    assert!(
+        saved.to_string_lossy().ends_with("_file.jpg"),
+        "{}",
+        saved.display()
+    );
+    assert_eq!(std::fs::read(saved).unwrap(), b"moved");
+    let first = origin.requests()[0].to_ascii_lowercase();
+    assert!(first.contains("cookie: secret-cookie\r\n"), "{first}");
+    let moved = cdn.requests()[0].to_ascii_lowercase();
+    assert!(moved.starts_with("get /moved.jpg "), "{moved}");
+    for private in ["secret-cookie", "bearer secret", "x-custom-token"] {
+        assert!(!moved.contains(private), "{moved}");
+    }
+    assert!(moved.contains("referer: https://site.invalid/post\r\n"));
+    assert!(moved.contains("user-agent: public-agent\r\n"));
+}
+
+#[tokio::test]
 async fn failed_primary_body_is_discarded_and_last_error_is_private() {
     let server = Server::new(vec![partial(), reply("200 OK", b"backup")]);
     let media = item(
