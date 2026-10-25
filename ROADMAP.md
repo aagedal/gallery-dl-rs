@@ -668,20 +668,25 @@ links, and Gelbooru `redirect` classes are now native, along with Danbooru/e621
 samples, plus Danbooru `ugoira` (ZIP originals with `media_metadata` frame
 delays for the ugoira postprocessors) and `external` (sources of file-less posts
 queued through the process-wide router). Upstream has no other favorites
-classes for these sites. Remaining: the DAPI `url` option, other
-Danbooru/e621 instances (atfbooru, aibooru, booruvar, e6ai) and Danbooru host
-aliases, per-post laziness of option requests (they run per page), and
-authenticated live verification.
-The other instances do not fit the current `booru::Site` model cleanly: `Site`
-is at once the API dialect, the output category, the media-CDN allow-list and
-the key of the per-site extractor/credential caches, and the category strings
-`danbooru`/`e621`/`e926` are special-cased across keyword policies, filter
-contexts, source-archive descriptors, naming defaults and compatibility
-normalization (e926 itself still shares e621's category and credentials).
-Distinct upstream categories need an instance layer (dialect, category, API
-root, CDN hosts such as `cdn.aibooru.download`/`static1.e6ai.net`, aibooru's
-host-dependent root) threaded through those paths with per-instance
-credential scopes, and their own source-oracle coverage.
+classes for these sites.
+Upstream's other Danbooru instances (atfbooru, aibooru, booruvar) and the e621
+instance e6ai are native too. `booru::Site` is now the instance (output
+category, exact upstream hosts and API root, including aibooru's
+host-dependent root, CDN allow-list, credentials and extractor cache slot) and
+`booru::Dialect` the API family; behaviour upstream implements per extractor
+base class keys on the dialect, while configuration scope, archive category and
+output key on the instance. Instance scopes inherit upstream's `basecategory`
+scopes `extractor.Danbooru`/`extractor.E621` (also consulted by danbooru and
+e621), credentials are instance-scoped, and atfbooru/booruvar resolve
+root-relative file URLs like upstream. Existing danbooru, e621/e926, gelbooru
+and safebooru output, archive identities and paths are unchanged.
+Remaining: the DAPI `url` option, Danbooru host aliases (hijiribe, sonohara,
+safebooru.donmai.us, donmai.moe), upstream's separate `e926` category (e926
+still shares e621's category and credentials natively), user-configured
+instances and the `Danbooru:URL`/`E621:URL` prefixes, class scopes under the
+base scopes, recorded source-oracle fixtures for the new instances, per-post
+laziness of option requests (they run per page), and authenticated live
+verification.
 
 **Implemented experimental native Mastodon:** every upstream class (statuses,
 ActivityPub `/objects/ID` resolved by redirect, user timelines, followed accounts
