@@ -9,6 +9,7 @@
 pub mod http;
 
 mod adult;
+mod adult_video;
 mod art;
 mod boorus;
 mod filehosts;
@@ -155,6 +156,7 @@ pub fn sites() -> &'static [&'static Site] {
             art::SITES,
             social::SITES,
             adult::SITES,
+            adult_video::SITES,
             video::SITES,
         ]
         .concat()
@@ -239,6 +241,7 @@ pub fn extra_cookie_domains(site: &Site) -> &'static [&'static str] {
         "shortlink" => social::SHORTLINK_COOKIE_DOMAINS,
         "cien" => &["ci-en.dlsite.com"],
         "subscribestar" => &["subscribestar.adult"],
+        "vipergirls" => adult_video::VIPERGIRLS_COOKIE_DOMAINS,
         _ => &[],
     }
 }
