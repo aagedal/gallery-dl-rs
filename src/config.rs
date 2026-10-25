@@ -104,7 +104,7 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ("furaffinity", &["descriptions", "external", "layout"]),
     ("weasyl", &["metadata"]),
     ("newgrounds", &["flash", "format"]),
-    ("bluesky", &["depth"]),
+    ("bluesky", &["depth", "metadata"]),
     (
         "tumblr",
         &[

@@ -543,10 +543,10 @@ pub(super) fn events(
                 let extras = extractor
                     .with_archives(&state.host, None, archive_files(&post, &state.host))
                     .await;
-                base.kemono_extras = Some(extras.clone());
+                base.extra_keywords = Some(extras.clone());
                 for item in &mut media {
                     if let Some(metadata) = &mut item.metadata {
-                        metadata.kemono_extras = Some(extras.clone());
+                        metadata.extra_keywords = Some(extras.clone());
                     }
                 }
                 for item in &mut media {
@@ -1070,7 +1070,7 @@ mod tests {
                 ExtractionEvent::Media(media) => media.metadata.as_ref(),
                 _ => None,
             })
-            .map(|metadata| metadata.kemono_extras.as_ref().unwrap()["archives"].clone())
+            .map(|metadata| metadata.extra_keywords.as_ref().unwrap()["archives"].clone())
             .collect();
         let expected = json!({HASH: {"id": 5, "size": 7, "name": "archive.zip",
             "path": format!("/aa/11/{HASH}.bin"), "type": "attachment", "hash": HASH}});

@@ -946,7 +946,7 @@ fn context_parts(
             }
             metadata.insert("revision".into(), map(fields));
         }
-        if let Some(extras) = &post.kemono_extras {
+        if let Some(extras) = &post.extra_keywords {
             for (key, value) in extras.iter() {
                 metadata.insert(key.clone(), json_value(value));
             }

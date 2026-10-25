@@ -338,6 +338,15 @@ page, skipping deleted or blocked bookmarks. Upstream's mirror hosts
 string up to 1000, default 0) also emits that many reply levels of single posts
 and liked posts, breadth-first after the post itself; unavailable replies are
 skipped, and a thread without selected media is an error.
+`extractor.bluesky.metadata` (default false) mirrors upstream: true selects
+`user` and `facets`, a comma-separated string or list selects either. `user`
+is the URL actor's `app.bsky.actor.getProfile` object (fetched once per DID;
+search, hashtag and bookmark posts use their author object instead), with an
+`instance` from the handle's last two labels; `facets` adds `hashtags`,
+`mentions` (DIDs) and `uris` from each post record's facets (empty lists without
+facets). The keywords reach filters, templates and JSON output; default
+filenames, directories and archive keys are unchanged (native naming does not
+switch to upstream's `{author[handle]}`/`{createdAt[:19]}` templates).
 
 Category-scoped `username` (handle or email; DIDs contain `:` and are not
 accepted) and `password` (preferably an app password) log in lazily with

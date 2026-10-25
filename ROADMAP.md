@@ -1152,8 +1152,10 @@ replies/video, profile-image and public likes views are described above.
 `username`/`password` login creates an in-memory session on bsky.social (or
 `api-server`), refreshes an expired token once, attaches it only to the API
 origin and enables bookmarks (which fail without a login before any request).
-Not yet: the `metadata` option (`user`/`facets` keywords, which need upstream's
-keyword dictionary and would change default naming), upstream's persistent
+The `metadata` option now adds upstream's `user` (actor profile or post author,
+with `instance`) and facet `hashtags`/`mentions`/`uris` keywords without
+switching native default naming to upstream's templates. Not yet: upstream's
+`author` keyword dictionary and default naming, upstream's persistent
 refresh-token cache, DID identifiers as login names, newer multi-item media
 embeds, and authenticated live verification.
 

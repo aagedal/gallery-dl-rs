@@ -709,9 +709,11 @@ pub struct PostMetadata {
     pub creator: Option<crate::kemono::CreatorMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<crate::kemono::RevisionMetadata>,
-    /// Kemono/Coomer `comments`, `dms`, `announcements` and `archives` values.
+    /// Raw source keywords of optional site settings: Kemono/Coomer
+    /// `comments`, `dms`, `announcements` and `archives`; Bluesky `metadata`
+    /// (`user`, `hashtags`, `mentions`, `uris`).
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub kemono_extras: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
+    pub extra_keywords: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<crate::file_metadata::FileMetadata>,
     /// Ordered Pixiv ugoira ZIP member names and millisecond frame delays.
@@ -2327,9 +2329,11 @@ fn compatibility_metadata(
         discord: discord.clone(),
         creator,
         revision: compatibility_revision(data, category),
-        kemono_extras: matches!(category, "kemono" | "coomer")
-            .then(|| crate::kemono::extras_from_keywords(data))
-            .flatten(),
+        extra_keywords: match category {
+            "kemono" | "coomer" => crate::kemono::extras_from_keywords(data),
+            "bluesky" => crate::bluesky::extras_from_keywords(data),
+            _ => None,
+        },
         rating: (category == "pixiv-novel"
             || crate::booru::Site::from_category(category).is_some())
         .then(|| string("rating"))

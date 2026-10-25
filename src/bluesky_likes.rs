@@ -299,7 +299,7 @@ impl Bluesky {
                     }
                 }
                 if let Some(reply) = state.replies.pop_front() {
-                    state.active = Some(SelectedState::new(reply));
+                    state.active = Some(SelectedState::new(reply).with_user(state.did.clone()));
                     continue;
                 }
                 if let Some(record) = state.records.pop_front() {
@@ -330,7 +330,7 @@ impl Bluesky {
                     };
                     let post = posts.pop_front().expect("thread root");
                     state.replies = posts;
-                    state.active = Some(SelectedState::new(post));
+                    state.active = Some(SelectedState::new(post).with_user(state.did.clone()));
                     continue;
                 }
                 if state.done {

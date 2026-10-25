@@ -733,6 +733,11 @@ pub struct Bluesky {
     api_server_configured: bool,
     credentials: Option<session::Credentials>,
     session: tokio::sync::Mutex<Option<session::Session>>,
+    /// Upstream `metadata`: `user` and `facets` keywords.
+    metadata_user: bool,
+    metadata_facets: bool,
+    /// `metadata: user` profiles by DID.
+    profiles: tokio::sync::Mutex<std::collections::HashMap<String, Arc<Value>>>,
     #[cfg(test)]
     blob_root_override: Option<Url>,
 }
@@ -751,6 +756,8 @@ struct FeedState {
 
 struct SelectedState {
     post: Option<Value>,
+    /// DID of the URL's actor, the `metadata` option's `user`.
+    user: Option<String>,
     quote: Option<Quote>,
     quote_parent: Option<Value>,
     pending: VecDeque<ExtractionEvent>,
@@ -763,6 +770,7 @@ impl SelectedState {
     fn new(post: Value) -> Self {
         Self {
             post: Some(post),
+            user: None,
             quote: None,
             quote_parent: None,
             pending: VecDeque::new(),
@@ -771,6 +779,76 @@ impl SelectedState {
             emitted: false,
         }
     }
+}
+
+impl SelectedState {
+    fn with_user(mut self, user: Option<String>) -> Self {
+        self.user = user;
+        self
+    }
+}
+
+/// Upstream `_instance`: the last two labels of a handle.
+fn handle_instance(handle: &str) -> String {
+    let labels: Vec<&str> = handle.rsplitn(3, '.').collect();
+    labels
+        .iter()
+        .take(2)
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// Upstream `metadata: facets`: tags, mentioned DIDs and link URIs of a
+/// record's facets (the first feature of each); posts without facets get
+/// empty lists. Malformed facets are skipped.
+fn facet_keywords(record: &Value) -> serde_json::Map<String, Value> {
+    let mut tags = Vec::new();
+    let mut dids = Vec::new();
+    let mut uris = Vec::new();
+    for facet in record
+        .get("facets")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(features) = facet.pointer("/features/0") else {
+            continue;
+        };
+        if let Some(tag) = features.get("tag") {
+            tags.push(tag.clone());
+        } else if let Some(did) = features.get("did") {
+            dids.push(did.clone());
+        } else if let Some(uri) = features.get("uri") {
+            uris.push(uri.clone());
+        }
+    }
+    serde_json::Map::from_iter([
+        ("hashtags".into(), Value::Array(tags)),
+        ("mentions".into(), Value::Array(dids)),
+        ("uris".into(), Value::Array(uris)),
+    ])
+}
+
+/// Bound for each `metadata` keyword value.
+const MAX_EXTRA_BYTES: usize = 1024 * 1024;
+/// Bound for cached `metadata: user` profiles.
+const MAX_PROFILES: usize = 1024;
+
+/// Upstream's `metadata` keywords (`user`, `hashtags`, `mentions`, `uris`)
+/// from compatibility output, bounded like native values.
+pub(crate) fn extras_from_keywords(
+    data: &serde_json::Map<String, Value>,
+) -> Option<Arc<serde_json::Map<String, Value>>> {
+    let extras: serde_json::Map<String, Value> = ["user", "hashtags", "mentions", "uris"]
+        .into_iter()
+        .filter_map(|key| Some((key.to_owned(), data.get(key)?.clone())))
+        .filter(|(_, value)| {
+            serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_EXTRA_BYTES)
+        })
+        .collect();
+    (!extras.is_empty()).then(|| Arc::new(extras))
 }
 
 impl Bluesky {
@@ -793,6 +871,9 @@ impl Bluesky {
             api_server_configured: false,
             credentials: None,
             session: tokio::sync::Mutex::new(None),
+            metadata_user: false,
+            metadata_facets: false,
+            profiles: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(test)]
             blob_root_override: None,
         })
@@ -927,6 +1008,11 @@ impl Bluesky {
                 return Ok(None);
             }
             let mut media = parse_post_view_selected(&post, self.selection)?;
+            let extras = if media.is_empty() {
+                None
+            } else {
+                self.metadata_keywords(&post, state.user.as_deref()).await?
+            };
             if self.selection.quoted {
                 state.quote_parent = Some(post);
             }
@@ -934,11 +1020,69 @@ impl Bluesky {
             for item in &mut media {
                 self.route_blob(item).await?;
                 self.network.apply_media(item);
+                if let Some(metadata) = &mut item.metadata {
+                    metadata.extra_keywords = extras.clone();
+                }
             }
             if !media.is_empty() {
                 state.pending.extend(group(media, "bluesky"));
             }
         }
+    }
+
+    /// Upstream `metadata` keywords of one post: `user` is the URL actor's
+    /// profile (fetched once per DID) or else the post author, each with an
+    /// `instance`; `facets` adds `hashtags`, `mentions` and `uris`.
+    async fn metadata_keywords(
+        &self,
+        post: &Value,
+        user: Option<&str>,
+    ) -> Result<Option<Arc<serde_json::Map<String, Value>>>> {
+        if !(self.metadata_user || self.metadata_facets) {
+            return Ok(None);
+        }
+        let mut keywords = serde_json::Map::new();
+        if self.metadata_facets {
+            keywords.extend(facet_keywords(post.get("record").unwrap_or(&Value::Null)));
+        }
+        if self.metadata_user {
+            let mut user = match user {
+                Some(did) => self.profile(did).await?.as_ref().clone(),
+                None => post.get("author").cloned().unwrap_or(Value::Null),
+            };
+            if let Some(user) = user.as_object_mut()
+                && let Some(handle) = user.get("handle").and_then(Value::as_str)
+            {
+                let instance = handle_instance(handle);
+                user.insert("instance".into(), instance.into());
+            }
+            if serde_json::to_vec(&user).is_ok_and(|bytes| bytes.len() <= MAX_EXTRA_BYTES) {
+                keywords.insert("user".into(), user);
+            }
+        }
+        Ok(Some(Arc::new(keywords)))
+    }
+
+    /// `app.bsky.actor.getProfile` for `did`, cached per DID.
+    async fn profile(&self, did: &str) -> Result<Arc<Value>> {
+        let mut profiles = self.profiles.lock().await;
+        if let Some(profile) = profiles.get(did) {
+            return Ok(profile.clone());
+        }
+        let body = self
+            .call("app.bsky.actor.getProfile", &[("actor", did)])
+            .await?;
+        let profile: Value =
+            serde_json::from_slice(&body).map_err(|_| error("Bluesky returned invalid JSON"))?;
+        if profile.get("did").and_then(Value::as_str) != Some(did) {
+            return Err(error("Bluesky profile does not match the requested DID"));
+        }
+        if profiles.len() >= MAX_PROFILES {
+            profiles.clear();
+        }
+        let profile = Arc::new(profile);
+        profiles.insert(did.to_owned(), profile.clone());
+        Ok(profile)
     }
 
     async fn next_page(&self, state: &mut FeedState) -> Result<()> {
@@ -1272,11 +1416,19 @@ impl Bluesky {
             posts: VecDeque<Value>,
             active: Option<SelectedState>,
             emitted: bool,
+            user: Option<String>,
         }
+        // The post URL's actor is the thread root's validated author.
+        let user = posts
+            .front()
+            .and_then(|post| post.pointer("/author/did"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         let state = State {
             posts,
             active: None,
             emitted: false,
+            user,
         };
         stream::unfold(Some(state), move |state| async move {
             let mut state = state?;
@@ -1292,7 +1444,8 @@ impl Bluesky {
                     }
                 }
                 if let Some(post) = state.posts.pop_front() {
-                    state.active = Some(SelectedState::new(post));
+                    let user = state.user.clone();
+                    state.active = Some(SelectedState::new(post).with_user(user));
                     continue;
                 }
                 if state.emitted {
@@ -1327,7 +1480,8 @@ impl Bluesky {
                     }
                 }
                 if let Some(post) = state.posts.pop_front() {
-                    state.active = Some(SelectedState::new(post));
+                    let user = state.did.clone().filter(|did| !did.is_empty());
+                    state.active = Some(SelectedState::new(post).with_user(user));
                     continue;
                 }
                 if state.done {
@@ -3803,5 +3957,119 @@ mod tests {
             assert!(events[0].is_err());
             server.join().unwrap();
         }
+    }
+
+    fn extras(events: &[Result<ExtractionEvent>]) -> Vec<serde_json::Map<String, Value>> {
+        events
+            .iter()
+            .filter_map(|event| match event.as_ref().unwrap() {
+                ExtractionEvent::Post(post) => post.metadata.as_ref(),
+                ExtractionEvent::Media(media) => media.metadata.as_ref(),
+                _ => None,
+            })
+            .map(|metadata| {
+                metadata
+                    .extra_keywords
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    fn metadata_options(value: Value) -> serde_json::Map<String, Value> {
+        serde_json::Map::from_iter([("metadata".into(), value)])
+    }
+
+    #[tokio::test]
+    async fn metadata_option_adds_actor_profile_and_facets_without_changing_naming() {
+        let embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]});
+        let mut tagged = post("3ka", embed.clone());
+        tagged["record"]["facets"] = json!([
+            {"features": [{"$type": "app.bsky.richtext.facet#tag", "tag": "art"}]},
+            {"features": [{"$type": "app.bsky.richtext.facet#mention", "did": "did:plc:bob"}]},
+            {"features": [{"$type": "app.bsky.richtext.facet#link", "uri": "https://a.test/"}]},
+            {"features": []}]);
+        let body = json!({"feed": [{"post": tagged}, {"post": post("3kb", embed)}]});
+        let profile = json!({"did": DID, "handle": "alice.example.co.uk", "followersCount": 3});
+        let (root, server) = serve(vec![
+            response("200 OK", "", body.to_string().as_bytes()),
+            response("200 OK", "", profile.to_string().as_bytes()),
+        ]);
+        let url = Url::parse(&format!("https://bsky.app/profile/{DID}/media")).unwrap();
+        let options = metadata_options(json!("user, facets"));
+        let client = bluesky(root.clone()).with_options(Some(&options)).unwrap();
+        let events: Vec<_> = client.events(&url).collect().await;
+        let extras = extras(&events);
+        assert_eq!(extras.len(), 4, "{events:?}");
+        let mut user = profile.clone();
+        user["instance"] = json!("co.uk");
+        assert!(extras.iter().all(|extras| extras["user"] == user));
+        assert_eq!(extras[0]["hashtags"], json!(["art"]));
+        assert_eq!(extras[0]["mentions"], json!(["did:plc:bob"]));
+        assert_eq!(extras[0]["uris"], json!(["https://a.test/"]));
+        assert_eq!(extras[3]["hashtags"], json!([]));
+        let ExtractionEvent::Media(media) = events[1].as_ref().unwrap() else {
+            panic!("expected media");
+        };
+        assert_eq!(media.filename, "3ka_1.jpg");
+        let values = crate::filter::context(media);
+        assert!(values.contains_key("user") && values.contains_key("hashtags"));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2, "the profile is fetched once");
+        assert!(requests[1].starts_with(&format!(
+            "GET /xrpc/app.bsky.actor.getProfile?actor={}",
+            DID.replace(':', "%3A")
+        )));
+    }
+
+    #[tokio::test]
+    async fn metadata_user_falls_back_to_post_authors_without_an_actor() {
+        let embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]});
+        let (root, server) = serve(vec![search_body(vec![post("3ka", embed)], None)]);
+        let options = metadata_options(json!(["user"]));
+        let events: Vec<_> = bluesky(root)
+            .with_options(Some(&options))
+            .unwrap()
+            .events(&Url::parse("https://bsky.app/search?q=cat").unwrap())
+            .collect()
+            .await;
+        let extras = extras(&events);
+        assert_eq!(extras.len(), 2, "{events:?}");
+        assert_eq!(
+            extras[1]["user"],
+            json!({"did": DID, "handle": "alice.bsky.social", "instance": "bsky.social"})
+        );
+        assert!(!extras[1].contains_key("hashtags"));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn metadata_selection_follows_upstream_truthiness_and_compat_keywords() {
+        for (value, user, facets) in [
+            (json!(true), true, true),
+            (json!(1), true, true),
+            (json!("facets"), false, true),
+            (json!(["user"]), true, false),
+            (json!(false), false, false),
+            (json!(""), false, false),
+            (Value::Null, false, false),
+        ] {
+            let client = Bluesky::new(Duration::from_secs(1))
+                .unwrap()
+                .with_options(Some(&metadata_options(value.clone())))
+                .unwrap();
+            assert_eq!(
+                (client.metadata_user, client.metadata_facets),
+                (user, facets),
+                "{value}"
+            );
+        }
+        assert_eq!(handle_instance("bsky.app"), "bsky.app");
+        assert_eq!(handle_instance("a.b.c.d"), "c.d");
+        let data = json!({"user": {"did": DID}, "uris": [], "text": "x"});
+        let extras = extras_from_keywords(data.as_object().unwrap()).unwrap();
+        assert_eq!(extras.keys().collect::<Vec<_>>(), ["user", "uris"]);
+        assert!(extras_from_keywords(&serde_json::Map::new()).is_none());
     }
 }

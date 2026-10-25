@@ -1378,7 +1378,7 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
-                        metadata.kemono_extras = extras.clone();
+                        metadata.extra_keywords = extras.clone();
                     }
                 }
                 ExtractionEvent::Media(media) => {
@@ -1386,7 +1386,7 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
-                        metadata.kemono_extras = extras.clone();
+                        metadata.extra_keywords = extras.clone();
                     }
                     if let Some(id) = post
                         .metadata
@@ -3778,7 +3778,7 @@ mod tests {
             })
             .map(|metadata| {
                 metadata
-                    .kemono_extras
+                    .extra_keywords
                     .as_deref()
                     .cloned()
                     .unwrap_or_default()

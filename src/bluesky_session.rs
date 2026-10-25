@@ -1,5 +1,6 @@
 //! Native Bluesky login (`username`/`password`), upstream's `BlueskyAPI.authenticate`,
-//! plus extractor options that are not typed configuration fields (`depth`).
+//! plus extractor options that are not typed configuration fields (`depth`,
+//! `metadata`).
 //!
 //! Sessions are created lazily with `com.atproto.server.createSession` on the
 //! configured API root (`https://bsky.social` unless `api-server` is set) and
@@ -62,7 +63,8 @@ impl Bluesky {
         Ok(self)
     }
 
-    /// Apply upstream settings without typed configuration fields: `depth`.
+    /// Apply upstream settings without typed configuration fields: `depth`
+    /// and `metadata`.
     pub fn with_options(mut self, options: Option<&Map<String, Value>>) -> Result<Self> {
         for (key, value) in options.into_iter().flatten() {
             let invalid = || error(format!("invalid Bluesky setting: {key}"));
@@ -79,6 +81,28 @@ impl Bluesky {
                     if self.depth > MAX_DEPTH {
                         return Err(invalid());
                     }
+                }
+                // Upstream: a comma-separated string (spaces removed) or a
+                // list selects `user`/`facets`; any other truthy value both.
+                "metadata" => {
+                    let selected: Vec<String> = match value {
+                        Value::String(text) => text
+                            .replace(' ', "")
+                            .split(',')
+                            .map(str::to_owned)
+                            .collect(),
+                        Value::Array(items) => items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect(),
+                        value if crate::postprocess::truthy(value) => {
+                            vec!["user".into(), "facets".into()]
+                        }
+                        _ => Vec::new(),
+                    };
+                    self.metadata_user = selected.iter().any(|item| item == "user");
+                    self.metadata_facets = selected.iter().any(|item| item == "facets");
                 }
                 _ => return Err(error(format!("unsupported Bluesky setting: {key}"))),
             }
