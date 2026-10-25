@@ -114,10 +114,12 @@ impl Media {
                 )
             }
             // Mastodon attachment IDs are scoped to their instance.
-            "mastodon" | "mastodon.social" | "pawoo" | "baraag" => {
+            category
+                if category == "mastodon" || crate::mastodon::is_instance_category(category) =>
+            {
                 let post = self.metadata.as_ref()?;
                 let instance = post.instance.as_deref()?;
-                if !crate::mastodon::INSTANCES.contains(&instance)
+                if crate::mastodon::instance_category(instance).is_none()
                     || (self.category != "mastodon"
                         && crate::mastodon::instance_category(instance)
                             != Some(self.category.as_str()))
@@ -846,6 +848,19 @@ pub fn input_url(value: &str) -> Result<Url> {
         };
         Some((scheme, rest.to_owned()))
     };
+    // Upstream `BaseExtractor` prefixes (`Danbooru:`, `E621:`, `mastodon:`,
+    // also accepted in lowercase) select the family for any http(s) host.
+    if let Some((prefix, target)) = value.split_once(':')
+        && let Some(base) = crate::base_instances::Base::from_prefix(prefix)
+    {
+        let lower = target.to_ascii_lowercase();
+        if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+            return Err(error("prefixed URLs need an http:// or https:// target"));
+        }
+        let target = http_url(target)?;
+        return Url::parse(&format!("{}:{target}", base.scheme()))
+            .map_err(|_| error("invalid prefixed URL"));
+    }
     let Some((scheme, target)) = prefixed(value) else {
         return http_url(value);
     };
@@ -907,6 +922,18 @@ pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
 }
 
 pub fn social_site(url: &Url) -> Option<&'static str> {
+    // `Danbooru:`/`E621:`/`mastodon:` inputs route by their target's family.
+    if crate::base_instances::prefixed(url).is_some() {
+        return social_site(&crate::base_instances::unprefix(url.clone()).ok()?);
+    }
+    // Configured and prefixed instances of the native base families; they
+    // never claim the hosts of built-in instances.
+    if let Some(instance) = crate::base_instances::find(url) {
+        return Some(match instance.base {
+            crate::base_instances::Base::Mastodon => "mastodon",
+            _ => instance.category,
+        });
+    }
     // Registry sites include the host-less `generic:`/`recursive:` inputs.
     if let Some(site) = crate::sites::find(url) {
         return Some(site.category);
@@ -1907,7 +1934,14 @@ const DEDICATED_CATEGORIES: &[&str] = &[
 
 /// Whether a category came from generic gallery-dl compatibility output.
 pub(crate) fn generic_category(category: &str) -> bool {
-    !DEDICATED_CATEGORIES.contains(&category) && !crate::sites::is_category(category)
+    !DEDICATED_CATEGORIES.contains(&category)
+        && !crate::sites::is_category(category)
+        && crate::base_instances::by_category(category).is_none()
+}
+
+/// Whether a category has dedicated handling in this crate.
+pub(crate) fn dedicated_category(category: &str) -> bool {
+    DEDICATED_CATEGORIES.contains(&category)
 }
 
 /// The category for a compatibility message. Generic runs take the upstream

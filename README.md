@@ -580,8 +580,7 @@ e621 `metadata` (true for `notes,pools`, or a string/list) adds each post's
 Gelbooru/Safebooru `tags` and `notes` fetch each post's HTML page for
 `tags_<type>` strings and note lists. These requests happen when a page is
 fetched, before its posts are emitted. Not supported natively: the DAPI `url`
-option, upstream's `Danbooru:URL`/`E621:URL` prefixes and user-configured
-instances.
+option.
 
 The additional instances accept only upstream's exact hosts (no `www.` or
 other subdomains); aibooru's API root is the host of the input URL, like
@@ -603,6 +602,43 @@ e926.net. Changed for e926 input in this release: native archive identities use
 archived), `extractor.e621` settings and credentials no longer apply to it,
 hidden e926 files are rebuilt on `static1.e926.net` as upstream, and its
 artist children run under the `e926` scope. e621.net output is unchanged.
+
+User-configured instances follow upstream's `BaseExtractor`: an object with a
+`root` under `extractor.Danbooru`, `extractor.E621` or `extractor.mastodon`
+(upstream's exact `basecategory` spellings) adds an instance named by its key,
+for example `{"extractor": {"Danbooru": {"mybooru": {"root":
+"https://booru.example.org", "pattern": "(?:www\\.)?booru\\.example\\.org"}},
+"mybooru": {"username": "me", "password": "API_KEY"}}}`. `pattern` is a regular
+expression (Rust `regex` syntax, so no look-around or back-references) matched
+against the URL's `scheme://host[:port]` after an optional `https?://`, as
+upstream prefixes it to the extractor's path pattern; without one, only the
+root's exact host and port match. Configured patterns are consulted before
+other sites but never claim a built-in instance's host. The root must be an
+http(s) origin without credentials, path, query or fragment; requests use it
+whichever host the pattern matched, files must come from the root's domain
+(or its exact origin, e.g. a local `http://host:port`), Danbooru-family
+root-relative files resolve against it and hidden e621-family files use
+`static1.<root host>`. The instance name becomes its category (paths, keywords
+and archive identity) and its configuration scope `extractor.<name>`, with the
+family's site options and, for Danbooru/e621, its own `tag`/`artist`/
+`artist-search` class scopes; unset settings fall back to the family's base
+scope, as upstream. Names must be new categories (1-64 ASCII letters, digits,
+`.`, `-` or `_`, not ending in a class name). Definitions accept only `root`
+and `pattern`, plus `access-token`, `client-id` and `client-secret` for
+Mastodon.
+
+Inputs prefixed with `Danbooru:`, `E621:` or `mastodon:` (or their lowercase
+forms) followed by an explicit `http://` or `https://` URL use that family for
+any host: the category is the URL's `host[:port]` and the root its scheme and
+host, as upstream. The host stays registered for the rest of the run, so child
+URLs on it (for example artist tag searches) route to the same instance. A
+prefixed host that a built-in or configured instance of the same family
+already serves uses that instance; one served by another family is an error.
+Prefixed instances use the family's base scope for settings (an
+`extractor.<host>` scope is not supported) but never its credentials: the
+shared base-scope credentials stay with built-in and configured instances.
+Configured instances and prefixes are native-only; `--extractor
+compatibility` passes the plain URL to gallery-dl.
 
 Experimental native Mastodon extraction (`--extractor native`) covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
@@ -629,7 +665,14 @@ Shared options belong under `extractor.mastodon`; instance settings under
 them. Set `access-token` only in an instance scope; the token is bound to that
 instance's HTTPS API origin and never attached to media or other instances.
 An empty string or false disables the native token; unset or `"cache"` uses
-the token `oauth:mastodon:INSTANCE` cached. Upstream's built-in per-instance
+the token `oauth:mastodon:INSTANCE` cached. User-configured instances
+(`extractor.mastodon.NAME` with a `root`, see the booru section) and
+`mastodon:https://HOST/...` inputs use the same routes; their `instance` and
+credential-cache key is the root's `host[:port]`, and the API is always the
+configured root. Their token is the `access-token` of `extractor.NAME`, then
+the cached `oauth:mastodon:HOST` token, then the definition's own
+`access-token` (upstream `config_instance`), bound to the root's origin; a
+definition's `client-id`/`client-secret` are used by `oauth:mastodon:HOST`. Upstream's built-in per-instance
 access tokens are not embedded, so endpoints an instance restricts to
 authenticated clients (for example baraag.net hashtag timelines) need a
 configured or cached `access-token`. Explicit

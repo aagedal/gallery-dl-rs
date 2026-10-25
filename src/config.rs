@@ -45,8 +45,62 @@ fn booru_scope_dialect(name: &str) -> Option<crate::booru::Dialect> {
         _ => None,
     }
 }
-fn booru_family_scope(name: &str) -> bool {
-    booru_scope_dialect(name).is_some()
+/// Upstream `BaseExtractor.update`: `extractor.<basecategory>.<category>`
+/// objects with a `root` define additional instances of the family.
+fn instance_definitions(shape: &Value) -> Result<Vec<crate::base_instances::Definition>> {
+    use crate::base_instances::{Base, Definition};
+    let mut definitions: Vec<Definition> = Vec::new();
+    let Some(extractor) = shape.get("extractor").and_then(Value::as_object) else {
+        return Ok(definitions);
+    };
+    for base in Base::ALL {
+        let Some(scope) = extractor.get(base.scope()).and_then(Value::as_object) else {
+            continue;
+        };
+        for (category, value) in scope {
+            if let Some(definition) = Definition::parse(base, category, value)? {
+                if definitions
+                    .iter()
+                    .any(|known| known.category == definition.category)
+                {
+                    return Err(error(
+                        "native configuration instance names must be unique across families",
+                    ));
+                }
+                if extractor
+                    .get(category)
+                    .is_some_and(|value| !value.is_object())
+                {
+                    return Err(error("native configuration category must be a JSON object"));
+                }
+                definitions.push(definition);
+            }
+        }
+    }
+    Ok(definitions)
+}
+
+/// The API dialect of a configured Danbooru/e621 instance.
+fn configured_dialect(
+    instances: &[crate::base_instances::Definition],
+    name: &str,
+) -> Option<crate::booru::Dialect> {
+    use crate::base_instances::Base;
+    instances
+        .iter()
+        .find(|definition| definition.category == name)
+        .and_then(|definition| match definition.base {
+            Base::Danbooru => Some(crate::booru::Dialect::Danbooru),
+            Base::E621 => Some(crate::booru::Dialect::E621),
+            Base::Mastodon => None,
+        })
+}
+
+/// Whether `name` is a configured Mastodon instance.
+fn configured_mastodon(instances: &[crate::base_instances::Definition], name: &str) -> bool {
+    instances.iter().any(|definition| {
+        definition.category == name && definition.base == crate::base_instances::Base::Mastodon
+    })
 }
 
 const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
@@ -653,6 +707,8 @@ pub struct Config {
     parent_keywords: Vec<String>,
     cache: crate::cache::Location,
     oauth: crate::oauth::Settings,
+    /// User-configured Danbooru/e621/Mastodon instances.
+    instances: Vec<crate::base_instances::Definition>,
 }
 
 /// Upstream `cache`: an object whose `file` is a path or null (disabled).
@@ -1293,9 +1349,19 @@ impl Config {
                 }
             }
         }
+        let instances = instance_definitions(&shape)?;
+        let configured_booru: Vec<&str> = instances
+            .iter()
+            .filter(|definition| configured_dialect(&instances, &definition.category).is_some())
+            .map(|definition| definition.category.as_str())
+            .collect();
         let mut raw_classes = Vec::new();
         if let Some(extractor) = shape.get_mut("extractor").and_then(Value::as_object_mut) {
-            for category in BOORU_CLASS_CATEGORIES.iter().copied() {
+            for category in BOORU_CLASS_CATEGORIES
+                .iter()
+                .copied()
+                .chain(configured_booru.iter().copied())
+            {
                 if let Some(settings) = extractor.get_mut(category).and_then(Value::as_object_mut) {
                     for subcategory in ["artist", "artist-search", "tag"] {
                         if let Some(value) = settings.remove(subcategory) {
@@ -1350,6 +1416,7 @@ impl Config {
                 .iter()
                 .chain(BOORU_BASE_CATEGORIES)
                 .copied()
+                .chain(configured_booru.iter().copied())
             {
                 if let Some(settings) = extractor.get(category) {
                     parent_keys(settings, &mut parent_keywords);
@@ -1372,6 +1439,9 @@ impl Config {
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let mut site_scopes = Vec::new();
         let mut site_options = BTreeMap::new();
+        let mut configured_names: Vec<String> = Vec::new();
+        let mut configured_scopes: Vec<Box<RawOptions>> = Vec::new();
+        let mut configured_site_options = BTreeMap::new();
         let mut original: Value = serde_json::from_slice(bytes)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         // `cache.file` and `extractor.oauth` are process-wide settings.
@@ -1436,6 +1506,41 @@ impl Config {
                     })?;
                     site_scopes.push((category, Box::new(raw)));
                 }
+            }
+            // Instance definitions are not settings; each configured
+            // instance has its own scope with its family's site options.
+            for definition in &instances {
+                if let Some(scope) = extractor
+                    .get_mut(definition.base.scope())
+                    .and_then(Value::as_object_mut)
+                {
+                    scope.remove(&definition.category);
+                }
+            }
+            for definition in &instances {
+                let mut value = extractor
+                    .remove(&definition.category)
+                    .unwrap_or_else(|| Value::Object(Default::default()));
+                let keys: &[&str] = match definition.base {
+                    crate::base_instances::Base::Danbooru => &["metadata", "external"],
+                    crate::base_instances::Base::E621 => &["metadata"],
+                    crate::base_instances::Base::Mastodon => &[],
+                };
+                if let Some(fields) = value.as_object_mut() {
+                    let extra: serde_json::Map<String, Value> = keys
+                        .iter()
+                        .filter_map(|key| fields.remove_entry(*key))
+                        .collect();
+                    if !extra.is_empty() {
+                        configured_site_options
+                            .insert(definition.category.clone(), std::sync::Arc::new(extra));
+                    }
+                }
+                let raw: RawOptions = serde_json::from_value(value).map_err(|_| {
+                    error("invalid native configuration JSON or unsupported option")
+                })?;
+                configured_names.push(definition.category.clone());
+                configured_scopes.push(Box::new(raw));
             }
             // Dedicated native extractors keep their typed scope; their
             // upstream-specific settings are forwarded as site options.
@@ -1685,8 +1790,18 @@ impl Config {
         ]
         .into_iter()
         .chain(site_scopes)
-        {
+        .chain(
+            configured_names
+                .iter()
+                .map(String::as_str)
+                .zip(configured_scopes),
+        ) {
+            let booru_scope_dialect = |name: &str| {
+                booru_scope_dialect(name).or_else(|| configured_dialect(&instances, name))
+            };
+            let booru_family_scope = |name: &str| booru_scope_dialect(name).is_some();
             if !BOORU_CLASS_CATEGORIES.contains(&name)
+                && configured_dialect(&instances, name).is_none()
                 && (settings.tag.is_some()
                     || settings.artist.is_some()
                     || settings.artist_search.is_some())
@@ -1775,6 +1890,7 @@ impl Config {
                 None
             };
             if !matches!(name, "mastodon.social" | "pawoo" | "baraag")
+                && !configured_mastodon(&instances, name)
                 && settings.access_token.0.is_some()
             {
                 return Err(error(
@@ -1856,7 +1972,9 @@ impl Config {
                 resolved.api_key = opaque_key;
             }
             resolved.tumblr_reblogs = tumblr_reblogs;
-            resolved.site_options = site_options.remove(name);
+            resolved.site_options = site_options
+                .remove(name)
+                .or_else(|| configured_site_options.remove(name));
             categories.insert(name.into(), resolved);
         }
         let classes = raw_classes
@@ -1874,6 +1992,7 @@ impl Config {
             parent_keywords,
             cache,
             oauth,
+            instances,
         })
     }
 
@@ -1887,53 +2006,78 @@ impl Config {
         &self.oauth
     }
 
+    /// User-configured Danbooru/e621/Mastodon instances, in configuration
+    /// order (see [`crate::base_instances::register`]).
+    pub fn instances(&self) -> &[crate::base_instances::Definition] {
+        &self.instances
+    }
+
+    /// Settings of a family's upstream `basecategory` scope alone
+    /// (`Danbooru`, `E621` or `mastodon`), used by URL-prefixed instances.
+    pub fn resolve_base(&self, base: crate::base_instances::Base) -> Result<Options> {
+        if base == crate::base_instances::Base::Mastodon {
+            return self.resolve("mastodon");
+        }
+        self.resolve_unchecked(base.scope())
+    }
+
     pub fn resolve(&self, category: &str) -> Result<Options> {
-        if !matches!(
-            category,
-            "instagram"
-                | "twitter"
-                | "facebook"
-                | "imgur"
-                | "bluesky"
-                | "reddit"
-                | "danbooru"
-                | "e621"
-                | "atfbooru"
-                | "aibooru"
-                | "booruvar"
-                | "e6ai"
-                | "e926"
-                | "gelbooru"
-                | "safebooru"
-                | "mastodon"
-                | "mastodon.social"
-                | "pawoo"
-                | "baraag"
-                | "kemono"
-                | "coomer"
-                | "pixeldrain"
-                | "catbox"
-                | "imgbox"
-                | "postimg"
-                | "tumblr"
-                | "pixiv"
-                | "pixiv-novel"
-                | "deviantart"
-                | "flickr"
-                | "wallhaven"
-                | "artstation"
-                | "pinterest"
-                | "newgrounds"
-                | "furaffinity"
-                | "weasyl"
-                | "vsco"
-                | "direct"
-        ) && !crate::sites::is_category(category)
+        if !self
+            .instances
+            .iter()
+            .any(|definition| definition.category == category)
+            && !matches!(
+                category,
+                "instagram"
+                    | "twitter"
+                    | "facebook"
+                    | "imgur"
+                    | "bluesky"
+                    | "reddit"
+                    | "danbooru"
+                    | "e621"
+                    | "atfbooru"
+                    | "aibooru"
+                    | "booruvar"
+                    | "e6ai"
+                    | "e926"
+                    | "gelbooru"
+                    | "safebooru"
+                    | "mastodon"
+                    | "mastodon.social"
+                    | "pawoo"
+                    | "baraag"
+                    | "kemono"
+                    | "coomer"
+                    | "pixeldrain"
+                    | "catbox"
+                    | "imgbox"
+                    | "postimg"
+                    | "tumblr"
+                    | "pixiv"
+                    | "pixiv-novel"
+                    | "deviantart"
+                    | "flickr"
+                    | "wallhaven"
+                    | "artstation"
+                    | "pinterest"
+                    | "newgrounds"
+                    | "furaffinity"
+                    | "weasyl"
+                    | "vsco"
+                    | "direct"
+            )
+            && !crate::sites::is_category(category)
         {
             return Err(error("unsupported native configuration category"));
         }
+        self.resolve_unchecked(category)
+    }
+
+    fn resolve_unchecked(&self, category: &str) -> Result<Options> {
         let mut settings = self.extractor.clone();
-        if matches!(category, "mastodon.social" | "pawoo" | "baraag")
+        if (matches!(category, "mastodon.social" | "pawoo" | "baraag")
+            || configured_mastodon(&self.instances, category))
             && let Some(base) = self.categories.get("mastodon")
         {
             settings = settings.overlay(base);
@@ -1961,7 +2105,8 @@ impl Config {
     /// instance's own scope is consulted first, then `Danbooru`/`E621`.
     fn booru_base(&self, category: &str) -> Option<&Options> {
         let base = booru_scope_dialect(category)
-            .filter(|_| BOORU_CLASS_CATEGORIES.contains(&category))?
+            .filter(|_| BOORU_CLASS_CATEGORIES.contains(&category))
+            .or_else(|| configured_dialect(&self.instances, category))?
             .base_category()?;
         self.categories.get(base)
     }

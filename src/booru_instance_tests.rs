@@ -94,7 +94,7 @@ const INSTANCES: &[(Site, &str, &str, Dialect)] = &[
 fn instances_have_their_own_category_and_cache_slot_but_share_a_dialect() {
     assert_eq!(Site::COUNT, Site::ALL.len());
     for (index, site) in Site::ALL.into_iter().enumerate() {
-        assert_eq!(site as usize, index);
+        assert_eq!(site.slot(), Some(index));
         assert_eq!(Site::from_category(site.category()), Some(site));
     }
     for (site, category, dialect) in [
@@ -669,4 +669,164 @@ async fn e926_extracts_under_its_own_category_and_credentials() {
         "authorization: basic {}",
         basic.to_ascii_lowercase()
     )));
+}
+
+/// Register a configured instance (the registry is process-wide: unique
+/// names and hosts per test).
+fn define(base: crate::base_instances::Base, category: &str, value: Value) -> Site {
+    crate::base_instances::register(&[crate::base_instances::Definition::parse(
+        base, category, &value,
+    )
+    .unwrap()
+    .unwrap()]);
+    Site::from_category(category).unwrap()
+}
+
+#[test]
+fn configured_instances_use_their_family_root_and_own_identity() {
+    use crate::base_instances::Base;
+    let site = define(
+        Base::Danbooru,
+        "cfgbooru",
+        json!({"root": "https://cfgbooru.test"}),
+    );
+    assert_eq!(site.category(), "cfgbooru");
+    assert_eq!(site.dialect(), Dialect::Danbooru);
+    assert_eq!(site.slot(), None);
+    assert!(is_danbooru_family("cfgbooru"));
+    let url = Url::parse("https://cfgbooru.test/posts?tags=a+b").unwrap();
+    assert_eq!(crate::extract::social_site(&url), Some("cfgbooru"));
+    assert_eq!(site_for_url(&url), Some(site));
+    assert_eq!(
+        target(site, &url).unwrap(),
+        (
+            Target::Tags { tags: "a b".into() },
+            Url::parse("https://cfgbooru.test/").unwrap()
+        )
+    );
+    assert_eq!(source_search_tags(site, &url).as_deref(), Some("a b"));
+    let defaults = defaults_for_url(&url).unwrap();
+    assert_eq!(
+        (defaults.category, defaults.archive),
+        ("cfgbooru", "t_{search_tags}_{id}")
+    );
+    let descriptor = crate::source_archive::for_url(&url).unwrap();
+    assert_eq!(descriptor.category, "cfgbooru");
+    // Without a pattern only the root's exact host matches.
+    for raw in [
+        "https://www.cfgbooru.test/posts/1",
+        "https://cfgbooru.test:8443/posts/1",
+        "https://danbooru.donmai.us/posts/1",
+    ] {
+        assert!(t(site, raw).is_err(), "{raw}");
+    }
+    assert!(t(Site::Danbooru, "https://cfgbooru.test/posts/1").is_err());
+    // Files come from the root's domain; root-relative ones resolve against it.
+    for (raw, expected) in [
+        (
+            format!("https://cdn.cfgbooru.test/{MD5}.png"),
+            format!("https://cdn.cfgbooru.test/{MD5}.png"),
+        ),
+        (
+            format!("/data/{MD5}.png"),
+            format!("https://cfgbooru.test/data/{MD5}.png"),
+        ),
+    ] {
+        let media = parse_post(site, &danbooru_dialect_post(3, &raw)).unwrap();
+        assert_eq!(media.url.as_str(), expected);
+        assert_eq!(media.category, "cfgbooru");
+        assert!(media.archive_key().unwrap().starts_with("cfgbooru:"));
+    }
+    for foreign in [
+        format!("https://cdn.donmai.us/original/{MD5}.png"),
+        format!("http://cdn.cfgbooru.test/{MD5}.png"),
+    ] {
+        assert!(
+            parse_post(site, &danbooru_dialect_post(3, &foreign)).is_none(),
+            "{foreign}"
+        );
+    }
+    // Configured e621-family instances: pattern routing and the
+    // `static1.{root host}` hidden-file host.
+    let six = define(
+        Base::E621,
+        "cfg621",
+        json!({"root": "https://cfg621.test", "pattern": r"(?:www\.)?cfg621\.(?:test|example)"}),
+    );
+    assert_eq!(six.dialect(), Dialect::E621);
+    assert_eq!(
+        t(six, "https://www.cfg621.example/posts/9").unwrap(),
+        (
+            Target::Post { id: 9 },
+            Url::parse("https://cfg621.test/").unwrap()
+        )
+    );
+    let hidden = parse_post(six, &e6ai_post(4, Value::Null)).unwrap();
+    assert_eq!(
+        hidden.url.as_str(),
+        format!("https://static1.cfg621.test/data/01/23/{MD5}.png")
+    );
+    assert_eq!(hidden.category, "cfg621");
+}
+
+#[tokio::test]
+async fn configured_and_prefixed_instances_extract_with_their_credentials() {
+    use crate::base_instances::Base;
+    let cdn = format!("https://cdn.credbooru.test/{MD5}.png");
+    let page = json!([danbooru_dialect_post(7, &cdn)]).to_string();
+    let (root, server) = serve(vec![response("200 OK", "", page.as_bytes())]);
+    let site = define(
+        Base::Danbooru,
+        "credbooru",
+        json!({"root": "https://credbooru.test"}),
+    );
+    let events: Vec<_> = booru(site, root)
+        .with_credentials(Some("cred-user"), Some("cred-key"))
+        .unwrap()
+        .events(&Url::parse("https://credbooru.test/posts?tags=cat").unwrap())
+        .collect()
+        .await;
+    let files = media(&events);
+    assert_eq!(files.len(), 1, "{events:?}");
+    assert_eq!(
+        paths(files[0]),
+        (format!("credbooru_7_{MD5}.png"), "credbooru/cat".into())
+    );
+    assert!(files[0].headers.is_empty());
+    let requests = server.join().unwrap();
+    assert!(requests[0].starts_with("GET /posts.json?tags=cat&limit=200"));
+    assert!(
+        requests[0]
+            .to_ascii_lowercase()
+            .contains("authorization: basic ")
+    );
+    // `Danbooru:URL` inputs use the family for any host, with the host as
+    // category and root.
+    let input = crate::extract::input_url("Danbooru:https://prebooru.test/posts/5").unwrap();
+    assert_eq!(crate::extract::social_site(&input), Some("prebooru.test"));
+    let url = crate::base_instances::unprefix(input).unwrap();
+    let site = site_for_url(&url).unwrap();
+    assert_eq!(site.category(), "prebooru.test");
+    assert!(site.instance().unwrap().prefixed);
+    assert_eq!(
+        target(site, &url).unwrap(),
+        (
+            Target::Post { id: 5 },
+            Url::parse("https://prebooru.test/").unwrap()
+        )
+    );
+    let body = danbooru_dialect_post(5, &format!("/data/{MD5}.png")).to_string();
+    let (root, server) = serve(vec![response("200 OK", "", body.as_bytes())]);
+    let events: Vec<_> = booru(site, root).events(&url).collect().await;
+    let files = media(&events);
+    assert_eq!(files.len(), 1, "{events:?}");
+    assert_eq!(
+        files[0].url.as_str(),
+        format!("https://prebooru.test/data/{MD5}.png")
+    );
+    assert_eq!(
+        paths(files[0]),
+        (format!("prebooru.test_5_{MD5}.png"), "prebooru.test".into())
+    );
+    assert!(server.join().unwrap()[0].starts_with("GET /posts/5.json"));
 }

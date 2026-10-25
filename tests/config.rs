@@ -3988,6 +3988,130 @@ fn e926_has_its_own_scope_falling_back_to_the_e621_basecategory() {
 }
 
 #[test]
+fn configured_instances_add_scopes_falling_back_to_their_basecategory() {
+    use gallery_dl_rs::base_instances::Base;
+    let cfg = parse(
+        r#"{"extractor":{
+            "Danbooru":{"username":"base","password":"base-key","metadata":true,
+                "mybooru":{"root":"https://booru.example.org/",
+                           "pattern":"(?:www\\.)?booru\\.example\\.org"}},
+            "E621":{"threshold":30,"my621":{"root":"http://e.example.org:8080"}},
+            "mastodon":{"reblogs":true,
+                "mydon":{"root":"https://social.example.org","access-token":"instance-token"}},
+            "mybooru":{"username":"mine","password":"mine-key","external":true,
+                "tag":{"metadata-parent":"tagged"}},
+            "mydon":{"access-token":"scoped","text-posts":true}}}"#,
+    )
+    .unwrap();
+    let instances: Vec<_> = cfg
+        .instances()
+        .iter()
+        .map(|d| {
+            (
+                d.base,
+                d.category.as_str(),
+                d.root.as_str(),
+                d.pattern.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        instances,
+        [
+            (
+                Base::Danbooru,
+                "mybooru",
+                "https://booru.example.org/",
+                Some(r"(?:www\.)?booru\.example\.org")
+            ),
+            (Base::E621, "my621", "http://e.example.org:8080/", None),
+            (Base::Mastodon, "mydon", "https://social.example.org/", None),
+        ]
+    );
+    assert_eq!(
+        cfg.instances()[2].access_token.as_deref(),
+        Some("instance-token")
+    );
+    // The instance scope wins, then its family's basecategory scope.
+    let mine = cfg.resolve("mybooru").unwrap();
+    assert_eq!(mine.username.as_deref(), Some("mine"));
+    let options = mine.site_options.unwrap();
+    assert_eq!(options["external"], true);
+    assert_eq!(options["metadata"], true);
+    assert_eq!(
+        cfg.resolve_class("mybooru", "tag")
+            .unwrap()
+            .artist_parent_metadata(),
+        Some(&serde_json::json!("tagged"))
+    );
+    let six = cfg.resolve("my621").unwrap();
+    assert_eq!(six.username, None);
+    assert_eq!(six.booru_threshold, Some(Some(30)));
+    let don = cfg.resolve("mydon").unwrap();
+    assert_eq!(don.access_token.as_deref(), Some("scoped"));
+    assert_eq!(don.reblogs, Some(true));
+    assert_eq!(don.text_posts, Some(true));
+    // URL-prefixed instances use the basecategory scope alone.
+    let base = cfg.resolve_base(Base::Danbooru).unwrap();
+    assert_eq!(base.username.as_deref(), Some("base"));
+    assert_eq!(base.site_options.unwrap()["metadata"], true);
+    assert_eq!(
+        cfg.resolve_base(Base::E621).unwrap().booru_threshold,
+        Some(Some(30))
+    );
+    assert_eq!(
+        cfg.resolve_base(Base::Mastodon).unwrap().reblogs,
+        Some(true)
+    );
+    // Built-in instances are unaffected by the definitions.
+    assert_eq!(
+        cfg.resolve("danbooru").unwrap().username.as_deref(),
+        Some("base")
+    );
+    assert_eq!(cfg.resolve("e621").unwrap().booru_threshold, Some(Some(30)));
+    assert!(cfg.resolve("unknownbooru").is_err());
+}
+
+#[test]
+fn configured_instances_validate_names_roots_and_scoped_options() {
+    for document in [
+        // Roots are http(s) origins without credentials.
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"ftp://x.example"}}}}),
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"https://u:PRIVATE@x.example"}}}}),
+        serde_json::json!({"extractor":{"E621":{"x":{"root":"https://x.example/sub"}}}}),
+        // Instance names are new categories, unique across families.
+        serde_json::json!({"extractor":{"Danbooru":{"danbooru":{"root":"https://x.example"}}}}),
+        serde_json::json!({"extractor":{"E621":{"e926":{"root":"https://x.example"}}}}),
+        serde_json::json!({"extractor":{"mastodon":{"pawoo":{"root":"https://x.example"}}}}),
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"https://a.example"}},
+                                        "mastodon":{"x":{"root":"https://b.example"}}}}),
+        // Definitions accept upstream's keys only; tokens are Mastodon's.
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"https://x.example","password":"PRIVATE"}}}}),
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"https://x.example","pattern":"(PRIVATE"}}}}),
+        // Instance scopes validate like their family.
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"https://x.example"}},
+                                        "x":{"user-id":"PRIVATE"}}}),
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"https://x.example"}},
+                                        "x":{"access-token":"PRIVATE"}}}),
+        serde_json::json!({"extractor":{"mastodon":{"x":{"root":"https://x.example"}},
+                                        "x":{"username":"PRIVATE"}}}),
+        serde_json::json!({"extractor":{"mastodon":{"x":{"root":"https://x.example"}},
+                                        "x":{"tag":{"filename":"PRIVATE"}}}}),
+        serde_json::json!({"extractor":{"Danbooru":{"x":{"root":"https://x.example"}},
+                                        "x":"PRIVATE"}}),
+        // A shared base-scope token would leave its instance's origin.
+        serde_json::json!({"extractor":{"mastodon":{"access-token":"PRIVATE"}}}),
+    ] {
+        let error = parse(&document.to_string()).err().unwrap().to_string();
+        assert!(!error.contains("PRIVATE"), "{error}");
+    }
+    // Objects without a root are not definitions (nor valid settings).
+    assert!(parse(r#"{"extractor":{"Danbooru":{"x":{"pattern":"x"}}}}"#).is_err());
+    // Gelbooru-style scopes have no instances.
+    assert!(parse(r#"{"extractor":{"gelbooru":{"x":{"root":"https://x.example"}}}}"#).is_err());
+}
+
+#[test]
 fn booru_instance_and_base_scopes_validate_like_their_family() {
     for document in [
         // Base scopes accept no class settings.

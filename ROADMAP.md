@@ -686,9 +686,17 @@ exactly as upstream's instance pattern (no `www.` or other subdomains).
 e926 is now upstream's separate `e926` instance (own category, settings scope
 falling back to `extractor.E621`, credentials, archive identity `e926:` and
 `static1.e926.net` hidden-file host); e621.net output is unchanged.
-Remaining: the DAPI `url` option, user-configured
-instances and the `Danbooru:URL`/`E621:URL` prefixes, class scopes under the
-base scopes, recorded source-oracle fixtures for the new instances, per-post
+User-configured instances (`extractor.Danbooru.NAME`/`extractor.E621.NAME`
+with `root`/`pattern`, upstream `BaseExtractor.update`) and the
+`Danbooru:URL`/`E621:URL` prefixes (category `host[:port]`, upstream
+`_init_category`) are native through a process-wide instance registry
+(`base_instances`, `booru::Site::Configured`); configured scopes fall back to
+the base scope, prefixed hosts use the base scope without its credentials.
+Patterns use the `regex` crate (no look-around/back-references) and must match
+up to the host; roots must be bare http(s) origins.
+Remaining: the DAPI `url` option, class scopes under the
+base scopes, `extractor.<host>` scopes for prefixed hosts, overriding a
+built-in instance's root through configuration, recorded source-oracle fixtures for the new instances, per-post
 laziness of option requests (they run per page), and authenticated live
 verification.
 
@@ -709,10 +717,14 @@ and empty post boundaries. Optional card images append outer-post previews with
 upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
 Scoped config, compatibility forwarding, header privacy, split Link fields, date
 ordering and cancellation have local coverage. Unset or `"cache"`
-`access-token` reads the token `oauth:mastodon:INSTANCE` cached. Remaining:
+`access-token` reads the token `oauth:mastodon:INSTANCE` cached.
+User-configured instances (`extractor.mastodon.NAME`) and the `mastodon:URL`
+prefix are native, with per-instance tokens (setting, then the per-instance
+credential cache, then the definition's `access-token`) and applications for
+`oauth:mastodon:`. Remaining:
 upstream's built-in per-instance access tokens (not embedded natively; some
 instances need a configured or cached `access-token`, e.g. baraag.net hashtags),
-user-configured instances and the `mastodon:URL` prefix, the moved-account
+the moved-account
 warning, and fuller metadata/default naming. Authenticated live verification and
 real captures remain required.
 

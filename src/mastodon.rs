@@ -6,7 +6,9 @@
 //! instances use their upstream categories; the instance host is kept
 //! in the `instance` metadata field and the archive key. Media attachments are
 //! served from instance-chosen CDNs, so any HTTPS host is accepted for files;
-//! no API headers or cookies are attached to media requests.
+//! no API headers or cookies are attached to media requests. User-configured
+//! and `mastodon:URL` instances ([`crate::base_instances`]) use the same
+//! routes against their root, keyed by its `host[:port]`.
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordPolicy, Post, group_with_keywords},
@@ -39,14 +41,41 @@ const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const PAGE_LIMIT: &str = "40";
 const MAX_PAGES: usize = 100;
 
-/// Upstream category for each supported instance (also the credential scope).
+/// Upstream category for each supported instance (also the credential
+/// scope): the built-in ones, or a configured/prefixed instance by its
+/// root's `host[:port]` (upstream `instance`).
 pub fn instance_category(host: &str) -> Option<&'static str> {
     match host {
         "mastodon.social" => Some("mastodon.social"),
         "pawoo.net" => Some("pawoo"),
         "baraag.net" => Some("baraag"),
-        _ => None,
+        _ => configured(host).map(|instance| instance.category),
     }
+}
+
+/// The configured or prefixed Mastodon instance whose root has this
+/// `host[:port]`.
+fn configured(netloc: &str) -> Option<&'static crate::base_instances::Instance> {
+    crate::base_instances::by_netloc(crate::base_instances::Base::Mastodon, netloc)
+}
+
+/// Whether `category` is the output category of a Mastodon instance.
+pub fn is_instance_category(category: &str) -> bool {
+    matches!(category, "mastodon.social" | "pawoo" | "baraag")
+        || crate::base_instances::by_category(category)
+            .is_some_and(|instance| instance.base == crate::base_instances::Base::Mastodon)
+}
+
+/// The instance (`host[:port]` of its root) serving an http(s) URL: a
+/// built-in host, or a configured/prefixed instance's root.
+pub fn instance_for_url(url: &Url) -> Option<String> {
+    let host = url.host_str()?;
+    if url.port().is_none() && INSTANCES.contains(&host) {
+        return Some(host.to_owned());
+    }
+    crate::base_instances::find(url)
+        .filter(|instance| instance.base == crate::base_instances::Base::Mastodon)
+        .map(|instance| instance.netloc.to_owned())
 }
 
 /// A sensitive `Authorization` value for a bearer token.
@@ -69,6 +98,9 @@ fn bearer(token: &str) -> Result<header::HeaderValue> {
 /// built-in instance, used by `oauth:mastodon:INSTANCE`. Upstream's shared
 /// access tokens are deliberately not embedded.
 pub fn application(host: &str) -> Option<(&'static str, &'static str)> {
+    if let Some(instance) = configured(host) {
+        return instance.client_id.zip(instance.client_secret);
+    }
     match host {
         "mastodon.social" => Some((
             "dBSHdpsnOUZgxOnjKSQrWEPakO3ctM7HmsyoOd4FcRo",
@@ -130,6 +162,19 @@ pub enum Target {
         host: String,
         feed: Collection,
     },
+}
+
+impl Target {
+    /// The instance (`host[:port]` of its root) the target belongs to.
+    pub fn instance(&self) -> &str {
+        match self {
+            Self::Status { host, .. }
+            | Self::Object { host, .. }
+            | Self::User { host, .. }
+            | Self::Following { host, .. }
+            | Self::Collection { host, .. } => host,
+        }
+    }
 }
 
 /// ActivityPub object IDs (e.g. UUIDs) are short URL-safe tokens.
@@ -232,21 +277,19 @@ pub fn target(url: &Url) -> Result<Target> {
             "unsupported Mastodon URL; expected a status, object, user, following, bookmarks, favourites, list or hashtag link on mastodon.social, pawoo.net or baraag.net",
         )
     };
-    let host = url.host_str().ok_or_else(unsupported)?;
     if !matches!(url.scheme(), "http" | "https")
-        || url.port().is_some()
         || !url.username().is_empty()
         || url.password().is_some()
-        || !INSTANCES.contains(&host)
     {
         return Err(unsupported());
     }
+    // Configured instances keep their root's host as `instance`.
+    let host = instance_for_url(url).ok_or_else(unsupported)?;
     let segments: Vec<_> = url
         .path_segments()
         .map(|segments| segments.filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
     let segments = segments.strip_prefix(&["web"]).unwrap_or(&segments);
-    let host = host.to_owned();
     let status = |id: &str| {
         valid_id(id)
             .then(|| Target::Status {
@@ -575,6 +618,9 @@ pub struct Mastodon {
     access_token: Option<(String, header::HeaderValue)>,
     /// The instance whose cached access token applies, until looked up.
     cached_token_instance: Option<String>,
+    /// A configured instance's own `access-token` (upstream
+    /// `config_instance`), used when neither setting nor cache provides one.
+    instance_token: Option<String>,
 }
 
 struct TimelineState {
@@ -602,6 +648,7 @@ impl Mastodon {
             selection: SelectionOptions::default(),
             access_token: None,
             cached_token_instance: None,
+            instance_token: None,
         })
     }
 
@@ -618,6 +665,13 @@ impl Mastodon {
             None => None,
             Some(token) => Some((instance.into(), bearer(token)?)),
         };
+        self.instance_token = None;
+        if self.access_token.is_none()
+            && let Some(token) = configured(instance).and_then(|known| known.access_token)
+        {
+            bearer(token)?;
+            self.instance_token = Some(instance.into());
+        }
         Ok(self)
     }
 
@@ -634,6 +688,19 @@ impl Mastodon {
             {
                 self.access_token = Some((instance, value));
             }
+        }
+        self.with_instance_token()
+    }
+
+    /// Fall back to the configured instance's own `access-token` when no
+    /// setting or cached token applies.
+    fn with_instance_token(mut self) -> Self {
+        if let Some(instance) = self.instance_token.take()
+            && self.access_token.is_none()
+            && let Some(token) = configured(&instance).and_then(|known| known.access_token)
+            && let Ok(value) = bearer(token)
+        {
+            self.access_token = Some((instance, value));
         }
         self
     }
@@ -669,9 +736,12 @@ impl Mastodon {
     }
 
     fn root(&self, host: &str) -> Url {
-        self.api_root
-            .clone()
-            .unwrap_or_else(|| Url::parse(&format!("https://{host}/")).expect("known instance"))
+        self.api_root.clone().unwrap_or_else(|| {
+            configured(host).map_or_else(
+                || Url::parse(&format!("https://{host}/")).expect("known instance"),
+                |instance| instance.root.clone(),
+            )
+        })
     }
 
     async fn call(
@@ -2041,6 +2111,189 @@ mod tests {
     }
 
     /// Upstream following, object and account-search parity.
+    /// User-configured (`extractor.mastodon.NAME`) and `mastodon:URL`
+    /// instances. The instance registry is process-wide: unique hosts only.
+    mod configured {
+        use super::*;
+        use crate::base_instances::{Base, Definition, register};
+
+        fn define(category: &str, value: Value) {
+            register(&[Definition::parse(Base::Mastodon, category, &value)
+                .unwrap()
+                .unwrap()]);
+        }
+
+        #[test]
+        fn configured_instances_route_with_their_root_category_and_application() {
+            define(
+                "cfgdon",
+                json!({"root": "https://cfgdon.test",
+                       "pattern": r"(?:www\.)?cfgdon\.(?:test|example)",
+                       "client-id": "cid", "client-secret": "csecret"}),
+            );
+            for raw in [
+                "https://cfgdon.test/@alice",
+                "http://www.cfgdon.example/web/@alice",
+            ] {
+                let url = Url::parse(raw).unwrap();
+                // The instance is the configured root's host, as upstream.
+                assert_eq!(
+                    target(&url).unwrap(),
+                    Target::User {
+                        host: "cfgdon.test".into(),
+                        acct: "alice".into()
+                    }
+                );
+                assert_eq!(crate::extract::social_site(&url), Some("mastodon"));
+                let descriptor = crate::source_archive::for_url(&url).unwrap();
+                assert_eq!(descriptor.category, "cfgdon");
+                assert_eq!(descriptor.format, "{media[id]}");
+            }
+            assert_eq!(instance_category("cfgdon.test"), Some("cfgdon"));
+            assert!(is_instance_category("cfgdon") && !is_instance_category("cfgdon.test"));
+            assert_eq!(application("cfgdon.test"), Some(("cid", "csecret")));
+            assert!(target(&Url::parse("https://other-cfgdon.test/@alice").unwrap()).is_err());
+            // Output uses the instance category; archive keys its root host.
+            let media = parse_status(&status("100"), "cfgdon.test");
+            assert_eq!(media[0].category, "cfgdon");
+            let builtin = parse_status(&status("100"), "mastodon.social");
+            assert!(media[0].archive_key().is_some());
+            assert_ne!(media[0].archive_key(), builtin[0].archive_key());
+            assert_eq!(
+                crate::source_archive::for_media(&media[0]).unwrap().format,
+                "{media[id]}"
+            );
+        }
+
+        #[tokio::test]
+        async fn tokens_come_from_the_setting_then_the_cache_then_the_instance() {
+            define(
+                "tokdon",
+                json!({"root": "https://tokdon.test", "access-token": "instance-token"}),
+            );
+            let directory = tempfile::tempdir().unwrap();
+            let cache = crate::cache::Cache::at(directory.path().join("cache.sqlite3"));
+            let api = Url::parse("https://tokdon.test/api/v1/bookmarks").unwrap();
+            let token = |native: &Mastodon| {
+                native
+                    .authorization(&api)
+                    .map(|value| value.to_str().unwrap().to_owned())
+            };
+            for setting in [None, Some("cache"), Some("")] {
+                let native = Mastodon::new(Duration::from_secs(1))
+                    .unwrap()
+                    .with_access_token_for("tokdon.test", setting)
+                    .unwrap()
+                    .with_token_cache(Some(&cache))
+                    .await;
+                assert_eq!(token(&native).as_deref(), Some("Bearer instance-token"));
+            }
+            // The token `oauth:mastodon:tokdon.test` cached is per instance.
+            let key = crate::cache::key("extractor.mastodon", "_access_token_cache", "tokdon.test");
+            cache
+                .set(&key, &serde_json::json!("cached-token"), None)
+                .await
+                .unwrap();
+            let native = Mastodon::new(Duration::from_secs(1))
+                .unwrap()
+                .with_access_token_for("tokdon.test", None)
+                .unwrap()
+                .with_token_cache(Some(&cache))
+                .await;
+            assert_eq!(token(&native).as_deref(), Some("Bearer cached-token"));
+            let native = Mastodon::new(Duration::from_secs(1))
+                .unwrap()
+                .with_access_token_for("tokdon.test", Some("own"))
+                .unwrap()
+                .with_token_cache(Some(&cache))
+                .await;
+            assert_eq!(token(&native).as_deref(), Some("Bearer own"));
+            // Tokens stay with their instance origin.
+            for other in [
+                "https://mastodon.social/api/v1/bookmarks",
+                "http://tokdon.test/api/v1/bookmarks",
+                "https://tokdon.test/landing",
+            ] {
+                assert!(
+                    native.authorization(&Url::parse(other).unwrap()).is_none(),
+                    "{other}"
+                );
+            }
+            // Another instance never receives this instance's token.
+            let native = Mastodon::new(Duration::from_secs(1))
+                .unwrap()
+                .with_access_token_for("mastodon.social", None)
+                .unwrap()
+                .with_token_cache(Some(&cache))
+                .await;
+            assert!(
+                native
+                    .authorization(&Url::parse("https://mastodon.social/api/v1/x").unwrap())
+                    .is_none()
+            );
+        }
+
+        #[tokio::test]
+        async fn configured_instances_request_their_configured_root() {
+            let (root, server) = serve(vec![response(
+                "200 OK",
+                "",
+                status("100").to_string().as_bytes(),
+            )]);
+            // `localhost` keeps this registration away from other tests'
+            // 127.0.0.1 servers that may later reuse the port.
+            let mut root = root;
+            root.set_host(Some("localhost")).unwrap();
+            define(
+                "rootdon",
+                json!({"root": root.as_str(), "access-token": "root-token"}),
+            );
+            let netloc = format!("localhost:{}", root.port().unwrap());
+            let native = Mastodon::new(Duration::from_secs(5))
+                .unwrap()
+                .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
+                .unwrap()
+                .with_access_token_for(&netloc, None)
+                .unwrap()
+                .with_token_cache(None)
+                .await;
+            let media: Vec<_> = native
+                .stream(&root.join("@alice/100").unwrap())
+                .collect()
+                .await;
+            assert_eq!(media.len(), 2, "{media:?}");
+            let file = media[0].as_ref().unwrap();
+            assert_eq!(file.category, "rootdon");
+            assert_eq!(
+                file.metadata.as_ref().unwrap().instance.as_deref(),
+                Some(netloc.as_str())
+            );
+            let requests = server.join().unwrap();
+            assert!(requests[0].starts_with("GET /api/v1/statuses/100 "));
+            assert!(
+                requests[0]
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer root-token\r\n")
+            );
+        }
+
+        #[test]
+        fn prefixed_inputs_use_the_mastodon_family_for_any_host() {
+            let input = crate::extract::input_url("mastodon:https://predon.test/@bob/7").unwrap();
+            assert_eq!(crate::extract::social_site(&input), Some("mastodon"));
+            let url = crate::base_instances::unprefix(input).unwrap();
+            assert_eq!(
+                target(&url).unwrap(),
+                Target::Status {
+                    host: "predon.test".into(),
+                    id: "7".into()
+                }
+            );
+            assert_eq!(instance_category("predon.test"), Some("predon.test"));
+            assert_eq!(application("predon.test"), None);
+        }
+    }
+
     mod parity {
         use super::*;
         use std::sync::Mutex;
