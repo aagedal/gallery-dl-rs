@@ -74,10 +74,17 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             let url = format!("{ROOT}{path}/");
             let page = http.text(&http.api(&url)?).await?;
             let content = extr(&page, "itemprop=\"text\">", "<h3");
-            let urls: Vec<String> = re!(r#"img.*?lazy-src="([^"]+)"#)
+            let mut urls: Vec<String> = re!(r#"img.*?lazy-src="([^"]+)"#)
                 .captures_iter(content)
                 .map(|c| unquote(&c[1]))
                 .collect();
+            // The site has since dropped lazy loading; upstream finds nothing.
+            if urls.is_empty() {
+                urls = re!(r#"<img [^>]*?src="([^"]+)"#)
+                    .captures_iter(content)
+                    .map(|c| unquote(&c[1]))
+                    .collect();
+            }
             let mut data = Map::new();
             data.insert(
                 "title".into(),
