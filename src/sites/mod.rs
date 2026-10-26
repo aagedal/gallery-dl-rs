@@ -6,13 +6,15 @@
 //! so filters, filename/directory templates and postprocessors see the same
 //! fields as gallery-dl. Default paths render the upstream `filename_fmt` and
 //! `directory_fmt`; archive identities use the upstream `archive_fmt` fields.
+pub(crate) mod gdl;
 pub mod http;
 
 mod art;
 mod boorus;
 mod filehosts;
+mod galleries;
 mod imageboards;
-mod manga;
+pub(crate) mod manga;
 mod media;
 mod social;
 mod video;
@@ -150,6 +152,7 @@ pub fn sites() -> &'static [&'static Site] {
             boorus::SITES,
             media::SITES,
             filehosts::SITES,
+            galleries::SITES,
             manga::SITES,
             art::SITES,
             social::SITES,
@@ -234,6 +237,7 @@ pub fn native_only(category: &str) -> bool {
 pub fn extra_cookie_domains(site: &Site) -> &'static [&'static str] {
     match site.category {
         "shortlink" => social::SHORTLINK_COOKIE_DOMAINS,
+        "subscribestar" => &["subscribestar.adult"],
         _ => &[],
     }
 }
@@ -247,11 +251,47 @@ pub fn categories() -> impl Iterator<Item = &'static str> {
 }
 
 /// Extract any registry URL, for child jobs that cross site boundaries.
+/// Other URLs end in an [`ExternalChild`] error, which
+/// [`with_external_children`] hands to the caller's full dispatcher.
 pub fn extract<'a>(http: &'a Http, url: Url) -> Events<'a> {
     match find(&url) {
         Some(site) => (site.extract)(http, url),
-        None => fail(error("unsupported child URL")),
+        None => fail(Box::new(ExternalChild(url))),
     }
+}
+
+/// A queued child URL that no registry site reads (upstream `Message.Queue`
+/// to another extractor).
+#[derive(Debug)]
+pub struct ExternalChild(pub Url);
+
+impl std::fmt::Display for ExternalChild {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unsupported child URL")
+    }
+}
+
+impl std::error::Error for ExternalChild {}
+
+/// Replace [`ExternalChild`] errors with the events `queue` produces for
+/// their URLs, so registry sites can queue URLs of any supported extractor.
+pub fn with_external_children<'a>(
+    events: Events<'a>,
+    queue: crate::event::Queue<'a>,
+) -> Events<'a> {
+    events
+        .flat_map(move |event| match event {
+            Err(error) => match error.downcast::<ExternalChild>() {
+                Ok(child) => {
+                    let ExternalChild(url) = *child;
+                    // Like upstream, URLs no extractor supports are skipped.
+                    queue(url).unwrap_or_else(|| stream::empty().boxed())
+                }
+                Err(error) => stream::once(async move { Err(error) }).boxed(),
+            },
+            ok => stream::once(async move { ok }).boxed(),
+        })
+        .boxed()
 }
 
 pub(crate) fn fail<'a>(error: crate::Error) -> Events<'a> {
@@ -279,6 +319,31 @@ where
         .map(|result| result.unwrap_or_else(fail))
         .flatten()
         .boxed()
+}
+
+/// Run `step` for each input only as consumers reach it (upstream's lazy
+/// per-post requests); a failing step yields its error.
+pub(crate) fn each<'a, T, F, Fut>(inputs: Vec<T>, step: F) -> Events<'a>
+where
+    T: Send + 'a,
+    F: FnMut(T) -> Fut + Send + 'a,
+    Fut: std::future::Future<Output = Result<Vec<ExtractionEvent>>> + Send + 'a,
+{
+    pages(
+        stream::iter(inputs)
+            .then(step)
+            .map(|result| result.map(events)),
+    )
+}
+
+/// [`each`] for steps that produce event streams (e.g. queued children).
+pub(crate) fn each_stream<'a, T, F, Fut>(inputs: Vec<T>, step: F) -> Events<'a>
+where
+    T: Send + 'a,
+    F: FnMut(T) -> Fut + Send + 'a,
+    Fut: std::future::Future<Output = Result<Events<'a>>> + Send + 'a,
+{
+    pages(stream::iter(inputs).then(step))
 }
 
 /// Paginate with a state machine: `next` returns the events of one page and
@@ -385,6 +450,17 @@ pub(crate) fn events<'a>(events: Vec<ExtractionEvent>) -> Events<'a> {
 
 fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usize) -> Media {
     let mut keywords = item.keywords;
+    // Upstream downloader hints are also passed to the handoff.
+    let handoff: BTreeMap<String, Value> = [
+        "_fallback",
+        "_ytdl_manifest",
+        "_http_method",
+        "_http_data",
+        "_http_expected_status",
+    ]
+    .into_iter()
+    .filter_map(|key| Some((key.to_owned(), keywords.get(key)?.clone())))
+    .collect();
     if !keywords.contains_key("filename") || !keywords.contains_key("extension") {
         let (name, ext) = nameext(&item.url);
         keywords.entry("filename").or_insert(name.into());
@@ -418,7 +494,7 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
             ..PostMetadata::default()
         }),
         headers: item.headers,
-        handoff: BTreeMap::new(),
+        handoff,
     };
     http.network.apply_media(&mut media);
     media
@@ -538,20 +614,22 @@ pub(crate) fn archive_key(media: &Media) -> Option<(&'static str, String)> {
     while let Some(start) = rest.find('{') {
         let end = rest[start..].find('}')? + start;
         let spec = rest[start + 1..end].split([':', '!']).next()?;
-        let mut parts = spec.split('[');
-        let mut value = keywords.fields.get(parts.next()?)?.clone();
-        for key in parts {
-            let key = key.strip_suffix(']')?;
-            value = match (&value, key.parse::<usize>()) {
-                (Value::Array(items), Ok(i)) => items.get(i)?.clone(),
-                (Value::String(text), Ok(i)) => text.chars().nth(i)?.to_string().into(),
-                (Value::Object(map), _) => map.get(key)?.clone(),
-                _ => return None,
-            };
-        }
-        if value.is_null() {
-            return None;
-        }
+        // `{a|b}` alternatives: the first one that resolves to a value.
+        let lookup = |spec: &str| -> Option<Value> {
+            let mut parts = spec.split('[');
+            let mut value = keywords.fields.get(parts.next()?)?.clone();
+            for key in parts {
+                let key = key.strip_suffix(']')?;
+                value = match (&value, key.parse::<usize>()) {
+                    (Value::Array(items), Ok(i)) => items.get(i)?.clone(),
+                    (Value::String(text), Ok(i)) => text.chars().nth(i)?.to_string().into(),
+                    (Value::Object(map), _) => map.get(key)?.clone(),
+                    _ => return None,
+                };
+            }
+            (!value.is_null()).then_some(value)
+        };
+        let value = spec.split('|').find_map(lookup)?;
         fields.push(scalar(&value));
         rest = &rest[end + 1..];
     }
@@ -611,6 +689,85 @@ pub(crate) mod testing {
         response("200 OK", "application/json", body.to_string().as_bytes())
     }
 
+    /// An expected path segment as this platform renders it: Windows
+    /// replaces reserved characters, and trims trailing dots and spaces
+    /// from directory names (see `naming::clean_source_segment`).
+    fn os_segment(segment: &str, directory: bool) -> String {
+        windows_segment(segment, directory, cfg!(windows))
+    }
+
+    fn windows_segment(segment: &str, directory: bool, windows: bool) -> String {
+        if !windows {
+            return segment.to_owned();
+        }
+        let cleaned: String = segment
+            .chars()
+            .map(|c| {
+                if matches!(c, '\\' | '|' | '<' | '>' | ':' | '"' | '?' | '*') {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        if directory {
+            cleaned.trim_end_matches(['.', ' ']).to_owned()
+        } else {
+            cleaned
+        }
+    }
+
+    #[test]
+    fn windows_expectations_match_ci_renders() {
+        // Rendered values reported by the windows-latest CI job.
+        let path = |expected: &str| {
+            let segments: Vec<&str> = expected.split('/').collect();
+            let last = segments.len() - 1;
+            segments
+                .iter()
+                .enumerate()
+                .map(|(i, s)| windows_segment(s, i < last, true))
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        assert_eq!(
+            path("readcomiconline/W.i.t.c.h./130/W.i.t.c.h._130_002."),
+            "readcomiconline/W.i.t.c.h/130/W.i.t.c.h._130_002."
+        );
+        assert_eq!(
+            path("weebdex/Yotsuba&!/v03 c012.5: T/Yotsuba&!_c012.5_002.png"),
+            "weebdex/Yotsuba&!/v03 c012.5_ T/Yotsuba&!_c012.5_002.png"
+        );
+        assert_eq!(
+            windows_segment("2024-01-02 03:04:05 V1 Rio rio.mp4", false, true),
+            "2024-01-02 03_04_05 V1 Rio rio.mp4"
+        );
+        assert_eq!(windows_segment("x:y", false, false), "x:y");
+    }
+
+    /// An expected filename as this platform renders it.
+    pub fn os_name(expected: &str) -> String {
+        os_segment(expected, false)
+    }
+
+    /// An expected directory (`a/b/c`) as this platform renders it.
+    pub fn os_dir(expected: &str) -> std::path::PathBuf {
+        expected.split('/').map(|s| os_segment(s, true)).collect()
+    }
+
+    /// An expected `directory/filename` string (as `manga::tests::path`
+    /// renders it, with `/` separators) for this platform.
+    pub fn os_path(expected: &str) -> String {
+        let segments: Vec<&str> = expected.split('/').collect();
+        let last = segments.len().saturating_sub(1);
+        segments
+            .iter()
+            .enumerate()
+            .map(|(index, s)| os_segment(s, index < last))
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
     pub fn html(body: &str) -> Vec<u8> {
         response("200 OK", "text/html", body.as_bytes())
     }
@@ -666,6 +823,19 @@ pub(crate) mod testing {
             .map(|m| m.unwrap())
             .collect()
             .await
+    }
+
+    /// Queued child jobs, canceled before they start; errors fail the test.
+    pub async fn children(events: Events<'_>) -> Vec<ChildMetadata> {
+        let mut events = events;
+        let mut out = Vec::new();
+        while let Some(event) = events.next().await {
+            if let ExtractionEvent::BeginChild(scope) = event.unwrap() {
+                scope.control.cancel();
+                out.push(scope.metadata);
+            }
+        }
+        out
     }
 
     /// Whether extraction ends in an error.

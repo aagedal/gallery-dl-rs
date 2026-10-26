@@ -167,14 +167,27 @@ enum Arithmetic {
 #[derive(Clone, Debug)]
 enum Op {
     Identity,
-    Optional { before: String, after: String },
-    Limit { max: usize, replacement: String },
+    Optional {
+        before: String,
+        after: String,
+    },
+    Limit {
+        max: usize,
+        replacement: String,
+    },
     Join(String),
-    Replace { old: String, new: String },
+    Replace {
+        old: String,
+        new: String,
+    },
     Arithmetic(Arithmetic, i128),
     Convert(Vec<char>),
-    Sort { reverse: bool },
+    Sort {
+        reverse: bool,
+    },
     Offset(source_offset::Offset),
+    /// `[start:stop]` / `[bstart:stop]` slice specifier.
+    Slice(Accessor),
 }
 
 #[derive(Clone, Debug)]
@@ -483,6 +496,10 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
             value => value,
         },
         Op::Offset(offset) => offset_date(value, *offset)?,
+        Op::Slice(accessor) => match access(value, accessor) {
+            Value::Missing => return Err(error("template slice requires a sequence")),
+            value => value,
+        },
     };
     apply(rest, spec, value)
 }
@@ -654,6 +671,10 @@ fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
             Value::List(values)
         }
         Op::Offset(offset) => offset_date(value, *offset)?,
+        Op::Slice(accessor) => match access(value, accessor) {
+            Value::Missing => return Err(error("template slice requires a sequence")),
+            value => value,
+        },
     };
     apply_identity(rest, spec, value)
 }
@@ -1450,7 +1471,13 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
         *spec = rest;
         Ok(argument.into())
     };
-    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI".contains(*c)) {
+    // Single-argument specifiers use `partition`: the `/` is optional.
+    let rest = |spec: &mut &str| -> String {
+        let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
+        *spec = rest;
+        argument.into()
+    };
+    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI[".contains(*c)) {
         if ops.len() >= 16 {
             return Err(error("template field has too many specifiers"));
         }
@@ -1472,13 +1499,13 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                     .ok_or_else(|| error("invalid template length limit"))?,
                 replacement: take(&mut spec)?,
             },
-            'J' => Op::Join(take(&mut spec)?),
+            'J' => Op::Join(rest(&mut spec)),
             'R' => Op::Replace {
                 old: take(&mut spec)?,
                 new: take(&mut spec)?,
             },
             'A' => {
-                let argument = take(&mut spec)?;
+                let argument = rest(&mut spec);
                 let mut chars = argument.chars();
                 let operation = match chars.next() {
                     Some('+') => Arithmetic::Add,
@@ -1493,14 +1520,14 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 Op::Arithmetic(operation, operand)
             }
             'C' => {
-                let conversions: Vec<char> = take(&mut spec)?.chars().collect();
+                let conversions: Vec<char> = rest(&mut spec).chars().collect();
                 if conversions.is_empty() || conversions.iter().any(|c| !CONVERSIONS.contains(*c)) {
                     return Err(error("unknown template conversion"));
                 }
                 Op::Convert(conversions)
             }
             'S' => Op::Sort {
-                reverse: match take(&mut spec)?.as_str() {
+                reverse: match rest(&mut spec).as_str() {
                     "" | "a" => false,
                     "r" | "d" => true,
                     _ => return Err(error("template sort order must be a, r, or d")),
@@ -1510,6 +1537,25 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
                 spec = rest;
                 Op::Offset(source_offset::Offset::parse(argument)?)
+            }
+            '[' => {
+                let (indices, rest) = spec
+                    .split_once(']')
+                    .ok_or_else(|| error("unclosed template slice specifier"))?;
+                spec = rest;
+                let integer = |text: &str| -> Result<Option<i64>> {
+                    if text.is_empty() {
+                        return Ok(None);
+                    }
+                    text.parse()
+                        .map(Some)
+                        .map_err(|_| error("invalid template slice"))
+                };
+                let (start, stop) = indices.split_once(':').unwrap_or((indices, ""));
+                Op::Slice(match start.strip_prefix('b') {
+                    Some(start) => Accessor::ByteSlice(integer(start)?, integer(stop)?),
+                    None => Accessor::Slice(integer(start)?, integer(stop)?),
+                })
             }
             _ => unreachable!(),
         });
@@ -1856,6 +1902,31 @@ fn strftime(date: &OffsetDateTime, pattern: &str) -> Result<String> {
 #[cfg(test)]
 mod strict_missing_tests {
     use super::{Field, Value};
+    #[test]
+    fn slice_specifiers_match_upstream() {
+        let text = |name: &str| match name {
+            "hash" => Some(Value::Str("0123456789abcdef".into())),
+            "name" => Some(Value::Str("äbc".into())),
+            _ => None,
+        };
+        let render = |spec: &str| Field::parse(spec, |_| true).unwrap().render(text).unwrap();
+        assert_eq!(render("hash:[:8]"), Some("01234567".into()));
+        assert_eq!(render("missing|hash:[-4:]"), Some("cdef".into()));
+        assert_eq!(render("hash:[2:4]>4"), Some("  23".into()));
+        assert_eq!(render("name:[b:2]"), Some("ä".into()));
+    }
+    #[test]
+    fn single_argument_specifiers_need_no_terminator() {
+        let tags = |_: &str| {
+            Some(Value::List(vec![
+                Value::Str("a".into()),
+                Value::Str("b".into()),
+            ]))
+        };
+        let render = |spec: &str| Field::parse(spec, |_| true).unwrap().render(tags).unwrap();
+        assert_eq!(render("tags:J "), Some("a b".into()));
+        assert_eq!(render("tags:J-/"), Some("a-b".into()));
+    }
     #[test]
     fn strict_required_fields_keep_missing_errors_while_source_content_uses_default() {
         let field = Field::parse("user[name]", |_| true).unwrap();

@@ -8,25 +8,49 @@ use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod ao3;
+mod architizer;
 mod arena;
+mod aryion;
 mod behance;
 mod booth;
+mod cien;
 mod civitai;
+mod desktopography;
+mod fanbox;
+mod fantia;
 mod fivehundredpx;
+mod foriio;
 mod hatenablog;
+mod inkbunny;
 mod issuu;
 mod itaku;
+mod lexica;
 mod lightroom;
 mod livedoor;
 mod lofter;
 mod myportfolio;
 mod naverblog;
+mod nekohouse;
+mod nijie;
+mod pexels;
+mod photovogue;
 mod picarto;
 mod piczel;
+mod pixnet;
+mod poipiku;
+mod seiga;
+mod skeb;
+mod slickpic;
 mod slideshare;
+mod smugmug;
 mod speakerdeck;
 mod steamgriddb;
 mod thirtyfivephoto;
+mod toyhouse;
+mod tungsten;
+mod unsplash;
+mod vanillarock;
 mod wikiart;
 mod xfolio;
 
@@ -52,6 +76,31 @@ pub(super) static SITES: &[&Site] = &[
     &slideshare::SITE,
     &speakerdeck::SITE,
     &wikiart::SITE,
+    &photovogue::SITE,
+    &lexica::SITE,
+    &architizer::SITE,
+    &vanillarock::SITE,
+    &desktopography::SITE,
+    &tungsten::SITE,
+    &nekohouse::SITE,
+    &slickpic::SITE,
+    &toyhouse::SITE,
+    &unsplash::SITE,
+    &pixnet::SITE,
+    &foriio::SITE,
+    &pexels::SITE,
+    &cien::SITE,
+    &poipiku::SITE,
+    &seiga::SITE,
+    &skeb::SITE,
+    &smugmug::SITE,
+    &nijie::NIJIE,
+    &nijie::HORNE,
+    &ao3::SITE,
+    &aryion::SITE,
+    &inkbunny::SITE,
+    &fantia::SITE,
+    &fanbox::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
@@ -64,6 +113,21 @@ pub(crate) struct Scan<'t> {
 impl<'t> Scan<'t> {
     pub fn new(text: &'t str) -> Self {
         Self { text, pos: 0 }
+    }
+
+    /// A cursor starting at byte `pos` (clamped to the text), like the
+    /// `pos` argument of `text.extract`.
+    pub fn at(text: &'t str, pos: usize) -> Self {
+        let mut pos = pos.min(text.len());
+        while !text.is_char_boundary(pos) {
+            pos -= 1;
+        }
+        Self { text, pos }
+    }
+
+    /// The current byte position.
+    pub fn pos(&self) -> usize {
+        self.pos
     }
 
     pub fn extr(&mut self, begin: &str, end: &str) -> &'t str {
@@ -184,7 +248,7 @@ const MONTHS: [&str; 12] = [
 ];
 
 /// A subset of Python `datetime.strptime` returning UTC seconds: `%Y %m %d
-/// %H %M %S %y %B %b %p %I %z %f %%` and literal text. Like Python,
+/// %H %M %S %y %B %b %A %a %p %I %z %f %%` and literal text. Like Python,
 /// whitespace in the format matches any run of whitespace.
 pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
     let (mut year, mut month, mut day) = (1900i32, 1u8, 1u8);
@@ -237,6 +301,29 @@ pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
                     _ => return None,
                 });
                 input = &input[2..];
+            }
+            'A' | 'a' => {
+                // Weekday names carry no date information.
+                const DAYS: [&str; 7] = [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                ];
+                let lower = input.to_lowercase();
+                let len = DAYS.iter().find_map(|name| {
+                    if lower.starts_with(name) {
+                        Some(name.len())
+                    } else if lower.starts_with(&name[..3]) {
+                        Some(3)
+                    } else {
+                        None
+                    }
+                })?;
+                input = &input[len..];
             }
             'B' | 'b' => {
                 let lower = input.to_lowercase();

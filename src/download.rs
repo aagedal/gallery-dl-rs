@@ -1223,6 +1223,9 @@ async fn request_media(
     // resource headers may cross that origin boundary.
     let mut redirects =
         Redirects::new(&target).allow_subdomains(kemono_public_redirects(media, headers));
+    // Upstream `_http_method = "POST"` with an `_http_data` form; redirects
+    // after the POST are followed with GET, as `requests` does.
+    let mut form = post_form(media);
     let response = loop {
         client
             .rate_limits
@@ -1233,9 +1236,11 @@ async fn request_media(
                 retry: false,
                 fallback: true,
             })?;
-        let response = client
-            .http
-            .get(target.clone())
+        let request = match form.take() {
+            Some(form) => client.http.post(target.clone()).form(&form),
+            None => client.http.get(target.clone()),
+        };
+        let response = request
             // Rate-limited bodies may outlast the attempt limit; the attempt's
             // extended deadline enforces it instead.
             .timeout(if client.rate.is_some() {
@@ -1258,6 +1263,27 @@ async fn request_media(
         }
     };
     Ok(response)
+}
+
+/// The form fields of a media POST request, if its handoff asks for one.
+fn post_form(media: &Media) -> Option<Vec<(String, String)>> {
+    let method = media.handoff.get("_http_method")?.as_str()?;
+    if !method.eq_ignore_ascii_case("post") {
+        return None;
+    }
+    let data = media.handoff.get("_http_data").and_then(|d| d.as_object());
+    Some(
+        data.into_iter()
+            .flatten()
+            .map(|(key, value)| {
+                let value = match value {
+                    serde_json::Value::String(text) => text.clone(),
+                    other => other.to_string(),
+                };
+                (key.clone(), value)
+            })
+            .collect(),
+    )
 }
 
 fn kemono_public_redirects(media: &Media, headers: &HeaderMap) -> bool {
@@ -1361,6 +1387,7 @@ fn check_status(
 ) -> std::result::Result<(), Failure> {
     if response.status() != reqwest::StatusCode::OK
         && !(allow_partial && response.status() == reqwest::StatusCode::PARTIAL_CONTENT)
+        && !expected_status(media, response.status())
     {
         let retry = response.status().is_server_error()
             || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
@@ -1375,6 +1402,19 @@ fn check_status(
         });
     }
     Ok(())
+}
+
+/// Upstream `_http_expected_status`: extra status codes that count as OK.
+fn expected_status(media: &Media, status: reqwest::StatusCode) -> bool {
+    media
+        .handoff
+        .get("_http_expected_status")
+        .and_then(|codes| codes.as_array())
+        .is_some_and(|codes| {
+            codes
+                .iter()
+                .any(|code| code.as_u64() == Some(u64::from(status.as_u16())))
+        })
 }
 
 fn validate_media(response: &reqwest::Response) -> std::result::Result<(), Failure> {

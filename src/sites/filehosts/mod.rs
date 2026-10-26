@@ -11,12 +11,35 @@ use serde_json::{Map, Value};
 use std::time::Duration;
 use url::Url;
 
+mod bellazon;
 mod bunkr;
 mod chevereto;
 mod cyberdrop;
+mod cyberfile;
 mod filester;
 mod gofile;
+mod imagebam;
+mod imagechest;
+mod imagehost;
+mod imagepond;
+mod imageshack;
+mod imgbb;
+mod imgpile;
+mod imgth;
+mod itchio;
+mod koofr;
+mod lensdump;
+mod lolisafe;
+mod mixdrop;
+mod telegraph;
+mod tenor;
 mod turbo;
+mod uploadir;
+mod urlgalleries;
+mod urlshortener;
+mod vipergirls;
+mod webmshare;
+mod xenforo;
 
 pub(super) static SITES: &[&Site] = &[
     &gofile::SITE,
@@ -27,6 +50,53 @@ pub(super) static SITES: &[&Site] = &[
     &chevereto::PUTMEGA,
     &turbo::SITE,
     &filester::SITE,
+    &imagehost::IMXTO,
+    &imagehost::ACIDIMG,
+    &imagehost::IMAGEVENUE,
+    &imagehost::IMAGETWIST,
+    &imagehost::IMGADULT,
+    &imagehost::IMGSPICE,
+    &imagehost::PIXHOST,
+    &imagehost::TURBOIMAGEHOST,
+    &imagehost::VIPR,
+    &imagehost::IMGCLICK,
+    &imagehost::FAPPIC,
+    &imagehost::PICSTATE,
+    &imagehost::IMGDRIVE,
+    &imagehost::IMGTAXI,
+    &imagehost::IMGWALLET,
+    &imagehost::SILVERPIC,
+    &imagehost::IMGPV,
+    &urlshortener::BITLY,
+    &urlshortener::TCO,
+    &mixdrop::SITE,
+    &webmshare::SITE,
+    &imgth::SITE,
+    &telegraph::SITE,
+    &lolisafe::SITE,
+    &urlgalleries::SITE,
+    &imagebam::SITE,
+    &imgpile::SITE,
+    &imagechest::SITE,
+    &lensdump::SITE,
+    &koofr::SITE,
+    &imagepond::SITE,
+    &imageshack::SITE,
+    &cyberfile::SITE,
+    &tenor::SITE,
+    &imgbb::SITE,
+    &vipergirls::SITE,
+    &bellazon::SITE,
+    &xenforo::SIMPCITY,
+    &xenforo::NUDOSTARFORUM,
+    &xenforo::ATFFORUM,
+    &xenforo::CELEBFORUM,
+    &xenforo::TITSINTOPS,
+    &xenforo::SOCIALMEDIAGIRLSFORUM,
+    &xenforo::BLACKTOWHITE,
+    &xenforo::XENFORO,
+    &itchio::SITE,
+    &uploadir::SITE,
 ];
 
 // ---------------------------------------------------------------------------

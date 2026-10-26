@@ -1501,7 +1501,10 @@ fn extract_input<'a>(
                         .map_err(|e| {
                             error(format!("native {} initialization failed: {e}", site.name))
                         })?;
-                    (site.extract)(native, url.clone())
+                    gallery_dl_rs::sites::with_external_children(
+                        (site.extract)(native, url.clone()),
+                        child_queue(extractors, backend, extractor, settings),
+                    )
                 }
                 Extractor::Native if category == "weasyl" => {
                     let native = extractors

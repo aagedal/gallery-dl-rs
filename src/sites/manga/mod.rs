@@ -11,11 +11,83 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod allporncomic;
+mod comick;
+mod dandadan;
+mod dankefuerslesen;
+mod dynastyscans;
+mod foolslide;
+mod hentai2read;
+mod hentaihere;
+mod hiperdex;
+mod kaliscan;
+mod keenspot;
+mod komikcast;
+mod madokami;
 mod mangadex;
+mod mangafire;
+mod mangafox;
+mod mangafreak;
+mod mangahere;
+mod manganelo;
+mod mangapark;
+mod mangaread;
+mod mangareader;
+mod mangataro;
+mod mangatown;
+mod naverwebtoon;
+mod rawkuma;
+mod readcomiconline;
+mod senmanga;
+mod simplyhentai;
+mod tapas;
+mod tcbscans;
 mod text;
-mod webtoons;
+mod tmohentai;
+pub(crate) mod webtoons;
+mod weebcentral;
+mod weebdex;
 
-pub(super) static SITES: &[&Site] = &[&mangadex::SITE, &webtoons::SITE];
+pub(super) static SITES: &[&Site] = &[
+    &mangadex::SITE,
+    &webtoons::SITE,
+    &tcbscans::SITE,
+    &rawkuma::SITE,
+    &mangatown::SITE,
+    &kaliscan::SITE,
+    &mangahere::SITE,
+    &mangafox::SITE,
+    &mangafreak::SITE,
+    &dynastyscans::SITE,
+    &hentai2read::SITE,
+    &mangareader::SITE,
+    &senmanga::SITE,
+    &tmohentai::SITE,
+    &dandadan::SITE,
+    &hentaihere::SITE,
+    &mangaread::SITE,
+    &komikcast::SITE,
+    &madokami::SITE,
+    &naverwebtoon::SITE,
+    &dankefuerslesen::SITE,
+    &foolslide::SITE,
+    &weebcentral::SITE,
+    &mangataro::SITE,
+    &hiperdex::SITE,
+    &manganelo::NELOMANGA,
+    &manganelo::NATOMANGA,
+    &manganelo::MANGANATO,
+    &manganelo::MANGAKAKALOT,
+    &weebdex::SITE,
+    &keenspot::SITE,
+    &allporncomic::SITE,
+    &tapas::SITE,
+    &mangafire::SITE,
+    &simplyhentai::SITE,
+    &mangapark::SITE,
+    &readcomiconline::SITE,
+    &comick::SITE,
+];
 
 /// Insert a key into a keyword map.
 pub(super) fn set(map: &mut Map<String, Value>, key: &str, value: impl Into<Value>) {
@@ -73,6 +145,14 @@ impl Gallery {
             timestamp: None,
             headers: Vec::new(),
             uncounted: false,
+        }
+    }
+
+    /// A `GalleryExtractor` whose files are numbered under `num`.
+    pub fn numbered(route: &'static Route, data: Map<String, Value>, pages: Vec<Page>) -> Self {
+        Self {
+            enum_key: "num",
+            ..Self::chapter(route, data, pages)
         }
     }
 
@@ -153,6 +233,99 @@ impl Gallery {
         }
         crate::sites::post(site, http, self.route, items)
     }
+}
+
+/// Upstream `ChapterExtractor` default formats.
+pub(super) const CHAPTER_FILENAME: &str =
+    "{manga}_c{chapter:>03}{chapter_minor:?//}_{page:>03}.{extension}";
+pub(super) const CHAPTER_DIRECTORY: &[&str] = &[
+    "{category}",
+    "{manga}",
+    "{volume:?v/ />02}c{chapter:>03}{chapter_minor:?//}{title:?: //}",
+];
+pub(super) const CHAPTER_ARCHIVE: &str = "{manga}_{chapter}{chapter_minor}_{page}";
+
+/// An upstream `ChapterExtractor` subclass with default formats.
+pub(super) const fn chapter_route() -> Route {
+    Route::new(
+        "chapter",
+        CHAPTER_FILENAME,
+        CHAPTER_DIRECTORY,
+        CHAPTER_ARCHIVE,
+    )
+}
+
+/// Upstream `GalleryExtractor` default formats.
+pub(super) const GALLERY_FILENAME: &str = "{category}_{gallery_id}_{num:>03}.{extension}";
+pub(super) const GALLERY_ARCHIVE: &str = "{gallery_id}_{num}";
+
+/// An upstream `MangaExtractor` subclass with default formats; it only
+/// queues chapters.
+pub(super) const fn manga_route() -> Route {
+    Route::new("manga", "{filename}.{extension}", &["{category}"], "")
+}
+
+/// `MangaExtractor.items`: queue chapters, reversed unless `reverse` is
+/// false, with the `chapter-reverse` option flipping the order.
+pub(super) fn queue_chapters<'a>(
+    http: &'a Http,
+    site: &'static Site,
+    route: &'static Route,
+    mut chapters: Vec<(Url, Map<String, Value>)>,
+    reverse: bool,
+) -> Events<'a> {
+    if reverse != http.option_bool("chapter-reverse", false) {
+        chapters.reverse();
+    }
+    queue_urls(http, site, route, chapters)
+}
+
+/// Fetch a page as text through the site's (test-rewritable) origin.
+pub(super) async fn fetch(http: &Http, url: &str) -> crate::Result<String> {
+    http.text(&http.api(url)?).await
+}
+
+/// The mobile readers of mangahere/fanfox: each `N.html` page shows two
+/// images, so pages `1, 3, 5, ...` are fetched until `count` URLs are known.
+pub(super) async fn paired_pages(
+    http: &Http,
+    base: &str,
+    mut page: String,
+    count: usize,
+    headers: &[(&str, &str)],
+) -> crate::Result<Vec<Page>> {
+    let mut pages = Vec::new();
+    let mut number = 1;
+    while pages.len() < count {
+        let mut scan = crate::sites::gdl::Scan::new(&page);
+        for begin in ["<img src=\"", " src=\""] {
+            if pages.len() < count {
+                let url = crate::sites::gdl::unescape(scan.extr(begin, "\""));
+                pages.push((text::ensure_http_scheme(&url), None));
+            }
+        }
+        if pages.len() >= count {
+            break;
+        }
+        number += 2;
+        page = http
+            .text_with(&http.api(&format!("{base}{number}.html"))?, headers)
+            .await?;
+    }
+    Ok(pages)
+}
+
+/// The `(chapter, chapter_minor)` keyword pair of `text.partition(".")`.
+pub(super) fn chapter_keys(data: &mut Map<String, Value>, number: &str) {
+    let (chapter, minor) = text::chapter(number);
+    set(data, "chapter", chapter);
+    set(data, "chapter_minor", minor);
+}
+
+/// `lang`/`language` keywords for English sites.
+pub(super) fn english(data: &mut Map<String, Value>) {
+    set(data, "lang", "en");
+    set(data, "language", "English");
 }
 
 /// Queue child URLs of this site, in order.

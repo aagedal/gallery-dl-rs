@@ -8,17 +8,23 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod agnph;
+mod comicvine;
 mod furry34;
 mod gelbooru_v01;
 mod gelbooru_v02;
+mod idolcomplex;
 mod moebooru;
+mod nozomi;
 mod paheal;
 mod philomena;
 mod realbooru;
 mod rule34us;
 mod rule34vault;
 mod rule34xyz;
+pub(super) mod sankaku;
+mod scatbooru;
 mod shimmie2;
+mod sizebooru;
 mod szurubooru;
 mod threedbooru;
 mod twibooru;
@@ -63,6 +69,12 @@ pub(super) static SITES: &[&Site] = &[
     &rule34vault::SITE,
     &furry34::SITE,
     &yiffverse::SITE,
+    &comicvine::SITE,
+    &scatbooru::SITE,
+    &sizebooru::SITE,
+    &nozomi::SITE,
+    &sankaku::SITE,
+    &idolcomplex::SITE,
 ];
 
 // ---------------------------------------------------------------------------

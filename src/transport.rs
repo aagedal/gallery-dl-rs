@@ -132,6 +132,8 @@ async fn decode_gzip_body(body: Vec<u8>, limit: usize, state: Arc<DecodeState>) 
 pub(crate) struct Redirects {
     visited: Vec<Url>,
     subdomains: bool,
+    same_site: bool,
+    any_site: bool,
 }
 
 impl Redirects {
@@ -141,6 +143,8 @@ impl Redirects {
         Self {
             visited: vec![url],
             subdomains: false,
+            same_site: false,
+            any_site: false,
         }
     }
 
@@ -150,6 +154,34 @@ impl Redirects {
     pub(crate) fn allow_subdomains(mut self, allow: bool) -> Self {
         self.subdomains = allow;
         self
+    }
+
+    /// Also accept HTTPS redirects between hosts of one registrable domain
+    /// (e.g. a site's `ww2.` mirror moving to `ww3.`).
+    pub(crate) fn allow_same_site(mut self, allow: bool) -> Self {
+        self.same_site = allow;
+        self
+    }
+
+    /// Also accept redirects to any HTTP(S) origin, for requests that carry
+    /// no credentials of their own (cookies are scoped by the jar).
+    pub(crate) fn allow_any_site(mut self, allow: bool) -> Self {
+        self.any_site = allow;
+        self
+    }
+
+    fn same_site_as_origin(&self, target: &Url) -> bool {
+        let origin = &self.visited[0];
+        let site = |url: &Url| match url.host() {
+            Some(url::Host::Domain(host)) => psl::domain_str(host).map(str::to_ascii_lowercase),
+            _ => None,
+        };
+        self.same_site
+            && origin.scheme() == "https"
+            && target.scheme() == "https"
+            && origin.port().is_none()
+            && target.port().is_none()
+            && site(origin).is_some_and(|domain| Some(domain) == site(target))
     }
 
     fn subdomain_of_origin(&self, target: &Url) -> bool {
@@ -197,7 +229,10 @@ impl Redirects {
         if !matches!(target.scheme(), "http" | "https")
             || !target.username().is_empty()
             || target.password().is_some()
-            || target.origin() != self.visited[0].origin() && !self.subdomain_of_origin(&target)
+            || target.origin() != self.visited[0].origin()
+                && !self.any_site
+                && !self.subdomain_of_origin(&target)
+                && !self.same_site_as_origin(&target)
         {
             return Err(error(
                 "HTTP redirect requires the same origin and no URL credentials",
@@ -322,6 +357,44 @@ mod tests {
         ] {
             assert!(hop(allowed(), bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn same_site_redirects_are_opt_in_and_https_only() {
+        let origin = Url::parse("https://ww2.mangafreak.me/Read1_x_1").unwrap();
+        let hop = |redirects: Redirects, location: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(reqwest::header::LOCATION, location.parse().unwrap());
+            let mut redirects = redirects;
+            redirects.next(&origin, reqwest::StatusCode::MOVED_PERMANENTLY, &headers)
+        };
+        let allowed = || Redirects::new(&origin).allow_same_site(true);
+        assert!(hop(Redirects::new(&origin), "https://ww3.mangafreak.me/x").is_err());
+        for good in ["https://ww3.mangafreak.me/x", "https://mangafreak.me/x"] {
+            assert_eq!(hop(allowed(), good).unwrap().unwrap().as_str(), good);
+        }
+        for bad in [
+            "http://ww3.mangafreak.me/x",
+            "https://ww3.mangafreak.me:8443/x",
+            "https://mangafreak.me.evil.example/x",
+            "https://evilmangafreak.me/x",
+            "https://user@ww3.mangafreak.me/x",
+        ] {
+            assert!(hop(allowed(), bad).is_err(), "{bad}");
+        }
+        // Distinct registrants below a public suffix are different sites.
+        let origin = Url::parse("https://a.github.io/x").unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::LOCATION,
+            "https://b.github.io/x".parse().unwrap(),
+        );
+        assert!(
+            Redirects::new(&origin)
+                .allow_same_site(true)
+                .next(&origin, reqwest::StatusCode::FOUND, &headers)
+                .is_err()
+        );
     }
 
     #[test]

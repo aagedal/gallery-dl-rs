@@ -264,3 +264,76 @@ fn exec_runs_after_downloaded_files_and_once_after_all() {
         .unwrap();
     assert!(!output.status.success());
 }
+
+/// One request's head and body, answered with `response`.
+fn capture_server(response: &'static [u8]) -> (String, thread::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut bytes = [0; 4096];
+        loop {
+            let read = socket.read(&mut bytes).unwrap();
+            assert!(read > 0);
+            request.extend_from_slice(&bytes[..read]);
+            let text = String::from_utf8_lossy(&request).to_string();
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let length = head
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length: ")
+                            .map(str::to_owned)
+                    })
+                    .and_then(|n| n.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if body.len() >= length {
+                    break;
+                }
+            }
+        }
+        let _ = socket.write_all(response);
+        String::from_utf8_lossy(&request).to_string()
+    });
+    (format!("http://{address}/file.jpg"), handle)
+}
+
+#[tokio::test]
+async fn handoff_post_forms_and_expected_statuses_match_upstream() {
+    let client = download::client(Duration::from_secs(5)).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (url, handle) = capture_server(RESPONSE);
+    let mut media = item(&url, None);
+    media.handoff.insert("_http_method".into(), "POST".into());
+    media.handoff.insert(
+        "_http_data".into(),
+        serde_json::json!({"authenticity_token": "a b", "upload_id": "x"}),
+    );
+    let outcome = download::download(&client, root.path(), &media, 0)
+        .await
+        .unwrap();
+    assert!(matches!(outcome, Outcome::Downloaded(_)), "{outcome:?}");
+    let request = handle.join().unwrap();
+    assert!(request.starts_with("POST /file.jpg "), "{request}");
+    assert!(
+        request.ends_with("authenticity_token=a+b&upload_id=x"),
+        "{request}"
+    );
+
+    const MISSING: &[u8] = b"HTTP/1.1 404 Not Found\r\nContent-Type: image/jpeg\r\nContent-Length: 4\r\nConnection: close\r\n\r\njpeg";
+    let (url, handle) = capture_server(MISSING);
+    let mut media = item(&url, None);
+    media.filename = "missing.jpg".into();
+    media
+        .handoff
+        .insert("_http_expected_status".into(), serde_json::json!([404]));
+    let outcome = download::download(&client, root.path(), &media, 0)
+        .await
+        .unwrap();
+    assert!(matches!(outcome, Outcome::Downloaded(_)), "{outcome:?}");
+    assert!(handle.join().unwrap().starts_with("GET /file.jpg "));
+}

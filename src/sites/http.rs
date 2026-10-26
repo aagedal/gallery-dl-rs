@@ -1,8 +1,10 @@
 //! Shared bounded HTTP access for registry site extractors.
 //!
-//! Requests follow same-origin redirects only, retry HTTP 429/5xx and
-//! transport failures with backoff and `Retry-After` cooldowns, and cap
-//! responses at 16 MiB. Diagnostics never include URLs or credentials.
+//! Requests follow same-origin redirects and HTTPS redirects within one
+//! registrable domain; GET requests without credential headers follow
+//! redirects to any site (session cookies stay scoped to their domains).
+//! They retry HTTP 429/5xx and transport failures with backoff and
+//! `Retry-After` cooldowns, and cap responses at 16 MiB. Diagnostics never include URLs or credentials.
 use crate::{
     Result,
     cookies::CookieJar,
@@ -149,11 +151,35 @@ impl Http {
     }
 
     /// The value of a session cookie that would be sent to `url`.
+    /// Names of the session cookies sent to `url`.
+    pub fn cookie_names(&self, url: &Url) -> Vec<String> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .header(url)
+            .map(|header| {
+                header
+                    .split("; ")
+                    .filter_map(|pair| pair.split_once('=').map(|(name, _)| name.to_owned()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn cookie(&self, url: &Url, name: &str) -> Option<String> {
         self.cookies
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .value(url, name)
+    }
+
+    /// The `Cookie` header the session would send to `url`, for downloads
+    /// that need the extraction session (e.g. form POSTs).
+    pub fn cookie_header(&self, url: &Url) -> Option<String> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .header(url)
     }
 
     /// Store a cookie as if `url` had set it with this `Set-Cookie` value.
@@ -248,19 +274,46 @@ impl Http {
     }
 
     pub async fn text_with(&self, url: &Url, headers: &[(&str, &str)]) -> Result<String> {
-        let body = self.get(url, headers).await?;
-        Ok(String::from_utf8_lossy(&body).into_owned())
+        let (body, _, headers) = self.send_with(url, headers, None, false).await?;
+        Ok(decode_text(&body, content_type(&headers)))
+    }
+
+    /// GET the raw body together with the response headers.
+    pub async fn get_with_headers(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<(Vec<u8>, reqwest::header::HeaderMap)> {
+        let (body, _, headers) = self.send_with(url, headers, None, false).await?;
+        Ok((body, headers))
     }
 
     pub async fn get(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
         self.send(url, headers, None).await
     }
 
-    /// The `Location` of one GET without following it, for short links that
-    /// redirect to another site; `None` unless the response is a redirect.
-    pub async fn location(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Option<Url>> {
+    /// GET that never follows a redirect to another site, for sites that
+    /// detect login walls by such redirects.
+    pub async fn get_strict(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
+        self.send_with(url, headers, None, true)
+            .await
+            .map(|(body, _, _)| body)
+    }
+
+    /// GET text and the URL it was finally served from after redirects.
+    pub async fn text_final(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(String, Url)> {
+        let (body, final_url, headers) = self.send_with(url, headers, None, false).await?;
+        Ok((decode_text(&body, content_type(&headers)), final_url))
+    }
+
+    /// One GET without status handling or redirects: status and body text,
+    /// for sites whose error pages carry data (e.g. 429 challenges).
+    pub async fn get_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(u16, String)> {
         self.rate_limits.wait(url, self.timeout).await?;
         let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
+        if let Some(cookie) = self.cookie_header(url) {
+            request = request.header("Cookie", cookie);
+        }
         for (key, value) in headers {
             request = request.header(*key, *value);
         }
@@ -273,6 +326,78 @@ impl Http {
                     self.name
                 ))
             })?;
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store_response(url, response.headers());
+        let status = response.status().as_u16();
+        let content_type = content_type(response.headers()).map(str::to_owned);
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| error(format!("could not read {} response", self.name)))?;
+        if bytes.len() > MAX_RESPONSE {
+            return Err(error(format!("{} response exceeded 16 MiB", self.name)));
+        }
+        Ok((status, decode_text(&bytes, content_type.as_deref())))
+    }
+
+    /// The status of one HEAD request without following redirects.
+    pub async fn head_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<u16> {
+        Ok(self.head(url, headers).await?.0)
+    }
+
+    /// Status and headers of one HEAD request without following redirects.
+    pub async fn head(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<(u16, reqwest::header::HeaderMap)> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self.client.head(url.clone()).timeout(self.request_timeout);
+        if let Some(cookie) = self.cookie_header(url) {
+            request = request.header("Cookie", cookie);
+        }
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        Ok((response.status().as_u16(), response.headers().clone()))
+    }
+
+    /// The `Location` of one GET without following it, for short links that
+    /// redirect to another site; `None` unless the response is a redirect.
+    /// Session cookies are sent and updated, like any session request.
+    pub async fn location(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Option<Url>> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
+        if let Some(cookie) = self.cookie_header(url) {
+            request = request.header("Cookie", cookie);
+        }
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store_response(url, response.headers());
         if !response.status().is_redirection() {
             return Ok(None);
         }
@@ -289,6 +414,85 @@ impl Http {
             }))
     }
 
+    /// POST an (empty) form without following redirects: the redirect
+    /// target, or the response text. Session cookies are sent and updated.
+    pub async fn post_or_location(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<String, Url>> {
+        self.post_form_or_location(url, &[], headers).await
+    }
+
+    /// POST a form without following redirects: the redirect target, or the
+    /// response text. Session cookies are sent and updated.
+    pub async fn post_form_or_location(
+        &self,
+        url: &Url,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<String, Url>> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self
+            .client
+            .post(url.clone())
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .timeout(self.request_timeout);
+        if !form.is_empty() {
+            request = request.body(
+                url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(form.iter())
+                    .finish(),
+            );
+        }
+        if let Some(cookie) = self
+            .cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .header(url)
+        {
+            request = request.header("Cookie", cookie);
+        }
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store_response(url, response.headers());
+        let status = response.status();
+        if status.is_redirection() {
+            return response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| url.join(value).ok())
+                .filter(|target| matches!(target.scheme(), "http" | "https"))
+                .map(Err)
+                .ok_or_else(|| error(format!("{} sent an invalid redirect", self.name)));
+        }
+        if !status.is_success() {
+            return Err(error(format!("{} returned HTTP {status}", self.name)));
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| error(format!("could not read {} response", self.name)))?;
+        if bytes.len() > MAX_RESPONSE {
+            return Err(error(format!("{} response exceeded 16 MiB", self.name)));
+        }
+        Ok(Ok(String::from_utf8_lossy(&bytes).into_owned()))
+    }
+
     /// POST a body and return the raw response; redirects are refused.
     pub async fn post(
         &self,
@@ -300,6 +504,17 @@ impl Http {
     }
 
     /// POST a form and parse the JSON response; redirects are refused.
+    /// POST a form and return the response text (lossy UTF-8).
+    pub async fn post_form_text(
+        &self,
+        url: &Url,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<String> {
+        let bytes = self.send(url, headers, Some(Body::Form(form))).await?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
     pub async fn post_form(
         &self,
         url: &Url,
@@ -329,9 +544,21 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
     ) -> Result<Vec<u8>> {
+        self.send_with(url, headers, body, false)
+            .await
+            .map(|(body, _, _)| body)
+    }
+
+    async fn send_with(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+        body: Option<Body<'_>>,
+        strict: bool,
+    ) -> Result<(Vec<u8>, Url, reqwest::header::HeaderMap)> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
-                match self.attempt(url, headers, body, attempt).await {
+                match self.attempt(url, headers, body, attempt, strict).await {
                     Ok(body) => return Ok(body),
                     Err(failure) if failure.retry && attempt < self.retries => {
                         tokio::time::sleep(backoff(attempt)).await;
@@ -351,10 +578,15 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
         attempt: u8,
-    ) -> std::result::Result<Vec<u8>, Failure> {
+        strict: bool,
+    ) -> std::result::Result<(Vec<u8>, Url, reqwest::header::HeaderMap), Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
-        let mut redirects = Redirects::new(endpoint);
+        let mut redirects = Redirects::new(endpoint)
+            .allow_same_site(true)
+            .allow_any_site(
+                !strict && body.is_none() && !headers.iter().any(|(key, _)| sensitive(key)),
+            );
         let response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = match body {
@@ -454,8 +686,65 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok(crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?)
+        Ok((
+            crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
+            target,
+            headers,
+        ))
     }
+}
+
+fn content_type(headers: &reqwest::header::HeaderMap) -> Option<&str> {
+    headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+}
+
+/// Decode a text response by its `Content-Type` charset, else a `<meta>`
+/// charset declaration near the start of an HTML page, else UTF-8.
+pub(crate) fn decode_text(body: &[u8], content_type: Option<&str>) -> String {
+    let declared = content_type
+        .and_then(|value| {
+            value.split(';').find_map(|part| {
+                part.trim()
+                    .strip_prefix("charset=")
+                    .map(|charset| charset.trim_matches('"').to_owned())
+            })
+        })
+        .or_else(|| {
+            let head = String::from_utf8_lossy(&body[..body.len().min(2048)]).to_ascii_lowercase();
+            let at = head.find("charset=")? + "charset=".len();
+            let value: String = head[at..]
+                .trim_start_matches(['"', '\''])
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+                .collect();
+            (!value.is_empty()).then_some(value)
+        });
+    match declared.and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes())) {
+        Some(encoding) if encoding != encoding_rs::UTF_8 => encoding.decode(body).0.into_owned(),
+        _ => String::from_utf8_lossy(body).into_owned(),
+    }
+}
+
+/// Whether a request header carries credentials that must not follow a
+/// redirect to another site.
+fn sensitive(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "authorization" | "proxy-authorization" | "cookie"
+    ) || [
+        "auth",
+        "token",
+        "key",
+        "session",
+        "csrf",
+        "secret",
+        "signature",
+    ]
+    .iter()
+    .any(|word| name.contains(word))
 }
 
 /// An HTTP 401/403 response. Displays like any other site error (no URL or
@@ -559,5 +848,26 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].contains("cookie: explicit=1"));
         assert!(!requests[0].contains("jar=1"));
+    }
+}
+
+#[cfg(test)]
+mod charset_tests {
+    use super::decode_text;
+
+    #[test]
+    fn decodes_declared_charsets() {
+        let (sjis, _, _) = encoding_rs::SHIFT_JIS.encode("二次元裏＠ふたば");
+        assert_eq!(
+            decode_text(&sjis, Some("text/html; charset=Shift_JIS")),
+            "二次元裏＠ふたば"
+        );
+        let page = [b"<meta charset=\"shift_jis\">".as_slice(), &sjis].concat();
+        assert!(decode_text(&page, Some("text/html")).ends_with("二次元裏＠ふたば"));
+        assert_eq!(decode_text("ä".as_bytes(), None), "ä");
+        assert_eq!(
+            decode_text(b"\xe4", Some("text/plain; charset=iso-8859-1")),
+            "ä"
+        );
     }
 }
