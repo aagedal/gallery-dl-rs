@@ -271,3 +271,8 @@ pub(crate) fn rextr<'t>(text: &'t str, begin: &str, end: &str, pos: Option<usize
         .find(end)
         .map_or("", |last| &text[first..first + last])
 }
+
+/// `util.language_to_code`: the code of an English language name.
+pub(crate) fn language_to_code(language: &str) -> Option<&'static str> {
+    crate::sites::manga::webtoons::language_to_code(language)
+}

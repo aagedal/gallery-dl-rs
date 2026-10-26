@@ -78,6 +78,21 @@ const LANGUAGES: &[(&str, &str)] = &[
     ("zh", "Chinese"),
 ];
 
+/// `util.language_to_code` (`str.capitalize()` then a name lookup).
+pub(crate) fn language_to_code(language: &str) -> Option<&'static str> {
+    let mut chars = language.chars();
+    let name: String = chars
+        .next()
+        .map(|first| {
+            first
+                .to_uppercase()
+                .chain(chars.flat_map(char::to_lowercase))
+                .collect()
+        })
+        .unwrap_or_default();
+    LANGUAGES.iter().find(|(_, l)| *l == name).map(|(c, _)| *c)
+}
+
 pub(crate) fn code_to_language(code: &str) -> Option<&'static str> {
     let code = code.to_lowercase();
     LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, l)| *l)

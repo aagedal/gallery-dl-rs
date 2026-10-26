@@ -36,6 +36,7 @@ mod mangatown;
 mod naverwebtoon;
 mod rawkuma;
 mod senmanga;
+mod simplyhentai;
 mod tapas;
 mod tcbscans;
 mod text;
@@ -79,6 +80,7 @@ pub(super) static SITES: &[&Site] = &[
     &allporncomic::SITE,
     &tapas::SITE,
     &mangafire::SITE,
+    &simplyhentai::SITE,
 ];
 
 /// Insert a key into a keyword map.
