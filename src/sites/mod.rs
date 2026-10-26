@@ -425,10 +425,16 @@ pub(crate) fn events<'a>(events: Vec<ExtractionEvent>) -> Events<'a> {
 fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usize) -> Media {
     let mut keywords = item.keywords;
     // Upstream downloader hints are also passed to the handoff.
-    let handoff: BTreeMap<String, Value> = ["_fallback", "_ytdl_manifest"]
-        .into_iter()
-        .filter_map(|key| Some((key.to_owned(), keywords.get(key)?.clone())))
-        .collect();
+    let handoff: BTreeMap<String, Value> = [
+        "_fallback",
+        "_ytdl_manifest",
+        "_http_method",
+        "_http_data",
+        "_http_expected_status",
+    ]
+    .into_iter()
+    .filter_map(|key| Some((key.to_owned(), keywords.get(key)?.clone())))
+    .collect();
     if !keywords.contains_key("filename") || !keywords.contains_key("extension") {
         let (name, ext) = nameext(&item.url);
         keywords.entry("filename").or_insert(name.into());

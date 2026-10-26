@@ -173,6 +173,15 @@ impl Http {
             .value(url, name)
     }
 
+    /// The `Cookie` header the session would send to `url`, for downloads
+    /// that need the extraction session (e.g. form POSTs).
+    pub fn cookie_header(&self, url: &Url) -> Option<String> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .header(url)
+    }
+
     /// Store a cookie as if `url` had set it with this `Set-Cookie` value.
     pub fn set_cookie(&self, url: &Url, set_cookie: &str) {
         self.cookies
@@ -299,9 +308,13 @@ impl Http {
 
     /// The `Location` of one GET without following it, for short links that
     /// redirect to another site; `None` unless the response is a redirect.
+    /// Session cookies are sent and updated, like any session request.
     pub async fn location(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Option<Url>> {
         self.rate_limits.wait(url, self.timeout).await?;
         let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
+        if let Some(cookie) = self.cookie_header(url) {
+            request = request.header("Cookie", cookie);
+        }
         for (key, value) in headers {
             request = request.header(*key, *value);
         }
@@ -314,6 +327,10 @@ impl Http {
                     self.name
                 ))
             })?;
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store_response(url, response.headers());
         if !response.status().is_redirection() {
             return Ok(None);
         }

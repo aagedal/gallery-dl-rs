@@ -34,6 +34,7 @@ mod mixdrop;
 mod telegraph;
 mod tenor;
 mod turbo;
+mod uploadir;
 mod urlgalleries;
 mod urlshortener;
 mod vipergirls;
@@ -95,6 +96,7 @@ pub(super) static SITES: &[&Site] = &[
     &xenforo::BLACKTOWHITE,
     &xenforo::XENFORO,
     &itchio::SITE,
+    &uploadir::SITE,
 ];
 
 // ---------------------------------------------------------------------------

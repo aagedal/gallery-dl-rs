@@ -91,6 +91,7 @@ fn decode_video_url(raw: &str) -> Option<String> {
 fn item(mut data: Map<String, Value>) -> Option<Item> {
     let raw = crate::sites::scalar(&data["url"]);
     let id = crate::sites::scalar(&data["id"]);
+    data.insert("_http_expected_status".into(), vec![404].into());
     let item = if let Some(stream) = raw.strip_prefix("ytdl:") {
         ytdl_item(stream, data)?
     } else {
@@ -298,6 +299,10 @@ mod tests {
             "ytdl:https://cdn.hotleak.vip/v/2.m3u8"
         );
         assert_eq!(keywords(&files[1])["extension"], "mp4");
+        assert_eq!(
+            files[0].handoff["_http_expected_status"],
+            serde_json::json!([404])
+        );
         let (file, _) = crate::sites::default_templates(&files[1]).unwrap();
         assert_eq!(file.render(&files[1]).unwrap(), "jane_2.mp4");
         let requests = server.join().unwrap();
