@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 use std::time::Duration;
 use url::Url;
 
+mod bellazon;
 mod bunkr;
 mod chevereto;
 mod cyberdrop;
@@ -82,6 +83,7 @@ pub(super) static SITES: &[&Site] = &[
     &tenor::SITE,
     &imgbb::SITE,
     &vipergirls::SITE,
+    &bellazon::SITE,
 ];
 
 // ---------------------------------------------------------------------------
