@@ -12,6 +12,7 @@ pub mod http;
 mod art;
 mod boorus;
 mod filehosts;
+mod galleries;
 mod imageboards;
 pub(crate) mod manga;
 mod media;
@@ -151,6 +152,7 @@ pub fn sites() -> &'static [&'static Site] {
             boorus::SITES,
             media::SITES,
             filehosts::SITES,
+            galleries::SITES,
             manga::SITES,
             art::SITES,
             social::SITES,
