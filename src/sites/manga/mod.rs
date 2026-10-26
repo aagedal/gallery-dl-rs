@@ -11,11 +11,22 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod kaliscan;
 mod mangadex;
+mod mangatown;
+mod rawkuma;
+mod tcbscans;
 mod text;
 mod webtoons;
 
-pub(super) static SITES: &[&Site] = &[&mangadex::SITE, &webtoons::SITE];
+pub(super) static SITES: &[&Site] = &[
+    &mangadex::SITE,
+    &webtoons::SITE,
+    &tcbscans::SITE,
+    &rawkuma::SITE,
+    &mangatown::SITE,
+    &kaliscan::SITE,
+];
 
 /// Insert a key into a keyword map.
 pub(super) fn set(map: &mut Map<String, Value>, key: &str, value: impl Into<Value>) {
@@ -153,6 +164,65 @@ impl Gallery {
         }
         crate::sites::post(site, http, self.route, items)
     }
+}
+
+/// Upstream `ChapterExtractor` default formats.
+pub(super) const CHAPTER_FILENAME: &str =
+    "{manga}_c{chapter:>03}{chapter_minor:?//}_{page:>03}.{extension}";
+pub(super) const CHAPTER_DIRECTORY: &[&str] = &[
+    "{category}",
+    "{manga}",
+    "{volume:?v/ />02}c{chapter:>03}{chapter_minor:?//}{title:?: //}",
+];
+pub(super) const CHAPTER_ARCHIVE: &str = "{manga}_{chapter}{chapter_minor}_{page}";
+
+/// An upstream `ChapterExtractor` subclass with default formats.
+pub(super) const fn chapter_route() -> Route {
+    Route::new(
+        "chapter",
+        CHAPTER_FILENAME,
+        CHAPTER_DIRECTORY,
+        CHAPTER_ARCHIVE,
+    )
+}
+
+/// An upstream `MangaExtractor` subclass with default formats; it only
+/// queues chapters.
+pub(super) const fn manga_route() -> Route {
+    Route::new("manga", "{filename}.{extension}", &["{category}"], "")
+}
+
+/// `MangaExtractor.items`: queue chapters, reversed unless `reverse` is
+/// false, with the `chapter-reverse` option flipping the order.
+pub(super) fn queue_chapters<'a>(
+    http: &'a Http,
+    site: &'static Site,
+    route: &'static Route,
+    mut chapters: Vec<(Url, Map<String, Value>)>,
+    reverse: bool,
+) -> Events<'a> {
+    if reverse != http.option_bool("chapter-reverse", false) {
+        chapters.reverse();
+    }
+    queue_urls(http, site, route, chapters)
+}
+
+/// Fetch a page as text through the site's (test-rewritable) origin.
+pub(super) async fn fetch(http: &Http, url: &str) -> crate::Result<String> {
+    http.text(&http.api(url)?).await
+}
+
+/// The `(chapter, chapter_minor)` keyword pair of `text.partition(".")`.
+pub(super) fn chapter_keys(data: &mut Map<String, Value>, number: &str) {
+    let (chapter, minor) = text::chapter(number);
+    set(data, "chapter", chapter);
+    set(data, "chapter_minor", minor);
+}
+
+/// `lang`/`language` keywords for English sites.
+pub(super) fn english(data: &mut Map<String, Value>) {
+    set(data, "lang", "en");
+    set(data, "language", "English");
 }
 
 /// Queue child URLs of this site, in order.

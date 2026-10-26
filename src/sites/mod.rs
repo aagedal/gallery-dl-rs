@@ -6,6 +6,7 @@
 //! so filters, filename/directory templates and postprocessors see the same
 //! fields as gallery-dl. Default paths render the upstream `filename_fmt` and
 //! `directory_fmt`; archive identities use the upstream `archive_fmt` fields.
+pub(crate) mod gdl;
 pub mod http;
 
 mod art;
@@ -666,6 +667,19 @@ pub(crate) mod testing {
             .map(|m| m.unwrap())
             .collect()
             .await
+    }
+
+    /// Queued child jobs, canceled before they start; errors fail the test.
+    pub async fn children(events: Events<'_>) -> Vec<ChildMetadata> {
+        let mut events = events;
+        let mut out = Vec::new();
+        while let Some(event) = events.next().await {
+            if let ExtractionEvent::BeginChild(scope) = event.unwrap() {
+                scope.control.cancel();
+                out.push(scope.metadata);
+            }
+        }
+        out
     }
 
     /// Whether extraction ends in an error.
