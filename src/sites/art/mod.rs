@@ -27,6 +27,7 @@ mod lofter;
 mod myportfolio;
 mod naverblog;
 mod nekohouse;
+mod nijie;
 mod pexels;
 mod photovogue;
 mod picarto;
@@ -88,6 +89,8 @@ pub(super) static SITES: &[&Site] = &[
     &seiga::SITE,
     &skeb::SITE,
     &smugmug::SITE,
+    &nijie::NIJIE,
+    &nijie::HORNE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
