@@ -19,6 +19,7 @@ mod gofile;
 mod imagebam;
 mod imagechest;
 mod imagehost;
+mod imagepond;
 mod imgpile;
 mod imgth;
 mod koofr;
@@ -70,6 +71,7 @@ pub(super) static SITES: &[&Site] = &[
     &imagechest::SITE,
     &lensdump::SITE,
     &koofr::SITE,
+    &imagepond::SITE,
 ];
 
 // ---------------------------------------------------------------------------
