@@ -474,3 +474,84 @@ pub(crate) fn mime_extension(content_type: Option<&str>) -> &'static str {
         _ => "bin",
     }
 }
+
+/// HMAC-SHA1 (RFC 2104).
+pub(crate) fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
+    use sha1::{Digest, Sha1};
+    let mut block = [0u8; 64];
+    if key.len() > 64 {
+        block[..20].copy_from_slice(&Sha1::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha1::new();
+    inner.update(block.map(|b| b ^ 0x36));
+    inner.update(message);
+    let mut outer = Sha1::new();
+    outer.update(block.map(|b| b ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+/// `oauth.quote`: percent-encoding that keeps only unreserved characters.
+pub(crate) fn oauth_quote(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// `OAuth1Client`: the `Authorization` header for one request.
+pub(crate) fn oauth1_header(
+    method: &str,
+    url: &Url,
+    consumer: (&str, &str),
+    token: (&str, &str),
+    nonce: &str,
+    timestamp: i64,
+) -> String {
+    use base64::Engine;
+    let mut params: Vec<(String, String)> = vec![
+        ("oauth_consumer_key".into(), consumer.0.into()),
+        ("oauth_nonce".into(), nonce.into()),
+        ("oauth_signature_method".into(), "HMAC-SHA1".into()),
+        ("oauth_timestamp".into(), timestamp.to_string()),
+        ("oauth_version".into(), "1.0".into()),
+    ];
+    if !token.0.is_empty() {
+        params.push(("oauth_token".into(), token.0.into()));
+    }
+    let mut signed = params.clone();
+    for (key, value) in parse_query(url.query().unwrap_or_default()) {
+        signed.push((
+            oauth_quote(&key),
+            oauth_quote(&crate::sites::scalar(&value)),
+        ));
+    }
+    signed.sort();
+    let query = signed
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let mut base = url.clone();
+    base.set_query(None);
+    let message = [method, base.as_str(), &query].map(oauth_quote).join("&");
+    let key = format!("{}&{}", oauth_quote(consumer.1), oauth_quote(token.1));
+    let signature = base64::engine::general_purpose::STANDARD
+        .encode(hmac_sha1(key.as_bytes(), message.as_bytes()));
+    params.push(("oauth_signature".into(), oauth_quote(&signature)));
+    format!(
+        "OAuth {}",
+        params
+            .iter()
+            .map(|(k, v)| format!("{k}=\"{v}\""))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}

@@ -37,6 +37,7 @@ mod seiga;
 mod skeb;
 mod slickpic;
 mod slideshare;
+mod smugmug;
 mod speakerdeck;
 mod steamgriddb;
 mod thirtyfivephoto;
@@ -86,6 +87,7 @@ pub(super) static SITES: &[&Site] = &[
     &poipiku::SITE,
     &seiga::SITE,
     &skeb::SITE,
+    &smugmug::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a

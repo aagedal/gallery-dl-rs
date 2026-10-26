@@ -780,11 +780,14 @@ pub fn http_url(value: &str) -> Result<Url> {
     let url = Url::parse(value)?;
     // gallery-dl `basecategory:https://host/...` inputs address readers of
     // a shared engine that has no built-in instance for the host.
-    if !matches!(url.scheme(), "http" | "https")
-        && crate::sites::find(&url).is_some()
-        && let Some((_, inner)) = value.split_once(':')
-    {
-        http_url(inner)?;
+    // Opaque inputs such as `smugmug:album:ID` are accepted when a registry
+    // site matches them; embedded HTTP(S) URLs are still validated.
+    if !matches!(url.scheme(), "http" | "https") && crate::sites::find(&url).is_some() {
+        if let Some((_, inner)) = value.split_once(':')
+            && Url::parse(inner).is_ok_and(|inner| matches!(inner.scheme(), "http" | "https"))
+        {
+            http_url(inner)?;
+        }
         return Ok(url);
     }
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
