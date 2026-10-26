@@ -27,6 +27,7 @@ mod leakgallery;
 mod listal;
 mod luscious;
 mod mangoxo;
+mod motherless;
 mod myhentaigallery;
 mod nsfwalbum;
 mod nudostar;
@@ -118,6 +119,7 @@ pub(super) static SITES: &[&Site] = &[
     &thehentaiworld::SITE,
     &pornpics::SITE,
     &mangoxo::SITE,
+    &motherless::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
