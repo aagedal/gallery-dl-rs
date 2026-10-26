@@ -24,6 +24,7 @@ mod keenspot;
 mod komikcast;
 mod madokami;
 mod mangadex;
+mod mangafire;
 mod mangafox;
 mod mangafreak;
 mod mangahere;
@@ -77,6 +78,7 @@ pub(super) static SITES: &[&Site] = &[
     &keenspot::SITE,
     &allporncomic::SITE,
     &tapas::SITE,
+    &mangafire::SITE,
 ];
 
 /// Insert a key into a keyword map.
