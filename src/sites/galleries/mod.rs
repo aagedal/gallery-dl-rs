@@ -34,6 +34,7 @@ mod picazor;
 mod pictoa;
 mod poringa;
 mod pornhub;
+mod pornpics;
 mod pornstarstube;
 mod s3ndpics;
 mod sankakucomplex;
@@ -114,6 +115,7 @@ pub(super) static SITES: &[&Site] = &[
     &tumblrgallery::SITE,
     &poringa::SITE,
     &thehentaiworld::SITE,
+    &pornpics::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
