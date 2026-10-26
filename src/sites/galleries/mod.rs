@@ -36,6 +36,7 @@ mod pornhub;
 mod pornstarstube;
 mod s3ndpics;
 mod sankakucomplex;
+mod shopify;
 mod sxypix;
 mod wallpapercave;
 mod wikifeet;
@@ -93,6 +94,18 @@ pub(super) static SITES: &[&Site] = &[
     &listal::SITE,
     &myhentaigallery::SITE,
     &s3ndpics::SITE,
+    &shopify::CHELSEACREW,
+    &shopify::FASHIONNOVA,
+    &shopify::LOUNGEUNDERWEAR,
+    &shopify::MICHAELSCAMERAS,
+    &shopify::MODCLOTH,
+    &shopify::OHPOLLY,
+    &shopify::OMGMIAMISWIMWEAR,
+    &shopify::PINUPGIRLCLOTHING,
+    &shopify::RAIDLONDON,
+    &shopify::UNIQUEVINTAGE,
+    &shopify::WINDSORSTORE,
+    &shopify::SHOPIFY,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.

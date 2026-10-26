@@ -24,9 +24,11 @@ mod livedoor;
 mod lofter;
 mod myportfolio;
 mod naverblog;
+mod nekohouse;
 mod photovogue;
 mod picarto;
 mod piczel;
+mod slickpic;
 mod slideshare;
 mod speakerdeck;
 mod steamgriddb;
@@ -64,6 +66,8 @@ pub(super) static SITES: &[&Site] = &[
     &vanillarock::SITE,
     &desktopography::SITE,
     &tungsten::SITE,
+    &nekohouse::SITE,
+    &slickpic::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
