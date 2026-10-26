@@ -11,6 +11,7 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod dandadan;
 mod dynastyscans;
 mod hentai2read;
 mod kaliscan;
@@ -21,8 +22,10 @@ mod mangahere;
 mod mangareader;
 mod mangatown;
 mod rawkuma;
+mod senmanga;
 mod tcbscans;
 mod text;
+mod tmohentai;
 mod webtoons;
 
 pub(super) static SITES: &[&Site] = &[
@@ -38,6 +41,9 @@ pub(super) static SITES: &[&Site] = &[
     &dynastyscans::SITE,
     &hentai2read::SITE,
     &mangareader::SITE,
+    &senmanga::SITE,
+    &tmohentai::SITE,
+    &dandadan::SITE,
 ];
 
 /// Insert a key into a keyword map.
@@ -96,6 +102,14 @@ impl Gallery {
             timestamp: None,
             headers: Vec::new(),
             uncounted: false,
+        }
+    }
+
+    /// A `GalleryExtractor` whose files are numbered under `num`.
+    pub fn gallery(route: &'static Route, data: Map<String, Value>, pages: Vec<Page>) -> Self {
+        Self {
+            enum_key: "num",
+            ..Self::chapter(route, data, pages)
         }
     }
 
@@ -197,6 +211,10 @@ pub(super) const fn chapter_route() -> Route {
         CHAPTER_ARCHIVE,
     )
 }
+
+/// Upstream `GalleryExtractor` default formats.
+pub(super) const GALLERY_FILENAME: &str = "{category}_{gallery_id}_{num:>03}.{extension}";
+pub(super) const GALLERY_ARCHIVE: &str = "{gallery_id}_{num}";
 
 /// An upstream `MangaExtractor` subclass with default formats; it only
 /// queues chapters.
