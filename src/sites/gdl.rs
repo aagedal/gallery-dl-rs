@@ -190,3 +190,27 @@ pub(crate) fn captures<'u>(pattern: &regex::Regex, url: &'u Url) -> Option<regex
 pub(crate) fn group<'t>(caps: &regex::Captures<'t>, index: usize) -> &'t str {
     caps.get(index).map_or("", |m| m.as_str())
 }
+
+/// `text.parse_bytes` ("500k", "2.5M", ...).
+pub(crate) fn parse_bytes(text: &str) -> i64 {
+    crate::sites::filehosts::parse_bytes(text)
+}
+
+/// The site's `username`/`password` options, as `_get_auth_info`.
+pub(crate) fn auth_info(http: &crate::sites::Http) -> Option<(String, String)> {
+    let username = http.option_str("username").filter(|u| !u.is_empty())?;
+    let password = http
+        .option("password")
+        .map(crate::sites::scalar)
+        .unwrap_or_default();
+    Some((username.to_owned(), password))
+}
+
+/// An HTTP basic `Authorization` header value.
+pub(crate) fn basic_auth(username: &str, password: &str) -> String {
+    use base64::Engine;
+    format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"))
+    )
+}

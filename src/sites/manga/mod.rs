@@ -17,6 +17,7 @@ mod hentai2read;
 mod hentaihere;
 mod kaliscan;
 mod komikcast;
+mod madokami;
 mod mangadex;
 mod mangafox;
 mod mangafreak;
@@ -24,6 +25,7 @@ mod mangahere;
 mod mangaread;
 mod mangareader;
 mod mangatown;
+mod naverwebtoon;
 mod rawkuma;
 mod senmanga;
 mod tcbscans;
@@ -50,6 +52,8 @@ pub(super) static SITES: &[&Site] = &[
     &hentaihere::SITE,
     &mangaread::SITE,
     &komikcast::SITE,
+    &madokami::SITE,
+    &naverwebtoon::SITE,
 ];
 
 /// Insert a key into a keyword map.
