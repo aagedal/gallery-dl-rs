@@ -389,3 +389,21 @@ pub(crate) fn ytdl_item(page: &str, fields: Map<String, Value>) -> Option<crate:
     let url = Url::parse(&format!("ytdl:{page}")).ok()?;
     Some(crate::sites::Item::new(url, fields).job(crate::extract::MediaJob::VideoPage { page_url }))
 }
+
+/// A `text:` item saving `body` as an inline document.
+pub(crate) fn text_item(body: String, fields: Map<String, Value>) -> Option<crate::sites::Item> {
+    let (url, job) = crate::extract::inline_text(body).ok()?;
+    Some(crate::sites::Item::new(url, fields).job(job))
+}
+
+/// `util.bencode` with the base-36 alphabet (`util.b36encode`).
+pub(crate) fn b36encode(mut num: u64) -> String {
+    const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut out = Vec::new();
+    while num > 0 {
+        out.push(ALPHABET[(num % 36) as usize]);
+        num /= 36;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}

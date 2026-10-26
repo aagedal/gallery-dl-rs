@@ -5,8 +5,10 @@ mod bilibili;
 mod discord;
 mod kuaishou;
 mod linkedin;
+mod pholder;
 mod pillowfort;
 mod plurk;
+mod postmill;
 mod shortlink;
 mod snapchat;
 mod telegram;
@@ -33,6 +35,9 @@ pub(super) static SITES: &[&Site] = &[
     &linkedin::SITE,
     &plurk::SITE,
     &pillowfort::SITE,
+    &pholder::SITE,
+    &postmill::RADDLE,
+    &postmill::POSTMILL,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;
