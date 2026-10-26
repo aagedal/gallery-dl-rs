@@ -167,3 +167,26 @@ pub(crate) fn word(text: &str) -> bool {
 pub(crate) fn truthy(value: Option<&Value>) -> bool {
     crate::sites::art::truthy(value)
 }
+
+/// A lazily compiled, cached regex.
+macro_rules! re {
+    ($pattern:expr) => {{
+        static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        RE.get_or_init(|| regex::Regex::new($pattern).expect("static regex"))
+    }};
+}
+pub(crate) use re;
+
+/// Upstream `pattern.match(url)`: captures of a regex anchored at the start
+/// of a plain HTTP(S) URL. Patterns should begin with `^`.
+pub(crate) fn captures<'u>(pattern: &regex::Regex, url: &'u Url) -> Option<regex::Captures<'u>> {
+    if !crate::sites::plain(url) {
+        return None;
+    }
+    pattern.captures(url.as_str())
+}
+
+/// A capture group as text, or `""`.
+pub(crate) fn group<'t>(caps: &regex::Captures<'t>, index: usize) -> &'t str {
+    caps.get(index).map_or("", |m| m.as_str())
+}
