@@ -7,7 +7,9 @@ mod adultempire;
 mod ahottie;
 mod eightmuses;
 mod eporner;
+mod everia;
 mod fapachi;
+mod fapello;
 mod fuskator;
 mod girlsreleased;
 mod hentaicosplays;
@@ -33,6 +35,8 @@ pub(super) static SITES: &[&Site] = &[
     &girlsreleased::SITE,
     &fuskator::SITE,
     &eightmuses::SITE,
+    &everia::SITE,
+    &fapello::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
