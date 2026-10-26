@@ -17,8 +17,11 @@ mod cyberdrop;
 mod filester;
 mod gofile;
 mod imagehost;
+mod imgth;
+mod mixdrop;
 mod turbo;
 mod urlshortener;
+mod webmshare;
 
 pub(super) static SITES: &[&Site] = &[
     &gofile::SITE,
@@ -48,6 +51,9 @@ pub(super) static SITES: &[&Site] = &[
     &imagehost::IMGPV,
     &urlshortener::BITLY,
     &urlshortener::TCO,
+    &mixdrop::SITE,
+    &webmshare::SITE,
+    &imgth::SITE,
 ];
 
 // ---------------------------------------------------------------------------
