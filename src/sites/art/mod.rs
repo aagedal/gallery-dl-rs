@@ -8,6 +8,7 @@ use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod architizer;
 mod arena;
 mod behance;
 mod booth;
@@ -16,6 +17,7 @@ mod fivehundredpx;
 mod hatenablog;
 mod issuu;
 mod itaku;
+mod lexica;
 mod lightroom;
 mod livedoor;
 mod lofter;
@@ -28,6 +30,7 @@ mod slideshare;
 mod speakerdeck;
 mod steamgriddb;
 mod thirtyfivephoto;
+mod vanillarock;
 mod wikiart;
 mod xfolio;
 
@@ -54,6 +57,9 @@ pub(super) static SITES: &[&Site] = &[
     &speakerdeck::SITE,
     &wikiart::SITE,
     &photovogue::SITE,
+    &lexica::SITE,
+    &architizer::SITE,
+    &vanillarock::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a

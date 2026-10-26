@@ -22,10 +22,13 @@ mod hentaicosplays;
 mod hotleak;
 mod imagefap;
 mod imhentai;
+mod kabeuchi;
 mod leakgallery;
 mod luscious;
+mod nudostar;
 mod okporn;
 mod picazor;
+mod pictoa;
 mod pornhub;
 mod pornstarstube;
 mod sankakucomplex;
@@ -79,6 +82,9 @@ pub(super) static SITES: &[&Site] = &[
     &picazor::SITE,
     &wikifeet::WIKIFEET,
     &wikifeet::WIKIFEETX,
+    &nudostar::SITE,
+    &pictoa::SITE,
+    &kabeuchi::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
