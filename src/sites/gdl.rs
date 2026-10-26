@@ -368,3 +368,16 @@ pub(crate) fn dispatch<'v>(
             .collect(),
     )
 }
+
+/// An HLS stream for yt-dlp (`ytdl:` URL with `_ytdl_manifest = "hls"`).
+pub(crate) fn hls_item(stream: &str, fields: Map<String, Value>) -> Option<crate::sites::Item> {
+    let base_url = Url::parse(stream).ok()?;
+    let url = Url::parse(&format!("ytdl:{stream}")).ok()?;
+    Some(
+        crate::sites::Item::new(url, fields).job(crate::extract::MediaJob::Manifest {
+            protocol: crate::extract::ManifestProtocol::Hls,
+            base_url,
+            inline_data: None,
+        }),
+    )
+}
