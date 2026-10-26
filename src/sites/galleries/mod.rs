@@ -19,7 +19,10 @@ mod girlsreleased;
 mod girlswithmuscle;
 mod hentaicosplays;
 mod hotleak;
+mod imagefap;
+mod imhentai;
 mod leakgallery;
+mod luscious;
 mod pornhub;
 mod sankakucomplex;
 mod xasiat;
@@ -51,6 +54,14 @@ pub(super) static SITES: &[&Site] = &[
     &fitnakedgirls::SITE,
     &girlswithmuscle::SITE,
     &hotleak::SITE,
+    &imagefap::SITE,
+    &imhentai::IMHENTAI,
+    &imhentai::HENTAIERA,
+    &imhentai::HENTAIROX,
+    &imhentai::HENTAIFOX,
+    &imhentai::HENTAIENVY,
+    &imhentai::HENTAIZAP,
+    &luscious::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.

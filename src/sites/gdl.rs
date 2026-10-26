@@ -370,7 +370,8 @@ pub(crate) fn dispatch<'v>(
 }
 
 /// An HLS stream for yt-dlp (`ytdl:` URL with `_ytdl_manifest = "hls"`).
-pub(crate) fn hls_item(stream: &str, fields: Map<String, Value>) -> Option<crate::sites::Item> {
+pub(crate) fn hls_item(stream: &str, mut fields: Map<String, Value>) -> Option<crate::sites::Item> {
+    fields.insert("_ytdl_manifest".into(), "hls".into());
     let base_url = Url::parse(stream).ok()?;
     let url = Url::parse(&format!("ytdl:{stream}")).ok()?;
     Some(
