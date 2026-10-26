@@ -283,17 +283,14 @@ pub fn with_external_children<'a>(
             Err(error) => match error.downcast::<ExternalChild>() {
                 Ok(child) => {
                     let ExternalChild(url) = *child;
-                    queue(url).unwrap_or_else(|| fail(error_unsupported()))
+                    // Like upstream, URLs no extractor supports are skipped.
+                    queue(url).unwrap_or_else(|| stream::empty().boxed())
                 }
                 Err(error) => stream::once(async move { Err(error) }).boxed(),
             },
             ok => stream::once(async move { ok }).boxed(),
         })
         .boxed()
-}
-
-fn error_unsupported() -> crate::Error {
-    error("unsupported child URL")
 }
 
 pub(crate) fn fail<'a>(error: crate::Error) -> Events<'a> {

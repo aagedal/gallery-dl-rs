@@ -5,6 +5,7 @@ mod bilibili;
 mod discord;
 mod kuaishou;
 mod linkedin;
+mod plurk;
 mod shortlink;
 mod snapchat;
 mod telegram;
@@ -29,6 +30,7 @@ pub(super) static SITES: &[&Site] = &[
     &youtube_posts::SITE,
     &shortlink::SITE,
     &linkedin::SITE,
+    &plurk::SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;

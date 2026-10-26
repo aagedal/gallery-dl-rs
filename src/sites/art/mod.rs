@@ -13,6 +13,7 @@ mod arena;
 mod behance;
 mod booth;
 mod civitai;
+mod desktopography;
 mod fivehundredpx;
 mod hatenablog;
 mod issuu;
@@ -30,6 +31,7 @@ mod slideshare;
 mod speakerdeck;
 mod steamgriddb;
 mod thirtyfivephoto;
+mod tungsten;
 mod vanillarock;
 mod wikiart;
 mod xfolio;
@@ -60,6 +62,8 @@ pub(super) static SITES: &[&Site] = &[
     &lexica::SITE,
     &architizer::SITE,
     &vanillarock::SITE,
+    &desktopography::SITE,
+    &tungsten::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a

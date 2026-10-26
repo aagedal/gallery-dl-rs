@@ -34,6 +34,7 @@ mod picazor;
 mod pictoa;
 mod pornhub;
 mod pornstarstube;
+mod s3ndpics;
 mod sankakucomplex;
 mod sxypix;
 mod wallpapercave;
@@ -91,6 +92,7 @@ pub(super) static SITES: &[&Site] = &[
     &nsfwalbum::SITE,
     &listal::SITE,
     &myhentaigallery::SITE,
+    &s3ndpics::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
