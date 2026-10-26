@@ -237,6 +237,7 @@ pub fn native_only(category: &str) -> bool {
 pub fn extra_cookie_domains(site: &Site) -> &'static [&'static str] {
     match site.category {
         "shortlink" => social::SHORTLINK_COOKIE_DOMAINS,
+        "subscribestar" => &["subscribestar.adult"],
         _ => &[],
     }
 }

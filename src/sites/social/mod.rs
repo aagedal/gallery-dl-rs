@@ -17,6 +17,7 @@ mod reactor;
 mod scrolller;
 mod shortlink;
 mod snapchat;
+mod subscribestar;
 mod telegram;
 mod threads;
 mod tiktok;
@@ -58,6 +59,7 @@ pub(super) static SITES: &[&Site] = &[
     &nitter::XCANCEL,
     &nitter::LIGHTBRD,
     &nitter::NITTER,
+    &subscribestar::SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;
