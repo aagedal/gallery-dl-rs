@@ -29,6 +29,7 @@ mod mangafox;
 mod mangafreak;
 mod mangahere;
 mod manganelo;
+mod mangapark;
 mod mangaread;
 mod mangareader;
 mod mangataro;
@@ -81,6 +82,7 @@ pub(super) static SITES: &[&Site] = &[
     &tapas::SITE,
     &mangafire::SITE,
     &simplyhentai::SITE,
+    &mangapark::SITE,
 ];
 
 /// Insert a key into a keyword map.
