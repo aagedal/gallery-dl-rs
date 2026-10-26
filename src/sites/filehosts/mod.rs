@@ -29,6 +29,7 @@ mod lensdump;
 mod lolisafe;
 mod mixdrop;
 mod telegraph;
+mod tenor;
 mod turbo;
 mod urlgalleries;
 mod urlshortener;
@@ -76,6 +77,7 @@ pub(super) static SITES: &[&Site] = &[
     &imagepond::SITE,
     &imageshack::SITE,
     &cyberfile::SITE,
+    &tenor::SITE,
 ];
 
 // ---------------------------------------------------------------------------
