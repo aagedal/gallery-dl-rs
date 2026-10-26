@@ -15,6 +15,7 @@ mod booth;
 mod civitai;
 mod desktopography;
 mod fivehundredpx;
+mod foriio;
 mod hatenablog;
 mod issuu;
 mod itaku;
@@ -25,6 +26,7 @@ mod lofter;
 mod myportfolio;
 mod naverblog;
 mod nekohouse;
+mod pexels;
 mod photovogue;
 mod picarto;
 mod piczel;
@@ -74,6 +76,8 @@ pub(super) static SITES: &[&Site] = &[
     &toyhouse::SITE,
     &unsplash::SITE,
     &pixnet::SITE,
+    &foriio::SITE,
+    &pexels::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
