@@ -11,6 +11,7 @@ mod pholder;
 mod pillowfort;
 mod plurk;
 mod postmill;
+mod scrolller;
 mod shortlink;
 mod snapchat;
 mod telegram;
@@ -43,6 +44,7 @@ pub(super) static SITES: &[&Site] = &[
     &arcalive::SITE,
     &blogger::BLOGSPOT,
     &blogger::BLOGGER,
+    &scrolller::SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;
