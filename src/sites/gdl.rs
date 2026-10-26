@@ -319,3 +319,29 @@ pub(crate) fn html_escape(text: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
 }
+
+/// `text.slugify`.
+pub(crate) fn slugify(value: &str) -> String {
+    let lower = value.to_lowercase();
+    let cleaned: String = lower
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || c.is_whitespace() || *c == '-')
+        .collect();
+    let mut out = String::new();
+    let mut dash = false;
+    for c in cleaned.chars() {
+        if c == '-' || c.is_whitespace() {
+            dash = true;
+        } else {
+            if dash {
+                out.push('-');
+                dash = false;
+            }
+            out.push(c);
+        }
+    }
+    if dash {
+        out.push('-');
+    }
+    out.trim_matches(['-', '_']).to_owned()
+}

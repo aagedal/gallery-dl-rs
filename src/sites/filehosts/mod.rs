@@ -37,6 +37,7 @@ mod urlgalleries;
 mod urlshortener;
 mod vipergirls;
 mod webmshare;
+mod xenforo;
 
 pub(super) static SITES: &[&Site] = &[
     &gofile::SITE,
@@ -84,6 +85,14 @@ pub(super) static SITES: &[&Site] = &[
     &imgbb::SITE,
     &vipergirls::SITE,
     &bellazon::SITE,
+    &xenforo::SIMPCITY,
+    &xenforo::NUDOSTARFORUM,
+    &xenforo::ATFFORUM,
+    &xenforo::CELEBFORUM,
+    &xenforo::TITSINTOPS,
+    &xenforo::SOCIALMEDIAGIRLSFORUM,
+    &xenforo::BLACKTOWHITE,
+    &xenforo::XENFORO,
 ];
 
 // ---------------------------------------------------------------------------
