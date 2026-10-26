@@ -426,3 +426,51 @@ pub(crate) fn generate_token(size: usize) -> String {
 pub(crate) fn nested_date(seconds: Option<i64>) -> Value {
     crate::filter::source_date_json(seconds)
 }
+
+/// `HttpDownloader._find_extension`: a filename extension for a MIME type
+/// (upstream `MIME_TYPES`, then `bin`).
+pub(crate) fn mime_extension(content_type: Option<&str>) -> &'static str {
+    let mime = content_type
+        .unwrap_or("image/jpeg")
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let mime = if mime.contains('/') {
+        mime
+    } else {
+        format!("image/{mime}")
+    };
+    match mime.as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/bmp" | "image/x-bmp" | "image/x-ms-bmp" => "bmp",
+        "image/webp" => "webp",
+        "image/avif" => "avif",
+        "image/heic" => "heic",
+        "image/heif" => "heif",
+        "image/svg+xml" => "svg",
+        "image/ico" | "image/icon" | "image/x-icon" | "image/vnd.microsoft.icon" => "ico",
+        "image/x-photoshop" | "application/x-photoshop" | "image/vnd.adobe.photoshop" => "psd",
+        "video/webm" | "audio/webm" => "webm",
+        "video/ogg" | "audio/ogg" | "application/ogg" => "ogg",
+        "video/mp4" => "mp4",
+        "video/m4v" | "video/x-m4v" => "m4v",
+        "video/quicktime" => "mov",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/mpeg" => "mp3",
+        "audio/aac" | "audio/x-aac" => "aac",
+        "application/vnd.apple.mpegurl" | "application/x-mpegurl" => "m3u8",
+        "application/dash+xml" => "mpd",
+        "application/zip" | "application/x-zip" | "application/x-zip-compressed" => "zip",
+        "application/rar" | "application/x-rar" | "application/x-rar-compressed" => "rar",
+        "application/x-7z-compressed" => "7z",
+        "application/pdf" | "application/x-pdf" => "pdf",
+        "application/x-shockwave-flash" => "swf",
+        "text/html" => "html",
+        "model/obj" => "obj",
+        _ => "bin",
+    }
+}

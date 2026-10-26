@@ -308,6 +308,15 @@ impl Http {
 
     /// The status of one HEAD request without following redirects.
     pub async fn head_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<u16> {
+        Ok(self.head(url, headers).await?.0)
+    }
+
+    /// Status and headers of one HEAD request without following redirects.
+    pub async fn head(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<(u16, reqwest::header::HeaderMap)> {
         self.rate_limits.wait(url, self.timeout).await?;
         let mut request = self.client.head(url.clone()).timeout(self.request_timeout);
         if let Some(cookie) = self.cookie_header(url) {
@@ -325,7 +334,7 @@ impl Http {
                     self.name
                 ))
             })?;
-        Ok(response.status().as_u16())
+        Ok((response.status().as_u16(), response.headers().clone()))
     }
 
     /// The `Location` of one GET without following it, for short links that
@@ -376,12 +385,30 @@ impl Http {
         url: &Url,
         headers: &[(&str, &str)],
     ) -> Result<std::result::Result<String, Url>> {
+        self.post_form_or_location(url, &[], headers).await
+    }
+
+    /// POST a form without following redirects: the redirect target, or the
+    /// response text. Session cookies are sent and updated.
+    pub async fn post_form_or_location(
+        &self,
+        url: &Url,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<String, Url>> {
         self.rate_limits.wait(url, self.timeout).await?;
         let mut request = self
             .client
             .post(url.clone())
             .header("Content-Type", "application/x-www-form-urlencoded")
             .timeout(self.request_timeout);
+        if !form.is_empty() {
+            request = request.body(
+                url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(form.iter())
+                    .finish(),
+            );
+        }
         if let Some(cookie) = self
             .cookies
             .lock()
