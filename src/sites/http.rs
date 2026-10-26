@@ -306,6 +306,28 @@ impl Http {
         Ok((decode_text(&body, content_type(&headers)), final_url))
     }
 
+    /// The status of one HEAD request without following redirects.
+    pub async fn head_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<u16> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self.client.head(url.clone()).timeout(self.request_timeout);
+        if let Some(cookie) = self.cookie_header(url) {
+            request = request.header("Cookie", cookie);
+        }
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        Ok(response.status().as_u16())
+    }
+
     /// The `Location` of one GET without following it, for short links that
     /// redirect to another site; `None` unless the response is a redirect.
     /// Session cookies are sent and updated, like any session request.

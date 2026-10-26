@@ -1,6 +1,7 @@
 //! Large social networks: short-video, microblog and chat platforms.
 use crate::sites::Site;
 
+mod arcalive;
 mod bilibili;
 mod discord;
 mod kuaishou;
@@ -38,6 +39,7 @@ pub(super) static SITES: &[&Site] = &[
     &pholder::SITE,
     &postmill::RADDLE,
     &postmill::POSTMILL,
+    &arcalive::SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;

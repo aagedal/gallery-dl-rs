@@ -407,3 +407,16 @@ pub(crate) fn b36encode(mut num: u64) -> String {
     out.reverse();
     String::from_utf8(out).unwrap_or_default()
 }
+
+/// `util.generate_token(size)`: `size` random bytes as hex digits.
+pub(crate) fn generate_token(size: usize) -> String {
+    use std::hash::BuildHasher;
+    let state = std::collections::hash_map::RandomState::new();
+    let now = std::time::SystemTime::now();
+    let mut out = String::with_capacity(size * 2);
+    for index in 0..size.div_ceil(8) {
+        out.push_str(&format!("{:016x}", state.hash_one((now, index))));
+    }
+    out.truncate(size * 2);
+    out
+}
