@@ -258,3 +258,16 @@ pub(crate) fn quote(text: &str) -> String {
     }
     out
 }
+
+/// `text.rextr`: the text between the last `begin` before `pos` and the
+/// following `end`.
+pub(crate) fn rextr<'t>(text: &'t str, begin: &str, end: &str, pos: Option<usize>) -> &'t str {
+    let limit = pos.unwrap_or(text.len()).min(text.len());
+    let Some(first) = text.get(..limit).and_then(|head| head.rfind(begin)) else {
+        return "";
+    };
+    let first = first + begin.len();
+    text[first..]
+        .find(end)
+        .map_or("", |last| &text[first..first + last])
+}

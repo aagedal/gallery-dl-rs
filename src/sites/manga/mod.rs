@@ -19,6 +19,7 @@ mod hentai2read;
 mod hentaihere;
 mod hiperdex;
 mod kaliscan;
+mod keenspot;
 mod komikcast;
 mod madokami;
 mod mangadex;
@@ -38,6 +39,7 @@ mod text;
 mod tmohentai;
 pub(crate) mod webtoons;
 mod weebcentral;
+mod weebdex;
 
 pub(super) static SITES: &[&Site] = &[
     &mangadex::SITE,
@@ -69,6 +71,8 @@ pub(super) static SITES: &[&Site] = &[
     &manganelo::NATOMANGA,
     &manganelo::MANGANATO,
     &manganelo::MANGAKAKALOT,
+    &weebdex::SITE,
+    &keenspot::SITE,
 ];
 
 /// Insert a key into a keyword map.
