@@ -8,6 +8,7 @@ use crate::{Result, error};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod ao3;
 mod architizer;
 mod arena;
 mod behance;
@@ -91,6 +92,7 @@ pub(super) static SITES: &[&Site] = &[
     &smugmug::SITE,
     &nijie::NIJIE,
     &nijie::HORNE,
+    &ao3::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
