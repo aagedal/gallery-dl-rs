@@ -306,6 +306,42 @@ impl Http {
         Ok((decode_text(&body, content_type(&headers)), final_url))
     }
 
+    /// One GET without status handling or redirects: status and body text,
+    /// for sites whose error pages carry data (e.g. 429 challenges).
+    pub async fn get_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(u16, String)> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
+        if let Some(cookie) = self.cookie_header(url) {
+            request = request.header("Cookie", cookie);
+        }
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store_response(url, response.headers());
+        let status = response.status().as_u16();
+        let content_type = content_type(response.headers()).map(str::to_owned);
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| error(format!("could not read {} response", self.name)))?;
+        if bytes.len() > MAX_RESPONSE {
+            return Err(error(format!("{} response exceeded 16 MiB", self.name)));
+        }
+        Ok((status, decode_text(&bytes, content_type.as_deref())))
+    }
+
     /// The status of one HEAD request without following redirects.
     pub async fn head_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<u16> {
         Ok(self.head(url, headers).await?.0)

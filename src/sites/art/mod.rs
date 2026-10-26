@@ -34,6 +34,7 @@ mod piczel;
 mod pixnet;
 mod poipiku;
 mod seiga;
+mod skeb;
 mod slickpic;
 mod slideshare;
 mod speakerdeck;
@@ -84,6 +85,7 @@ pub(super) static SITES: &[&Site] = &[
     &cien::SITE,
     &poipiku::SITE,
     &seiga::SITE,
+    &skeb::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
