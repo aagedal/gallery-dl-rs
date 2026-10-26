@@ -11,6 +11,7 @@ use url::Url;
 mod ao3;
 mod architizer;
 mod arena;
+mod aryion;
 mod behance;
 mod booth;
 mod cien;
@@ -93,6 +94,7 @@ pub(super) static SITES: &[&Site] = &[
     &nijie::NIJIE,
     &nijie::HORNE,
     &ao3::SITE,
+    &aryion::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a

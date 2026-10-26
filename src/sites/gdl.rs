@@ -555,3 +555,24 @@ pub(crate) fn oauth1_header(
             .join(",")
     )
 }
+
+/// `text.filename_from_contentdisposition`.
+pub(crate) fn filename_from_contentdisposition(cd: &str) -> String {
+    let value_at = |pos: usize| -> &str {
+        let rest = &cd[pos..];
+        match rest.strip_prefix('"') {
+            Some(quoted) => &quoted[..quoted.find('"').unwrap_or(quoted.len())],
+            None => &rest[..rest.find(';').unwrap_or(rest.len())],
+        }
+    };
+    if let Some(pos) = cd.find("filename*=") {
+        let mut parts = value_at(pos + 10).splitn(3, '\'');
+        if let (Some(_charset), Some(_lang), Some(value)) =
+            (parts.next(), parts.next(), parts.next())
+        {
+            return unquote(value);
+        }
+    }
+    cd.find("filename=")
+        .map_or_else(String::new, |pos| value_at(pos + 9).to_owned())
+}

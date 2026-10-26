@@ -335,6 +335,16 @@ where
     )
 }
 
+/// [`each`] for steps that produce event streams (e.g. queued children).
+pub(crate) fn each_stream<'a, T, F, Fut>(inputs: Vec<T>, step: F) -> Events<'a>
+where
+    T: Send + 'a,
+    F: FnMut(T) -> Fut + Send + 'a,
+    Fut: std::future::Future<Output = Result<Events<'a>>> + Send + 'a,
+{
+    pages(stream::iter(inputs).then(step))
+}
+
 /// Paginate with a state machine: `next` returns the events of one page and
 /// the following state, or `None` when done.
 pub(crate) fn paginate<'a, T, F, Fut>(state: T, next: F) -> Events<'a>
