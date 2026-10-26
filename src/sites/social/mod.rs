@@ -11,6 +11,7 @@ mod pholder;
 mod pillowfort;
 mod plurk;
 mod postmill;
+mod reactor;
 mod scrolller;
 mod shortlink;
 mod snapchat;
@@ -45,6 +46,9 @@ pub(super) static SITES: &[&Site] = &[
     &blogger::BLOGSPOT,
     &blogger::BLOGGER,
     &scrolller::SITE,
+    &reactor::REACTOR,
+    &reactor::PORNREACTOR,
+    &reactor::THATPERVERT,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;
