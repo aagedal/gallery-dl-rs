@@ -78,7 +78,7 @@ const LANGUAGES: &[(&str, &str)] = &[
     ("zh", "Chinese"),
 ];
 
-fn code_to_language(code: &str) -> Option<&'static str> {
+pub(crate) fn code_to_language(code: &str) -> Option<&'static str> {
     let code = code.to_lowercase();
     LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, l)| *l)
 }

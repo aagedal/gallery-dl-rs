@@ -214,3 +214,8 @@ pub(crate) fn basic_auth(username: &str, password: &str) -> String {
         base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"))
     )
 }
+
+/// `util.code_to_language`: the English name of a language code.
+pub(crate) fn code_to_language(code: &str) -> Option<&'static str> {
+    crate::sites::manga::webtoons::code_to_language(code)
+}

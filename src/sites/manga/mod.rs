@@ -12,7 +12,9 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod dandadan;
+mod dankefuerslesen;
 mod dynastyscans;
+mod foolslide;
 mod hentai2read;
 mod hentaihere;
 mod kaliscan;
@@ -31,7 +33,7 @@ mod senmanga;
 mod tcbscans;
 mod text;
 mod tmohentai;
-mod webtoons;
+pub(crate) mod webtoons;
 
 pub(super) static SITES: &[&Site] = &[
     &mangadex::SITE,
@@ -54,6 +56,8 @@ pub(super) static SITES: &[&Site] = &[
     &komikcast::SITE,
     &madokami::SITE,
     &naverwebtoon::SITE,
+    &dankefuerslesen::SITE,
+    &foolslide::SITE,
 ];
 
 /// Insert a key into a keyword map.

@@ -13,7 +13,7 @@ mod art;
 mod boorus;
 mod filehosts;
 mod imageboards;
-mod manga;
+pub(crate) mod manga;
 mod media;
 mod social;
 mod video;

@@ -301,6 +301,17 @@ impl Http {
     }
 
     /// POST a form and parse the JSON response; redirects are refused.
+    /// POST a form and return the response text (lossy UTF-8).
+    pub async fn post_form_text(
+        &self,
+        url: &Url,
+        form: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Result<String> {
+        let bytes = self.send(url, headers, Some(Body::Form(form))).await?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
     pub async fn post_form(
         &self,
         url: &Url,
