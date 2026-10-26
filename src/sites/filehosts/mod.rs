@@ -20,6 +20,7 @@ mod imagebam;
 mod imagechest;
 mod imagehost;
 mod imagepond;
+mod imageshack;
 mod imgpile;
 mod imgth;
 mod koofr;
@@ -72,6 +73,7 @@ pub(super) static SITES: &[&Site] = &[
     &lensdump::SITE,
     &koofr::SITE,
     &imagepond::SITE,
+    &imageshack::SITE,
 ];
 
 // ---------------------------------------------------------------------------
