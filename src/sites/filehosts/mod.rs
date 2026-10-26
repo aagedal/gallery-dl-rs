@@ -18,6 +18,7 @@ mod filester;
 mod gofile;
 mod imagehost;
 mod turbo;
+mod urlshortener;
 
 pub(super) static SITES: &[&Site] = &[
     &gofile::SITE,
@@ -45,6 +46,8 @@ pub(super) static SITES: &[&Site] = &[
     &imagehost::IMGWALLET,
     &imagehost::SILVERPIC,
     &imagehost::IMGPV,
+    &urlshortener::BITLY,
+    &urlshortener::TCO,
 ];
 
 // ---------------------------------------------------------------------------

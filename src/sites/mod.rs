@@ -248,11 +248,50 @@ pub fn categories() -> impl Iterator<Item = &'static str> {
 }
 
 /// Extract any registry URL, for child jobs that cross site boundaries.
+/// Other URLs end in an [`ExternalChild`] error, which
+/// [`with_external_children`] hands to the caller's full dispatcher.
 pub fn extract<'a>(http: &'a Http, url: Url) -> Events<'a> {
     match find(&url) {
         Some(site) => (site.extract)(http, url),
-        None => fail(error("unsupported child URL")),
+        None => fail(Box::new(ExternalChild(url))),
     }
+}
+
+/// A queued child URL that no registry site reads (upstream `Message.Queue`
+/// to another extractor).
+#[derive(Debug)]
+pub struct ExternalChild(pub Url);
+
+impl std::fmt::Display for ExternalChild {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unsupported child URL")
+    }
+}
+
+impl std::error::Error for ExternalChild {}
+
+/// Replace [`ExternalChild`] errors with the events `queue` produces for
+/// their URLs, so registry sites can queue URLs of any supported extractor.
+pub fn with_external_children<'a>(
+    events: Events<'a>,
+    queue: crate::event::Queue<'a>,
+) -> Events<'a> {
+    events
+        .flat_map(move |event| match event {
+            Err(error) => match error.downcast::<ExternalChild>() {
+                Ok(child) => {
+                    let ExternalChild(url) = *child;
+                    queue(url).unwrap_or_else(|| fail(error_unsupported()))
+                }
+                Err(error) => stream::once(async move { Err(error) }).boxed(),
+            },
+            ok => stream::once(async move { ok }).boxed(),
+        })
+        .boxed()
+}
+
+fn error_unsupported() -> crate::Error {
+    error("unsupported child URL")
 }
 
 pub(crate) fn fail<'a>(error: crate::Error) -> Events<'a> {
