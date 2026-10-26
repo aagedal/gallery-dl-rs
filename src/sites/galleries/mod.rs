@@ -23,11 +23,16 @@ mod imagefap;
 mod imhentai;
 mod leakgallery;
 mod luscious;
+mod okporn;
 mod pornhub;
+mod pornstarstube;
 mod sankakucomplex;
+mod sxypix;
+mod wallpapercave;
 mod xasiat;
 mod xhamster;
 mod xvideos;
+mod yourlesbians;
 
 pub(super) static SITES: &[&Site] = &[
     &eporner::SITE,
@@ -62,6 +67,11 @@ pub(super) static SITES: &[&Site] = &[
     &imhentai::HENTAIENVY,
     &imhentai::HENTAIZAP,
     &luscious::SITE,
+    &okporn::SITE,
+    &sxypix::SITE,
+    &pornstarstube::SITE,
+    &yourlesbians::SITE,
+    &wallpapercave::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
