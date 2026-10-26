@@ -1,6 +1,7 @@
 //! Shared bounded HTTP access for registry site extractors.
 //!
-//! Requests follow same-origin redirects only, retry HTTP 429/5xx and
+//! Requests follow same-origin redirects and HTTPS redirects within one
+//! registrable domain, retry HTTP 429/5xx and
 //! transport failures with backoff and `Retry-After` cooldowns, and cap
 //! responses at 16 MiB. Diagnostics never include URLs or credentials.
 use crate::{
@@ -354,7 +355,7 @@ impl Http {
     ) -> std::result::Result<Vec<u8>, Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
-        let mut redirects = Redirects::new(endpoint);
+        let mut redirects = Redirects::new(endpoint).allow_same_site(true);
         let response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = match body {

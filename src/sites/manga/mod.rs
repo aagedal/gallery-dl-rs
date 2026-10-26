@@ -11,9 +11,11 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod dynastyscans;
 mod kaliscan;
 mod mangadex;
 mod mangafox;
+mod mangafreak;
 mod mangahere;
 mod mangatown;
 mod rawkuma;
@@ -30,6 +32,8 @@ pub(super) static SITES: &[&Site] = &[
     &kaliscan::SITE,
     &mangahere::SITE,
     &mangafox::SITE,
+    &mangafreak::SITE,
+    &dynastyscans::SITE,
 ];
 
 /// Insert a key into a keyword map.
