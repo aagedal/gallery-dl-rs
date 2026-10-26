@@ -5,8 +5,12 @@ use url::Url;
 
 mod adultempire;
 mod ahottie;
+mod eightmuses;
 mod eporner;
 mod fapachi;
+mod fuskator;
+mod girlsreleased;
+mod hentaicosplays;
 mod pornhub;
 mod sankakucomplex;
 mod xasiat;
@@ -23,6 +27,12 @@ pub(super) static SITES: &[&Site] = &[
     &adultempire::SITE,
     &ahottie::SITE,
     &fapachi::SITE,
+    &hentaicosplays::HENTAICOSPLAY,
+    &hentaicosplays::HENTAIIMG,
+    &hentaicosplays::PORNIMAGE,
+    &girlsreleased::SITE,
+    &fuskator::SITE,
+    &eightmuses::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
