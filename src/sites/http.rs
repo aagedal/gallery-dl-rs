@@ -261,7 +261,15 @@ impl Http {
     /// GET that never follows a redirect to another site, for sites that
     /// detect login walls by such redirects.
     pub async fn get_strict(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
-        self.send_with(url, headers, None, true).await
+        self.send_with(url, headers, None, true)
+            .await
+            .map(|(body, _)| body)
+    }
+
+    /// GET text and the URL it was finally served from after redirects.
+    pub async fn text_final(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(String, Url)> {
+        let (body, final_url) = self.send_with(url, headers, None, false).await?;
+        Ok((String::from_utf8_lossy(&body).into_owned(), final_url))
     }
 
     /// The `Location` of one GET without following it, for short links that
@@ -348,7 +356,9 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
     ) -> Result<Vec<u8>> {
-        self.send_with(url, headers, body, false).await
+        self.send_with(url, headers, body, false)
+            .await
+            .map(|(body, _)| body)
     }
 
     async fn send_with(
@@ -357,7 +367,7 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
         strict: bool,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<(Vec<u8>, Url)> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
                 match self.attempt(url, headers, body, attempt, strict).await {
@@ -381,7 +391,7 @@ impl Http {
         body: Option<Body<'_>>,
         attempt: u8,
         strict: bool,
-    ) -> std::result::Result<Vec<u8>, Failure> {
+    ) -> std::result::Result<(Vec<u8>, Url), Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint)
@@ -488,7 +498,10 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok(crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?)
+        Ok((
+            crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
+            target,
+        ))
     }
 }
 
