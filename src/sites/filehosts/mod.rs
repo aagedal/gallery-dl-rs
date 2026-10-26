@@ -16,6 +16,7 @@ mod chevereto;
 mod cyberdrop;
 mod filester;
 mod gofile;
+mod imagehost;
 mod turbo;
 
 pub(super) static SITES: &[&Site] = &[
@@ -27,6 +28,23 @@ pub(super) static SITES: &[&Site] = &[
     &chevereto::PUTMEGA,
     &turbo::SITE,
     &filester::SITE,
+    &imagehost::IMXTO,
+    &imagehost::ACIDIMG,
+    &imagehost::IMAGEVENUE,
+    &imagehost::IMAGETWIST,
+    &imagehost::IMGADULT,
+    &imagehost::IMGSPICE,
+    &imagehost::PIXHOST,
+    &imagehost::TURBOIMAGEHOST,
+    &imagehost::VIPR,
+    &imagehost::IMGCLICK,
+    &imagehost::FAPPIC,
+    &imagehost::PICSTATE,
+    &imagehost::IMGDRIVE,
+    &imagehost::IMGTAXI,
+    &imagehost::IMGWALLET,
+    &imagehost::SILVERPIC,
+    &imagehost::IMGPV,
 ];
 
 // ---------------------------------------------------------------------------
