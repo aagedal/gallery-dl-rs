@@ -14,6 +14,7 @@ use url::Url;
 mod bunkr;
 mod chevereto;
 mod cyberdrop;
+mod cyberfile;
 mod filester;
 mod gofile;
 mod imagebam;
@@ -74,6 +75,7 @@ pub(super) static SITES: &[&Site] = &[
     &koofr::SITE,
     &imagepond::SITE,
     &imageshack::SITE,
+    &cyberfile::SITE,
 ];
 
 // ---------------------------------------------------------------------------
