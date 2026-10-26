@@ -106,7 +106,7 @@ impl Gallery {
     }
 
     /// A `GalleryExtractor` whose files are numbered under `num`.
-    pub fn gallery(route: &'static Route, data: Map<String, Value>, pages: Vec<Page>) -> Self {
+    pub fn numbered(route: &'static Route, data: Map<String, Value>, pages: Vec<Page>) -> Self {
         Self {
             enum_key: "num",
             ..Self::chapter(route, data, pages)

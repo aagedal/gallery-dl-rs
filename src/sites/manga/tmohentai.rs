@@ -41,7 +41,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             .map(|i| (format!("{base}{i:03}.webp"), None))
             .collect();
         Ok(crate::sites::events(
-            Gallery::gallery(&GALLERY, metadata(&page, &id), pages)
+            Gallery::numbered(&GALLERY, metadata(&page, &id), pages)
                 .id(id)
                 .events(&SITE, http),
         ))
