@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(file.render(&files[1]).unwrap(), "02.mp4");
         assert_eq!(
             dir.render(&files[1]).unwrap().unwrap(),
-            std::path::PathBuf::from("s3ndpics/jane/2025-01-02 03:04:05 Hi (aa)")
+            crate::sites::testing::os_dir("s3ndpics/jane/2025-01-02 03:04:05 Hi (aa)")
         );
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with("GET /api/posts?tag=cat&limit=20&page=2 "));

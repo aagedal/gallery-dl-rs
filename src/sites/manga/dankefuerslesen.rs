@@ -233,7 +233,9 @@ mod tests {
         assert_eq!(k["lang"], Value::Null);
         assert_eq!(
             path(&files[1]),
-            "dankefuerslesen/Awana-chan/v01 c002: Two/Awana-chan_c002_002.png"
+            crate::sites::testing::os_path(
+                "dankefuerslesen/Awana-chan/v01 c002: Two/Awana-chan_c002_002.png"
+            )
         );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /api/series/awana/ "));

@@ -184,7 +184,9 @@ mod tests {
         );
         assert_eq!(
             path(&files[0]),
-            "hentaihere/Uchi no Jimuin/c001: Chapter One/Uchi no Jimuin_c001_001.jpg"
+            crate::sites::testing::os_path(
+                "hentaihere/Uchi no Jimuin/c001: Chapter One/Uchi no Jimuin_c001_001.jpg"
+            )
         );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /m/S13812/1/1 "));

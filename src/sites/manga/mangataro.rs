@@ -311,7 +311,9 @@ mod tests {
         assert_eq!(k["publisher"], "Pub");
         assert_eq!(
             path(&files[1]),
-            "mangataro/Majo to Youhei/c012.2: The Title/Majo to Youhei_c012.2_002.webp"
+            crate::sites::testing::os_path(
+                "mangataro/Majo to Youhei/c012.2: The Title/Majo to Youhei_c012.2_002.webp"
+            )
         );
         let requests = server.join().unwrap();
         assert!(requests[2].starts_with("GET /auth/chapter-content?chapter_id=1 "));

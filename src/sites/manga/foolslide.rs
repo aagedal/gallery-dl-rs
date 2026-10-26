@@ -247,7 +247,9 @@ mod tests {
         assert!(k.get("thumb_url").is_none());
         assert_eq!(
             path(&files[1]),
-            "foolslide/One & Piece/Chapter 123: Title/One & Piece_c123.2_002.jpg"
+            crate::sites::testing::os_path(
+                "foolslide/One & Piece/Chapter 123: Title/One & Piece_c123.2_002.jpg"
+            )
         );
         assert_eq!(archive(&files[0]), r#"["{id}",["7"]]"#);
         let requests = server.join().unwrap();

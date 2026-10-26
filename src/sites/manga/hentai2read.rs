@@ -187,7 +187,9 @@ mod tests {
         assert_eq!(archive(&files[0]), r#"["{chapter_id}_{page}",["413","1"]]"#);
         assert_eq!(
             path(&files[1]),
-            "hentai2read/Amazon Elixir/c001: Story/Amazon Elixir_c001_002.png"
+            crate::sites::testing::os_path(
+                "hentai2read/Amazon Elixir/c001: Story/Amazon Elixir_c001_002.png"
+            )
         );
         server.join().unwrap();
     }

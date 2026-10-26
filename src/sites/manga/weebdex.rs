@@ -317,7 +317,9 @@ mod tests {
         assert_eq!(k["uploader"], "U");
         assert_eq!(
             path(&files[1]),
-            "weebdex/Yotsuba&!/v03 c012.5: T/Yotsuba&!_c012.5_002.png"
+            crate::sites::testing::os_path(
+                "weebdex/Yotsuba&!/v03 c012.5: T/Yotsuba&!_c012.5_002.png"
+            )
         );
         assert_eq!(
             archive(&files[1]),

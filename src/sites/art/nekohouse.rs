@@ -230,7 +230,9 @@ mod tests {
         assert_eq!(file.render(&files[1]).unwrap(), "02 pack & more.zip");
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
-            std::path::PathBuf::from("nekohouse/fanbox/Artist (1)/2 2024-01-02 03:04:05 Title")
+            crate::sites::testing::os_dir(
+                "nekohouse/fanbox/Artist (1)/2 2024-01-02 03:04:05 Title"
+            )
         );
         server.join().unwrap();
     }

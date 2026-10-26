@@ -313,7 +313,9 @@ mod tests {
         assert_eq!(k["chapter_id"], 77);
         assert_eq!(
             path(&files[2]),
-            "mangahere/Dongguo & Xiaojie/c004.2: The Title/Dongguo & Xiaojie_c004.2_003.jpg"
+            crate::sites::testing::os_path(
+                "mangahere/Dongguo & Xiaojie/c004.2: The Title/Dongguo & Xiaojie_c004.2_003.jpg"
+            )
         );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /manga/dongguo_xiaojie/c004.2/1.html "));

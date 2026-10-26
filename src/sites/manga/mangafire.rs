@@ -530,7 +530,9 @@ mod tests {
         assert_eq!(k["lang"], "en");
         assert_eq!(
             path(&files[1]),
-            "mangafire/One Piece/c001.5: A & B/One Piece_c001.5_002.jpg"
+            crate::sites::testing::os_path(
+                "mangafire/One Piece/c001.5: A & B/One Piece_c001.5_002.jpg"
+            )
         );
         assert_eq!(
             archive(&files[0]),

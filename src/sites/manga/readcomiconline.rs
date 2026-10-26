@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(k["issue_id"], 22289);
         assert_eq!(
             path(&files[1]),
-            "readcomiconline/W.i.t.c.h./130/W.i.t.c.h._130_002."
+            crate::sites::testing::os_path("readcomiconline/W.i.t.c.h./130/W.i.t.c.h._130_002.")
         );
         assert_eq!(archive(&files[0]), r#"["{issue_id}_{page}",["22289","1"]]"#);
         let requests = server.join().unwrap();

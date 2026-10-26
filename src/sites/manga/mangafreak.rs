@@ -224,7 +224,9 @@ mod tests {
         assert_eq!(k["chapter_string"], "1");
         assert_eq!(
             path(&files[1]),
-            "mangafreak/Onepunch-Man/c001: One & Punch/Onepunch-Man_c001_002.jpg"
+            crate::sites::testing::os_path(
+                "mangafreak/Onepunch-Man/c001: One & Punch/Onepunch-Man_c001_002.jpg"
+            )
         );
         server.join().unwrap();
     }

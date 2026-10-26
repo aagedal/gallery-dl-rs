@@ -485,7 +485,9 @@ mod tests {
         assert_eq!(k["date"], "2021-01-02 03:04:05");
         assert_eq!(
             path(&files[1]),
-            "comick/Neko no Oshigoto/v02 c010.5: T/Neko no Oshigoto_c010.5_002.jpg"
+            crate::sites::testing::os_path(
+                "comick/Neko no Oshigoto/v02 c010.5: T/Neko no Oshigoto_c010.5_002.jpg"
+            )
         );
         assert_eq!(archive(&files[0]), r#"["{chapter_hid}_{page}",["L7","1"]]"#);
         let requests = server.join().unwrap();

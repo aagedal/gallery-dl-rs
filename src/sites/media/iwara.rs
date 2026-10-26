@@ -759,7 +759,7 @@ mod tests {
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
         assert_eq!(
             file.render(&files[0]).unwrap(),
-            "2024-01-02 03:04:05 V1 Rio rio.mp4"
+            crate::sites::testing::os_name("2024-01-02 03:04:05 V1 Rio rio.mp4")
         );
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),

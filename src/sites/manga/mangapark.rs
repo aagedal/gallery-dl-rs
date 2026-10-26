@@ -489,7 +489,7 @@ mod tests {
         assert_eq!(k["date"], "2020-09-13 12:26:40");
         assert_eq!(
             path(&files[1]),
-            "mangapark/Aria/c060.2: Navi/Aria_c060.2_002.jpg"
+            crate::sites::testing::os_path("mangapark/Aria/c060.2: Navi/Aria_c060.2_002.jpg")
         );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("POST /apo/ "));

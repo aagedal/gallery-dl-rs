@@ -689,6 +689,85 @@ pub(crate) mod testing {
         response("200 OK", "application/json", body.to_string().as_bytes())
     }
 
+    /// An expected path segment as this platform renders it: Windows
+    /// replaces reserved characters, and trims trailing dots and spaces
+    /// from directory names (see `naming::clean_source_segment`).
+    fn os_segment(segment: &str, directory: bool) -> String {
+        windows_segment(segment, directory, cfg!(windows))
+    }
+
+    fn windows_segment(segment: &str, directory: bool, windows: bool) -> String {
+        if !windows {
+            return segment.to_owned();
+        }
+        let cleaned: String = segment
+            .chars()
+            .map(|c| {
+                if matches!(c, '\\' | '|' | '<' | '>' | ':' | '"' | '?' | '*') {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        if directory {
+            cleaned.trim_end_matches(['.', ' ']).to_owned()
+        } else {
+            cleaned
+        }
+    }
+
+    #[test]
+    fn windows_expectations_match_ci_renders() {
+        // Rendered values reported by the windows-latest CI job.
+        let path = |expected: &str| {
+            let segments: Vec<&str> = expected.split('/').collect();
+            let last = segments.len() - 1;
+            segments
+                .iter()
+                .enumerate()
+                .map(|(i, s)| windows_segment(s, i < last, true))
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        assert_eq!(
+            path("readcomiconline/W.i.t.c.h./130/W.i.t.c.h._130_002."),
+            "readcomiconline/W.i.t.c.h/130/W.i.t.c.h._130_002."
+        );
+        assert_eq!(
+            path("weebdex/Yotsuba&!/v03 c012.5: T/Yotsuba&!_c012.5_002.png"),
+            "weebdex/Yotsuba&!/v03 c012.5_ T/Yotsuba&!_c012.5_002.png"
+        );
+        assert_eq!(
+            windows_segment("2024-01-02 03:04:05 V1 Rio rio.mp4", false, true),
+            "2024-01-02 03_04_05 V1 Rio rio.mp4"
+        );
+        assert_eq!(windows_segment("x:y", false, false), "x:y");
+    }
+
+    /// An expected filename as this platform renders it.
+    pub fn os_name(expected: &str) -> String {
+        os_segment(expected, false)
+    }
+
+    /// An expected directory (`a/b/c`) as this platform renders it.
+    pub fn os_dir(expected: &str) -> std::path::PathBuf {
+        expected.split('/').map(|s| os_segment(s, true)).collect()
+    }
+
+    /// An expected `directory/filename` string (as `manga::tests::path`
+    /// renders it, with `/` separators) for this platform.
+    pub fn os_path(expected: &str) -> String {
+        let segments: Vec<&str> = expected.split('/').collect();
+        let last = segments.len().saturating_sub(1);
+        segments
+            .iter()
+            .enumerate()
+            .map(|(index, s)| os_segment(s, index < last))
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
     pub fn html(body: &str) -> Vec<u8> {
         response("200 OK", "text/html", body.as_bytes())
     }
