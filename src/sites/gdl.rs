@@ -106,12 +106,46 @@ pub(crate) fn root_of(url: &Url) -> String {
     }
 }
 
-/// `text.parse_query`: the last value of each non-empty query key.
+/// `text.parse_query`: name-value pairs, the first value of a name wins;
+/// parts without `=` are ignored.
 pub(crate) fn parse_query(query: &str) -> Map<String, Value> {
-    url::form_urlencoded::parse(query.as_bytes())
-        .filter(|(k, v)| !k.is_empty() && !v.is_empty())
-        .map(|(k, v)| (k.into_owned(), Value::String(v.into_owned())))
-        .collect()
+    let mut result = Map::new();
+    for part in query.split('&') {
+        let (name, eq, value) = partition(part, "=");
+        if eq.is_empty() {
+            continue;
+        }
+        let name = unquote(&name.replace('+', " "));
+        if !result.contains_key(&name) {
+            result.insert(name, Value::String(unquote(&value.replace('+', " "))));
+        }
+    }
+    result
+}
+
+/// `text.parse_query_list`: like [`parse_query`], but values of names in
+/// `as_list` are collected into lists.
+pub(crate) fn parse_query_list(query: &str, as_list: &[&str]) -> Map<String, Value> {
+    let mut result = Map::new();
+    for part in query.split('&') {
+        let (name, eq, value) = partition(part, "=");
+        if eq.is_empty() {
+            continue;
+        }
+        let name = unquote(&name.replace('+', " "));
+        let value = Value::String(unquote(&value.replace('+', " ")));
+        if as_list.contains(&name.as_str()) {
+            match result.get_mut(&name) {
+                Some(Value::Array(list)) => list.push(value),
+                _ => {
+                    result.insert(name, Value::Array(vec![value]));
+                }
+            }
+        } else if !result.contains_key(&name) {
+            result.insert(name, value);
+        }
+    }
+    result
 }
 
 /// A keyword map from `(key, value)` pairs.

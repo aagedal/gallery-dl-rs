@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod allporncomic;
+mod comick;
 mod dandadan;
 mod dankefuerslesen;
 mod dynastyscans;
@@ -85,6 +86,7 @@ pub(super) static SITES: &[&Site] = &[
     &simplyhentai::SITE,
     &mangapark::SITE,
     &readcomiconline::SITE,
+    &comick::SITE,
 ];
 
 /// Insert a key into a keyword map.
