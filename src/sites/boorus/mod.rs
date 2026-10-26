@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod agnph;
+mod comicvine;
 mod furry34;
 mod gelbooru_v01;
 mod gelbooru_v02;
@@ -63,6 +64,7 @@ pub(super) static SITES: &[&Site] = &[
     &rule34vault::SITE,
     &furry34::SITE,
     &yiffverse::SITE,
+    &comicvine::SITE,
 ];
 
 // ---------------------------------------------------------------------------

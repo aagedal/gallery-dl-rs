@@ -199,7 +199,7 @@ const MONTHS: [&str; 12] = [
 ];
 
 /// A subset of Python `datetime.strptime` returning UTC seconds: `%Y %m %d
-/// %H %M %S %y %B %b %p %I %z %f %%` and literal text. Like Python,
+/// %H %M %S %y %B %b %A %a %p %I %z %f %%` and literal text. Like Python,
 /// whitespace in the format matches any run of whitespace.
 pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
     let (mut year, mut month, mut day) = (1900i32, 1u8, 1u8);
@@ -252,6 +252,29 @@ pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
                     _ => return None,
                 });
                 input = &input[2..];
+            }
+            'A' | 'a' => {
+                // Weekday names carry no date information.
+                const DAYS: [&str; 7] = [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                ];
+                let lower = input.to_lowercase();
+                let len = DAYS.iter().find_map(|name| {
+                    if lower.starts_with(name) {
+                        Some(name.len())
+                    } else if lower.starts_with(&name[..3]) {
+                        Some(3)
+                    } else {
+                        None
+                    }
+                })?;
+                input = &input[len..];
             }
             'B' | 'b' => {
                 let lower = input.to_lowercase();
