@@ -22,6 +22,7 @@ mod imagechest;
 mod imagehost;
 mod imagepond;
 mod imageshack;
+mod imgbb;
 mod imgpile;
 mod imgth;
 mod koofr;
@@ -78,6 +79,7 @@ pub(super) static SITES: &[&Site] = &[
     &imageshack::SITE,
     &cyberfile::SITE,
     &tenor::SITE,
+    &imgbb::SITE,
 ];
 
 // ---------------------------------------------------------------------------
