@@ -17,6 +17,7 @@ mod dynastyscans;
 mod foolslide;
 mod hentai2read;
 mod hentaihere;
+mod hiperdex;
 mod kaliscan;
 mod komikcast;
 mod madokami;
@@ -24,6 +25,7 @@ mod mangadex;
 mod mangafox;
 mod mangafreak;
 mod mangahere;
+mod manganelo;
 mod mangaread;
 mod mangareader;
 mod mangataro;
@@ -62,6 +64,11 @@ pub(super) static SITES: &[&Site] = &[
     &foolslide::SITE,
     &weebcentral::SITE,
     &mangataro::SITE,
+    &hiperdex::SITE,
+    &manganelo::NELOMANGA,
+    &manganelo::NATOMANGA,
+    &manganelo::MANGANATO,
+    &manganelo::MANGAKAKALOT,
 ];
 
 /// Insert a key into a keyword map.

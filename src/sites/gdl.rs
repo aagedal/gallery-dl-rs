@@ -245,3 +245,16 @@ pub(crate) fn nextdata(page: &str) -> crate::Result<Value> {
     };
     serde_json::from_str(raw).map_err(|_| crate::error("page has no valid Next.js data"))
 }
+
+/// `text.quote` (`urllib.parse.quote` with `safe="/"`).
+pub(crate) fn quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'~' | b'/') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}

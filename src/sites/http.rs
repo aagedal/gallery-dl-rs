@@ -1,9 +1,10 @@
 //! Shared bounded HTTP access for registry site extractors.
 //!
 //! Requests follow same-origin redirects and HTTPS redirects within one
-//! registrable domain, retry HTTP 429/5xx and
-//! transport failures with backoff and `Retry-After` cooldowns, and cap
-//! responses at 16 MiB. Diagnostics never include URLs or credentials.
+//! registrable domain; GET requests without credential headers follow
+//! redirects to any site (session cookies stay scoped to their domains).
+//! They retry HTTP 429/5xx and transport failures with backoff and
+//! `Retry-After` cooldowns, and cap responses at 16 MiB. Diagnostics never include URLs or credentials.
 use crate::{
     Result,
     cookies::CookieJar,
@@ -257,6 +258,12 @@ impl Http {
         self.send(url, headers, None).await
     }
 
+    /// GET that never follows a redirect to another site, for sites that
+    /// detect login walls by such redirects.
+    pub async fn get_strict(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
+        self.send_with(url, headers, None, true).await
+    }
+
     /// The `Location` of one GET without following it, for short links that
     /// redirect to another site; `None` unless the response is a redirect.
     pub async fn location(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Option<Url>> {
@@ -341,9 +348,19 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
     ) -> Result<Vec<u8>> {
+        self.send_with(url, headers, body, false).await
+    }
+
+    async fn send_with(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+        body: Option<Body<'_>>,
+        strict: bool,
+    ) -> Result<Vec<u8>> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
-                match self.attempt(url, headers, body, attempt).await {
+                match self.attempt(url, headers, body, attempt, strict).await {
                     Ok(body) => return Ok(body),
                     Err(failure) if failure.retry && attempt < self.retries => {
                         tokio::time::sleep(backoff(attempt)).await;
@@ -363,10 +380,15 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
         attempt: u8,
+        strict: bool,
     ) -> std::result::Result<Vec<u8>, Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
-        let mut redirects = Redirects::new(endpoint).allow_same_site(true);
+        let mut redirects = Redirects::new(endpoint)
+            .allow_same_site(true)
+            .allow_any_site(
+                !strict && body.is_none() && !headers.iter().any(|(key, _)| sensitive(key)),
+            );
         let response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             let mut request = match body {
@@ -468,6 +490,26 @@ impl Http {
         }
         Ok(crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?)
     }
+}
+
+/// Whether a request header carries credentials that must not follow a
+/// redirect to another site.
+fn sensitive(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "authorization" | "proxy-authorization" | "cookie"
+    ) || [
+        "auth",
+        "token",
+        "key",
+        "session",
+        "csrf",
+        "secret",
+        "signature",
+    ]
+    .iter()
+    .any(|word| name.contains(word))
 }
 
 /// An HTTP 401/403 response. Displays like any other site error (no URL or

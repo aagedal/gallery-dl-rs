@@ -133,6 +133,7 @@ pub(crate) struct Redirects {
     visited: Vec<Url>,
     subdomains: bool,
     same_site: bool,
+    any_site: bool,
 }
 
 impl Redirects {
@@ -143,6 +144,7 @@ impl Redirects {
             visited: vec![url],
             subdomains: false,
             same_site: false,
+            any_site: false,
         }
     }
 
@@ -158,6 +160,13 @@ impl Redirects {
     /// (e.g. a site's `ww2.` mirror moving to `ww3.`).
     pub(crate) fn allow_same_site(mut self, allow: bool) -> Self {
         self.same_site = allow;
+        self
+    }
+
+    /// Also accept redirects to any HTTP(S) origin, for requests that carry
+    /// no credentials of their own (cookies are scoped by the jar).
+    pub(crate) fn allow_any_site(mut self, allow: bool) -> Self {
+        self.any_site = allow;
         self
     }
 
@@ -221,6 +230,7 @@ impl Redirects {
             || !target.username().is_empty()
             || target.password().is_some()
             || target.origin() != self.visited[0].origin()
+                && !self.any_site
                 && !self.subdomain_of_origin(&target)
                 && !self.same_site_as_origin(&target)
         {
