@@ -53,7 +53,7 @@ async fn graphql(
         .await?;
     data["data"]
         .as_object()
-        .and_then(|fields| fields.values().last().cloned())
+        .and_then(|fields| fields.values().next_back().cloned())
         .ok_or_else(|| error("MangaPark returned no GraphQL data"))
 }
 
