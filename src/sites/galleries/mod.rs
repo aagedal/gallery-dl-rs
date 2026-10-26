@@ -32,6 +32,7 @@ mod nudostar;
 mod okporn;
 mod picazor;
 mod pictoa;
+mod poringa;
 mod pornhub;
 mod pornstarstube;
 mod s3ndpics;
@@ -39,6 +40,7 @@ mod sankakucomplex;
 mod shopify;
 mod sxypix;
 mod thefap;
+mod thehentaiworld;
 mod tumblrgallery;
 mod wallpapercave;
 mod wikifeet;
@@ -110,6 +112,8 @@ pub(super) static SITES: &[&Site] = &[
     &shopify::SHOPIFY,
     &thefap::SITE,
     &tumblrgallery::SITE,
+    &poringa::SITE,
+    &thehentaiworld::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.

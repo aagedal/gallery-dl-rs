@@ -35,6 +35,7 @@ mod steamgriddb;
 mod thirtyfivephoto;
 mod toyhouse;
 mod tungsten;
+mod unsplash;
 mod vanillarock;
 mod wikiart;
 mod xfolio;
@@ -70,6 +71,7 @@ pub(super) static SITES: &[&Site] = &[
     &nekohouse::SITE,
     &slickpic::SITE,
     &toyhouse::SITE,
+    &unsplash::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
