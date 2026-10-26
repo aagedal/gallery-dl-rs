@@ -9,6 +9,8 @@ use url::Url;
 
 mod misskey;
 mod redgifs;
+mod soundgasm;
+mod whyp;
 mod wikimedia;
 
 pub(super) static SITES: &[&Site] = &[
@@ -35,6 +37,8 @@ pub(super) static SITES: &[&Site] = &[
     &wikimedia::PIDGIWIKI,
     &wikimedia::AZURLANEWIKI,
     &wikimedia::MGEWIKI,
+    &soundgasm::SITE,
+    &whyp::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
