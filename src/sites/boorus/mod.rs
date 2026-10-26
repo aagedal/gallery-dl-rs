@@ -12,6 +12,7 @@ mod comicvine;
 mod furry34;
 mod gelbooru_v01;
 mod gelbooru_v02;
+mod idolcomplex;
 mod moebooru;
 mod nozomi;
 mod paheal;
@@ -20,7 +21,7 @@ mod realbooru;
 mod rule34us;
 mod rule34vault;
 mod rule34xyz;
-mod sankaku;
+pub(super) mod sankaku;
 mod scatbooru;
 mod shimmie2;
 mod sizebooru;
@@ -73,6 +74,7 @@ pub(super) static SITES: &[&Site] = &[
     &sizebooru::SITE,
     &nozomi::SITE,
     &sankaku::SITE,
+    &idolcomplex::SITE,
 ];
 
 // ---------------------------------------------------------------------------

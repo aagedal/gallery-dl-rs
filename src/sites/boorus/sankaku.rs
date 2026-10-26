@@ -36,32 +36,70 @@ static BOOKS: Route = Route::new("books", FILENAME, &["{category}"], "");
 pub static SITE: Site = Site {
     category: "sankaku",
     name: "Sankaku Channel",
-    matches: |url| target(url).is_some(),
-    extract,
+    matches: |url| target(&SANKAKU, url).is_some(),
+    extract: |http, url| extract_flavor(&SANKAKU, http, url),
     routes: &[&TAG, &POOL, &POST, &BOOKS],
     api_key: false,
     cookies: None,
 };
 
+/// A Sankaku API frontend: its site, API host, origin and URL patterns.
+pub(super) struct Flavor {
+    pub site: &'static Site,
+    pub api: &'static str,
+    pub root: &'static str,
+    pub base: &'static str,
+    /// Pool URL pattern below `base`.
+    pub pool: &'static str,
+    pub books: bool,
+}
+
+static SANKAKU: Flavor = Flavor {
+    site: &SITE,
+    api: API,
+    root: ROOT,
+    base: BASE,
+    pool: r"/(?:books|pools?/show)/(\w+)",
+    books: true,
+};
+
 #[derive(Debug, PartialEq)]
-enum Target {
+pub(super) enum Target {
     Tag(String),
     Pool(String),
     Post(String),
     Books(String),
 }
 
-fn target(url: &Url) -> Option<Target> {
-    if let Some(c) = captures(re!(&format!(r"{BASE}(?:/posts)?/?\?([^#]*)")), url) {
+fn compiled(pattern: String) -> regex::Regex {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, regex::Regex>>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    cache
+        .entry(pattern.clone())
+        .or_insert_with(|| regex::Regex::new(&pattern).expect("static sankaku pattern"))
+        .clone()
+}
+
+pub(super) fn target(flavor: &Flavor, url: &Url) -> Option<Target> {
+    let base = flavor.base;
+    if let Some(c) = captures(&compiled(format!(r"{base}(?:/posts)?/?\?([^#]*)")), url) {
         return Some(Target::Tag(group(&c, 1).into()));
     }
-    if let Some(c) = captures(re!(&format!(r"{BASE}/(?:books|pools?/show)/(\w+)")), url) {
+    if let Some(c) = captures(&compiled(format!("{base}{}", flavor.pool)), url) {
         return Some(Target::Pool(group(&c, 1).into()));
     }
-    if let Some(c) = captures(re!(&format!(r"{BASE}/posts?(?:/show)?/(\w+)")), url) {
+    if let Some(c) = captures(&compiled(format!(r"{base}/posts?(?:/show)?/(\w+)")), url) {
         return Some(Target::Post(group(&c, 1).into()));
     }
-    captures(re!(&format!(r"{BASE}/books/?\?([^#]*)")), url)
+    if !flavor.books {
+        return None;
+    }
+    captures(&compiled(format!(r"{base}/books/?\?([^#]*)")), url)
         .map(|c| Target::Books(group(&c, 1).into()))
 }
 
@@ -118,13 +156,14 @@ fn tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, Strin
 struct Api<'a> {
     http: &'a Http,
     auth: Option<(String, String)>,
+    flavor: &'static Flavor,
 }
 
 impl<'a> Api<'a> {
     fn headers(&self, token: Option<&str>) -> Vec<(&'static str, String)> {
         let mut headers = vec![
             ("Accept", "application/vnd.sankaku.api+json;v=2".to_owned()),
-            ("Origin", ROOT.to_owned()),
+            ("Origin", self.flavor.root.to_owned()),
         ];
         if let Some(token) = token {
             headers.push(("Authorization", token.to_owned()));
@@ -149,7 +188,7 @@ impl<'a> Api<'a> {
         let data = self
             .http
             .post_json(
-                &self.http.api(&format!("{API}/auth/token"))?,
+                &self.http.api(&format!("{}/auth/token", self.flavor.api))?,
                 &json!({"login": username, "password": password}),
                 &refs,
             )
@@ -174,7 +213,7 @@ impl<'a> Api<'a> {
         let mut refresh = false;
         loop {
             let token = self.token(refresh).await?;
-            let mut url = self.http.api(&format!("{API}{endpoint}"))?;
+            let mut url = self.http.api(&format!("{}{endpoint}", self.flavor.api))?;
             if !params.is_empty() {
                 url.query_pairs_mut().extend_pairs(params.iter());
             }
@@ -371,13 +410,15 @@ async fn post_item(
     Ok(Some(Item::new(url, post).ids(id.clone(), id)))
 }
 
-fn extract(http: &Http, url: Url) -> Events<'_> {
-    let Some(target) = target(&url) else {
+pub(super) fn extract_flavor<'a>(flavor: &'static Flavor, http: &'a Http, url: Url) -> Events<'a> {
+    let Some(target) = target(flavor, &url) else {
         return crate::sites::fail(error("unsupported Sankaku URL"));
     };
+    let site = flavor.site;
     let api = Api {
         http,
         auth: auth_info(http),
+        flavor,
     };
     match target {
         Target::Post(id) => crate::sites::once(async move {
@@ -397,7 +438,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             for post in posts.as_array().cloned().unwrap_or_default() {
                 items.extend(post_item(&api, post, &Map::new()).await?);
             }
-            Ok(crate::sites::events(per_post(&SITE, http, &POST, items)))
+            Ok(crate::sites::events(per_post(site, http, &POST, items)))
         }),
         Target::Pool(id) => crate::sites::once(async move {
             let mut pool = api
@@ -424,7 +465,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 post["num"] = (index + 1).into();
                 items.extend(post_item(&api, post, &extra).await?);
             }
-            Ok(crate::sites::events(per_post(&SITE, http, &POOL, items)))
+            Ok(crate::sites::events(per_post(site, http, &POOL, items)))
         }),
         Target::Tag(query) => {
             let tags = search_tags(&query);
@@ -455,7 +496,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                             items.extend(post_item(&api, post, &extra).await?);
                         }
                         Ok::<_, crate::Error>(crate::sites::events(per_post(
-                            &SITE, http, &TAG, items,
+                            site, http, &TAG, items,
                         )))
                     }
                 })
@@ -492,7 +533,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                         .collect();
                     futures_util::stream::iter(children)
                         .map(move |(url, data)| {
-                            crate::sites::queue(http, SITE.category, BOOKS.subcategory, url, &data)
+                            crate::sites::queue(http, site.category, BOOKS.subcategory, url, &data)
                         })
                         .flatten()
                         .boxed()
@@ -512,7 +553,7 @@ mod tests {
 
     #[test]
     fn classifies_urls() {
-        let t = |raw: &str| target(&Url::parse(raw).unwrap());
+        let t = |raw: &str| target(&SANKAKU, &Url::parse(raw).unwrap());
         assert_eq!(
             t("https://sankaku.app/zh-CN/?tags=order%3Apopularity"),
             Some(Target::Tag("tags=order%3Apopularity".into()))
@@ -561,7 +602,7 @@ mod tests {
             reply(json!({"data": [post("a2")], "meta": {"next": null}})),
         ]);
         let http = client("sankaku", root);
-        let files = media(extract(
+        let files = media((SITE.extract)(
             &http,
             Url::parse("https://sankaku.app/?tags=bonocho").unwrap(),
         ))
@@ -604,7 +645,7 @@ mod tests {
         let http = client("sankaku", root).with_options(Some(std::sync::Arc::new(
             options.as_object().unwrap().clone(),
         )));
-        let files = media(extract(
+        let files = media((SITE.extract)(
             &http,
             Url::parse("https://sankaku.app/posts/p1").unwrap(),
         ))
@@ -628,7 +669,7 @@ mod tests {
         )]);
         let http = client("sankaku", root);
         assert_eq!(
-            children(extract(
+            children((SITE.extract)(
                 &http,
                 Url::parse("https://sankaku.app/books?tags=aiue").unwrap()
             ))
