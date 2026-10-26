@@ -5,8 +5,10 @@ use url::Url;
 
 mod adultempire;
 mod ahottie;
+mod cfake;
 mod eightmuses;
 mod eporner;
+mod erome;
 mod everia;
 mod fapachi;
 mod fapello;
@@ -37,6 +39,8 @@ pub(super) static SITES: &[&Site] = &[
     &eightmuses::SITE,
     &everia::SITE,
     &fapello::SITE,
+    &cfake::SITE,
+    &erome::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
