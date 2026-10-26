@@ -4,9 +4,16 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod eporner;
+mod xasiat;
+mod xhamster;
 mod xvideos;
 
-pub(super) static SITES: &[&Site] = &[&eporner::SITE, &xvideos::SITE];
+pub(super) static SITES: &[&Site] = &[
+    &eporner::SITE,
+    &xvideos::SITE,
+    &xhamster::SITE,
+    &xasiat::SITE,
+];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
 pub(super) fn numbered(
