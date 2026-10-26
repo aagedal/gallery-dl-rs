@@ -17,9 +17,11 @@ mod cyberdrop;
 mod filester;
 mod gofile;
 mod imagebam;
+mod imagechest;
 mod imagehost;
 mod imgpile;
 mod imgth;
+mod lensdump;
 mod lolisafe;
 mod mixdrop;
 mod telegraph;
@@ -64,6 +66,8 @@ pub(super) static SITES: &[&Site] = &[
     &urlgalleries::SITE,
     &imagebam::SITE,
     &imgpile::SITE,
+    &imagechest::SITE,
+    &lensdump::SITE,
 ];
 
 // ---------------------------------------------------------------------------
