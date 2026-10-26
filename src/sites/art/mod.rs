@@ -66,6 +66,21 @@ impl<'t> Scan<'t> {
         Self { text, pos: 0 }
     }
 
+    /// A cursor starting at byte `pos` (clamped to the text), like the
+    /// `pos` argument of `text.extract`.
+    pub fn at(text: &'t str, pos: usize) -> Self {
+        let mut pos = pos.min(text.len());
+        while !text.is_char_boundary(pos) {
+            pos -= 1;
+        }
+        Self { text, pos }
+    }
+
+    /// The current byte position.
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
     pub fn extr(&mut self, begin: &str, end: &str) -> &'t str {
         self.find(begin, end).unwrap_or_default()
     }

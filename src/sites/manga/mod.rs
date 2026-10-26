@@ -13,6 +13,8 @@ use url::Url;
 
 mod kaliscan;
 mod mangadex;
+mod mangafox;
+mod mangahere;
 mod mangatown;
 mod rawkuma;
 mod tcbscans;
@@ -26,6 +28,8 @@ pub(super) static SITES: &[&Site] = &[
     &rawkuma::SITE,
     &mangatown::SITE,
     &kaliscan::SITE,
+    &mangahere::SITE,
+    &mangafox::SITE,
 ];
 
 /// Insert a key into a keyword map.
@@ -210,6 +214,36 @@ pub(super) fn queue_chapters<'a>(
 /// Fetch a page as text through the site's (test-rewritable) origin.
 pub(super) async fn fetch(http: &Http, url: &str) -> crate::Result<String> {
     http.text(&http.api(url)?).await
+}
+
+/// The mobile readers of mangahere/fanfox: each `N.html` page shows two
+/// images, so pages `1, 3, 5, ...` are fetched until `count` URLs are known.
+pub(super) async fn paired_pages(
+    http: &Http,
+    base: &str,
+    mut page: String,
+    count: usize,
+    headers: &[(&str, &str)],
+) -> crate::Result<Vec<Page>> {
+    let mut pages = Vec::new();
+    let mut number = 1;
+    while pages.len() < count {
+        let mut scan = crate::sites::gdl::Scan::new(&page);
+        for begin in ["<img src=\"", " src=\""] {
+            if pages.len() < count {
+                let url = crate::sites::gdl::unescape(scan.extr(begin, "\""));
+                pages.push((text::ensure_http_scheme(&url), None));
+            }
+        }
+        if pages.len() >= count {
+            break;
+        }
+        number += 2;
+        page = http
+            .text_with(&http.api(&format!("{base}{number}.html"))?, headers)
+            .await?;
+    }
+    Ok(pages)
 }
 
 /// The `(chapter, chapter_minor)` keyword pair of `text.partition(".")`.
