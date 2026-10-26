@@ -40,6 +40,7 @@ mod pornpics;
 mod pornstarstube;
 mod s3ndpics;
 mod sankakucomplex;
+mod sexcom;
 mod shopify;
 mod sxypix;
 mod thefap;
@@ -120,6 +121,7 @@ pub(super) static SITES: &[&Site] = &[
     &pornpics::SITE,
     &mangoxo::SITE,
     &motherless::SITE,
+    &sexcom::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
