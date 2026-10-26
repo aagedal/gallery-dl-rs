@@ -14,11 +14,14 @@ use url::Url;
 mod dandadan;
 mod dynastyscans;
 mod hentai2read;
+mod hentaihere;
 mod kaliscan;
+mod komikcast;
 mod mangadex;
 mod mangafox;
 mod mangafreak;
 mod mangahere;
+mod mangaread;
 mod mangareader;
 mod mangatown;
 mod rawkuma;
@@ -44,6 +47,9 @@ pub(super) static SITES: &[&Site] = &[
     &senmanga::SITE,
     &tmohentai::SITE,
     &dandadan::SITE,
+    &hentaihere::SITE,
+    &mangaread::SITE,
+    &komikcast::SITE,
 ];
 
 /// Insert a key into a keyword map.
