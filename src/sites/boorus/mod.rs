@@ -20,6 +20,7 @@ mod realbooru;
 mod rule34us;
 mod rule34vault;
 mod rule34xyz;
+mod sankaku;
 mod scatbooru;
 mod shimmie2;
 mod sizebooru;
@@ -71,6 +72,7 @@ pub(super) static SITES: &[&Site] = &[
     &scatbooru::SITE,
     &sizebooru::SITE,
     &nozomi::SITE,
+    &sankaku::SITE,
 ];
 
 // ---------------------------------------------------------------------------
