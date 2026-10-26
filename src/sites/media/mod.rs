@@ -10,6 +10,7 @@ use url::Url;
 mod audiochan;
 mod khinsider;
 mod misskey;
+mod naverchzzk;
 mod redgifs;
 mod soundgasm;
 mod whyp;
@@ -43,6 +44,7 @@ pub(super) static SITES: &[&Site] = &[
     &whyp::SITE,
     &audiochan::SITE,
     &khinsider::SITE,
+    &naverchzzk::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
