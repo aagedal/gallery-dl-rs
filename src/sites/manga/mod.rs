@@ -26,6 +26,7 @@ mod mangafreak;
 mod mangahere;
 mod mangaread;
 mod mangareader;
+mod mangataro;
 mod mangatown;
 mod naverwebtoon;
 mod rawkuma;
@@ -34,6 +35,7 @@ mod tcbscans;
 mod text;
 mod tmohentai;
 pub(crate) mod webtoons;
+mod weebcentral;
 
 pub(super) static SITES: &[&Site] = &[
     &mangadex::SITE,
@@ -58,6 +60,8 @@ pub(super) static SITES: &[&Site] = &[
     &naverwebtoon::SITE,
     &dankefuerslesen::SITE,
     &foolslide::SITE,
+    &weebcentral::SITE,
+    &mangataro::SITE,
 ];
 
 /// Insert a key into a keyword map.

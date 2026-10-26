@@ -219,3 +219,29 @@ pub(crate) fn basic_auth(username: &str, password: &str) -> String {
 pub(crate) fn code_to_language(code: &str) -> Option<&'static str> {
     crate::sites::manga::webtoons::code_to_language(code)
 }
+
+/// `Extractor._extract_jsonld`: the page's JSON-LD script.
+pub(crate) fn jsonld(page: &str) -> crate::Result<Value> {
+    let raw = match extr(page, "<script type=\"application/ld+json\">", "</script>") {
+        "" => extr(page, "<script type='application/ld+json'>", "</script>"),
+        raw => raw,
+    };
+    serde_json::from_str(raw).map_err(|_| crate::error("page has no valid JSON-LD data"))
+}
+
+/// `Extractor._extract_nextdata`: the page's Next.js `__NEXT_DATA__`.
+pub(crate) fn nextdata(page: &str) -> crate::Result<Value> {
+    let raw = match extr(
+        page,
+        " id=\"__NEXT_DATA__\" type=\"application/json\">",
+        "</script>",
+    ) {
+        "" => extr(
+            page,
+            " id='__NEXT_DATA__' type='application/json'>",
+            "</script>",
+        ),
+        raw => raw,
+    };
+    serde_json::from_str(raw).map_err(|_| crate::error("page has no valid Next.js data"))
+}
