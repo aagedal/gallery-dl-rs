@@ -21,6 +21,7 @@ mod imagechest;
 mod imagehost;
 mod imgpile;
 mod imgth;
+mod koofr;
 mod lensdump;
 mod lolisafe;
 mod mixdrop;
@@ -68,6 +69,7 @@ pub(super) static SITES: &[&Site] = &[
     &imgpile::SITE,
     &imagechest::SITE,
     &lensdump::SITE,
+    &koofr::SITE,
 ];
 
 // ---------------------------------------------------------------------------

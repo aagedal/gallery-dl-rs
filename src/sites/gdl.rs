@@ -310,3 +310,12 @@ pub(crate) fn rextr<'t>(text: &'t str, begin: &str, end: &str, pos: Option<usize
 pub(crate) fn language_to_code(language: &str) -> Option<&'static str> {
     crate::sites::manga::webtoons::language_to_code(language)
 }
+
+/// `text.escape` (`html.escape` with quotes).
+pub(crate) fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}

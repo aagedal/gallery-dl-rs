@@ -578,20 +578,22 @@ pub(crate) fn archive_key(media: &Media) -> Option<(&'static str, String)> {
     while let Some(start) = rest.find('{') {
         let end = rest[start..].find('}')? + start;
         let spec = rest[start + 1..end].split([':', '!']).next()?;
-        let mut parts = spec.split('[');
-        let mut value = keywords.fields.get(parts.next()?)?.clone();
-        for key in parts {
-            let key = key.strip_suffix(']')?;
-            value = match (&value, key.parse::<usize>()) {
-                (Value::Array(items), Ok(i)) => items.get(i)?.clone(),
-                (Value::String(text), Ok(i)) => text.chars().nth(i)?.to_string().into(),
-                (Value::Object(map), _) => map.get(key)?.clone(),
-                _ => return None,
-            };
-        }
-        if value.is_null() {
-            return None;
-        }
+        // `{a|b}` alternatives: the first one that resolves to a value.
+        let lookup = |spec: &str| -> Option<Value> {
+            let mut parts = spec.split('[');
+            let mut value = keywords.fields.get(parts.next()?)?.clone();
+            for key in parts {
+                let key = key.strip_suffix(']')?;
+                value = match (&value, key.parse::<usize>()) {
+                    (Value::Array(items), Ok(i)) => items.get(i)?.clone(),
+                    (Value::String(text), Ok(i)) => text.chars().nth(i)?.to_string().into(),
+                    (Value::Object(map), _) => map.get(key)?.clone(),
+                    _ => return None,
+                };
+            }
+            (!value.is_null()).then_some(value)
+        };
+        let value = spec.split('|').find_map(lookup)?;
         fields.push(scalar(&value));
         rest = &rest[end + 1..];
     }
