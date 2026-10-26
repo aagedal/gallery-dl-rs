@@ -5,6 +5,7 @@ mod arcalive;
 mod bilibili;
 mod blogger;
 mod discord;
+mod joyreactor;
 mod kuaishou;
 mod linkedin;
 mod pholder;
@@ -49,6 +50,7 @@ pub(super) static SITES: &[&Site] = &[
     &reactor::REACTOR,
     &reactor::PORNREACTOR,
     &reactor::THATPERVERT,
+    &joyreactor::SITE,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;
