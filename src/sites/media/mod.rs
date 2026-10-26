@@ -7,6 +7,8 @@ use crate::sites::Site;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod audiochan;
+mod khinsider;
 mod misskey;
 mod redgifs;
 mod soundgasm;
@@ -39,6 +41,8 @@ pub(super) static SITES: &[&Site] = &[
     &wikimedia::MGEWIKI,
     &soundgasm::SITE,
     &whyp::SITE,
+    &audiochan::SITE,
+    &khinsider::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
