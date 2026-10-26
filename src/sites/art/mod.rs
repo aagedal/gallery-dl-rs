@@ -21,6 +21,7 @@ mod livedoor;
 mod lofter;
 mod myportfolio;
 mod naverblog;
+mod photovogue;
 mod picarto;
 mod piczel;
 mod slideshare;
@@ -52,6 +53,7 @@ pub(super) static SITES: &[&Site] = &[
     &slideshare::SITE,
     &speakerdeck::SITE,
     &wikiart::SITE,
+    &photovogue::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a

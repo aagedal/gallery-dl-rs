@@ -6,6 +6,7 @@ use url::Url;
 mod adultempire;
 mod ahottie;
 mod cfake;
+mod comedywildlifephoto;
 mod eightmuses;
 mod eporner;
 mod erome;
@@ -24,11 +25,13 @@ mod imhentai;
 mod leakgallery;
 mod luscious;
 mod okporn;
+mod picazor;
 mod pornhub;
 mod pornstarstube;
 mod sankakucomplex;
 mod sxypix;
 mod wallpapercave;
+mod wikifeet;
 mod xasiat;
 mod xhamster;
 mod xvideos;
@@ -72,6 +75,10 @@ pub(super) static SITES: &[&Site] = &[
     &pornstarstube::SITE,
     &yourlesbians::SITE,
     &wallpapercave::SITE,
+    &comedywildlifephoto::SITE,
+    &picazor::SITE,
+    &wikifeet::WIKIFEET,
+    &wikifeet::WIKIFEETX,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.

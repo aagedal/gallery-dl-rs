@@ -26,6 +26,7 @@ mod imageshack;
 mod imgbb;
 mod imgpile;
 mod imgth;
+mod itchio;
 mod koofr;
 mod lensdump;
 mod lolisafe;
@@ -93,6 +94,7 @@ pub(super) static SITES: &[&Site] = &[
     &xenforo::SOCIALMEDIAGIRLSFORUM,
     &xenforo::BLACKTOWHITE,
     &xenforo::XENFORO,
+    &itchio::SITE,
 ];
 
 // ---------------------------------------------------------------------------
