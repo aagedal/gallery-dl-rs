@@ -345,3 +345,23 @@ pub(crate) fn slugify(value: &str) -> String {
     }
     out.trim_matches(['-', '_']).to_owned()
 }
+
+/// `Dispatch._dispatch_extractors`: the selected `(view, url)` pairs for
+/// the `include` option (`default` when unset), in configured order.
+pub(crate) fn dispatch<'v>(
+    http: &crate::sites::Http,
+    views: &'v [(&'v str, String)],
+    default: &[&str],
+) -> crate::Result<Vec<&'v (&'v str, String)>> {
+    let include = match http.option("include") {
+        None => None,
+        Some(value) => Some(crate::dispatch::Include::parse(value)?),
+    };
+    let available: Vec<&str> = views.iter().map(|(view, _)| *view).collect();
+    Ok(
+        crate::dispatch::select(include.as_ref(), default, &available, &[])
+            .into_iter()
+            .filter_map(|name| views.iter().find(|(view, _)| *view == name))
+            .collect(),
+    )
+}

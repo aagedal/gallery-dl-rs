@@ -305,6 +305,67 @@ impl Http {
             }))
     }
 
+    /// POST an (empty) form without following redirects: the redirect
+    /// target, or the response text. Session cookies are sent and updated.
+    pub async fn post_or_location(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<String, Url>> {
+        self.rate_limits.wait(url, self.timeout).await?;
+        let mut request = self
+            .client
+            .post(url.clone())
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .timeout(self.request_timeout);
+        if let Some(cookie) = self
+            .cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .header(url)
+        {
+            request = request.header("Cookie", cookie);
+        }
+        for (key, value) in headers {
+            request = request.header(*key, *value);
+        }
+        let response = tokio::time::timeout(self.timeout, request.send())
+            .await
+            .map_err(|_| error(format!("native {} extraction timed out", self.name)))?
+            .map_err(|_| {
+                error(format!(
+                    "{} request failed; check network access",
+                    self.name
+                ))
+            })?;
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .store_response(url, response.headers());
+        let status = response.status();
+        if status.is_redirection() {
+            return response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| url.join(value).ok())
+                .filter(|target| matches!(target.scheme(), "http" | "https"))
+                .map(Err)
+                .ok_or_else(|| error(format!("{} sent an invalid redirect", self.name)));
+        }
+        if !status.is_success() {
+            return Err(error(format!("{} returned HTTP {status}", self.name)));
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| error(format!("could not read {} response", self.name)))?;
+        if bytes.len() > MAX_RESPONSE {
+            return Err(error(format!("{} response exceeded 16 MiB", self.name)));
+        }
+        Ok(Ok(String::from_utf8_lossy(&bytes).into_owned()))
+    }
+
     /// POST a body and return the raw response; redirects are refused.
     pub async fn post(
         &self,
