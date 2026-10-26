@@ -19,7 +19,9 @@ mod realbooru;
 mod rule34us;
 mod rule34vault;
 mod rule34xyz;
+mod scatbooru;
 mod shimmie2;
+mod sizebooru;
 mod szurubooru;
 mod threedbooru;
 mod twibooru;
@@ -65,6 +67,8 @@ pub(super) static SITES: &[&Site] = &[
     &furry34::SITE,
     &yiffverse::SITE,
     &comicvine::SITE,
+    &scatbooru::SITE,
+    &sizebooru::SITE,
 ];
 
 // ---------------------------------------------------------------------------
