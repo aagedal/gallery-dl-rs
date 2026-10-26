@@ -11,6 +11,7 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value};
 use url::Url;
 
+mod allporncomic;
 mod dandadan;
 mod dankefuerslesen;
 mod dynastyscans;
@@ -73,6 +74,7 @@ pub(super) static SITES: &[&Site] = &[
     &manganelo::MANGAKAKALOT,
     &weebdex::SITE,
     &keenspot::SITE,
+    &allporncomic::SITE,
 ];
 
 /// Insert a key into a keyword map.
