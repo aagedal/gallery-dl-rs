@@ -381,3 +381,10 @@ pub(crate) fn hls_item(stream: &str, fields: Map<String, Value>) -> Option<crate
         }),
     )
 }
+
+/// A `ytdl:` URL handed to yt-dlp as a video page.
+pub(crate) fn ytdl_item(page: &str, fields: Map<String, Value>) -> Option<crate::sites::Item> {
+    let page_url = Url::parse(page).ok()?;
+    let url = Url::parse(&format!("ytdl:{page}")).ok()?;
+    Some(crate::sites::Item::new(url, fields).job(crate::extract::MediaJob::VideoPage { page_url }))
+}

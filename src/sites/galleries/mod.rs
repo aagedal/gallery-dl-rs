@@ -13,9 +13,12 @@ mod everia;
 mod fapachi;
 mod fapello;
 mod fikfap;
+mod fitnakedgirls;
 mod fuskator;
 mod girlsreleased;
+mod girlswithmuscle;
 mod hentaicosplays;
+mod hotleak;
 mod leakgallery;
 mod pornhub;
 mod sankakucomplex;
@@ -45,6 +48,9 @@ pub(super) static SITES: &[&Site] = &[
     &erome::SITE,
     &fikfap::SITE,
     &leakgallery::SITE,
+    &fitnakedgirls::SITE,
+    &girlswithmuscle::SITE,
+    &hotleak::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
