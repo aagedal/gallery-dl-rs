@@ -12,6 +12,7 @@ mod architizer;
 mod arena;
 mod behance;
 mod booth;
+mod cien;
 mod civitai;
 mod desktopography;
 mod fivehundredpx;
@@ -78,6 +79,7 @@ pub(super) static SITES: &[&Site] = &[
     &pixnet::SITE,
     &foriio::SITE,
     &pexels::SITE,
+    &cien::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
