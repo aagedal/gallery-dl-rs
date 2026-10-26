@@ -24,7 +24,10 @@ mod imagefap;
 mod imhentai;
 mod kabeuchi;
 mod leakgallery;
+mod listal;
 mod luscious;
+mod myhentaigallery;
+mod nsfwalbum;
 mod nudostar;
 mod okporn;
 mod picazor;
@@ -85,6 +88,9 @@ pub(super) static SITES: &[&Site] = &[
     &nudostar::SITE,
     &pictoa::SITE,
     &kabeuchi::SITE,
+    &nsfwalbum::SITE,
+    &listal::SITE,
+    &myhentaigallery::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.

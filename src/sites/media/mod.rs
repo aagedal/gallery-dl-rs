@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use url::Url;
 
 mod audiochan;
+mod bbc;
 mod iwara;
 mod khinsider;
 mod misskey;
@@ -47,6 +48,7 @@ pub(super) static SITES: &[&Site] = &[
     &khinsider::SITE,
     &naverchzzk::SITE,
     &iwara::SITE,
+    &bbc::SITE,
 ];
 
 /// gallery-dl `dt.parse_iso` as Unix seconds: Python 3.12
