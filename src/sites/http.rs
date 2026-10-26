@@ -265,8 +265,18 @@ impl Http {
     }
 
     pub async fn text_with(&self, url: &Url, headers: &[(&str, &str)]) -> Result<String> {
-        let (body, _, content_type) = self.send_with(url, headers, None, false).await?;
-        Ok(decode_text(&body, content_type.as_deref()))
+        let (body, _, headers) = self.send_with(url, headers, None, false).await?;
+        Ok(decode_text(&body, content_type(&headers)))
+    }
+
+    /// GET the raw body together with the response headers.
+    pub async fn get_with_headers(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<(Vec<u8>, reqwest::header::HeaderMap)> {
+        let (body, _, headers) = self.send_with(url, headers, None, false).await?;
+        Ok((body, headers))
     }
 
     pub async fn get(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
@@ -283,8 +293,8 @@ impl Http {
 
     /// GET text and the URL it was finally served from after redirects.
     pub async fn text_final(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(String, Url)> {
-        let (body, final_url, content_type) = self.send_with(url, headers, None, false).await?;
-        Ok((decode_text(&body, content_type.as_deref()), final_url))
+        let (body, final_url, headers) = self.send_with(url, headers, None, false).await?;
+        Ok((decode_text(&body, content_type(&headers)), final_url))
     }
 
     /// The `Location` of one GET without following it, for short links that
@@ -443,7 +453,7 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
         strict: bool,
-    ) -> Result<(Vec<u8>, Url, Option<String>)> {
+    ) -> Result<(Vec<u8>, Url, reqwest::header::HeaderMap)> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
                 match self.attempt(url, headers, body, attempt, strict).await {
@@ -467,7 +477,7 @@ impl Http {
         body: Option<Body<'_>>,
         attempt: u8,
         strict: bool,
-    ) -> std::result::Result<(Vec<u8>, Url, Option<String>), Failure> {
+    ) -> std::result::Result<(Vec<u8>, Url, reqwest::header::HeaderMap), Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint)
@@ -574,16 +584,18 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        let content_type = headers
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
         Ok((
             crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
             target,
-            content_type,
+            headers,
         ))
     }
+}
+
+fn content_type(headers: &reqwest::header::HeaderMap) -> Option<&str> {
+    headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
 }
 
 /// Decode a text response by its `Content-Type` charset, else a `<meta>`

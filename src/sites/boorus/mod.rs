@@ -13,6 +13,7 @@ mod furry34;
 mod gelbooru_v01;
 mod gelbooru_v02;
 mod moebooru;
+mod nozomi;
 mod paheal;
 mod philomena;
 mod realbooru;
@@ -69,6 +70,7 @@ pub(super) static SITES: &[&Site] = &[
     &comicvine::SITE,
     &scatbooru::SITE,
     &sizebooru::SITE,
+    &nozomi::SITE,
 ];
 
 // ---------------------------------------------------------------------------
