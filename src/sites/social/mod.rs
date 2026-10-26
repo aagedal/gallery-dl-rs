@@ -8,6 +8,7 @@ mod discord;
 mod joyreactor;
 mod kuaishou;
 mod linkedin;
+mod nitter;
 mod pholder;
 mod pillowfort;
 mod plurk;
@@ -51,6 +52,12 @@ pub(super) static SITES: &[&Site] = &[
     &reactor::PORNREACTOR,
     &reactor::THATPERVERT,
     &joyreactor::SITE,
+    &nitter::NITTER_NET,
+    &nitter::NITTER_SPACE,
+    &nitter::NITTER_TIEKOETTER,
+    &nitter::XCANCEL,
+    &nitter::LIGHTBRD,
+    &nitter::NITTER,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;
