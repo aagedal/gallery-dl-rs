@@ -206,7 +206,10 @@ pub(crate) fn truthy(value: Option<&Value>) -> bool {
 macro_rules! re {
     ($pattern:expr) => {{
         static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-        RE.get_or_init(|| regex::Regex::new($pattern).expect("static regex"))
+        // Compiled once per call site, even inside loops.
+        #[allow(clippy::regex_creation_in_loops)]
+        let compiled = RE.get_or_init(|| regex::Regex::new($pattern).expect("static regex"));
+        compiled
     }};
 }
 pub(crate) use re;

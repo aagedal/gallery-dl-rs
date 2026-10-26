@@ -5,6 +5,7 @@ use url::Url;
 
 mod eporner;
 mod pornhub;
+mod sankakucomplex;
 mod xasiat;
 mod xhamster;
 mod xvideos;
@@ -15,6 +16,7 @@ pub(super) static SITES: &[&Site] = &[
     &xhamster::SITE,
     &xasiat::SITE,
     &pornhub::SITE,
+    &sankakucomplex::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
