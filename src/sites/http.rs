@@ -151,6 +151,21 @@ impl Http {
     }
 
     /// The value of a session cookie that would be sent to `url`.
+    /// Names of the session cookies sent to `url`.
+    pub fn cookie_names(&self, url: &Url) -> Vec<String> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .header(url)
+            .map(|header| {
+                header
+                    .split("; ")
+                    .filter_map(|pair| pair.split_once('=').map(|(name, _)| name.to_owned()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn cookie(&self, url: &Url, name: &str) -> Option<String> {
         self.cookies
             .lock()
@@ -250,8 +265,8 @@ impl Http {
     }
 
     pub async fn text_with(&self, url: &Url, headers: &[(&str, &str)]) -> Result<String> {
-        let body = self.get(url, headers).await?;
-        Ok(String::from_utf8_lossy(&body).into_owned())
+        let (body, _, content_type) = self.send_with(url, headers, None, false).await?;
+        Ok(decode_text(&body, content_type.as_deref()))
     }
 
     pub async fn get(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
@@ -263,13 +278,13 @@ impl Http {
     pub async fn get_strict(&self, url: &Url, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
         self.send_with(url, headers, None, true)
             .await
-            .map(|(body, _)| body)
+            .map(|(body, _, _)| body)
     }
 
     /// GET text and the URL it was finally served from after redirects.
     pub async fn text_final(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(String, Url)> {
-        let (body, final_url) = self.send_with(url, headers, None, false).await?;
-        Ok((String::from_utf8_lossy(&body).into_owned(), final_url))
+        let (body, final_url, content_type) = self.send_with(url, headers, None, false).await?;
+        Ok((decode_text(&body, content_type.as_deref()), final_url))
     }
 
     /// The `Location` of one GET without following it, for short links that
@@ -419,7 +434,7 @@ impl Http {
     ) -> Result<Vec<u8>> {
         self.send_with(url, headers, body, false)
             .await
-            .map(|(body, _)| body)
+            .map(|(body, _, _)| body)
     }
 
     async fn send_with(
@@ -428,7 +443,7 @@ impl Http {
         headers: &[(&str, &str)],
         body: Option<Body<'_>>,
         strict: bool,
-    ) -> Result<(Vec<u8>, Url)> {
+    ) -> Result<(Vec<u8>, Url, Option<String>)> {
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
                 match self.attempt(url, headers, body, attempt, strict).await {
@@ -452,7 +467,7 @@ impl Http {
         body: Option<Body<'_>>,
         attempt: u8,
         strict: bool,
-    ) -> std::result::Result<(Vec<u8>, Url), Failure> {
+    ) -> std::result::Result<(Vec<u8>, Url, Option<String>), Failure> {
         let name = self.name;
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint)
@@ -559,10 +574,42 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
+        let content_type = headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         Ok((
             crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
             target,
+            content_type,
         ))
+    }
+}
+
+/// Decode a text response by its `Content-Type` charset, else a `<meta>`
+/// charset declaration near the start of an HTML page, else UTF-8.
+pub(crate) fn decode_text(body: &[u8], content_type: Option<&str>) -> String {
+    let declared = content_type
+        .and_then(|value| {
+            value.split(';').find_map(|part| {
+                part.trim()
+                    .strip_prefix("charset=")
+                    .map(|charset| charset.trim_matches('"').to_owned())
+            })
+        })
+        .or_else(|| {
+            let head = String::from_utf8_lossy(&body[..body.len().min(2048)]).to_ascii_lowercase();
+            let at = head.find("charset=")? + "charset=".len();
+            let value: String = head[at..]
+                .trim_start_matches(['"', '\''])
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+                .collect();
+            (!value.is_empty()).then_some(value)
+        });
+    match declared.and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes())) {
+        Some(encoding) if encoding != encoding_rs::UTF_8 => encoding.decode(body).0.into_owned(),
+        _ => String::from_utf8_lossy(body).into_owned(),
     }
 }
 
@@ -687,5 +734,26 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].contains("cookie: explicit=1"));
         assert!(!requests[0].contains("jar=1"));
+    }
+}
+
+#[cfg(test)]
+mod charset_tests {
+    use super::decode_text;
+
+    #[test]
+    fn decodes_declared_charsets() {
+        let (sjis, _, _) = encoding_rs::SHIFT_JIS.encode("二次元裏＠ふたば");
+        assert_eq!(
+            decode_text(&sjis, Some("text/html; charset=Shift_JIS")),
+            "二次元裏＠ふたば"
+        );
+        let page = [b"<meta charset=\"shift_jis\">".as_slice(), &sjis].concat();
+        assert!(decode_text(&page, Some("text/html")).ends_with("二次元裏＠ふたば"));
+        assert_eq!(decode_text("ä".as_bytes(), None), "ä");
+        assert_eq!(
+            decode_text(b"\xe4", Some("text/plain; charset=iso-8859-1")),
+            "ä"
+        );
     }
 }

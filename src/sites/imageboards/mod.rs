@@ -3,6 +3,7 @@ use crate::sites::{Events, Http, Route, Site};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod eightchan;
 mod foolfuuka;
 mod fourarchive;
 mod fourchan;
@@ -10,6 +11,7 @@ mod fourchanarchives;
 mod jschan;
 mod lynxchan;
 mod twoch;
+mod twochan;
 mod twochen;
 mod vichan;
 mod warosu;
@@ -38,6 +40,8 @@ pub(super) static SITES: &[&Site] = &[
     &twoch::SITE,
     &twochen::STURDYCHAN,
     &twochen::SCHAN,
+    &twochan::SITE,
+    &eightchan::SITE,
 ];
 
 /// Key holding the upstream `Message.Directory` fields a route's default
