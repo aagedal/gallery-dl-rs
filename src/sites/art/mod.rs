@@ -17,6 +17,7 @@ mod booth;
 mod cien;
 mod civitai;
 mod desktopography;
+mod fantia;
 mod fivehundredpx;
 mod foriio;
 mod hatenablog;
@@ -97,6 +98,7 @@ pub(super) static SITES: &[&Site] = &[
     &ao3::SITE,
     &aryion::SITE,
     &inkbunny::SITE,
+    &fantia::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
