@@ -38,6 +38,8 @@ mod s3ndpics;
 mod sankakucomplex;
 mod shopify;
 mod sxypix;
+mod thefap;
+mod tumblrgallery;
 mod wallpapercave;
 mod wikifeet;
 mod xasiat;
@@ -106,6 +108,8 @@ pub(super) static SITES: &[&Site] = &[
     &shopify::UNIQUEVINTAGE,
     &shopify::WINDSORSTORE,
     &shopify::SHOPIFY,
+    &thefap::SITE,
+    &tumblrgallery::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.

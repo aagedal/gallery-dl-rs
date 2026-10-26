@@ -33,6 +33,7 @@ mod slideshare;
 mod speakerdeck;
 mod steamgriddb;
 mod thirtyfivephoto;
+mod toyhouse;
 mod tungsten;
 mod vanillarock;
 mod wikiart;
@@ -68,6 +69,7 @@ pub(super) static SITES: &[&Site] = &[
     &tungsten::SITE,
     &nekohouse::SITE,
     &slickpic::SITE,
+    &toyhouse::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
