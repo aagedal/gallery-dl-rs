@@ -34,6 +34,7 @@ mod tenor;
 mod turbo;
 mod urlgalleries;
 mod urlshortener;
+mod vipergirls;
 mod webmshare;
 
 pub(super) static SITES: &[&Site] = &[
@@ -80,6 +81,7 @@ pub(super) static SITES: &[&Site] = &[
     &cyberfile::SITE,
     &tenor::SITE,
     &imgbb::SITE,
+    &vipergirls::SITE,
 ];
 
 // ---------------------------------------------------------------------------
