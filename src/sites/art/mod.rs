@@ -20,6 +20,7 @@ mod desktopography;
 mod fivehundredpx;
 mod foriio;
 mod hatenablog;
+mod inkbunny;
 mod issuu;
 mod itaku;
 mod lexica;
@@ -95,6 +96,7 @@ pub(super) static SITES: &[&Site] = &[
     &nijie::HORNE,
     &ao3::SITE,
     &aryion::SITE,
+    &inkbunny::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
