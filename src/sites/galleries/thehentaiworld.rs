@@ -196,25 +196,31 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     format!("{base}page/{page_num}/")
                 };
                 let page = http.text(&http.api(&url)?).await?;
-                let mut events = Vec::new();
-                for post in extract_iter(
+                let posts: Vec<String> = extract_iter(
                     extr(&page, "id=\"thumbContainer\"", "<script"),
                     " href=\"",
                     "\"",
-                ) {
-                    let items = post_items(http, post)
-                        .await
-                        .into_iter()
-                        .map(|mut item| {
-                            item.keywords
-                                .insert("search_tags".into(), tag.as_str().into());
-                            item
-                        })
-                        .collect();
-                    events.extend(crate::sites::post(&SITE, http, &TAG, items));
-                }
+                )
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
                 let next = page.contains("class=\"next\"").then_some(page_num + 1);
-                Ok(Some((crate::sites::events(events), next)))
+                let events = crate::sites::each(posts, move |post| {
+                    let tag = tag.clone();
+                    async move {
+                        let items = post_items(http, &post)
+                            .await
+                            .into_iter()
+                            .map(|mut item| {
+                                item.keywords
+                                    .insert("search_tags".into(), tag.as_str().into());
+                                item
+                            })
+                            .collect();
+                        Ok(crate::sites::post(&SITE, http, &TAG, items))
+                    }
+                });
+                Ok(Some((events, next)))
             }
         }),
     }

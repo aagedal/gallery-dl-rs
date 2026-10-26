@@ -240,39 +240,49 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                         data
                     }
                 };
-                let mut number = num;
-                let mut items = Vec::new();
-                for thumb in extract_iter(&html, "class=\"thumb-container", "</div>") {
-                    let mut scan = Scan::new(thumb);
-                    let codename = scan.extr("data-codename=\"", "\"").to_owned();
-                    scan.extr("data-mediatype=\"", "\"");
-                    let thumbnail = scan.extr("class=\"static\" src=\"", "\"").to_owned();
-                    number += 1;
-                    let Ok(mut file) = media(http, &codename).await else {
-                        continue;
-                    };
-                    let uploader = file.get("uploader").cloned();
-                    file.extend(data.clone());
-                    file.insert("num".into(), number.into());
-                    file.insert("thumbnail".into(), thumbnail.into());
-                    file.insert("uploader".into(), uploader.unwrap_or(Value::Null));
-                    if kind == "group" {
-                        file.insert("group".into(), data["group_id"].clone());
-                    }
-                    let url = crate::sites::scalar(&file["url"]);
-                    nameext_into(&url, &mut file);
-                    let media_id = crate::sites::scalar(&file["id"]);
-                    if let Ok(url) = Url::parse(&url) {
-                        items.push(Item::new(url, file).ids(id.clone(), media_id));
-                    }
-                }
+                let thumbs: Vec<(usize, String, String)> =
+                    extract_iter(&html, "class=\"thumb-container", "</div>")
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, thumb)| {
+                            let mut scan = Scan::new(thumb);
+                            let codename = scan.extr("data-codename=\"", "\"").to_owned();
+                            scan.extr("data-mediatype=\"", "\"");
+                            (
+                                num + index + 1,
+                                codename,
+                                scan.extr("class=\"static\" src=\"", "\"").to_owned(),
+                            )
+                        })
+                        .collect();
+                let number = num + thumbs.len();
                 let next = unescape(extr(&html, "<link rel=\"next\" href=\"", "\""));
+                let shared = data.clone();
                 let next = (!next.is_empty()).then_some((next, Some(data), number));
-                let events = items
-                    .into_iter()
-                    .flat_map(|item| crate::sites::post(&SITE, http, route, vec![item]))
-                    .collect();
-                Ok(Some((crate::sites::events(events), next)))
+                let events = crate::sites::each(thumbs, move |(number, codename, thumbnail)| {
+                    let data = shared.clone();
+                    let id = id.clone();
+                    async move {
+                        let mut file = media(http, &codename).await?;
+                        let uploader = file.get("uploader").cloned();
+                        file.extend(data.clone());
+                        file.insert("num".into(), number.into());
+                        file.insert("thumbnail".into(), thumbnail.into());
+                        file.insert("uploader".into(), uploader.unwrap_or(Value::Null));
+                        if kind == "group" {
+                            file.insert("group".into(), data["group_id"].clone());
+                        }
+                        let url = crate::sites::scalar(&file["url"]);
+                        nameext_into(&url, &mut file);
+                        let media_id = crate::sites::scalar(&file["id"]);
+                        let items = Url::parse(&url)
+                            .map(|url| Item::new(url, file).ids(id, media_id))
+                            .into_iter()
+                            .collect();
+                        Ok(crate::sites::post(&SITE, http, route, items))
+                    }
+                });
+                Ok(Some((events, next)))
             }
         },
     )

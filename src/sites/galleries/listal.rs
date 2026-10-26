@@ -100,19 +100,22 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     format!("{base}/{number}")
                 };
                 let page = http.text(&http.api(&url)?).await?;
-                let mut events = Vec::new();
-                for image_id in extract_iter(&page, "listal.com/viewimage/", "'") {
-                    events.extend(crate::sites::post(
-                        &SITE,
-                        http,
-                        &PEOPLE,
-                        image(http, image_id).await?.into_iter().collect(),
-                    ));
-                }
+                let ids: Vec<String> = extract_iter(&page, "listal.com/viewimage/", "'")
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect();
                 let next = page
                     .contains("<span class='nextprev'>Next")
                     .then_some(number + 1);
-                Ok(Some((crate::sites::events(events), next)))
+                let events = crate::sites::each(ids, move |image_id| async move {
+                    Ok(crate::sites::post(
+                        &SITE,
+                        http,
+                        &PEOPLE,
+                        image(http, &image_id).await?.into_iter().collect(),
+                    ))
+                });
+                Ok(Some((events, next)))
             }
         }),
     }

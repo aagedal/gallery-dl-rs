@@ -142,16 +142,15 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 }
             }
             let next = (ids.len() >= 19).then_some(page_num + 1);
-            let mut events = Vec::new();
-            for id in ids {
-                events.extend(crate::sites::post(
+            let events = crate::sites::each(ids, move |id| async move {
+                Ok(crate::sites::post(
                     &SITE,
                     http,
                     route,
                     post_items(http, &id).await,
-                ));
-            }
-            Ok(Some((crate::sites::events(events), next)))
+                ))
+            });
+            Ok(Some((events, next)))
         }
     })
 }

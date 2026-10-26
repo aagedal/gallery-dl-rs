@@ -320,6 +320,21 @@ where
         .boxed()
 }
 
+/// Run `step` for each input only as consumers reach it (upstream's lazy
+/// per-post requests); a failing step yields its error.
+pub(crate) fn each<'a, T, F, Fut>(inputs: Vec<T>, step: F) -> Events<'a>
+where
+    T: Send + 'a,
+    F: FnMut(T) -> Fut + Send + 'a,
+    Fut: std::future::Future<Output = Result<Vec<ExtractionEvent>>> + Send + 'a,
+{
+    pages(
+        stream::iter(inputs)
+            .then(step)
+            .map(|result| result.map(events)),
+    )
+}
+
 /// Paginate with a state machine: `next` returns the events of one page and
 /// the following state, or `None` when done.
 pub(crate) fn paginate<'a, T, F, Fut>(state: T, next: F) -> Events<'a>
