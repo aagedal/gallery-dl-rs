@@ -3,7 +3,10 @@ use crate::sites::{Http, Item, Route, Site};
 use serde_json::{Map, Value};
 use url::Url;
 
+mod adultempire;
+mod ahottie;
 mod eporner;
+mod fapachi;
 mod pornhub;
 mod sankakucomplex;
 mod xasiat;
@@ -17,6 +20,9 @@ pub(super) static SITES: &[&Site] = &[
     &xasiat::SITE,
     &pornhub::SITE,
     &sankakucomplex::SITE,
+    &adultempire::SITE,
+    &ahottie::SITE,
+    &fapachi::SITE,
 ];
 
 /// `GalleryExtractor.items`: files numbered under `num` with a `count`.
@@ -52,4 +58,20 @@ pub(super) fn numbered(
         })
         .collect();
     crate::sites::post(site, http, route, items)
+}
+
+/// Queue child URLs (upstream `Message.Queue`), in order.
+pub(super) fn queue<'a>(
+    http: &'a Http,
+    site: &'static Site,
+    route: &'static Route,
+    children: Vec<(Url, Map<String, Value>)>,
+) -> crate::sites::Events<'a> {
+    use futures_util::StreamExt;
+    futures_util::stream::iter(children)
+        .map(move |(url, data)| {
+            crate::sites::queue(http, site.category, route.subcategory, url, &data)
+        })
+        .flatten()
+        .boxed()
 }
