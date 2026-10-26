@@ -3,6 +3,7 @@ use crate::sites::Site;
 
 mod arcalive;
 mod bilibili;
+mod blogger;
 mod discord;
 mod kuaishou;
 mod linkedin;
@@ -40,6 +41,8 @@ pub(super) static SITES: &[&Site] = &[
     &postmill::RADDLE,
     &postmill::POSTMILL,
     &arcalive::SITE,
+    &blogger::BLOGSPOT,
+    &blogger::BLOGGER,
 ];
 
 pub(super) static SHORTLINK_COOKIE_DOMAINS: &[&str] = shortlink::COOKIE_DOMAINS;

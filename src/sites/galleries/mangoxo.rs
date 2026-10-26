@@ -1,7 +1,7 @@
 //! Mangoxo albums and channels, mirroring gallery_dl/extractor/mangoxo.py.
 use crate::error;
 use crate::sites::gdl::{
-    Scan, auth_info, captures, date, extr, extract_iter, group, nameext_into, parse_int, re,
+    Scan, auth_info, captures, extr, extract_iter, group, nameext_into, nested_date, parse_int, re,
     rpartition, strptime, unescape,
 };
 use crate::sites::{Events, Http, Item, Route, Site};
@@ -130,7 +130,7 @@ fn metadata(page: &str, album_id: &str) -> Map<String, Value> {
         "channel".into(),
         json!({"id": cid, "name": unescape(&cname), "cover": cover}),
     );
-    data.insert("album".into(), json!({"id": album_id, "name": unescape(&title), "date": date(strptime(&created, "%Y.%m.%d %H:%M")), "description": unescape(&description)}));
+    data.insert("album".into(), json!({"id": album_id, "name": unescape(&title), "date": nested_date(strptime(&created, "%Y.%m.%d %H:%M")), "description": unescape(&description)}));
     data.insert("count".into(), parse_int(&count).into());
     data
 }
@@ -241,13 +241,11 @@ mod tests {
         );
         let k = keywords(&files[1]);
         assert_eq!(
-            (
-                k["id"].as_i64(),
-                k["album"]["name"].as_str(),
-                k["album"]["date"].as_str()
-            ),
-            (Some(12), Some("Album & Co"), Some("2019-05-06 07:08:00"))
+            (k["id"].as_i64(), k["album"]["name"].as_str()),
+            (Some(12), Some("Album & Co"))
         );
+        let public = crate::postprocess::public_keywords(&crate::postprocess::context(&files[1]));
+        assert_eq!(public["album"]["date"], "2019-05-06 07:08:00");
         let (file, dir) = crate::sites::default_templates(&files[1]).unwrap();
         assert_eq!(file.render(&files[1]).unwrap(), "lzVOv1Q9_002.png");
         assert_eq!(

@@ -420,3 +420,9 @@ pub(crate) fn generate_token(size: usize) -> String {
     out.truncate(size * 2);
     out
 }
+
+/// A datetime nested inside another keyword (`post[date]`), which the
+/// formatter only recognizes through the source-date marker.
+pub(crate) fn nested_date(seconds: Option<i64>) -> Value {
+    crate::filter::source_date_json(seconds)
+}
