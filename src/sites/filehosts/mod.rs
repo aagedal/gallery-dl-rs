@@ -18,8 +18,11 @@ mod filester;
 mod gofile;
 mod imagehost;
 mod imgth;
+mod lolisafe;
 mod mixdrop;
+mod telegraph;
 mod turbo;
+mod urlgalleries;
 mod urlshortener;
 mod webmshare;
 
@@ -54,6 +57,9 @@ pub(super) static SITES: &[&Site] = &[
     &mixdrop::SITE,
     &webmshare::SITE,
     &imgth::SITE,
+    &telegraph::SITE,
+    &lolisafe::SITE,
+    &urlgalleries::SITE,
 ];
 
 // ---------------------------------------------------------------------------
