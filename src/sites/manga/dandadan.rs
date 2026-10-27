@@ -29,11 +29,12 @@ enum Target {
 }
 
 fn target(url: &Url) -> Option<Target> {
-    let chapter = re!(r"^https?://(?:www\.)?dandadan\.net(/manga/dandadan-chapter-([^/?#]+)/?)");
+    let chapter =
+        re!(r"^https?://(?:www\.|w\d+\.)?dandadan\.net(/manga/dandadan-chapter-([^/?#]+)/?)");
     if let Some(caps) = captures(chapter, url) {
         return Some(Target::Chapter(group(&caps, 1).into()));
     }
-    let manga = re!(r"^https?://(?:www\.)?dandadan\.net(/)");
+    let manga = re!(r"^https?://(?:www\.|w\d+\.)?dandadan\.net(/)");
     captures(manga, url).map(|_| Target::Manga)
 }
 
@@ -104,6 +105,11 @@ mod tests {
             Some(Target::Chapter("/manga/dandadan-chapter-40-5-3/".into()))
         );
         assert_eq!(t("https://dandadan.net/"), Some(Target::Manga));
+        // The site now serves from numbered mirrors such as `w6.`.
+        assert_eq!(
+            t("https://w6.dandadan.net/manga/dandadan-chapter-205/"),
+            Some(Target::Chapter("/manga/dandadan-chapter-205/".into()))
+        );
         assert_eq!(t("https://dandadan.org/"), None);
     }
 
