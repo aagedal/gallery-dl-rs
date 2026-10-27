@@ -9,6 +9,7 @@ use url::Url;
 
 mod agnph;
 mod comicvine;
+mod danbooru;
 mod furry34;
 mod gelbooru_v01;
 mod gelbooru_v02;
@@ -75,6 +76,10 @@ pub(super) static SITES: &[&Site] = &[
     &nozomi::SITE,
     &sankaku::SITE,
     &idolcomplex::SITE,
+    &danbooru::ATFBOORU,
+    &danbooru::AIBOORU,
+    &danbooru::BOORUVAR,
+    &danbooru::E6AI,
 ];
 
 // ---------------------------------------------------------------------------
