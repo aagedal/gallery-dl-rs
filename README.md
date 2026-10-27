@@ -1096,7 +1096,8 @@ the title, with `published_time` and width/height. Default filenames are
 `{post_id}.{extension}`; archive identity is the UUID.
 
 Experimental native Flickr extraction (`--extractor native`, `flickr` category)
-uses the REST API with upstream's default public key unless
+uses the REST API with the site's public key (read once per run from
+`flickr.com/prints`, as upstream does; a built-in key is the fallback) unless
 `extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
 echoed). Supported: `www.flickr.com/photos/USER/ID` (`photos.getInfo` +
 `photos.getSizes`: "Original" or the largest photo; videos pick the best
