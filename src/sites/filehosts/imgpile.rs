@@ -52,6 +52,11 @@ fn target(url: &Url) -> Option<Target> {
 }
 
 fn post_items(page: &str, slug: &str) -> Vec<Item> {
+    if !page.contains("lass=\"post-media")
+        && let Some(data) = crate::sites::gdl::turbo_stream(page)
+    {
+        return loader_items(&data["loaderData"]["routes/post"]["doc"], slug);
+    }
     let mut scan = Scan::new(page);
     let mut post = Map::new();
     post.insert("id_slug".into(), slug.into());
@@ -103,6 +108,45 @@ fn post_items(page: &str, slug: &str) -> Vec<Item> {
             data.insert("url".into(), raw.as_str().into());
             nameext_into(&raw, &mut data);
             Some(Item::new(url, data).ids(slug, id.to_string()))
+        })
+        .collect()
+}
+
+/// [`post_items`] for the React Router site: its `routes/post` loader doc.
+fn loader_items(doc: &Value, slug: &str) -> Vec<Item> {
+    let tags: Vec<Value> = doc["tags"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|tag| tag["name"].clone())
+        .collect();
+    let mut post = Map::new();
+    post.insert("id_slug".into(), slug.into());
+    post.insert("title".into(), doc["title"].clone());
+    post.insert("id".into(), doc["id"].clone());
+    post.insert("author".into(), doc["user"]["username"].clone());
+    post.insert("score".into(), doc["score"].clone());
+    post.insert("views".into(), doc["viewCount"].clone());
+    post.insert("tags".into(), tags.into());
+    let media = doc["media"].as_array().cloned().unwrap_or_default();
+    post.insert("count".into(), media.len().into());
+    let count = media.len();
+    media
+        .iter()
+        .enumerate()
+        .filter_map(|(index, file)| {
+            let raw = file["urls"]["original"].as_str()?.to_owned();
+            let url = Url::parse(&raw).ok()?;
+            let mut data = Map::new();
+            data.insert("post".into(), Value::Object(post.clone()));
+            data.insert("count".into(), count.into());
+            data.insert("num".into(), (index + 1).into());
+            data.insert("id_slug".into(), file["slug"].clone());
+            data.insert("id".into(), file["id"].clone());
+            data.insert("url".into(), raw.as_str().into());
+            nameext_into(&raw, &mut data);
+            let id = crate::sites::scalar(&file["id"]);
+            Some(Item::new(url, data).ids(slug, id))
         })
         .collect()
 }
@@ -182,6 +226,29 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 mod tests {
     use super::*;
     use crate::sites::testing::{children, html, http as client, json, keywords, media, serve};
+
+    #[test]
+    fn reads_turbo_stream_loader() {
+        // [root, "loaderData", {routes/post}, "routes/post", {doc}, "doc", ...]
+        let values = serde_json::json!([
+            {"_1": 2}, "loaderData", {"_3": 4}, "routes/post", {"_5": 6}, "doc",
+            {"_7": 8, "_9": 10, "_11": 12}, "id", 105411, "title", "Scans", "media", [13],
+            {"_14": 15, "_16": 17, "_18": 19}, "id", 3518940, "slug", "BobTUou", "urls", {"_20": 21},
+            "original", "https://cdn.imgpile.com/f/BobTUou.jpg"
+        ]);
+        let page = format!(
+            "<script>window.__reactRouterContext.streamController.enqueue({});</script>",
+            serde_json::to_string(&format!("{values}\n")).unwrap()
+        );
+        let items = post_items(&page, "bbjiXrl");
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].url.as_str(),
+            "https://cdn.imgpile.com/f/BobTUou.jpg"
+        );
+        assert_eq!(items[0].keywords["post"]["title"], "Scans");
+        assert_eq!(items[0].keywords["filename"], "BobTUou");
+    }
 
     #[test]
     fn classifies_urls() {

@@ -826,8 +826,6 @@
     },
     {
       "url": "https://www.furaffinity.net/favorites/example/",
-      "native_supported": false,
-      "native_reason": "Native Fur Affinity currently supports submissions, gallery and scraps only.",
       "extractor": "FuraffinityFavoriteExtractor",
       "subcategory": "favorite",
       "descriptor": {

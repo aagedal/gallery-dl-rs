@@ -172,7 +172,16 @@ fn work_data(html: &str, creator: &str, work_id: &str) -> Map<String, Value> {
 fn parse_work(html: &str, creator: &str, work_id: &str) -> Vec<Item> {
     let mut work = work_data(html, creator, work_id);
     let mut files = Vec::new();
-    for img in extract_iter(html, "class=\"article__wrap_img", "</div>") {
+    // Each wrapper up to the next one: wrappers may nest a `<div>` before
+    // their `<img>`, so upstream's `</div>` end loses those images.
+    let marker = "class=\"article__wrap_img";
+    let wraps: Vec<&str> = html
+        .match_indices(marker)
+        .map(|(i, _)| &html[i + marker.len()..])
+        .filter(|rest| !rest.starts_with("_hide"))
+        .map(|rest| &rest[..rest.find(marker).unwrap_or(rest.len())])
+        .collect();
+    for img in wraps {
         let image_id = extr(img, "/fullscale_image?image_id=", "&");
         if !image_id.is_empty() {
             let url = format!(
@@ -191,9 +200,17 @@ fn parse_work(html: &str, creator: &str, work_id: &str) -> Vec<Item> {
         if src.is_empty() {
             continue;
         }
-        // Python `url.split("/", 5)[-2]`.
+        // Python `url.split("/", 5)[-2]`; newer `/secure/<n>/` URLs carry
+        // the image id as the file name's `<id>_` prefix instead.
         let parts: Vec<&str> = src.splitn(6, '/').collect();
-        let image_id = parts[parts.len().saturating_sub(2)].to_owned();
+        let mut image_id = parts[parts.len().saturating_sub(2)].to_owned();
+        if src.contains("/secure/") {
+            let name = src.split('?').next().unwrap_or_default();
+            let name = name.rsplit('/').next().unwrap_or_default();
+            if let Some((id, _)) = name.split_once('_').filter(|(id, _)| !id.is_empty()) {
+                image_id = id.to_owned();
+            }
+        }
         let url = unescape(src);
         let ext = ext_from_url(&url);
         files.push((
@@ -298,7 +315,7 @@ mod tests {
 <div data-creator-id="1495" data-creator-user-id="3778" data-creator-name="香椎" data-creator-profile="P &amp; Q">
 <a href="/portfolio/yutakashii/series/42">
 <div class="article__wrap_img"><a href="/fullscale_image?image_id=113179&work_id=23977"><img src="x"></a></div>
-<div class="article__wrap_img"><img src="https://assets.xfolio.jp/secure/1359786657/creator/6030/works/87495/305223_r.webp?hash=I&amp;expires=1"></div>
+<div class="article__wrap_img"><div class="openIcon"></div><img src="https://assets.xfolio.jp/secure/1359786657/creator/6030/works/87495/305223_r.webp?hash=I&amp;expires=1"></div>
 <div class="article__wrap_img">nothing</div>"#;
 
     #[tokio::test]
@@ -330,13 +347,13 @@ mod tests {
             "https://xfolio.jp/fullscale_image?image_id=113179&work_id=23977"
         );
         let k = keywords(&files[1]);
-        assert_eq!(k["image_id"], "1359786657");
+        assert_eq!(k["image_id"], "305223");
         assert_eq!(k["extension"], "webp");
         assert_eq!(k["num"], 2);
         assert!(files[1].url.as_str().ends_with("?hash=I&expires=1"));
         assert_eq!(files[1].headers["Sec-Fetch-Site"], "same-site");
         let (file, dir) = crate::sites::default_templates(&files[1]).unwrap();
-        assert_eq!(file.render(&files[1]).unwrap(), "23977_1359786657.webp");
+        assert_eq!(file.render(&files[1]).unwrap(), "23977_305223.webp");
         assert_eq!(
             dir.render(&files[1]).unwrap().unwrap(),
             std::path::PathBuf::from("xfolio/yutakashii/23977")

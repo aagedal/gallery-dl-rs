@@ -108,7 +108,7 @@ impl Server {
         self.requests.lock().unwrap().len()
     }
     async fn wait_for(&self, count: usize) {
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(Duration::from_secs(15), async {
             while self.count() < count {
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }

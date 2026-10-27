@@ -114,6 +114,19 @@ impl Site {
     }
 }
 
+/// Hosts of upstream's `danbooru` instance pattern:
+/// `(danbooru|hijiribe|sonohara|safebooru).donmai.us` and `donmai.moe`.
+pub fn danbooru_host(host: &str) -> bool {
+    matches!(
+        host,
+        "danbooru.donmai.us"
+            | "hijiribe.donmai.us"
+            | "sonohara.donmai.us"
+            | "safebooru.donmai.us"
+            | "donmai.moe"
+    )
+}
+
 /// A supported booru input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -185,9 +198,7 @@ fn source_search_tags_raw(site: Site, url: &Url) -> Option<&str> {
     }
     let query = url.query()?;
     Some(match site {
-        Site::Danbooru
-            if url.host_str() == Some("danbooru.donmai.us") && url.path() == "/posts" =>
-        {
+        Site::Danbooru if url.host_str().is_some_and(danbooru_host) && url.path() == "/posts" => {
             // The source's greedy repeated query prefix selects the last pair.
             query
                 .split('&')
@@ -268,6 +279,11 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     let host = host.strip_prefix("www.").unwrap_or(host);
     let root = match (site, host) {
         (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => "https://danbooru.donmai.us/",
+        // Mirrors keep their own origin (`safebooru` filters content).
+        (Site::Danbooru, "hijiribe.donmai.us") => "https://hijiribe.donmai.us/",
+        (Site::Danbooru, "sonohara.donmai.us") => "https://sonohara.donmai.us/",
+        (Site::Danbooru, "safebooru.donmai.us") => "https://safebooru.donmai.us/",
+        (Site::Danbooru, "donmai.moe") => "https://donmai.moe/",
         (Site::E621, "e621.net") => "https://e621.net/",
         (Site::E621, "e926.net") => "https://e926.net/",
         (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/",
@@ -325,6 +341,22 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
                 .or_else(|| query("tags"))
                 .filter(|t| valid_tags(t))
                 .map(|tags| Target::Tags { tags }),
+            // e621's `/post?tags=` and legacy `/post/index/PAGE/TAGS`.
+            ["post"] if site == Site::E621 => source_tags
+                .clone()
+                .or_else(|| query("tags"))
+                .filter(|t| valid_tags(t))
+                .map(|tags| Target::Tags { tags }),
+            ["post", "index", page, tags]
+                if site == Site::E621 && page.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                let encoded = format!("value={tags}");
+                let tags = url::form_urlencoded::parse(encoded.as_bytes())
+                    .next()
+                    .map(|(_, v)| v.into_owned())
+                    .unwrap_or_default();
+                valid_tags(&tags).then_some(Target::Tags { tags })
+            }
             _ => None,
         }
     } else {
@@ -695,7 +727,7 @@ fn defaults(
 
 pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDefaults>> {
     let category = match url.host_str()? {
-        "danbooru.donmai.us" => "danbooru",
+        host if danbooru_host(host) => "danbooru",
         "e621.net" => "e621",
         "e926.net" => "e926",
         "gelbooru.com" => "gelbooru",
@@ -1869,11 +1901,13 @@ impl Booru {
     ) -> std::result::Result<Vec<u8>, Failure> {
         let name = self.site.name();
         let mut target = endpoint.clone();
-        let mut redirects = Redirects::new(endpoint);
+        // Danbooru's mirror hosts now redirect to other `donmai.us` hosts
+        // (e.g. `hijiribe` → `shima`); other sites stay on their origin.
+        let mut redirects = Redirects::new(endpoint).allow_same_site(self.site == Site::Danbooru);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
             // Keep the canonical URL free of secrets. Redirects are restricted
-            // to this origin, and credentials are added only to each API request.
+            // to this site, and credentials are added only to each API request.
             let mut request_url = target.clone();
             if kind != RequestKind::Html
                 && let Some((user_id, api_key)) = &self.api_credentials
@@ -2136,6 +2170,30 @@ mod tests {
     }
 
     #[test]
+    fn e621_legacy_tag_urls() {
+        for raw in [
+            "https://e621.net/post/index/1/cat+dog",
+            "https://e926.net/post/index/3/cat%20dog",
+            "https://e621.net/post?tags=cat+dog",
+        ] {
+            assert_eq!(
+                target(Site::E621, &Url::parse(raw).unwrap()).unwrap().0,
+                Target::Tags {
+                    tags: "cat dog".into()
+                },
+                "{raw}"
+            );
+        }
+        assert!(
+            target(
+                Site::Danbooru,
+                &Url::parse("https://danbooru.donmai.us/post/index/1/x").unwrap()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn search_source_matching_preserves_native_alias_fallback_and_bounds() {
         for (site, raw) in [
             (Site::Danbooru, "https://donmai.us/posts?tags=Cat+Dog"),
@@ -2395,6 +2453,7 @@ mod tests {
     #[test]
     fn classifies_supported_urls() {
         let t = |site, raw: &str| target(site, &Url::parse(raw).unwrap()).map(|(t, _)| t);
+        let t2 = |raw: &str| target(Site::Danbooru, &Url::parse(raw).unwrap()).unwrap();
         assert_eq!(
             t(Site::Danbooru, "https://danbooru.donmai.us/posts/123?q=x").unwrap(),
             Target::Post { id: 123 }
@@ -2434,11 +2493,21 @@ mod tests {
             .unwrap(),
             Target::Pool { id: "1".into() }
         );
+        // Upstream's danbooru instance also covers these mirrors.
+        for host in [
+            "safebooru.donmai.us",
+            "hijiribe.donmai.us",
+            "sonohara.donmai.us",
+            "donmai.moe",
+        ] {
+            let (target, root) = t2(&format!("https://{host}/posts/1"));
+            assert_eq!(target, Target::Post { id: 1 });
+            assert_eq!(root.as_str(), format!("https://{host}/"));
+        }
         for (site, raw) in [
             (Site::Danbooru, "https://danbooru.donmai.us/posts"),
             (Site::Danbooru, "https://danbooru.donmai.us/posts/abc"),
             (Site::Danbooru, "https://danbooru.donmai.us:444/posts/1"),
-            (Site::Danbooru, "https://safebooru.donmai.us/posts/1"),
             (Site::E621, "https://e621.net/users/1"),
             (
                 Site::Gelbooru,

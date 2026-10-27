@@ -59,13 +59,8 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     crate::sites::once(async move {
         let page = http.api(&format!("{ROOT}/@{name}"))?;
         let html = http.text_with(&page, &http.browser_headers(&[])).await?;
-        let data = crate::sites::extr(
-            &html,
-            r#"<script id="__NEXT_DATA__" type="application/json">"#,
-            "</script>",
-        )
-        .and_then(|json| serde_json::from_str::<Value>(json).ok())
-        .ok_or_else(|| error("Snapchat profile page has no profile data"))?;
+        let data = crate::sites::gdl::nextdata(&html)
+            .map_err(|_| error("Snapchat profile page has no profile data"))?;
         let props = data
             .pointer("/props/pageProps")
             .ok_or_else(|| error("Snapchat profile page has no profile data"))?;

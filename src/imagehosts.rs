@@ -81,7 +81,9 @@ impl Site {
             "pixeldrain.com" => Self::Pixeldrain,
             "catbox.moe" => Self::Catbox,
             "imgbox.com" => Self::Imgbox,
-            "postimg.cc" | "postimages.org" => Self::Postimg,
+            // Upstream's `(?:postim(?:ages|g)|pixxxels)\.(?:cc|org)`.
+            "postimg.cc" | "postimg.org" | "postimages.cc" | "postimages.org" | "pixxxels.cc"
+            | "pixxxels.org" => Self::Postimg,
             _ => return None,
         })
     }
@@ -539,7 +541,9 @@ pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let timestamp = between(page, "<p>Created ", "<")
         .or_else(|| between(page, "<p>Uploaded ", "<"))
         .and_then(catbox_date);
+    // Albums now quote their links with `'`; accept both styles.
     let items = between_all(page, "href=\"https://files.catbox.moe/", "\"")
+        .chain(between_all(page, "href='https://files.catbox.moe/", "'"))
         .filter_map(|name| {
             if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.') {
                 return None;
@@ -566,7 +570,8 @@ pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
 // ---------------------------------------------------------------------------
 // imgbox.
 
-/// `https://thumbs2.imgbox.com/xx/yy/ID_t.ext` → original image URL and ID.
+/// `https://thumbs2.imgbox.com/xx/yy/ID_t.ext` (or `_b`) → original image
+/// URL and ID.
 pub fn imgbox_original(thumb: &str) -> Option<(Url, String)> {
     let thumb = Url::parse(&unescape(thumb)).ok()?;
     let host = thumb.host_str()?;
@@ -586,7 +591,10 @@ pub fn imgbox_original(thumb: &str) -> Option<(Url, String)> {
         return None;
     }
     let (stem, ext) = file.rsplit_once('.')?;
-    let id = stem.strip_suffix("_t")?;
+    // Gallery thumbnails now use `_b` (big) as well as `_t`.
+    let id = stem
+        .strip_suffix("_t")
+        .or_else(|| stem.strip_suffix("_b"))?;
     let ext = clean_extension(ext)?;
     if !valid_media_id(Site::Imgbox, id) {
         return None;
@@ -1040,6 +1048,9 @@ mod tests {
             t("https://www.postimages.org/gallery/G1").unwrap(),
             Target::PostimgGallery("G1".into())
         );
+        for host in ["pixxxels.cc", "postimg.org", "postimages.cc"] {
+            assert_eq!(Site::from_host(host), Some(Site::Postimg), "{host}");
+        }
         for raw in [
             "https://pixeldrain.com/",
             "https://pixeldrain.com/u/a%2Fb",
@@ -1184,6 +1195,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_single_quoted_catbox_links() {
+        let page = br#"<h1>test</h1><p>Created August 18 2022</p>
+            <a href='https://files.catbox.moe/8ih3y7.png'  data-fancybox='gallery'></a>
+            <a href='https://files.catbox.moe/9qvb5g.zip' target='_blank'></a>
+            <a href='https://files.catbox.moe/8ih3y7.png' target='_blank'>list</a>"#;
+        let media = parse_catbox_album(page, "1igcbe").unwrap();
+        assert_eq!(media.len(), 2, "{media:?}");
+        assert_eq!(media[1].url.as_str(), "https://files.catbox.moe/9qvb5g.zip");
+    }
+
+    #[test]
     fn catbox_created_dates_match_upstream_and_preserve_media_identity() {
         let legacy = parse_catbox_album(CATBOX.as_bytes(), "alb1").unwrap();
         for date in ["March 05 2023", "march 5 2023", "05 March 2023"] {
@@ -1224,7 +1246,7 @@ mod tests {
     const IMGBOX_GALLERY: &str = r#"<h1>Holiday &quot;2024&quot;</h1>
         <div id="gallery-view-content">
         <a href="/AbCd1234"><img alt="AbCd1234" src="https://thumbs2.imgbox.com/ab/cd/AbCd1234_t.JPG" title="one.jpg" /></a>
-        <a href="/EfGh5678"><img alt="EfGh5678" src="https://thumbs2.imgbox.com/ef/gh/EfGh5678_t.png" /></a>
+        <a href="/EfGh5678"><img alt="EfGh5678" src="https://thumbs3.imgbox.com/ef/gh/EfGh5678_b.png" /></a>
         <a href="/Bad"><img src="https://thumbs2.imgbox.com.evil.example/ab/cd/AbCd9999_t.jpg" /></a>
         <a href="/Bad2"><img src="http://thumbs2.imgbox.com/ab/cd/AbCd9998_t.jpg" /></a>
         <img src="https://imgbox.com/logo.png"></div>"#;
@@ -1238,6 +1260,10 @@ mod tests {
             "https://images2.imgbox.com/ab/cd/AbCd1234_o.jpg"
         );
         assert_eq!(media[0].filename, "AbCdEfGhIj_01.jpg");
+        assert_eq!(
+            media[1].url.as_str(),
+            "https://images3.imgbox.com/ef/gh/EfGh5678_o.png"
+        );
         let m = meta(&media[0]);
         assert_eq!(m.caption.as_deref(), Some("Holiday \"2024\""));
         assert_eq!(m.media_id, "AbCd1234");

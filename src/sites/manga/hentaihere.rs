@@ -30,6 +30,8 @@ pub static SITE: Site = Site {
 enum Target {
     Chapter(String, String),
     Manga(String),
+    /// Newer `/reader/MANGA-slug/CHAPTER_ID` chapter pages (path).
+    Reader(String, String),
 }
 
 fn target(url: &Url) -> Option<Target> {
@@ -40,7 +42,15 @@ fn target(url: &Url) -> Option<Target> {
             group(&caps, 2).into(),
         ));
     }
-    let manga = re!(r"^https?://(?:www\.)?hentaihere\.com(/m/S\d+)/?$");
+    let reader = re!(r"^https?://(?:www\.)?hentaihere\.com(/reader/(\d+)-[^/?#]+/\d+)");
+    if let Some(caps) = captures(reader, url) {
+        return Some(Target::Reader(
+            group(&caps, 1).into(),
+            group(&caps, 2).into(),
+        ));
+    }
+    // `/m/S123` now redirects to `/<type>/123-slug`.
+    let manga = re!(r"^https?://(?:www\.)?hentaihere\.com(/m/S\d+|/[a-z-]+/\d+-[^/?#]+)/?$");
     captures(manga, url).map(|caps| Target::Manga(group(&caps, 1).into()))
 }
 
@@ -52,30 +62,90 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         Ok(match target {
             Target::Chapter(manga_id, chapter) => {
                 let page = super::fetch(http, &format!("{ROOT}/m/S{manga_id}/{chapter}/1")).await?;
-                let data = chapter_metadata(&page, &manga_id, &chapter)?;
-                let images: Vec<String> =
-                    serde_json::from_str(extr(&page, "var rff_imageList = ", ";"))
-                        .map_err(|_| error("HentaiHere chapter has no image list"))?;
-                let pages = images
-                    .into_iter()
-                    .map(|part| (format!("https://hentaicdn.com/hentai{part}"), None))
-                    .collect();
+                let mut data = chapter_metadata(&page, &manga_id, &chapter)?;
+                let pages = match serde_json::from_str::<Vec<String>>(extr(
+                    &page,
+                    "var rff_imageList = ",
+                    ";",
+                )) {
+                    Ok(images) => images
+                        .into_iter()
+                        .map(|part| (format!("https://hentaicdn.com/hentai{part}"), None))
+                        .collect(),
+                    // The newer `/reader/` pages embed absolute URLs.
+                    Err(_) => reader_images(&page, &mut data)
+                        .ok_or_else(|| error("HentaiHere chapter has no image list"))?,
+                };
+                crate::sites::events(Gallery::chapter(&CHAPTER, data, pages).events(&SITE, http))
+            }
+            Target::Reader(path, manga_id) => {
+                let page = super::fetch(http, &format!("{ROOT}{path}/page-1")).await?;
+                let mut data = Map::new();
+                set(&mut data, "manga_id", parse_int(&manga_id));
+                let pages = reader_images(&page, &mut data)
+                    .ok_or_else(|| error("HentaiHere chapter has no image list"))?;
+                english(&mut data);
                 crate::sites::events(Gallery::chapter(&CHAPTER, data, pages).events(&SITE, http))
             }
             Target::Manga(path) => {
                 let page = super::fetch(http, &format!("{ROOT}{path}")).await?;
-                let manga_id = parse_int(
-                    path.trim_end_matches('/')
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or_default()
-                        .get(1..)
-                        .unwrap_or_default(),
-                );
-                super::queue_chapters(http, &SITE, &MANGA, chapters(&page, manga_id), true)
+                let last = path
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default();
+                let manga_id = parse_int(last.strip_prefix('S').unwrap_or(last));
+                let mut list = chapters(&page, manga_id);
+                if list.is_empty() {
+                    list = reader_chapters(&page, manga_id);
+                }
+                super::queue_chapters(http, &SITE, &MANGA, list, true)
             }
         })
     })
+}
+
+/// One page URL with optional per-page keywords.
+type Page = (String, Option<Map<String, Value>>);
+
+/// Pages and metadata of the newer reader's `data-reader-data` JSON.
+fn reader_images(page: &str, data: &mut Map<String, Value>) -> Option<Vec<Page>> {
+    let reader: Value = serde_json::from_str(extr(page, "data-reader-data>", "</script>")).ok()?;
+    let images: Vec<Page> = reader["images"]
+        .as_array()?
+        .iter()
+        .filter_map(|url| Some((url.as_str()?.to_owned(), None)))
+        .collect();
+    let book = &reader["book"];
+    if data.get("chapter").is_none() {
+        let label = book["chapter"].as_str().unwrap_or_default();
+        let number = label.strip_prefix("Chapter ").unwrap_or(label);
+        let (major, sep, minor) = partition(number, ".");
+        set(data, "chapter", parse_int(major));
+        set(data, "chapter_minor", format!("{sep}{minor}"));
+    }
+    if data
+        .get("manga")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        set(data, "manga", book["title"].as_str().unwrap_or_default());
+    }
+    let chapter_url = reader["chapterUrl"].as_str().unwrap_or_default();
+    if let Some(id) = chapter_url.rsplit('/').next().filter(|id| !id.is_empty()) {
+        set(data, "chapter_id", parse_int(id));
+    }
+    // "Reading MANGA by AUTHOR Chapter N Online - Page {page} - HentaiHere"
+    let title = reader["title"].as_str().unwrap_or_default();
+    if let Some(caps) = re!(r"^Reading .+ by (.+?) Chapter ").captures(title) {
+        set(data, "author", group(&caps, 1));
+    }
+    // `<h1 class="sr-only">MANGA - Chapter N: TITLE</h1>`
+    let heading = unescape(extr(page, "<h1 class=\"sr-only\">", "</h1>"));
+    if let Some((_, title)) = heading.split_once(": ") {
+        set(data, "title", title);
+    }
+    Some(images)
 }
 
 fn chapter_metadata(
@@ -101,6 +171,33 @@ fn chapter_metadata(
     set(&mut data, "author", field(4));
     english(&mut data);
     Ok(data)
+}
+
+/// The newer manga page's chapter `<select>`: `<option value="ID"
+/// data-read="URL" …>Chapter N - TITLE</option>`.
+fn reader_chapters(page: &str, manga_id: i64) -> Vec<(Url, Map<String, Value>)> {
+    let manga = unescape(extr(page, "\"@type\":\"Book\",\"name\":\"", "\""));
+    let mut results = Vec::new();
+    let mut scan = Scan::new(page);
+    while let Some(option) = scan.find("<option value=\"", "</option>") {
+        let read = extr(option, "data-read=\"", "\"");
+        let Ok(url) = Url::parse(read) else { continue };
+        let chapter_id = option.split('"').next().unwrap_or_default();
+        let label = unescape(option.rsplit('>').next().unwrap_or_default());
+        let (chapter, _, title) = partition(label.trim(), " - ");
+        let number = chapter.strip_prefix("Chapter ").unwrap_or(chapter);
+        let (major, sep, minor) = partition(number, ".");
+        let mut data = Map::new();
+        set(&mut data, "manga_id", manga_id);
+        set(&mut data, "manga", manga.as_str());
+        set(&mut data, "chapter", parse_int(major));
+        set(&mut data, "chapter_minor", format!("{sep}{minor}"));
+        set(&mut data, "chapter_id", parse_int(chapter_id));
+        set(&mut data, "title", title);
+        english(&mut data);
+        results.push((url, data));
+    }
+    results
 }
 
 fn chapters(page: &str, manga_id: i64) -> Vec<(Url, Map<String, Value>)> {
@@ -141,6 +238,61 @@ mod tests {
     use super::super::tests::{archive, path};
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, serve};
+
+    #[test]
+    fn reader_layout() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap());
+        assert_eq!(
+            t("https://hentaihere.com/reader/17542-hypnosis-sex-guidance/105688/page-1"),
+            Some(Target::Reader(
+                "/reader/17542-hypnosis-sex-guidance/105688".into(),
+                "17542".into()
+            ))
+        );
+        assert_eq!(
+            t("https://hentaihere.com/original/17542-hypnosis-sex-guidance"),
+            Some(Target::Manga(
+                "/original/17542-hypnosis-sex-guidance".into()
+            ))
+        );
+        let manga = r#"<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Book","name":"Hypnosis &amp; More"}]</script>
+            <option value="105689" data-read="https://hentaihere.com/reader/17542-x/105689/page-1" data-added="1 year ago">Chapter 2.5 - Session 2: Reika</option>"#;
+        let list = reader_chapters(manga, 17542);
+        assert_eq!(list.len(), 1);
+        let data = &list[0].1;
+        assert_eq!(
+            (
+                data["manga"].as_str(),
+                data["chapter"].as_i64(),
+                data["chapter_minor"].as_str(),
+                data["title"].as_str()
+            ),
+            (
+                Some("Hypnosis & More"),
+                Some(2),
+                Some(".5"),
+                Some("Session 2: Reika")
+            )
+        );
+        let chapter = r#"<h1 class="sr-only">Hypnosis - Chapter 1: Session 1</h1>
+            <script type="application/json" data-reader-data>{"images":["https://hermes.hentai.direct/hentai/17542/1/a.jpg"],
+            "chapterUrl":"https://hentaihere.com/reader/17542-x/105688","title":"Reading Hypnosis by Aiue Oka Chapter 1 Online - Page {page} - HentaiHere",
+            "book":{"title":"Hypnosis","chapter":"Chapter 1"}}</script>"#;
+        let mut data = Map::new();
+        let pages = reader_images(chapter, &mut data).unwrap();
+        assert_eq!(
+            pages[0].0,
+            "https://hermes.hentai.direct/hentai/17542/1/a.jpg"
+        );
+        assert_eq!(
+            (
+                data["author"].as_str(),
+                data["title"].as_str(),
+                data["chapter_id"].as_i64()
+            ),
+            (Some("Aiue Oka"), Some("Session 1"), Some(105688))
+        );
+    }
 
     #[test]
     fn classifies_urls() {

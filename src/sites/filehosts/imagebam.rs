@@ -5,7 +5,7 @@ use crate::sites::{Events, Http, Item, Route, Site};
 use serde_json::{Map, Value};
 use url::Url;
 
-const ROOT: &str = "https://www.imagebam.com";
+const ROOT: &str = "https://imagebam.com";
 
 static GALLERY: Route = Route::new(
     "gallery",
@@ -92,7 +92,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
     crate::sites::once(async move {
         let root = http.api(ROOT)?;
         for name in ["nsfw_inter", "sfw_inter"] {
-            http.set_cookie(&root, &format!("{name}=1; Domain=www.imagebam.com; Path=/"));
+            http.set_cookie(&root, &format!("{name}=1; Domain=imagebam.com; Path=/"));
         }
         Ok(match target {
             Target::Image(path) => {
@@ -109,7 +109,8 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 let mut page = http.text(&http.api(&format!("{ROOT}{path}"))?).await?;
                 let title = unescape(extr(&page, "id=\"gallery-name\">", "<").trim());
                 let pattern =
-                    re!(r#"<a href="https://www\.imagebam\.com(/(?:image/|view/M)[a-zA-Z0-9]+)"#);
+                    // The site moved from `www.imagebam.com` to `imagebam.com`.
+                    re!(r#"<a href="https://(?:www\.)?imagebam\.com(/(?:image/|view/M)[a-zA-Z0-9]+)"#);
                 let mut paths: Vec<String> = Vec::new();
                 loop {
                     paths.extend(

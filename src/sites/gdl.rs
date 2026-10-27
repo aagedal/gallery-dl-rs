@@ -7,6 +7,7 @@ pub(crate) use crate::sites::art::{
 };
 pub(crate) use crate::sites::{remove_html, unescape};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use url::Url;
 
 /// Python `str.partition`.
@@ -205,10 +206,19 @@ pub(crate) fn truthy(value: Option<&Value>) -> bool {
 /// A lazily compiled, cached regex.
 macro_rules! re {
     ($pattern:expr) => {{
-        static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-        // Compiled once per call site, even inside loops.
-        #[allow(clippy::regex_creation_in_loops)]
-        let compiled = RE.get_or_init(|| regex::Regex::new($pattern).expect("static regex"));
+        // Compiled once per call site and distinct pattern (patterns built
+        // with `format!` can differ between site instances).
+        static RE: std::sync::Mutex<
+            Option<std::collections::HashMap<String, &'static regex::Regex>>,
+        > = std::sync::Mutex::new(None);
+        let pattern: &str = $pattern;
+        let mut cache = RE.lock().unwrap_or_else(|e| e.into_inner());
+        let compiled: &'static regex::Regex = *cache
+            .get_or_insert_default()
+            .entry(pattern.to_owned())
+            .or_insert_with(|| {
+                Box::leak(Box::new(regex::Regex::new(pattern).expect("static regex")))
+            });
         compiled
     }};
 }
@@ -267,20 +277,121 @@ pub(crate) fn jsonld(page: &str) -> crate::Result<Value> {
 }
 
 /// `Extractor._extract_nextdata`: the page's Next.js `__NEXT_DATA__`.
+/// Unlike upstream, extra script attributes (e.g. `nonce`) are allowed.
 pub(crate) fn nextdata(page: &str) -> crate::Result<Value> {
-    let raw = match extr(
-        page,
-        " id=\"__NEXT_DATA__\" type=\"application/json\">",
-        "</script>",
-    ) {
-        "" => extr(
-            page,
-            " id='__NEXT_DATA__' type='application/json'>",
-            "</script>",
-        ),
-        raw => raw,
-    };
+    let raw = [
+        " id=\"__NEXT_DATA__\" type=\"application/json\"",
+        " id='__NEXT_DATA__' type='application/json'",
+    ]
+    .iter()
+    .find_map(|begin| {
+        let rest = &page[page.find(begin)? + begin.len()..];
+        let rest = &rest[rest.find('>')? + 1..];
+        Some(&rest[..rest.find("</script>")?])
+    })
+    .unwrap_or_default();
     serde_json::from_str(raw).map_err(|_| crate::error("page has no valid Next.js data"))
+}
+
+/// The decoded Next.js App Router flight data (`self.__next_f.push([1,"…"])`
+/// chunks, concatenated), which replaced `__NEXT_DATA__` on newer pages.
+pub(crate) fn next_flight(page: &str) -> String {
+    const PUSH: &str = "self.__next_f.push([1,";
+    let mut out = String::new();
+    let mut rest = page;
+    while let Some(start) = rest.find(PUSH) {
+        rest = &rest[start + PUSH.len()..];
+        if let Some(Ok(chunk)) = serde_json::Deserializer::from_str(rest)
+            .into_iter::<String>()
+            .next()
+        {
+            out.push_str(&chunk);
+        }
+    }
+    out
+}
+
+/// The first JSON value after `key` in `text`, e.g. an object embedded in
+/// flight data.
+pub(crate) fn json_after(text: &str, key: &str) -> Option<Value> {
+    let start = text.find(key)? + key.len();
+    serde_json::Deserializer::from_str(&text[start..])
+        .into_iter::<Value>()
+        .next()?
+        .ok()
+}
+
+/// React Router's turbo-stream loader data
+/// (`__reactRouterContext.streamController.enqueue("…")`), decoded from its
+/// index-deduplicated form. Promises, symbols and other non-JSON types
+/// become `null`; dates become their millisecond timestamps.
+pub(crate) fn turbo_stream(page: &str) -> Option<Value> {
+    const ENQUEUE: &str = "streamController.enqueue(";
+    let start = page.find(ENQUEUE)? + ENQUEUE.len();
+    let chunk: String = serde_json::Deserializer::from_str(&page[start..])
+        .into_iter::<String>()
+        .next()?
+        .ok()?;
+    let values: Vec<Value> = serde_json::from_str(chunk.lines().next()?).ok()?;
+    let mut cache = HashMap::new();
+    Some(turbo_hydrate(&values, 0, &mut cache, 0))
+}
+
+fn turbo_hydrate(
+    values: &[Value],
+    index: i64,
+    cache: &mut HashMap<i64, Value>,
+    depth: usize,
+) -> Value {
+    if index < 0 {
+        return match index {
+            -4 => Value::from(0),
+            _ => Value::Null,
+        };
+    }
+    if depth > 256 {
+        return Value::Null;
+    }
+    if let Some(hit) = cache.get(&index) {
+        return hit.clone();
+    }
+    let Some(raw) = usize::try_from(index).ok().and_then(|i| values.get(i)) else {
+        return Value::Null;
+    };
+    let index_of = |v: &Value| v.as_i64().unwrap_or(-5);
+    let result = match raw {
+        Value::Array(items) => match items.first().and_then(Value::as_str) {
+            Some("D") => items.get(1).cloned().unwrap_or(Value::Null),
+            Some("U" | "B" | "Y") => items.get(1).cloned().unwrap_or(Value::Null),
+            Some(_) => Value::Null,
+            None => items
+                .iter()
+                .map(|i| turbo_hydrate(values, index_of(i), cache, depth + 1))
+                .collect::<Vec<_>>()
+                .into(),
+        },
+        Value::Object(map) => {
+            let mut out = Map::new();
+            for (key, value) in map {
+                let Some(name) = key
+                    .strip_prefix('_')
+                    .and_then(|k| k.parse::<usize>().ok())
+                    .and_then(|k| values.get(k))
+                    .and_then(Value::as_str)
+                else {
+                    continue;
+                };
+                out.insert(
+                    name.to_owned(),
+                    turbo_hydrate(values, index_of(value), cache, depth + 1),
+                );
+            }
+            Value::Object(out)
+        }
+        other => other.clone(),
+    };
+    cache.insert(index, result.clone());
+    result
 }
 
 /// `text.quote` (`urllib.parse.quote` with `safe="/"`).

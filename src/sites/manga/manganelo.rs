@@ -49,9 +49,20 @@ fn site(category: &str) -> &'static Site {
 fn root(category: &str) -> &'static str {
     match category {
         "nelomanga" => "https://www.nelomanga.net",
-        "natomanga" => "https://www.natomanga.com",
+        // These moved; their old domains redirect and stay accepted.
+        "natomanga" => "https://www.manganami.com",
         "manganato" => "https://www.manganato.gg",
-        _ => "https://www.mangakakalot.gg",
+        _ => "https://www.kakamanga.com",
+    }
+}
+
+/// The domains an instance's URLs may use.
+fn domains(category: &str) -> &'static [&'static str] {
+    match category {
+        "nelomanga" => &["nelomanga.net"],
+        "natomanga" => &["natomanga.com", "manganami.com"],
+        "manganato" => &["manganato.gg"],
+        _ => &["mangakakalot.gg", "kakamanga.com"],
     }
 }
 
@@ -64,8 +75,8 @@ enum Target {
 
 fn target(category: &str, url: &Url) -> Option<Target> {
     let host = url.host_str()?;
-    let domain = &root(category)["https://www.".len()..];
-    if !crate::sites::plain(url) || host.strip_prefix("www.").unwrap_or(host) != domain {
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if !crate::sites::plain(url) || !domains(category).contains(&host) {
         return None;
     }
     let path = url.path();
@@ -281,6 +292,18 @@ mod tests {
         );
         assert_eq!(
             t("natomanga", "https://natomanga.com/manga/aria"),
+            Some(Target::Manga("/manga/aria".into()))
+        );
+        // Current domains of moved instances.
+        assert_eq!(
+            t(
+                "mangakakalot",
+                "https://www.kakamanga.com/manga/aria/chapter-79"
+            ),
+            Some(Target::Chapter("/manga/aria/chapter-79".into()))
+        );
+        assert_eq!(
+            t("natomanga", "https://www.manganami.com/manga/aria"),
             Some(Target::Manga("/manga/aria".into()))
         );
         assert_eq!(

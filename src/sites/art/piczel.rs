@@ -7,6 +7,8 @@ use serde_json::{Map, Value};
 use url::Url;
 
 const ROOT: &str = "https://piczel.tv";
+/// `piczel.tv/api` was retired for this host, with pages in the path.
+const API: &str = "https://api.piczel.tv";
 const FILENAME: &str = "{category}_{id}_{title}_{num:>02}.{extension}";
 static USER: Route = Route::new(
     "user",
@@ -74,13 +76,15 @@ fn target(url: &Url) -> Option<Target> {
 fn extract(http: &Http, url: Url) -> Events<'_> {
     match target(&url) {
         Some(Target::User(user)) => {
-            pagination(http, &USER, format!("{ROOT}/api/users/{user}/gallery"))
+            pagination(http, &USER, format!("{API}/users/{user}/gallery/{{page}}"))
         }
-        Some(Target::Folder(id)) => {
-            pagination(http, &FOLDER, format!("{ROOT}/api/gallery/folder/{id}"))
-        }
+        Some(Target::Folder(id)) => pagination(
+            http,
+            &FOLDER,
+            format!("{API}/gallery/folder/{id}/page/{{page}}"),
+        ),
         Some(Target::Image(id)) => crate::sites::once(async move {
-            let url = http.api(&format!("{ROOT}/api/gallery/{id}"))?;
+            let url = http.api(&format!("{API}/gallery/{id}"))?;
             let post = http.json(&url).await?;
             Ok(crate::sites::events(post_events(http, &IMAGE, post)?))
         }),
@@ -95,8 +99,7 @@ fn pagination<'a>(http: &'a Http, route: &'static Route, endpoint: String) -> Ev
             let Some(page) = page else {
                 return Ok(None);
             };
-            let mut url = http.api(&endpoint)?;
-            url.query_pairs_mut().append_pair("page", &page.to_string());
+            let url = http.api(&endpoint.replace("{page}", &page.to_string()))?;
             let body = http.json(&url).await?;
             let mut events = Vec::new();
             for post in body
@@ -289,8 +292,8 @@ mod tests {
         let (_, identity) = crate::sites::archive_key(&files[1]).unwrap();
         assert_eq!(identity, r#"["f{folder[id]}_{id}_{num}",["3","7","1"]]"#);
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /api/gallery/folder/3?page=1 "));
-        assert!(requests[1].starts_with("GET /api/gallery/folder/3?page=2 "));
+        assert!(requests[0].starts_with("GET /gallery/folder/3/page/1 "));
+        assert!(requests[1].starts_with("GET /gallery/folder/3/page/2 "));
     }
 
     #[tokio::test]
@@ -307,7 +310,7 @@ mod tests {
         assert_eq!(file.render(&files[1]).unwrap(), "piczel_7_Two_01.jpg");
         let (_, identity) = crate::sites::archive_key(&files[1]).unwrap();
         assert_eq!(identity, r#"["{id}_{num}",["7","1"]]"#);
-        assert!(server.join().unwrap()[0].starts_with("GET /api/gallery/7 "));
+        assert!(server.join().unwrap()[0].starts_with("GET /gallery/7 "));
     }
 
     #[tokio::test]

@@ -103,7 +103,7 @@ fn parse_album(page: &str, album_id: &str) -> (Vec<Row>, Map<String, Value>) {
     let title = extr.next("<h1 ", "<");
     let descr = extr.next("<p ", "<");
     let tbody = extr.next("id=\"fileTbody\"", "</tbody>");
-    let rows: Vec<Row> = super::extract_iter(tbody, "<tr", "</tr>")
+    let mut rows: Vec<Row> = super::extract_iter(tbody, "<tr", "</tr>")
         .into_iter()
         .map(|row| Row {
             id: crate::sites::extr(row, "data-id=\"", "\"")
@@ -114,6 +114,25 @@ fn parse_album(page: &str, album_id: &str) -> (Vec<Row>, Map<String, Value>) {
             ),
         })
         .collect();
+    if tbody.is_empty() {
+        // Newer pages render rows from a `const FILES = [{ id:"…", size: N }]`
+        // script literal.
+        let files = crate::sites::extr(page, "const FILES = [", "];").unwrap_or_default();
+        rows = super::extract_iter(files, "{", "}")
+            .into_iter()
+            .map(|entry| Row {
+                id: crate::sites::extr(entry, "id:\"", "\"")
+                    .unwrap_or_default()
+                    .to_owned(),
+                size: super::parse_int(
+                    crate::sites::extr(entry, "size:", ",")
+                        .unwrap_or_default()
+                        .trim(),
+                ),
+            })
+            .filter(|row| !row.id.is_empty())
+            .collect();
+    }
     let mut data = Map::new();
     data.insert("album_id".into(), album_id.into());
     data.insert(
@@ -124,12 +143,9 @@ fn parse_album(page: &str, album_id: &str) -> (Vec<Row>, Map<String, Value>) {
         "description".into(),
         crate::sites::unescape(after_tag(descr)).into(),
     );
-    let size: i64 = super::extract_iter(tbody, "data-size=\"", "\"")
-        .into_iter()
-        .map(super::parse_int)
-        .sum();
+    let size: i64 = rows.iter().map(|row| row.size).sum();
     data.insert("album_size".into(), size.into());
-    data.insert("count".into(), tbody.matches("data-id=").count().into());
+    data.insert("count".into(), rows.len().into());
     (rows, data)
 }
 
@@ -259,6 +275,22 @@ mod tests {
     use super::*;
     use crate::sites::testing::{html, http, json, keywords, media as collect, serve};
     use serde_json::json;
+
+    #[test]
+    fn album_rows_from_files_literal() {
+        let page = r#"<h1 class="t">Album</h1><p class="d">Desc</p><tbody id="rows"></tbody>
+            <script>const FILES = [
+    { id:"ze10Ohbpoy5", name:"a.mp4", size: 36396624 , views: 0 , thumb:"x", dur: 0  },
+    { id:"6lC7mKrJst8", name:"b.mp4", size: 687238 , views: 0 , thumb:"y", dur: 0  },
+  ];</script>"#;
+        let (rows, data) = parse_album(page, "2c5iuWHTumH");
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["ze10Ohbpoy5", "6lC7mKrJst8"]);
+        assert_eq!(
+            (data["count"].as_i64(), data["album_size"].as_i64()),
+            (Some(2), Some(37083862))
+        );
+    }
 
     #[test]
     fn classifies_urls() {

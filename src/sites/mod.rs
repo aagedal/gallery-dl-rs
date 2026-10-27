@@ -466,8 +466,16 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
         keywords.entry("filename").or_insert(name.into());
         keywords.entry("extension").or_insert(ext.into());
     }
-    keywords.insert("category".into(), site.category.into());
-    keywords.insert("subcategory".into(), route.subcategory.into());
+    // Sites with per-URL categories (upstream `generic`, `fandom`) pass
+    // them in `_category`/`_subcategory`; lookups keep the site's category.
+    let category = keywords
+        .remove("_category")
+        .unwrap_or_else(|| site.category.into());
+    keywords.insert("category".into(), category);
+    let subcategory = keywords
+        .remove("_subcategory")
+        .unwrap_or_else(|| route.subcategory.into());
+    keywords.insert("subcategory".into(), subcategory);
     let stem = keywords.get("filename").map(scalar).unwrap_or_default();
     let extension = keywords.get("extension").map(scalar).unwrap_or_default();
     let filename = if extension.is_empty() {

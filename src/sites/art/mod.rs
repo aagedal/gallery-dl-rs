@@ -13,11 +13,13 @@ mod architizer;
 mod arena;
 mod aryion;
 mod behance;
+mod boosty;
 mod booth;
 mod cien;
 mod civitai;
 mod desktopography;
 mod fanbox;
+mod fansly;
 mod fantia;
 mod fivehundredpx;
 mod foriio;
@@ -33,6 +35,7 @@ mod myportfolio;
 mod naverblog;
 mod nekohouse;
 mod nijie;
+mod patreon;
 mod pexels;
 mod photovogue;
 mod picarto;
@@ -101,6 +104,9 @@ pub(super) static SITES: &[&Site] = &[
     &inkbunny::SITE,
     &fantia::SITE,
     &fanbox::SITE,
+    &boosty::SITE,
+    &fansly::SITE,
+    &patreon::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a

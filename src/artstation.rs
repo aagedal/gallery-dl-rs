@@ -130,7 +130,8 @@ pub fn target(url: &Url) -> Result<Target> {
                 ["projects" | "artwork", hash] if valid_hash(hash) => {
                     Ok(Target::Project { hash: hash.into() })
                 }
-                [] | ["albums", "all"] => Ok(Target::User { user: user.into() }),
+                // Upstream's `USER.artstation.com(?:/projects)?/?$`.
+                [] | ["projects"] | ["albums", "all"] => Ok(Target::User { user: user.into() }),
                 _ => Err(unsupported()),
             }
         }
@@ -583,6 +584,12 @@ mod tests {
         };
         assert_eq!(t("https://www.artstation.com/artwork/LQVJr").unwrap(), p);
         assert_eq!(t("https://alice.artstation.com/projects/LQVJr").unwrap(), p);
+        assert_eq!(
+            t("https://alice.artstation.com/projects/").unwrap(),
+            Target::User {
+                user: "alice".into()
+            }
+        );
         let u = Target::User {
             user: "alice".into(),
         };

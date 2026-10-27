@@ -91,12 +91,22 @@ fn album_image(raw: &str) -> Option<(String, Map<String, Value>)> {
         object => object,
     };
     let data: Value = serde_json::from_str(&unquote(object)).ok()?;
-    let url = crate::sites::gdl::str_of(&data, "url").to_owned();
+    // Newer objects nest the URL in `image` and drop `name`.
+    let url = match crate::sites::gdl::str_of(&data, "url") {
+        "" => crate::sites::gdl::str_of(&data["image"], "url").to_owned(),
+        url => url.to_owned(),
+    };
+    let name = data
+        .get("name")
+        .cloned()
+        .filter(|n| !n.is_null())
+        .or_else(|| {
+            let viewer = crate::sites::gdl::str_of(&data, "path_viewer");
+            let id = viewer.rsplit('/').next().filter(|id| !id.is_empty())?;
+            Some(id.into())
+        });
     let mut fields = Map::new();
-    fields.insert(
-        "id".into(),
-        data.get("name").cloned().unwrap_or(Value::Null),
-    );
+    fields.insert("id".into(), name.clone().unwrap_or(Value::Null));
     fields.insert("url".into(), url.as_str().into());
     let title = data
         .get("title")
@@ -107,10 +117,7 @@ fn album_image(raw: &str) -> Option<(String, Map<String, Value>)> {
         "name".into(),
         data.get("filename").cloned().unwrap_or(Value::Null),
     );
-    fields.insert(
-        "filename".into(),
-        data.get("name").cloned().unwrap_or(Value::Null),
-    );
+    fields.insert("filename".into(), name.unwrap_or(Value::Null));
     fields.insert(
         "extension".into(),
         data.get("extension").cloned().unwrap_or(Value::Null),
@@ -134,7 +141,13 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 };
                 let page = http.text(&http.api(&url)?).await?;
                 let title = unescape(extr(&page, "property=\"og:title\" content=\"", "\"").trim());
-                let images: Vec<_> = paginate(http, page, " class=\"list-item ", ">")
+                // Newer pages list `<a class="tile ...">` items instead.
+                let begin = if page.contains(" class=\"list-item ") {
+                    " class=\"list-item "
+                } else {
+                    " class=\"tile "
+                };
+                let images: Vec<_> = paginate(http, page, begin, ">")
                     .await?
                     .iter()
                     .filter_map(|raw| album_image(raw))
@@ -171,9 +184,17 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     );
                 }
                 let page = http.text(&url).await?;
-                let albums = paginate(http, page, "data-url-short=\"", "\"")
+                // Newer album tiles carry `data-code="CODE"` for `/a/CODE`.
+                let tiles = !page.contains("data-url-short=\"");
+                let begin = if tiles {
+                    "class=\"tilecell\" data-code=\""
+                } else {
+                    "data-url-short=\""
+                };
+                let albums = paginate(http, page, begin, "\"")
                     .await?
                     .into_iter()
+                    .map(|path| if tiles { format!("/a/{path}") } else { path })
                     .filter_map(|path| Url::parse(ROOT).ok()?.join(&path).ok())
                     .map(|url| (url, Map::new()))
                     .collect::<Vec<_>>();
@@ -225,6 +246,17 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 mod tests {
     use super::*;
     use crate::sites::testing::{children, html, http as client, keywords, media, serve};
+
+    #[test]
+    fn nested_image_objects() {
+        let raw = r#" class="tile stream-pic" href="/i/tq7GxQ" data-object="{%22image%22:{%22url%22:%22https://d.l3n.co/tq7GxQ.png%22},%22title%22:%22t%22,%22extension%22:%22png%22,%22filename%22:%22tq7GxQ.png%22,%22width%22:%222560%22,%22height%22:%221080%22,%22path_viewer%22:%22/i/tq7GxQ%22}""#;
+        let (url, fields) = album_image(raw).unwrap();
+        assert_eq!(url, "https://d.l3n.co/tq7GxQ.png");
+        assert_eq!(
+            (fields["id"].as_str(), fields["width"].as_i64()),
+            (Some("tq7GxQ"), Some(2560))
+        );
+    }
 
     #[test]
     fn classifies_urls() {
@@ -290,6 +322,21 @@ mod tests {
         assert_eq!(file.render(&files[1]).unwrap(), "lensdump_1IhJr_002.jpg");
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with("GET /a/1IhJr/?page=2 "));
+    }
+
+    #[tokio::test]
+    async fn queues_user_album_tiles() {
+        let (root, _server) = serve(vec![html(
+            r#"<ul class="tilegrid grid-albums" data-albums><li class="tilecell" data-code="bSqGYz1z"><a href="https://lensdump.com/a/bSqGYz1z"></a></li>
+            <li class="tilecell" data-code="tX1uA">"#,
+        )]);
+        let http = client("lensdump", root);
+        let queued = children(extract(
+            &http,
+            Url::parse("https://lensdump.com/vstar925").unwrap(),
+        ))
+        .await;
+        assert_eq!(queued.len(), 2);
     }
 
     #[tokio::test]

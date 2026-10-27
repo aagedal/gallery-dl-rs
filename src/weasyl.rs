@@ -78,7 +78,11 @@ pub fn target(url: &Url) -> Result<Target> {
             .map(str::to_ascii_lowercase)
     };
     match parts[..] {
-        ["submission", id, ..] if valid_id(id) => Ok(Target::Submission { id: id.into() }),
+        // Upstream also accepts `/view/ID` and `/submissions/USER`.
+        ["submission" | "view", id, ..] if valid_id(id) => Ok(Target::Submission { id: id.into() }),
+        ["submissions", name] if valid_user(name) => Ok(Target::Gallery {
+            user: name.to_ascii_lowercase(),
+        }),
         [owner, "submissions", id, ..] if user(owner).is_some() && valid_id(id) => {
             Ok(Target::Submission { id: id.into() })
         }
@@ -462,6 +466,21 @@ mod tests {
         format!(
             r#"{{"submitid":{id},"title":"Big &amp; Bold","owner_login":"alice","posted_at":"2023-09-21T13:23:00Z","rating":"mature","media":{{"submission":[{{"url":"https://cdn.weasyl.com/~alice/submissions/{id}/abc/alice-big.PNG"}}]}}}}"#
         )
+    }
+
+    #[test]
+    fn view_and_submissions_urls() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap()).unwrap();
+        assert_eq!(
+            t("https://www.weasyl.com/view/2031/a-wesley"),
+            Target::Submission { id: "2031".into() }
+        );
+        assert_eq!(
+            t("https://www.weasyl.com/submissions/Tanidareal"),
+            Target::Gallery {
+                user: "tanidareal".into()
+            }
+        );
     }
 
     #[test]

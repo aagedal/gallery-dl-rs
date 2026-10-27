@@ -130,6 +130,9 @@ fn split(html: &str) -> Vec<String> {
 }
 
 fn metadata(page: &str, gallery_id: &str) -> Map<String, Value> {
+    if page.contains("id=\"gallery-title\"") {
+        return metadata_reader(page, gallery_id);
+    }
     let mut scan = Scan::new(page);
     let title = scan.extr("<h1>", "<").to_owned();
     let title_alt = scan.extr("class=\"subtitle\">", "<").to_owned();
@@ -162,6 +165,48 @@ fn metadata(page: &str, gallery_id: &str) -> Map<String, Value> {
             "lang".into(),
             language_to_code(&first).map_or(Value::Null, Value::from),
         );
+    }
+    data
+}
+
+/// [`metadata`] for the newer layout's `*-gallery-entity-group` blocks.
+fn metadata_reader(page: &str, gallery_id: &str) -> Map<String, Value> {
+    let group = |label: &str| -> Vec<Value> {
+        let start = format!("-gallery-entity-label\">{label}:</span>");
+        let block = page
+            .find(&start)
+            .map(|i| &page[i + start.len()..])
+            .map(|rest| &rest[..rest.find("-gallery-entity-label").unwrap_or(rest.len())])
+            .unwrap_or_default();
+        extract_iter(block, "-gallery-tag__name\">", "<")
+            .into_iter()
+            .map(|name| unescape(name.trim()).into())
+            .collect()
+    };
+    let mut data = Map::new();
+    data.insert("gallery_id".into(), parse_int(gallery_id).into());
+    data.insert(
+        "title".into(),
+        unescape(extr(page, "id=\"gallery-title\">", "<")).into(),
+    );
+    data.insert(
+        "title_alt".into(),
+        unescape(extr(page, "-gallery-description\">", "<")).into(),
+    );
+    for (key, label) in [
+        ("parody", "Parodies"),
+        ("character", "Characters"),
+        ("tags", "Tags"),
+        ("artist", "Artists"),
+        ("group", "Groups"),
+        ("language", "Languages"),
+    ] {
+        data.insert(key.into(), group(label).into());
+    }
+    data.insert("type".into(), extr(page, "href=\"/category/", "/").into());
+    if let Some(first) = data["language"].get(0).and_then(Value::as_str) {
+        let code = language_to_code(first).map_or(Value::Null, Value::from);
+        data.insert("lang".into(), code);
     }
     data
 }
@@ -213,6 +258,32 @@ fn images(page: &str) -> Vec<(String, Option<Map<String, Value>>)> {
         .collect()
 }
 
+/// Pages of the newer reader layout: `readerPagesJson` entries below
+/// `data-reader-image-base`.
+fn reader_images(page: &str) -> Vec<(String, Option<Map<String, Value>>)> {
+    let base = extr(page, "data-reader-image-base=\"", "\"").trim_end_matches('/');
+    let table: Vec<Value> =
+        serde_json::from_str(extr(page, "id=\"readerPagesJson\">", "</script>"))
+            .unwrap_or_default();
+    if base.is_empty() {
+        return Vec::new();
+    }
+    table
+        .iter()
+        .map(|entry| {
+            let mut file = Map::new();
+            file.insert("width".into(), entry["width"].clone());
+            file.insert("height".into(), entry["height"].clone());
+            let url = format!(
+                "{base}/{}.{}",
+                crate::sites::scalar(&entry["page"]),
+                crate::sites::scalar(&entry["ext"])
+            );
+            (url, Some(file))
+        })
+        .collect()
+}
+
 fn extract<'a>(
     site: &'static Site,
     root: &'static str,
@@ -229,13 +300,14 @@ fn extract<'a>(
                 .text(&http.api(&format!("{root}/gallery/{id}/"))?)
                 .await?;
             let data = metadata(&page, &id);
+            let mut files = images(&page);
+            if files.is_empty() {
+                // Newer layouts list pages only in the reader's JSON table.
+                let reader = http.text(&http.api(&format!("{root}/g/{id}/1/"))?).await?;
+                files = reader_images(&reader);
+            }
             Ok(crate::sites::events(super::numbered(
-                site,
-                http,
-                &GALLERY,
-                &data,
-                images(&page),
-                &id,
+                site, http, &GALLERY, &data, files, &id,
             )))
         }),
         Target::Tag(path) => pagination(site, root, http, &TAG, format!("{root}{path}/")),
@@ -268,7 +340,14 @@ fn pagination<'a>(
             }
             gallery_id.clone_into(&mut prev);
         }
-        let href = rextr(page, "class='page-link' href='", "'", None);
+        let mut href = rextr(page, "class='page-link' href='", "'", None);
+        if href.is_empty() {
+            // Newer layouts: `<a href="..." rel="next">`.
+            href = crate::sites::gdl::re!(r#"href="([^"]+)"\s+rel="next""#)
+                .captures(page)
+                .and_then(|c| c.get(1))
+                .map_or("", |m| m.as_str());
+        }
         let next = match href {
             "" | "#" => None,
             href if href.starts_with("//") => Some(format!("https:{href}")),
@@ -345,6 +424,26 @@ mod tests {
         assert_eq!(k["type"], "manga");
         assert_eq!(k["width"], 1280);
         server.join().unwrap();
+    }
+
+    #[test]
+    fn reader_layout() {
+        let gallery = r#"<h1 id="gallery-title">A &amp; B</h1><p class="hr-gallery-description">alt</p>
+            <span class="hr-gallery-entity-label">Tags:</span><div><a class="hr-gallery-tag" href="/tag/x/">
+            <span class="hr-gallery-tag__name">big breasts</span><span class="hr-gallery-tag__count">1</span></a></div>
+            <span class="hr-gallery-entity-label">Languages:</span><a><span class="hr-gallery-tag__name">japanese</span></a>
+            <a class="hr-gallery-tag" href="/category/doujinshi/">"#;
+        let data = metadata(gallery, "8526");
+        assert_eq!(data["title"], "A & B");
+        assert_eq!(data["tags"], serde_json::json!(["big breasts"]));
+        assert_eq!(
+            (data["lang"].as_str(), data["type"].as_str()),
+            (Some("ja"), Some("doujinshi"))
+        );
+        let reader = r#"data-reader-image-base="https://m1.hentairox.com/001/abc" <script type="application/json" id="readerPagesJson">[{"page":1,"ext":"jpg","width":10,"height":20},{"page":2,"ext":"webp","width":10,"height":20}]</script>"#;
+        let files = reader_images(reader);
+        assert_eq!(files[1].0, "https://m1.hentairox.com/001/abc/2.webp");
+        assert!(images(gallery).is_empty());
     }
 
     #[test]

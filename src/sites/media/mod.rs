@@ -35,6 +35,8 @@ pub(super) static SITES: &[&Site] = &[
     &wikimedia::WIKIDATA,
     &wikimedia::WIKIVOYAGE,
     &wikimedia::WIKISPECIES,
+    &wikimedia::FANDOM,
+    &wikimedia::WIKIGG,
     &wikimedia::WIKIMEDIACOMMONS,
     &wikimedia::MEDIAWIKI,
     &wikimedia::MARIOWIKI,

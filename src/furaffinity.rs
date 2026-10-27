@@ -58,6 +58,8 @@ fn valid_name(name: &str) -> bool {
 pub enum Folder {
     Gallery,
     Scraps,
+    /// `/favorites/USER/`, paged by "Next" links rather than numbers.
+    Favorites,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,14 +95,16 @@ pub fn target(url: &Url) -> Result<Target> {
         .unwrap_or_default();
     match parts[..] {
         ["view" | "full", id] if valid_id(id) => Ok(Target::Submission { id: id.into() }),
-        [folder @ ("gallery" | "scraps"), user, ..] if valid_name(user) => Ok(Target::Gallery {
-            user: user.to_ascii_lowercase(),
-            folder: if folder == "gallery" {
-                Folder::Gallery
-            } else {
-                Folder::Scraps
-            },
-        }),
+        [folder @ ("gallery" | "scraps" | "favorites"), user, ..] if valid_name(user) => {
+            Ok(Target::Gallery {
+                user: user.to_ascii_lowercase(),
+                folder: match folder {
+                    "gallery" => Folder::Gallery,
+                    "scraps" => Folder::Scraps,
+                    _ => Folder::Favorites,
+                },
+            })
+        }
         _ => Err(unsupported()),
     }
 }
@@ -261,6 +265,21 @@ pub fn parse_submission(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
 }
 
 /// Submission IDs listed on one gallery page, in order.
+/// Upstream `_pagination_favorites`: the "Next" form's action, else the
+/// `right` link; a site-relative path without its leading `/`.
+fn favorites_next(bytes: &[u8]) -> Option<String> {
+    let html = std::str::from_utf8(bytes).ok()?;
+    let path = match html.find("type=\"submit\">Next</button>") {
+        Some(pos) => {
+            let start = html[..pos].rfind("<form action=\"")? + 14;
+            html[start..].split('"').next()?
+        }
+        None => between(html, "right\" href=\"", "\"")?,
+    };
+    let path = path.trim_start_matches('/');
+    (path.starts_with("favorites/") && !path.contains("..")).then(|| path.to_owned())
+}
+
 pub fn parse_gallery(bytes: &[u8]) -> Result<Vec<String>> {
     let html =
         std::str::from_utf8(bytes).map_err(|_| error("Fur Affinity returned invalid HTML"))?;
@@ -288,6 +307,8 @@ struct GalleryState {
     user: String,
     folder: Folder,
     page: u64,
+    /// The next favorites page path, as linked from the current one.
+    next: Option<String>,
     done: bool,
     seen: HashSet<String>,
     pending: VecDeque<ExtractionEvent>,
@@ -363,18 +384,25 @@ impl FurAffinity {
 
     async fn next_page(&self, state: &mut GalleryState) -> Result<()> {
         state.page += 1;
-        let folder = match state.folder {
-            Folder::Gallery => "gallery",
-            Folder::Scraps => "scraps",
+        let path = match state.folder {
+            Folder::Gallery => format!("gallery/{}/{}/", state.user, state.page),
+            Folder::Scraps => format!("scraps/{}/{}/", state.user, state.page),
+            Folder::Favorites => state
+                .next
+                .take()
+                .unwrap_or_else(|| format!("favorites/{}/", state.user)),
         };
-        let body = self
-            .call(&format!("{folder}/{}/{}/", state.user, state.page))
-            .await?;
+        let body = self.call(&path).await?;
+        if state.folder == Folder::Favorites {
+            state.next = favorites_next(&body);
+        }
         let ids: Vec<String> = parse_gallery(&body)?
             .into_iter()
             .filter(|id| state.seen.insert(id.clone()))
             .collect();
-        state.done = ids.is_empty() || state.page >= MAX_PAGES;
+        state.done = ids.is_empty()
+            || state.page >= MAX_PAGES
+            || (state.folder == Folder::Favorites && state.next.is_none());
         for id in ids {
             match self.submission(&id).await {
                 Ok(events) => state.pending.extend(events),
@@ -409,6 +437,7 @@ impl FurAffinity {
             user,
             folder,
             page: 0,
+            next: None,
             done: false,
             seen: HashSet::new(),
             pending: VecDeque::new(),
@@ -594,6 +623,25 @@ by <a href="/user/alice/"><strong>Alice</strong></a>
             Some(1598918700)
         );
         assert_eq!(parse_popup_date("yesterday"), None);
+    }
+
+    #[test]
+    fn favorites_pages() {
+        assert_eq!(
+            target(&Url::parse("https://www.furaffinity.net/favorites/Mirlinthloth/").unwrap())
+                .unwrap(),
+            Target::Gallery {
+                user: "mirlinthloth".into(),
+                folder: Folder::Favorites
+            }
+        );
+        let page = br#"<figure id="sid-1"></figure><form action="/favorites/mirlinthloth/1605617063/next" method="get">
+            <button class="button standard" type="submit">Next</button></form>"#;
+        assert_eq!(
+            favorites_next(page).as_deref(),
+            Some("favorites/mirlinthloth/1605617063/next")
+        );
+        assert_eq!(favorites_next(b"<figure id=\"sid-1\"></figure>"), None);
     }
 
     #[test]

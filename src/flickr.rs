@@ -388,6 +388,10 @@ pub struct Flickr {
     network: NetworkOptions,
     api_root: Url,
     api_key: String,
+    /// Whether `api_key` was configured; otherwise the site's public key
+    /// is used (upstream `_extract_apikey`).
+    explicit_key: bool,
+    public_key: tokio::sync::OnceCell<String>,
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
@@ -415,6 +419,8 @@ impl Flickr {
             network: NetworkOptions::default(),
             api_root: Url::parse("https://api.flickr.com/").expect("static URL"),
             api_key: DEFAULT_API_KEY.into(),
+            explicit_key: false,
+            public_key: tokio::sync::OnceCell::new(),
             timeout,
             request_timeout: timeout,
             retries: 0,
@@ -433,6 +439,7 @@ impl Flickr {
     pub fn with_api_key(mut self, key: Option<&str>) -> Self {
         if let Some(key) = key {
             self.api_key = key.into();
+            self.explicit_key = true;
         }
         self
     }
@@ -455,8 +462,37 @@ impl Flickr {
         self
     }
 
+    /// The configured key, else the public `site_key` of flickr.com/prints
+    /// (fetched once; the built-in key when that fails or for test roots).
+    async fn key(&self) -> &str {
+        if self.explicit_key || self.api_root.host_str() != Some("api.flickr.com") {
+            return &self.api_key;
+        }
+        self.public_key
+            .get_or_init(|| async {
+                // The page answers 404 but still carries the key.
+                let request = self
+                    .client
+                    .get("https://www.flickr.com/prints")
+                    .timeout(self.request_timeout)
+                    .send();
+                let page = match tokio::time::timeout(self.timeout, request).await {
+                    Ok(Ok(response)) => response.text().await.unwrap_or_default(),
+                    _ => return self.api_key.clone(),
+                };
+                let start = "flickr.api.site_key = \"";
+                page.find(start)
+                    .map(|i| &page[i + start.len()..])
+                    .and_then(|rest| rest.split('"').next())
+                    .filter(|key| !key.is_empty() && key.bytes().all(|b| b.is_ascii_hexdigit()))
+                    .map_or_else(|| self.api_key.clone(), str::to_owned)
+            })
+            .await
+    }
+
     async fn call(&self, method: &str, query: &[(&str, &str)]) -> Result<Vec<u8>> {
-        if self.api_key.is_empty() {
+        let api_key = self.key().await;
+        if api_key.is_empty() {
             return Err(error("Flickr requires an api-key setting"));
         }
         let mut endpoint = self
@@ -466,7 +502,7 @@ impl Flickr {
         endpoint
             .query_pairs_mut()
             .append_pair("method", method)
-            .append_pair("api_key", &self.api_key)
+            .append_pair("api_key", api_key)
             .append_pair("format", "json")
             .append_pair("nojsoncallback", "1")
             .extend_pairs(query);

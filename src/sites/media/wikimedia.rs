@@ -54,6 +54,9 @@ enum Hosts {
         root: &'static str,
         hosts: &'static [&'static str],
     },
+    /// `<wiki>.<domain>` farms (`fandom`, `wikigg`): the root is the matched
+    /// host, the category `<site>-<wiki>`, and files default to originals.
+    Farm { domain: &'static str, dash: bool },
 }
 
 struct Instance {
@@ -156,6 +159,41 @@ fixed!(
     "/w/api.php",
     None
 );
+macro_rules! farm {
+    ($ident:ident, $instance:ident, $category:literal, $name:literal, $domain:literal, $dash:literal) => {
+        wiki!(
+            $ident,
+            $instance,
+            $category,
+            $name,
+            Instance {
+                hosts: Hosts::Farm {
+                    domain: $domain,
+                    dash: $dash,
+                },
+                api_path: "/api.php",
+                user_agent: None,
+            }
+        );
+    };
+}
+
+farm!(
+    FANDOM,
+    FANDOM_INSTANCE,
+    "fandom",
+    "Fandom",
+    "fandom.com",
+    true
+);
+farm!(
+    WIKIGG,
+    WIKIGG_INSTANCE,
+    "wikigg",
+    "wiki.gg",
+    "wiki.gg",
+    false
+);
 fixed!(
     MARIOWIKI,
     MARIOWIKI_INSTANCE,
@@ -212,6 +250,8 @@ struct Target {
     /// Instance root, including a `/xx` language path.
     root: String,
     lang: String,
+    /// `<site>-<wiki>` for farm instances.
+    category: Option<String>,
     kind: Kind,
 }
 
@@ -222,6 +262,15 @@ enum Kind {
         path: String,
         prefix: Option<String>,
     },
+}
+
+/// The registry category of a farm instance.
+fn sites_category(instance: &Instance) -> &'static str {
+    if std::ptr::eq(instance, &FANDOM_INSTANCE) {
+        "fandom"
+    } else {
+        "wikigg"
+    }
 }
 
 fn target(instance: &Instance, url: &Url) -> Option<Target> {
@@ -247,6 +296,21 @@ fn target(instance: &Instance, url: &Url) -> Option<Target> {
             }
             (root.to_owned(), String::new())
         }
+        Hosts::Farm { domain, dash } => {
+            let label = host.strip_suffix(&format!(".{domain}"))?;
+            let valid = |c: char| c.is_alphanumeric() || c == '_' || (dash && c == '-');
+            if label.is_empty() || !label.chars().all(valid) {
+                return None;
+            }
+            (format!("{}://{host}", url.scheme()), "en".to_owned())
+        }
+    };
+    let category = match instance.hosts {
+        Hosts::Farm { .. } => host.split('.').next().map(|wiki| {
+            let site = sites_category(instance);
+            format!("{site}-{wiki}")
+        }),
+        _ => None,
     };
     let raw = &url.path()[1..];
     if raw.is_empty() {
@@ -254,6 +318,7 @@ fn target(instance: &Instance, url: &Url) -> Option<Target> {
         return (url.query().is_none() && url.fragment().is_none()).then_some(Target {
             root,
             lang,
+            category,
             kind: Kind::Wiki,
         });
     }
@@ -275,6 +340,7 @@ fn target(instance: &Instance, url: &Url) -> Option<Target> {
     Some(Target {
         root,
         lang,
+        category,
         kind: Kind::Article {
             path: crate::sites::percent_decode(path),
             prefix,
@@ -332,6 +398,10 @@ fn extract<'a>(
             (prefix_route(prefix.as_deref()), params, info, subcategories)
         }
     };
+    let mut info = info;
+    if let Some(category) = &target.category {
+        info.insert("_category".into(), category.as_str().into());
+    }
     let mut params: Vec<(String, String)> =
         params.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
     let revisions = match http.option("image-revisions") {
@@ -399,7 +469,11 @@ fn query<'a>(
     params: Vec<(String, String)>,
     info: Map<String, Value>,
 ) -> Events<'a> {
-    let format = http.option_str("format").map(str::to_owned);
+    // Farm wikis default to original files (upstream `self.format`).
+    let format = http
+        .option_str("format")
+        .map(str::to_owned)
+        .or_else(|| matches!(instance.hosts, Hosts::Farm { .. }).then(|| "original".to_owned()));
     pages(instance, http, api, params, move |pages| {
         crate::sites::events(
             pages
@@ -578,6 +652,29 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn farm_wikis() {
+        let t = |i: &Instance, raw: &str| target(i, &Url::parse(raw).unwrap());
+        let fandom = t(
+            &FANDOM_INSTANCE,
+            "https://mushishi.fandom.com/wiki/Yahagi_no_Kiyo",
+        )
+        .unwrap();
+        assert_eq!(
+            (fandom.root.as_str(), fandom.category.as_deref()),
+            ("https://mushishi.fandom.com", Some("fandom-mushishi"))
+        );
+        let gg = t(
+            &WIKIGG_INSTANCE,
+            "https://hearthstone.wiki.gg/wiki/Flame_Juggler",
+        )
+        .unwrap();
+        assert_eq!(gg.category.as_deref(), Some("wikigg-hearthstone"));
+        assert!(t(&WIKIGG_INSTANCE, "https://my-wiki.wiki.gg/").is_none());
+        let url = Url::parse("https://mushishi.fandom.com/wiki/X").unwrap();
+        assert_eq!(crate::sites::find(&url).map(|s| s.category), Some("fandom"));
+    }
+
+    #[test]
     fn classifies_urls() {
         let wp = &WIKIPEDIA_INSTANCE;
         let t = |i: &Instance, raw: &str| target(i, &Url::parse(raw).unwrap());
@@ -586,6 +683,7 @@ mod tests {
             Some(Target {
                 root: "https://en.wikipedia.org".into(),
                 lang: "en".into(),
+                category: None,
                 kind: Kind::Article {
                     path: "Athena_Parthenos".into(),
                     prefix: None

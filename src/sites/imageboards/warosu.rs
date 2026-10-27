@@ -56,10 +56,15 @@ fn parse_page(page: &str, board: &str, thread: &str) -> Result<Vec<Item>> {
         .nth(1)
         .ok_or_else(|| error("warosu page has no board name"))?
         .to_owned();
+    // Warosu now quotes its attributes; both markups are accepted.
     let mut title = crate::sites::unescape(
-        crate::sites::extr(page, "class=filetitle>", "<").unwrap_or_default(),
+        crate::sites::extr(page, "class=filetitle>", "<")
+            .or_else(|| crate::sites::extr(page, "class=\"filetitle\">", "<"))
+            .unwrap_or_default(),
     );
-    let content = crate::sites::extr(page, "<div class=content", "</form>").unwrap_or_default();
+    let content = crate::sites::extr(page, "<div class=content", "</form>")
+        .or_else(|| crate::sites::extr(page, "<div class=\"content\"", "</form>"))
+        .unwrap_or_default();
     let posts: Vec<Map<String, Value>> = content.split("<table>").map(parse_post).collect();
     if title.is_empty() {
         let com = posts[0]
@@ -126,15 +131,26 @@ fn now(timestamp: i64) -> String {
 fn parse_post(post: &str) -> Map<String, Value> {
     let mut extr = Extr::new(post);
     let mut data = Map::new();
-    data.insert("no".into(), extr.next("id=p", ">").into());
-    data.insert(
-        "name".into(),
-        extr.next("class=postername>", "<").trim().into(),
-    );
-    data.insert(
-        "time".into(),
-        extr.next("class=posttime title=", "000>").into(),
-    );
+    if post.contains("id=\"p") {
+        data.insert("no".into(), extr.next("id=\"p", "\"").into());
+        extr.next("class=\"postername", ">");
+        data.insert("name".into(), extr.next("", "</span>").trim().into());
+        let time = extr.next("class=\"posttime\" title=\"", "\"");
+        data.insert(
+            "time".into(),
+            time.strip_suffix("000").unwrap_or(time).into(),
+        );
+    } else {
+        data.insert("no".into(), extr.next("id=p", ">").into());
+        data.insert(
+            "name".into(),
+            extr.next("class=postername>", "<").trim().into(),
+        );
+        data.insert(
+            "time".into(),
+            extr.next("class=posttime title=", "000>").into(),
+        );
+    }
     data.insert(
         "com".into(),
         crate::sites::unescape(&crate::sites::remove_html(
@@ -159,7 +175,7 @@ fn parse_post(post: &str) -> Map<String, Value> {
 
 fn extract_image(post: &str, data: &mut Map<String, Value>) -> bool {
     let mut extr = Extr::new(post);
-    extr.next("<span class=\"fileinfo\">", "");
+    extr.next("<span class=\"fileinfo", ">");
     data.insert("fsize".into(), extr.next("File: ", ", ").into());
     data.insert("w".into(), extr.next("", "x").into());
     data.insert("h".into(), extr.next("", ", ").into());
@@ -168,8 +184,10 @@ fn extract_image(post: &str, data: &mut Map<String, Value>) -> bool {
         "filename".into(),
         crate::sites::percent_decode(super::rpartition(name, ".").0).into(),
     );
-    extr.next("<br>", "");
-    let url = extr.next("<a href=", ">");
+    // Old markup: `<br><a href=URL>`; new: `<br />` then `<a href="URL">`.
+    extr.next("<br", "");
+    let raw = extr.next("<a href=", ">");
+    let url = raw.trim_matches('"');
     if url.is_empty() {
         return false;
     }
@@ -278,6 +296,32 @@ mod tests {
         );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /jp/thread/100 "));
+    }
+
+    #[test]
+    fn parses_quoted_markup() {
+        let post = r#"<td class=" comment reply" id="p51357879">
+            <span class="postername ">
+                    Anonymous
+            </span>
+        <span class="posttime" title="1793095701000">Wed</span>
+            <span class="fileinfo break-all">
+        File: 34 KB, 165x134, welcome backy.png
+    </span>
+    [<a href="/jp/image/z2AY">View same</a>]
+    <br />
+            <a href="https://i.warosu.org/data/jp/img/0513/57/1793095701471250.png">
+            <blockquote><p>hi</p></blockquote>"#;
+        let data = parse_post(post);
+        assert_eq!(data["no"], "51357879");
+        assert_eq!(data["name"], "Anonymous");
+        assert_eq!(data["time"], "1793095701");
+        assert_eq!(data["filename"], "welcome backy");
+        assert_eq!(data["tim"], "1793095701471250");
+        assert_eq!(
+            data["image"],
+            "https://i.warosu.org/data/jp/img/0513/57/1793095701471250.png"
+        );
     }
 
     #[test]
