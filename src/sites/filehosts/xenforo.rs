@@ -1023,7 +1023,20 @@ fn extract<'a>(
         };
         Ok(match kind {
             Kind::Post { path, id } => {
-                let (page, _) = request_page(http, &format!("{root}{path}{id}/")).await?;
+                // `…/#post-ID` anchors never reach the server (upstream then
+                // reads the thread's first page); the `posts/ID/` permalink
+                // redirects to the page holding the post.
+                let url = if path.contains('#') {
+                    let prefix = if path.starts_with("/index.php?") {
+                        "/index.php?"
+                    } else {
+                        "/"
+                    };
+                    format!("{root}{prefix}posts/{id}/")
+                } else {
+                    format!("{root}{path}{id}/")
+                };
+                let (page, _) = request_page(http, &url).await?;
                 let pos = page
                     .find(&format!("data-content=\"post-{id}\""))
                     .ok_or_else(|| error("XenForo post not found"))?;
@@ -1306,6 +1319,26 @@ mod tests {
         ));
         assert!(t(&XENFORO, "xenforo:https://forum.example/threads/x.1/"));
         assert!(!t(&SIMPCITY, "https://example.com/threads/x.1/"));
+    }
+
+    #[tokio::test]
+    async fn anchored_posts_use_permalinks() {
+        let page = r#"<article data-author="Ann" data-content="post-1034578"><div class="message-body"></div><footer>"#;
+        let (root, server) = serve(vec![html(page)]);
+        let http = client("simpcity", root);
+        let _: Vec<_> = (SIMPCITY.extract)(
+            &http,
+            Url::parse("https://simpcity.cr/threads/meme-thread.96106/page-7#post-1034578")
+                .unwrap(),
+        )
+        .collect()
+        .await;
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].starts_with("GET /posts/1034578/ "),
+            "{}",
+            requests[0]
+        );
     }
 
     #[tokio::test]
