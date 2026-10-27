@@ -608,6 +608,109 @@ fn now_ms() -> String {
         .to_string()
 }
 
+/// Whether to use the public REST API (upstream `api: "rest"`). Civitai
+/// now refuses anonymous tRPC calls, so that is also the default without
+/// an API key.
+fn rest_mode(http: &Http) -> bool {
+    match http.option_str("api") {
+        Some(api) => api == "rest",
+        None => http.api_key().is_none(),
+    }
+}
+
+/// Upstream `CivitaiRestAPI`, behind the tRPC procedure names the flows
+/// use: answers are reshaped like their tRPC counterparts.
+async fn rest(http: &Http, endpoint: &str, params: &Map<String, Value>) -> Result<Value> {
+    let id = || {
+        params
+            .get("id")
+            .map(crate::sites::scalar)
+            .unwrap_or_default()
+    };
+    let keep: &[&str] = match endpoint {
+        "image.getInfinite" | "image.get" => &[
+            "limit",
+            "postId",
+            "modelId",
+            "modelVersionId",
+            "username",
+            "sort",
+            "period",
+            "cursor",
+        ],
+        "model.getAll" => &[
+            "limit", "query", "tag", "username", "sort", "period", "cursor", "types",
+        ],
+        _ => &[],
+    };
+    let path = match endpoint {
+        "model.getById" => format!("/v1/models/{}", id()),
+        "modelVersion.getById" => format!("/v1/model-versions/{}", id()),
+        "image.getInfinite" | "image.get" => "/v1/images".into(),
+        "model.getAll" => "/v1/models".into(),
+        _ => {
+            return Err(error(format!(
+                "civitai '{endpoint}' needs the tRPC API; set an api-key"
+            )));
+        }
+    };
+    let mut url = http.api(&format!("{ROOT}/api{path}"))?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        for key in keep {
+            match params.get(*key) {
+                None | Some(Value::Null) => {}
+                Some(Value::Array(list)) => {
+                    for value in list {
+                        pairs.append_pair(key, &crate::sites::scalar(value));
+                    }
+                }
+                Some(value) => {
+                    pairs.append_pair(key, &crate::sites::scalar(value));
+                }
+            }
+        }
+        if endpoint == "image.get" {
+            pairs.append_pair("imageId", &id());
+        }
+        if endpoint.starts_with("image.") {
+            let nsfw = match http.option("nsfw") {
+                None | Some(Value::Bool(true)) | Some(Value::Null) => "X".to_owned(),
+                Some(Value::Bool(false)) => "Safe".to_owned(),
+                Some(other) => crate::sites::scalar(other),
+            };
+            pairs.append_pair("nsfw", &nsfw);
+        }
+    }
+    if url.query() == Some("") {
+        url.set_query(None);
+    }
+    let authorization = http.api_key().map(|key| format!("Bearer {key}"));
+    let mut headers = vec![("Content-Type", "application/json")];
+    if let Some(authorization) = &authorization {
+        headers.push(("Authorization", authorization));
+    }
+    let mut body = http.json_with(&url, &headers).await?;
+    // REST images name their author in `username`; flows expect `user`.
+    if let Some(items) = body.get_mut("items").and_then(Value::as_array_mut) {
+        for item in items.iter_mut() {
+            if item.get("user").is_none()
+                && let Some(name) = item.get("username").cloned()
+            {
+                item["user"] = json!({"username": name});
+            }
+        }
+    }
+    Ok(match endpoint {
+        "image.get" => body["items"][0].take(),
+        "image.getInfinite" | "model.getAll" => json!({
+            "items": body["items"].take(),
+            "nextCursor": body["metadata"]["nextCursor"].take(),
+        }),
+        _ => body,
+    })
+}
+
 /// Upstream `CivitaiTrpcAPI._call`: `result.data.json` of one tRPC query.
 async fn trpc(
     http: &Http,
@@ -615,6 +718,9 @@ async fn trpc(
     params: &Map<String, Value>,
     meta: Option<&Value>,
 ) -> Result<Value> {
+    if rest_mode(http) {
+        return rest(http, endpoint, params).await;
+    }
     let mut input = json!({"json": params});
     if let Some(meta) = meta {
         input["meta"] = json!({"values": meta});
@@ -1220,7 +1326,13 @@ fn user_images<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sites::testing::{http, json as reply, keywords, media, serve};
+    use crate::sites::testing::{http as client, json as reply, keywords, media, serve};
+
+    /// The tRPC client these fixtures model (REST is the keyless default).
+    fn http(name: &'static str, root: Url) -> Http {
+        let options = serde_json::Map::from_iter([("api".to_owned(), json!("trpc"))]);
+        client(name, root).with_options(Some(std::sync::Arc::new(options)))
+    }
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -1415,6 +1527,27 @@ mod tests {
         json!({"id": id, "url": format!("uuid-{id}"), "name": format!("{id:05}-seed.png"),
             "createdAt": "2024-08-31T01:11:47.021Z", "postId": post, "type": "image",
             "user": {"id": 9, "username": "bolero537"}})
+    }
+
+    #[tokio::test]
+    async fn rest_mode_without_api_key() {
+        let model = json!({"id": 703211, "name": "maid", "type": "LORA", "creator": {"username": "ARAfan"},
+            "modelVersions": [{"id": 786644, "name": "v1", "createdAt": "2024-09-01T00:00:00.000Z"}]});
+        let images = json!({"items": [{"id": 46055849, "url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/9e60/original=true/9e60.jpeg",
+            "type": "image", "createdAt": "2024-12-17T18:18:41.244Z", "postId": 10424321, "username": "ARAfan"}], "metadata": {}});
+        let (root, server) = serve(vec![reply(model), reply(images)]);
+        let http = client("civitai", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://civitai.com/models/703211?modelVersionId=786644").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        assert!(files[0].url.as_str().ends_with("/9e60.jpeg"));
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/v1/models/703211 "));
+        assert!(requests[1].starts_with("GET /api/v1/images?"));
+        assert!(requests[1].contains("modelVersionId=786644"));
     }
 
     #[tokio::test]
