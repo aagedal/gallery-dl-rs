@@ -17,6 +17,7 @@ mod chevereto;
 mod cyberdrop;
 mod cyberfile;
 mod filester;
+mod generic;
 mod gofile;
 mod imagebam;
 mod imagechest;
@@ -97,6 +98,7 @@ pub(super) static SITES: &[&Site] = &[
     &xenforo::XENFORO,
     &itchio::SITE,
     &uploadir::SITE,
+    &generic::SITE,
 ];
 
 // ---------------------------------------------------------------------------
