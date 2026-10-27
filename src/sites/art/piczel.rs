@@ -78,9 +78,11 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         Some(Target::User(user)) => {
             pagination(http, &USER, format!("{API}/users/{user}/gallery/{{page}}"))
         }
-        Some(Target::Folder(id)) => {
-            pagination(http, &FOLDER, format!("{API}/gallery/folder/{id}/page/{{page}}"))
-        }
+        Some(Target::Folder(id)) => pagination(
+            http,
+            &FOLDER,
+            format!("{API}/gallery/folder/{id}/page/{{page}}"),
+        ),
         Some(Target::Image(id)) => crate::sites::once(async move {
             let url = http.api(&format!("{API}/gallery/{id}"))?;
             let post = http.json(&url).await?;

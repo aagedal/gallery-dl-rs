@@ -102,7 +102,21 @@ async fn call(
         ));
     }
     let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let (_, body) = http.get_status(&url, &header_refs).await?;
+    // The API redirects to canonical URIs (`image/ID` → `image/ID-0`,
+    // user name case) with empty bodies; follow those like `requests`.
+    let mut url = url;
+    let mut hops = 0;
+    let body = loop {
+        let (status, body) = http.get_status(&url, &header_refs).await?;
+        if !(300..400).contains(&status) || hops == 3 {
+            break body;
+        }
+        match http.location(&url, &header_refs).await? {
+            Some(next) if next.host_str() == url.host_str() => url = next,
+            _ => break body,
+        }
+        hops += 1;
+    };
     let data: Value =
         serde_json::from_str(&body).map_err(|_| error("SmugMug resource not found"))?;
     match data["Code"].as_i64().unwrap_or_default() {
@@ -420,6 +434,24 @@ mod tests {
             header.ends_with("oauth_signature=\"9p9J5twgW1ErFvbcXzBhejGmcsg%3D\""),
             "{header}"
         );
+    }
+
+    #[tokio::test]
+    async fn follows_api_redirects() {
+        let moved = b"HTTP/1.1 301 Moved Permanently\r\nLocation: /api/v2/image/k1-0?_expand=ImageSizeDetails\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec();
+        let image = json!({"Code": 200, "Response": {"Locator": "Image", "Image": {"ImageKey": "k1", "UploadKey": "u1", "IsVideo": false,
+            "Uris": {"ImageSizeDetails": "/api/v2/image/k1-0!sizedetails"}}},
+            "Expansions": {"/api/v2/image/k1-0!sizedetails": {"Locator": "ImageSizeDetails", "ImageSizeDetails": {
+                "ImageSizeOriginal": {"Url": "https://photos.smugmug.com/O/a.jpg", "Width": 4000}}}}});
+        let (root, server) = serve(vec![moved.clone(), moved, body(image)]);
+        let http = client("smugmug", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://tdm.smugmug.com/Birds/i-k1").unwrap(),
+        ))
+        .await;
+        assert_eq!(files[0].url.as_str(), "https://photos.smugmug.com/O/a.jpg");
+        assert!(server.join().unwrap()[2].starts_with("GET /api/v2/image/k1-0?"));
     }
 
     #[tokio::test]
