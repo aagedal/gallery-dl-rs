@@ -96,7 +96,8 @@ pub fn target(url: &Url) -> Result<Target> {
                     .map(|(k, v)| (k.into_owned(), v.into_owned()))
                     .collect(),
             }),
-            ["user", user, "uploads"] if valid_user(user) => Ok(Target::Search {
+            // `/user/NAME/` dispatches to uploads by default upstream.
+            ["user", user] | ["user", user, "uploads"] if valid_user(user) => Ok(Target::Search {
                 query: vec![("q".into(), format!("@{user}"))],
             }),
             ["user", user, "favorites", id]
@@ -522,6 +523,15 @@ mod tests {
         json!({"id": id, "path": format!("https://w.wallhaven.cc/full/{id}/wallhaven-{id}.jpg"),
             "resolution": "1920x1080", "file_type": "image/jpeg",
             "created_at": "2018-10-31 01:23:10"})
+    }
+
+    #[test]
+    fn user_pages_list_uploads() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap()).unwrap();
+        assert_eq!(
+            t("https://wallhaven.cc/user/AksumkA/"),
+            t("https://wallhaven.cc/user/AksumkA/uploads")
+        );
     }
 
     #[test]
