@@ -153,11 +153,11 @@ async fn call(http: &Http, endpoint: &str, params: &Params) -> crate::Result<Val
     loop {
         let (status, body) = http.get_status(&url, &headers).await?;
         match status {
-            ..300 => {
+            0..300 => {
                 return serde_json::from_str(&body)
                     .map_err(|_| error("Boosty returned invalid JSON"));
             }
-            ..400 => return Err(error("Invalid API access token")),
+            300..400 => return Err(error("Invalid API access token")),
             429 => tokio::time::sleep(Duration::from_secs(600)).await,
             _ => return Err(error(format!("Boosty API request failed ({status})"))),
         }

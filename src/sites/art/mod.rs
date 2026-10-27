@@ -19,6 +19,7 @@ mod cien;
 mod civitai;
 mod desktopography;
 mod fanbox;
+mod fansly;
 mod fantia;
 mod fivehundredpx;
 mod foriio;
@@ -103,6 +104,7 @@ pub(super) static SITES: &[&Site] = &[
     &fantia::SITE,
     &fanbox::SITE,
     &boosty::SITE,
+    &fansly::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
