@@ -62,14 +62,15 @@ fn target(url: &Url) -> Option<Target> {
     if let Some(c) = captures(re!(&format!(r"{BASE}/album/photo/(\d+)")), url) {
         return Some(Target::Image(blog(&c)?, group(&c, 2).into()));
     }
-    if let Some(c) = captures(re!(&format!(r"{BASE}/album/set/(\d+)")), url) {
+    // `/albums/ID` is the redesigned site's set URL.
+    if let Some(c) = captures(re!(&format!(r"{BASE}/album(?:/set|s)/(\d+)")), url) {
         return Some(Target::Set(blog(&c)?, group(&c, 2).into()));
     }
     if let Some(c) = captures(re!(&format!(r"{BASE}/album/folder/(\d+)")), url) {
         return Some(Target::Folder(blog(&c)?, group(&c, 2).into()));
     }
     let c = captures(
-        re!(&format!(r"{BASE}(?:/blog|/album(?:/list)?)?/?(?:$|[?#])")),
+        re!(&format!(r"{BASE}(?:/blog|/albums?(?:/list)?)?/?(?:$|[?#])")),
         url,
     )?;
     Some(Target::User(blog(&c)?))
@@ -158,6 +159,17 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             }
             Target::Set(blog, id) => {
                 let root = format!("https://{blog}.pixnet.net");
+                // The redesigned site serves sets at `/albums/ID` (the old
+                // `/album/set/ID` answers 500).
+                let page = http
+                    .text(&http.api(&format!("{root}/albums/{id}"))?)
+                    .await?;
+                if page.contains("class=\"gallery-item\"") {
+                    let items = album_items(http, &root, &blog, &id, page).await?;
+                    return Ok(crate::sites::events(crate::sites::post(
+                        &SITE, http, &SET, items,
+                    )));
+                }
                 let page = http
                     .text(&http.api(&format!("{root}/album/set/{id}"))?)
                     .await?;
@@ -218,9 +230,112 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             Target::Folder(blog, id) => {
                 listing(http, &FOLDER, blog, format!("/album/folder/{id}")).await
             }
-            Target::User(blog) => listing(http, &USER, blog, "/album/list".into()).await,
+            Target::User(blog) => albums(http, blog).await,
         }
     })
+}
+
+/// The `?page=N` links of the redesigned pages: the next page's URL.
+fn next_page(page: &str, current: u32) -> Option<String> {
+    let needle = format!("page={}\"", current + 1);
+    let end = page.find(&needle)? + needle.len() - 1;
+    let start = page[..end].rfind("href=\"")? + 6;
+    Some(unescape(&page[start..end]))
+}
+
+/// A redesigned set page: `<a href="FILE" data-title="NAME"
+/// class="gallery-item">` entries across `?page=N` pages.
+async fn album_items(
+    http: &Http,
+    root: &str,
+    blog: &str,
+    id: &str,
+    first: String,
+) -> crate::Result<Vec<Item>> {
+    let title = unescape(extr(&first, "<title>", "</title>"));
+    let mut data = Map::new();
+    data.insert("blog".into(), blog.into());
+    data.insert("user".into(), blog.into());
+    data.insert("set_id".into(), parse_int(id).into());
+    data.insert(
+        "set_title".into(),
+        title.split(" | ").next().unwrap_or_default().trim().into(),
+    );
+    let (mut page, mut number) = (first, 1);
+    let mut items = Vec::new();
+    loop {
+        for (at, _) in page.match_indices("class=\"gallery-item\"") {
+            let Some(start) = page[..at].rfind("<a href=\"") else {
+                continue;
+            };
+            let tag = &page[start + 9..at];
+            let raw = tag.split('"').next().unwrap_or_default();
+            let Ok(url) = Url::parse(raw) else { continue };
+            let title = unescape(extr(tag, "data-title=\"", "\""));
+            let stem = rpartition(raw, "/").2;
+            let (stem, _, ext) = rpartition(stem, ".");
+            let mut photo = data.clone();
+            photo.insert("id".into(), stem.into());
+            photo.insert("url".into(), raw.into());
+            photo.insert("num".into(), (items.len() + 1).into());
+            photo.insert("filename".into(), rpartition(&title, ".").0.into());
+            photo.insert("extension".into(), ext.to_lowercase().into());
+            photo.insert("title".into(), title.as_str().into());
+            items.push(Item::new(url, photo).ids(id, stem));
+        }
+        match next_page(&page, number) {
+            Some(next) if number < 1000 => {
+                let next = if next.starts_with('/') {
+                    format!("{root}{next}")
+                } else {
+                    next
+                };
+                page = http.text(&http.api(&next)?).await?;
+                number += 1;
+            }
+            _ => return Ok(items),
+        }
+    }
+}
+
+/// The redesigned user listing: sets linked as `/albums/ID` across
+/// `/albums?page=N`; falls back to the old `/album/list`.
+async fn albums<'a>(http: &'a Http, blog: String) -> crate::Result<Events<'a>> {
+    let root = format!("https://{blog}.pixnet.net");
+    let pattern = re!(r#"href="(https://[\w-]+\.pixnet\.net/albums/(\d+))""#);
+    let mut page = match http.text(&http.api(&format!("{root}/albums"))?).await {
+        Ok(page) if pattern.is_match(&page) => page,
+        _ => return listing(http, &USER, blog, "/album/list".into()).await,
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut children = Vec::new();
+    let mut number = 1;
+    loop {
+        for c in pattern.captures_iter(&page) {
+            if !seen.insert(c[2].to_owned()) {
+                continue;
+            }
+            let mut item = Map::new();
+            item.insert("id".into(), parse_int(&c[2]).into());
+            item.insert("blog".into(), blog.as_str().into());
+            if let Ok(url) = Url::parse(&c[1]) {
+                children.push((url, item));
+            }
+        }
+        match next_page(&page, number) {
+            Some(next) if number < 1000 => {
+                let next = if next.starts_with('/') {
+                    format!("{root}{next}")
+                } else {
+                    next
+                };
+                page = http.text(&http.api(&next)?).await?;
+                number += 1;
+            }
+            _ => break,
+        }
+    }
+    Ok(crate::sites::galleries::queue(http, &SITE, &USER, children))
 }
 
 /// Folders and users queue their sets and folders.
@@ -284,10 +399,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn redesigned_album_pages() {
+        let first = r#"<title>2018 NEWS | Blog | PIXNET</title><a href="https://www.pixnet.net/">home</a>
+            <a href="https://pimg.1px.tw/jane/1522072075-24518557.jpg" data-title="0 (2).jpg" class="gallery-item" ><img></a>
+            <a href="https://jane.pixnet.net/albums/7?page=2">2</a>"#;
+        let second = r#"<a href="https://pimg.1px.tw/jane/1522072076-1.PNG" data-title="b.png" class="gallery-item">"#;
+        let (root, _server) = serve(vec![html(first), html(second)]);
+        let http = client("pixnet", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://jane.pixnet.net/albums/7").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 2);
+        let k = keywords(&files[0]);
+        assert_eq!(
+            (
+                k["set_title"].as_str(),
+                k["filename"].as_str(),
+                k["id"].as_str()
+            ),
+            (
+                Some("2018 NEWS"),
+                Some("0 (2)"),
+                Some("1522072075-24518557")
+            )
+        );
+        assert_eq!(keywords(&files[1])["extension"], "png");
+    }
+
+    #[tokio::test]
     async fn set_reads_breadcrumb_and_photos() {
         let page = r#"<meta name="author" content="Jane (jane)";><div id="breadcrumb"><a href="/album/folder/12">Folder </a><a href="/album/set/34">Set</a>
             <li id="p1"><a href="https://jane.pixnet.net/album/photo/56#x"><img src="https://pic.pimg.tw/jane/a_s.jpg" alt="Alpha"></a></li>"#;
-        let (root, server) = serve(vec![html(page)]);
+        // The redesigned `/albums/ID` page is tried first.
+        let (root, server) = serve(vec![html(""), html(page)]);
         let http = client("pixnet", root);
         let files = media(extract(
             &http,
@@ -318,7 +464,7 @@ mod tests {
     async fn user_follows_next_button() {
         let first = r#"<meta name="author" content="Jane (jane)";><li id="a"><a href="https://jane.pixnet.net/album/set/1"><img alt="One"></a></li><a class="nextBtn" href="/album/list?page=2">"#;
         let second = r#"<li id="b"><a href="https://jane.pixnet.net/album/folder/2"><img alt="Two"></a></li><span class="nextBtn">"#;
-        let (root, server) = serve(vec![html(first), html(second)]);
+        let (root, server) = serve(vec![html(""), html(first), html(second)]);
         let http = client("pixnet", root);
         assert_eq!(
             children(extract(
