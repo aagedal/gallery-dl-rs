@@ -539,7 +539,9 @@ pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let timestamp = between(page, "<p>Created ", "<")
         .or_else(|| between(page, "<p>Uploaded ", "<"))
         .and_then(catbox_date);
+    // Albums now quote their links with `'`; accept both styles.
     let items = between_all(page, "href=\"https://files.catbox.moe/", "\"")
+        .chain(between_all(page, "href='https://files.catbox.moe/", "'"))
         .filter_map(|name| {
             if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.') {
                 return None;
@@ -1181,6 +1183,17 @@ mod tests {
         assert_eq!(m.media_id, "abc123");
         assert_eq!(m.timestamp, Some(1677974400));
         assert!(parse_catbox_album(b"<h1>Empty</h1>", "alb1").is_err());
+    }
+
+    #[test]
+    fn parses_single_quoted_catbox_links() {
+        let page = br#"<h1>test</h1><p>Created August 18 2022</p>
+            <a href='https://files.catbox.moe/8ih3y7.png'  data-fancybox='gallery'></a>
+            <a href='https://files.catbox.moe/9qvb5g.zip' target='_blank'></a>
+            <a href='https://files.catbox.moe/8ih3y7.png' target='_blank'>list</a>"#;
+        let media = parse_catbox_album(page, "1igcbe").unwrap();
+        assert_eq!(media.len(), 2, "{media:?}");
+        assert_eq!(media[1].url.as_str(), "https://files.catbox.moe/9qvb5g.zip");
     }
 
     #[test]
