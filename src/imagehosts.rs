@@ -81,7 +81,9 @@ impl Site {
             "pixeldrain.com" => Self::Pixeldrain,
             "catbox.moe" => Self::Catbox,
             "imgbox.com" => Self::Imgbox,
-            "postimg.cc" | "postimages.org" => Self::Postimg,
+            // Upstream's `(?:postim(?:ages|g)|pixxxels)\.(?:cc|org)`.
+            "postimg.cc" | "postimg.org" | "postimages.cc" | "postimages.org" | "pixxxels.cc"
+            | "pixxxels.org" => Self::Postimg,
             _ => return None,
         })
     }
@@ -1046,6 +1048,9 @@ mod tests {
             t("https://www.postimages.org/gallery/G1").unwrap(),
             Target::PostimgGallery("G1".into())
         );
+        for host in ["pixxxels.cc", "postimg.org", "postimages.cc"] {
+            assert_eq!(Site::from_host(host), Some(Site::Postimg), "{host}");
+        }
         for raw in [
             "https://pixeldrain.com/",
             "https://pixeldrain.com/u/a%2Fb",
