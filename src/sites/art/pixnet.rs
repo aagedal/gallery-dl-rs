@@ -166,6 +166,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 let page = http
                     .text(&http.api(&format!("{root}/albums/{id}"))?)
                     .await?;
+                if page.contains("私密的部落格") {
+                    return Err(error("PIXNET blog is private"));
+                }
                 if page.contains("class=\"gallery-item\"") {
                     let items = album_items(http, &root, &blog, &id, page).await?;
                     return Ok(crate::sites::events(crate::sites::post(
