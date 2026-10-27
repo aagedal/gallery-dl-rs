@@ -267,20 +267,48 @@ pub(crate) fn jsonld(page: &str) -> crate::Result<Value> {
 }
 
 /// `Extractor._extract_nextdata`: the page's Next.js `__NEXT_DATA__`.
+/// Unlike upstream, extra script attributes (e.g. `nonce`) are allowed.
 pub(crate) fn nextdata(page: &str) -> crate::Result<Value> {
-    let raw = match extr(
-        page,
-        " id=\"__NEXT_DATA__\" type=\"application/json\">",
-        "</script>",
-    ) {
-        "" => extr(
-            page,
-            " id='__NEXT_DATA__' type='application/json'>",
-            "</script>",
-        ),
-        raw => raw,
-    };
+    let raw = [
+        " id=\"__NEXT_DATA__\" type=\"application/json\"",
+        " id='__NEXT_DATA__' type='application/json'",
+    ]
+    .iter()
+    .find_map(|begin| {
+        let rest = &page[page.find(begin)? + begin.len()..];
+        let rest = &rest[rest.find('>')? + 1..];
+        Some(&rest[..rest.find("</script>")?])
+    })
+    .unwrap_or_default();
     serde_json::from_str(raw).map_err(|_| crate::error("page has no valid Next.js data"))
+}
+
+/// The decoded Next.js App Router flight data (`self.__next_f.push([1,"…"])`
+/// chunks, concatenated), which replaced `__NEXT_DATA__` on newer pages.
+pub(crate) fn next_flight(page: &str) -> String {
+    const PUSH: &str = "self.__next_f.push([1,";
+    let mut out = String::new();
+    let mut rest = page;
+    while let Some(start) = rest.find(PUSH) {
+        rest = &rest[start + PUSH.len()..];
+        if let Some(Ok(chunk)) = serde_json::Deserializer::from_str(rest)
+            .into_iter::<String>()
+            .next()
+        {
+            out.push_str(&chunk);
+        }
+    }
+    out
+}
+
+/// The first JSON value after `key` in `text`, e.g. an object embedded in
+/// flight data.
+pub(crate) fn json_after(text: &str, key: &str) -> Option<Value> {
+    let start = text.find(key)? + key.len();
+    serde_json::Deserializer::from_str(&text[start..])
+        .into_iter::<Value>()
+        .next()?
+        .ok()
 }
 
 /// `text.quote` (`urllib.parse.quote` with `safe="/"`).

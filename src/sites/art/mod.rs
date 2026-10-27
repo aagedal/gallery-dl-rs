@@ -35,6 +35,7 @@ mod myportfolio;
 mod naverblog;
 mod nekohouse;
 mod nijie;
+mod patreon;
 mod pexels;
 mod photovogue;
 mod picarto;
@@ -105,6 +106,7 @@ pub(super) static SITES: &[&Site] = &[
     &fanbox::SITE,
     &boosty::SITE,
     &fansly::SITE,
+    &patreon::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
