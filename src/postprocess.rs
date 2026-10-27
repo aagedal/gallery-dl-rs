@@ -36,6 +36,10 @@ impl FrameInput {
 
 #[path = "postprocess_archive.rs"]
 pub(crate) mod archive;
+#[path = "postprocess_classify.rs"]
+pub mod classify;
+#[path = "postprocess_exec.rs"]
+pub mod exec;
 #[path = "postprocess_hash.rs"]
 pub mod hash;
 #[path = "postprocess_jobs.rs"]
@@ -48,8 +52,26 @@ pub mod metadata;
 pub mod mtime;
 #[path = "postprocess_objects.rs"]
 pub(crate) mod objects;
+#[path = "postprocess_rename.rs"]
+pub mod rename;
 #[path = "postprocess_template.rs"]
 pub mod template;
+#[path = "postprocess_zipfile.rs"]
+pub mod zipfile;
+
+/// Expand a leading `~` like Python's `os.path.expanduser`.
+pub(crate) fn expand_home(path: &str) -> PathBuf {
+    match path.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with(['/', '\\']) => std::env::var_os("HOME")
+            .map(|home| {
+                let mut home = home;
+                home.push(rest);
+                PathBuf::from(home)
+            })
+            .unwrap_or_else(|| path.into()),
+        _ => path.into(),
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Processor {
@@ -57,6 +79,12 @@ pub enum Processor {
     Metadata(metadata::MetadataOptions),
     Mtime(mtime::MtimeOptions),
     Hash(hash::HashOptions),
+    Exec(exec::ExecOptions),
+    Classify(classify::ClassifyOptions),
+    /// Re-evaluate the directory format with the current keywords.
+    Directory,
+    Zip(zipfile::ZipOptions),
+    Rename(rename::RenameOptions),
 }
 impl Processor {
     pub fn ugoira(&self) -> Option<&UgoiraOptions> {
@@ -188,9 +216,15 @@ impl Specification {
             "metadata" => Processor::Metadata(metadata::MetadataOptions::parse(&options, base)?),
             "mtime" => Processor::Mtime(mtime::MtimeOptions::parse(&options)?),
             "hash" => Processor::Hash(hash::HashOptions::parse(&options)?),
+            "exec" => Processor::Exec(exec::ExecOptions::parse(&options)?),
+            "classify" => Processor::Classify(classify::ClassifyOptions::parse(&options)?),
+            "directory" => Processor::Directory,
+            "zip" => Processor::Zip(zipfile::ZipOptions::parse(&options)?),
+            "rename" => Processor::Rename(rename::RenameOptions::parse(&options)?),
             _ => {
                 return Err(error(
-                    "unsupported native postprocessor; supported: ugoira, metadata, mtime, hash",
+                    "unsupported native postprocessor; supported: ugoira, metadata, mtime, hash, \
+                     exec, classify, directory, zip, rename",
                 ));
             }
         };
@@ -200,10 +234,19 @@ impl Specification {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            Processor::Exec(_) => vec!["after".to_owned()],
+            Processor::Directory => vec!["prepare".to_owned()],
             _ => vec!["file".to_owned()],
         };
         let events = if matches!(processor, Processor::Ugoira(_)) {
             Vec::new()
+        } else if matches!(processor, Processor::Classify(_)) {
+            // Upstream classify and zip register fixed hooks and ignore `event`.
+            vec![Hook::Prepare]
+        } else if matches!(processor, Processor::Zip(_)) {
+            vec![Hook::File, Hook::Finalize]
+        } else if let Processor::Rename(options) = &processor {
+            options.events()
         } else {
             let events = match options.get("event") {
                 None | Some(Value::Null) => defaults,
@@ -434,8 +477,14 @@ impl Postprocessors {
                 .iter()
                 .cloned()
                 .map(|mut spec| {
-                    if let Processor::Metadata(options) = &spec.options {
-                        spec.options = Processor::Metadata(options.fresh_job());
+                    match &spec.options {
+                        Processor::Metadata(options) => {
+                            spec.options = Processor::Metadata(options.fresh_job());
+                        }
+                        Processor::Zip(options) => {
+                            spec.options = Processor::Zip(options.fresh_job());
+                        }
+                        _ => {}
                     }
                     spec
                 })
@@ -657,6 +706,13 @@ impl Postprocessors {
         filename: Option<&crate::naming::FilenameTemplate>,
     ) -> Result<()> {
         for spec in &self.specifications {
+            if hook == Hook::Finalize
+                && let Processor::Zip(options) = &spec.options
+            {
+                // Upstream registers zip finalization without the filter.
+                options.finalize()?;
+                continue;
+            }
             if !spec.events.contains(&hook) || !spec.matches_keywords(media, context) {
                 if hook == Hook::Finalize
                     && let Processor::Metadata(options) = &spec.options
@@ -725,6 +781,28 @@ impl Postprocessors {
                         paths.realpath = Some(path);
                     }
                 }
+                Processor::Exec(options) => {
+                    let filename = paths
+                        .filename
+                        .as_ref()
+                        .map(|name| name.to_string_lossy().into_owned());
+                    options
+                        .run(
+                            context,
+                            exec::ExecPaths {
+                                path: paths.realpath.as_deref(),
+                                temppath: paths.temppath.as_deref(),
+                                directory: Some(&paths.directory),
+                                filename: filename.as_deref(),
+                            },
+                        )
+                        .await?
+                }
+                // Path-changing processors act on file hooks only.
+                Processor::Classify(_)
+                | Processor::Directory
+                | Processor::Zip(_)
+                | Processor::Rename(_) => {}
             }
             if hook == Hook::Finalize
                 && let Processor::Metadata(options) = &spec.options
@@ -782,6 +860,21 @@ impl Postprocessors {
                     },
                 )?,
                 Processor::Hash(options) => rebuild |= options.run(context, path).await?,
+                Processor::Exec(options) => {
+                    options
+                        .run(
+                            context,
+                            exec::ExecPaths {
+                                path: Some(path),
+                                ..Default::default()
+                            },
+                        )
+                        .await?
+                }
+                Processor::Classify(_)
+                | Processor::Directory
+                | Processor::Zip(_)
+                | Processor::Rename(_) => {}
             }
             if hook == Hook::Finalize
                 && let Processor::Metadata(options) = &spec.options

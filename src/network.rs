@@ -4,10 +4,14 @@ use reqwest::{Client, Proxy, header::HeaderValue};
 use std::{fmt, time::Duration};
 use url::Url;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct NetworkOptions {
     proxy: Option<String>,
     user_agent: Option<String>,
+    /// Upstream `verify: false`: accept invalid TLS certificates.
+    insecure: bool,
+    /// Upstream `source-address`: bind outgoing connections to this address.
+    source_address: Option<std::net::IpAddr>,
 }
 impl fmt::Debug for NetworkOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -45,7 +49,32 @@ impl NetworkOptions {
                 "user-agent must be a nonempty ASCII HTTP header of at most 1024 bytes",
             ));
         }
-        Ok(Self { proxy, user_agent })
+        Ok(Self {
+            proxy,
+            user_agent,
+            ..Self::default()
+        })
+    }
+    /// Disable TLS certificate verification (`--no-check-certificate`).
+    pub fn with_insecure(mut self, insecure: bool) -> Self {
+        self.insecure = insecure;
+        self
+    }
+    /// Equivalent upstream CLI arguments for the compatibility backend.
+    pub fn backend_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if self.insecure {
+            args.push("--no-check-certificate".into());
+        }
+        if let Some(address) = self.source_address {
+            args.extend(["--source-address".into(), address.to_string()]);
+        }
+        args
+    }
+    /// Bind outgoing connections to a local address (`--source-address`, `-4`, `-6`).
+    pub fn with_source_address(mut self, address: Option<std::net::IpAddr>) -> Self {
+        self.source_address = address;
+        self
     }
     pub fn proxy(&self) -> Option<&str> {
         self.proxy.as_deref()
@@ -60,7 +89,9 @@ impl NetworkOptions {
         let mut builder = Client::builder()
             .timeout(timeout)
             .user_agent(self.user_agent().unwrap_or(default_agent))
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            .danger_accept_invalid_certs(self.insecure)
+            .local_address(self.source_address);
         if let Some(proxy) = self.proxy() {
             builder = if proxy.is_empty() {
                 builder.no_proxy()

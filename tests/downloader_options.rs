@@ -255,14 +255,18 @@ fn exec_runs_after_downloaded_files_and_once_after_all() {
     let log_text = std::fs::read_to_string(&log).unwrap();
     let lines: Vec<_> = log_text.lines().map(str::trim).collect();
     assert_eq!(lines, ["4", "done"]);
-    // A failing command fails the run.
+    // Like upstream, a non-zero exit status is reported as a warning only.
+    let (url, handle) = server();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
-        .arg("--exec-after")
+        .arg("--exec")
         .arg("exit 3")
-        .args(["-d", root.path().join("empty").to_str().unwrap()])
+        .args(["-d", root.path().join("other").to_str().unwrap()])
+        .arg(&url)
         .output()
         .unwrap();
-    assert!(!output.status.success());
+    handle.join().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("non-zero exit status (3)"));
 }
 
 /// One request's head and body, answered with `response`.

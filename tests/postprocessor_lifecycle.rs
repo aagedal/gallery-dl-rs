@@ -440,3 +440,153 @@ async fn failed_http_runs_error_finalization_before_unconditional_finalization()
         "finalize-error:1\nfinalize:1\n"
     );
 }
+
+#[tokio::test]
+async fn cli_classify_directory_and_exec_relocate_files_and_run_commands() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = Server::start();
+    let backend = backend(temp.path(), &server.origin);
+    let config = temp.path().join("config.json");
+    let log = temp.path().join("exec.log");
+    fs::write(
+        &config,
+        serde_json::to_vec(&json!({
+            "directory": ["{username}"],
+            "filename": "{filename}.{extension}",
+            "postprocessors": [
+                {"name": "classify", "mapping": {"Images": ["jpg"]}},
+                {"name": "exec", "command": format!("echo after {{_filename}} >> '{}'", log.display())},
+                {"name": "exec", "event": "post", "command": ["sh", "-c", format!("echo post $0 >> '{}'", log.display()), "{post_id}"]},
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = cli(temp.path(), &backend, &config, &["--jobs", "1"]).await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.finish();
+    let mut names: Vec<_> = files(&temp.path().join("downloads"))
+        .into_iter()
+        .map(|p| {
+            p.strip_prefix(temp.path().join("downloads"))
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "fixture/Images/1-1.jpg",
+            "fixture/Images/1-2.jpg",
+            "fixture/Images/3-1.jpg",
+            "fixture/Images/3-2.jpg"
+        ]
+    );
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "post 1\nafter 1-1.jpg\nafter 1-2.jpg\npost 2\npost 3\nafter 3-1.jpg\nafter 3-2.jpg\n"
+    );
+}
+
+#[tokio::test]
+async fn cli_zip_stores_job_files_in_directory_archive() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = Server::start();
+    let backend = backend(temp.path(), &server.origin);
+    let config = temp.path().join("config.json");
+    fs::write(
+        &config,
+        serde_json::to_vec(&json!({
+            "directory": ["{username}"],
+            "filename": "{filename}.{extension}",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = cli(temp.path(), &backend, &config, &["--cbz"]).await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.finish();
+    let downloads = temp.path().join("downloads");
+    assert_eq!(files(&downloads), [downloads.join("fixture.cbz")]);
+    let archive =
+        zip::ZipArchive::new(fs::File::open(downloads.join("fixture.cbz")).unwrap()).unwrap();
+    let mut names: Vec<_> = archive
+        .file_names()
+        .map(|n| n.unwrap().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["1-1.jpg", "1-2.jpg", "3-1.jpg", "3-2.jpg"]);
+}
+
+#[tokio::test]
+async fn cli_rename_moves_existing_files_between_formats_without_downloading() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("downloads/fixture");
+    fs::create_dir_all(&directory).unwrap();
+    for name in ["old-1-1.jpg", "old-1-2.jpg", "old-3-1.jpg", "old-3-2.jpg"] {
+        fs::write(directory.join(name), b"kept").unwrap();
+    }
+    let config = temp.path().join("config.json");
+    fs::write(
+        &config,
+        serde_json::to_vec(&json!({
+            "directory": ["{username}"],
+            "filename": "{filename}.{extension}",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let server = Server::start();
+    let script = backend(temp.path(), &server.origin);
+    let output = cli(
+        temp.path(),
+        &script,
+        &config,
+        &["--rename", "old-{filename}.{extension}"],
+    )
+    .await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(server.finish().is_empty(), "renamed files were downloaded");
+    let mut names: Vec<_> = fs::read_dir(&directory)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["1-1.jpg", "1-2.jpg", "3-1.jpg", "3-2.jpg"]);
+
+    // --rename-to renames skipped files to the new format.
+    let server = Server::start();
+    let script = backend(temp.path(), &server.origin);
+    let output = cli(
+        temp.path(),
+        &script,
+        &config,
+        &["--rename-to", "new-{filename}.{extension}"],
+    )
+    .await;
+    assert!(output.status.success());
+    assert!(server.finish().is_empty());
+    let mut names: Vec<_> = fs::read_dir(&directory)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["new-1-1.jpg", "new-1-2.jpg", "new-3-1.jpg", "new-3-2.jpg"]
+    );
+}

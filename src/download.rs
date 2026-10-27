@@ -135,9 +135,7 @@ impl DownloadClient {
 
     /// Apply transport overrides while retaining shared per-origin cooldowns.
     pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
-        if self.network.proxy() != network.proxy()
-            || self.network.user_agent() != network.user_agent()
-        {
+        if self.network != *network {
             self.http = network.client(
                 concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")),
                 self.wait_limit,

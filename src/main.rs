@@ -42,6 +42,7 @@ use tokio::sync::OnceCell;
 #[derive(Parser)]
 #[command(
     version,
+    args_override_self = true,
     about = "Rust gallery downloader with experimental native Instagram, Facebook, and Twitter/X extractors"
 )]
 struct Args {
@@ -189,8 +190,38 @@ struct Args {
     #[arg(long)]
     native_config: Option<PathBuf>,
     /// Do not load the discovered default native configuration file
-    #[arg(long, conflicts_with = "native_config")]
+    #[arg(
+        long,
+        alias = "config-ignore",
+        alias = "ignore-config",
+        conflicts_with = "native_config"
+    )]
     native_config_ignore: bool,
+    /// Disable HTTPS certificate validation
+    #[arg(long)]
+    no_check_certificate: bool,
+    /// Client-side IP address to bind to
+    #[arg(long, value_name = "IP", conflicts_with_all = ["force_ipv4", "force_ipv6"])]
+    source_address: Option<std::net::IpAddr>,
+    /// Make all connections via IPv4
+    #[arg(short = '4', long, conflicts_with = "force_ipv6")]
+    force_ipv4: bool,
+    /// Make all connections via IPv6
+    #[arg(short = '6', long)]
+    force_ipv6: bool,
+    /// Accepted for compatibility: downloads always use temporary files that
+    /// are published once complete
+    #[arg(long, hide = true)]
+    no_part: bool,
+    /// Accepted for compatibility: the download buffer size is fixed
+    #[arg(long, hide = true, value_name = "SIZE", value_parser = parse_size)]
+    chunk_size: Option<u64>,
+    /// Accepted for compatibility: output is never colored
+    #[arg(long, hide = true)]
+    no_colors: bool,
+    /// Accepted for compatibility: gallery-dl-rs never prompts for input
+    #[arg(long, hide = true)]
+    no_input: bool,
     /// Additional native setting KEY=VALUE (VALUE is JSON or text), e.g.
     /// extractor.4chan.retries=3; `extractor.*` keys also reach the
     /// compatibility backend
@@ -220,6 +251,36 @@ struct Args {
     /// Activate a native postprocessor by name; repeatable
     #[arg(short = 'P', long = "postprocessor", value_name = "NAME")]
     postprocessor: Vec<String>,
+    /// Rename previously downloaded files from FORMAT to the current filename format
+    #[arg(long, value_name = "FORMAT")]
+    rename: Option<String>,
+    /// Rename previously downloaded files from the current filename format to FORMAT
+    #[arg(long, value_name = "FORMAT")]
+    rename_to: Option<String>,
+    /// Store downloaded files in a ZIP archive
+    #[arg(long)]
+    zip: bool,
+    /// Store downloaded files in a CBZ archive
+    #[arg(long)]
+    cbz: bool,
+    /// Convert Pixiv Ugoira to FMT using FFmpeg: webm, mp4, gif, vp8, vp9,
+    /// vp9-lossless, copy, or zip
+    #[arg(long, value_name = "FMT")]
+    ugoira: Vec<String>,
+    #[arg(long, hide = true)]
+    ugoira_conv: bool,
+    #[arg(long, hide = true)]
+    ugoira_conv_lossless: bool,
+    #[arg(long, hide = true)]
+    ugoira_conv_copy: bool,
+    #[arg(long, hide = true)]
+    mtime_from_date: bool,
+    /// Additional postprocessor option KEY=VALUE applied to every postprocessor
+    #[arg(short = 'O', long = "postprocessor-option", value_name = "KEY=VALUE")]
+    postprocessor_options: Vec<String>,
+    /// Do not run any postprocessors
+    #[arg(long)]
+    no_postprocessors: bool,
     /// Write gallery metadata to an info.json file per directory
     #[arg(long, alias = "write-infojson")]
     write_info_json: bool,
@@ -877,12 +938,6 @@ async fn run(args: Args) -> Result<()> {
                     if !args.quiet {
                         eprintln!("downloaded {}", path.display());
                     }
-                    for command in &args.exec {
-                        if let Err(e) = gallery_dl_rs::exec::run(command, Some(&path)).await {
-                            eprintln!("postprocessing failed for {}: {e}", path.display());
-                            failed.set(failed.get() + 1);
-                        }
-                    }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
                     if !args.quiet {
@@ -905,12 +960,6 @@ async fn run(args: Args) -> Result<()> {
                 // Stop new work while draining active files and finalization hooks.
                 eprintln!("stopping after {skipped} consecutive skipped files");
             }
-        }
-    }
-    for command in &args.exec_after {
-        if let Err(e) = gallery_dl_rs::exec::run(command, None).await {
-            eprintln!("postprocessing failed: {e}");
-            failed.set(failed.get() + 1);
         }
     }
     if let Some(path) = &args.error_file {
@@ -1864,6 +1913,7 @@ fn extract_input<'a>(
                             browser: configured.browser_spec.clone(),
                             proxy: configured.network.proxy().map(str::to_owned),
                             user_agent: configured.network.user_agent().map(str::to_owned),
+                            extra_args: configured.network.backend_args(),
                             retweets: (category == "twitter")
                                 .then_some(options.retweets)
                                 .flatten(),
@@ -2042,6 +2092,7 @@ fn extract_input<'a>(
                     browser: configured.browser_spec.clone(),
                     proxy: configured.network.proxy().map(str::to_owned),
                     user_agent: configured.network.user_agent().map(str::to_owned),
+                            extra_args: configured.network.backend_args(),
                     options: configured.cli_options.clone(),
                     ..BackendOptions::default()
                 },
@@ -2111,6 +2162,30 @@ impl Settings {
     }
 }
 
+/// Upstream's `--ugoira FMT` postprocessor presets.
+fn ugoira_postprocessor(format: &str) -> Result<serde_json::Value> {
+    use serde_json::json;
+    let mut pp = match format.trim().to_lowercase().as_str() {
+        "webm" | "vp9" => json!({"extension": "webm", "ffmpeg-args":
+            ["-c:v", "libvpx-vp9", "-crf", "12", "-b:v", "0", "-pix_fmt", "yuv420p", "-an"]}),
+        "vp9-lossless" => json!({"extension": "webm", "ffmpeg-args":
+            ["-c:v", "libvpx-vp9", "-lossless", "1", "-pix_fmt", "yuv420p", "-an"]}),
+        "vp8" => json!({"extension": "webm", "ffmpeg-args":
+            ["-c:v", "libvpx", "-crf", "4", "-b:v", "5M", "-pix_fmt", "yuv420p", "-an"]}),
+        "mp4" => json!({"extension": "mp4", "libx264-prevent-odd": true, "ffmpeg-args":
+            ["-c:v", "libx264", "-b:v", "5M", "-pix_fmt", "yuv420p", "-an"]}),
+        "gif" => json!({"extension": "gif", "repeat-last-frame": false, "ffmpeg-args":
+            ["-filter_complex", "[0:v] split [a][b];[a] palettegen [p];[b][p] paletteuse"]}),
+        "mkv" | "copy" => json!({"extension": "mkv", "repeat-last-frame": false,
+            "ffmpeg-args": ["-c:v", "copy"]}),
+        "zip" | "archive" => json!({"mode": "archive"}),
+        _ => return Err(error(format!("Unsupported Ugoira format '{format}'"))),
+    };
+    pp["name"] = "ugoira".into();
+    pp["whitelist"] = json!(["pixiv", "danbooru"]);
+    Ok(pp)
+}
+
 async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
     let discovered = if args.native_config.is_none() && !args.native_config_ignore {
         default_native_config()
@@ -2126,6 +2201,66 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
     use gallery_dl_rs::config::CliOption;
     for name in &args.postprocessor {
         options.push(CliOption::postprocessor(serde_json::json!(name)));
+    }
+    for command in &args.exec {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "exec", "command": command}),
+        ));
+    }
+    for command in &args.exec_after {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "exec", "command": command, "event": "finalize"}),
+        ));
+    }
+    let ugoira = args
+        .ugoira
+        .iter()
+        .map(String::as_str)
+        .chain(args.ugoira_conv.then_some("vp8"))
+        .chain(args.ugoira_conv_lossless.then_some("vp9-lossless"))
+        .chain(args.ugoira_conv_copy.then_some("copy"));
+    for format in ugoira {
+        options.push(gallery_dl_rs::config::parse_option(
+            "extractor.ugoira=original",
+        )?);
+        options.push(CliOption::postprocessor(ugoira_postprocessor(format)?));
+    }
+    if let Some(format) = &args.rename {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "rename", "from": format}),
+        ));
+    }
+    if let Some(format) = &args.rename_to {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "rename", "to": format}),
+        ));
+    }
+    if args.zip {
+        options.push(CliOption::postprocessor(serde_json::json!("zip")));
+    }
+    if args.cbz {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "zip", "extension": "cbz"}),
+        ));
+    }
+    if args.mtime_from_date {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "mtime", "value": "{date|status[date]}"}),
+        ));
+    }
+    if !args.postprocessor_options.is_empty() {
+        let mut values = serde_json::Map::new();
+        for option in &args.postprocessor_options {
+            let option = gallery_dl_rs::config::parse_option(option)?;
+            values.insert(option.key, option.value);
+        }
+        options.push(CliOption {
+            path: Vec::new(),
+            key: "postprocessor-options".into(),
+            value: values.into(),
+            raw: String::new(),
+            append: false,
+        });
     }
     if args.write_info_json {
         options.push(CliOption::postprocessor(serde_json::json!({
@@ -2382,7 +2517,14 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .transpose()?;
         let post_selection = (post_range.is_some() || post_filter.is_some())
             .then(|| PostSelection::new(post_range, post_filter));
-        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
+        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
+            .with_insecure(args.no_check_certificate)
+            .with_source_address(args.source_address.or_else(|| {
+                use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+                (args.force_ipv4)
+                    .then_some(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                    .or(args.force_ipv6.then_some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)))
+            }));
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
         let child_range = options
             .child_range
@@ -2399,6 +2541,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         let postprocessors = options
             .postprocessors
             .as_ref()
+            .filter(|_| !args.no_postprocessors)
             .map(|config| {
                 config.specifications().map(|specs| {
                     std::sync::Arc::new(gallery_dl_rs::postprocess::Postprocessors::new(specs))

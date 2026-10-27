@@ -10,6 +10,8 @@ pub(crate) struct Prepared {
     directory: Option<PathBuf>,
     extension: Option<Value>,
     source_temppath: Option<PathBuf>,
+    /// Set by `zip` without `keep-files`: discard instead of publishing.
+    delete: bool,
 }
 fn logical_path(
     root: &Path,
@@ -123,6 +125,7 @@ pub(crate) async fn prepare(
         directory,
         extension,
         source_temppath: None,
+        delete: false,
     };
     if source_filename && let Some(scope) = options.postprocessor_scope {
         scope.source_begin(&source_prepare_paths(&result, root, options));
@@ -424,6 +427,9 @@ async fn run_hook(
                                 }
                             }
                         }
+                        other => {
+                            run_path_processor(other, hook, root, input, prepared, options).await?
+                        }
                     }
                     Ok(())
                 }
@@ -492,6 +498,11 @@ pub(crate) async fn download(
         &mut prepared,
     )
     .await?;
+    // Upstream `_file_recheck`: a renamed destination may already exist.
+    if prepared.path != pending && postprocess::regular_file(&prepared.path)? {
+        let converted = skip(client, root, media, options, template, &mut prepared).await?;
+        return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
+    }
     let parent = prepared
         .path
         .parent()
@@ -697,7 +708,7 @@ pub(crate) async fn download(
             publish(&primary.0, &prepared.path, false)?;
         }
         primary.0 = prepared.path.clone();
-    } else if !outputs.iter().any(|(path, _, _)| path == &prepared.path) {
+    } else if !prepared.delete && !outputs.iter().any(|(path, _, _)| path == &prepared.path) {
         publish(&hook_input, &prepared.path, false)?;
     }
     for (path, temporary, replace) in outputs {
@@ -705,7 +716,7 @@ pub(crate) async fn download(
             publish(&temporary, &path, replace)?;
         }
     }
-    if !postprocess::regular_file(&prepared.path)? {
+    if !prepared.delete && !postprocess::regular_file(&prepared.path)? {
         return Err(error("postprocessor produced no primary output"));
     }
     source.source = None;
@@ -814,6 +825,9 @@ async fn run_single_file(
                     }
                 }
                 Processor::Ugoira(_) => {}
+                other => {
+                    run_path_processor(other, Hook::File, root, input, prepared, options).await?
+                }
             }
             Ok(())
         })
@@ -825,4 +839,89 @@ async fn run_single_file(
         }
     }
     result
+}
+
+/// Run processors that act on destination paths: `exec`, `classify` and
+/// `directory`. Others are handled by their callers.
+async fn run_path_processor(
+    processor: &Processor,
+    hook: Hook,
+    root: &Path,
+    input: &Path,
+    prepared: &mut Prepared,
+    options: DownloadOptions<'_>,
+) -> Result<()> {
+    let relocate = |prepared: &mut Prepared, directory: PathBuf| -> Result<()> {
+        let name = prepared
+            .path
+            .file_name()
+            .ok_or_else(|| error("invalid media filename"))?
+            .to_owned();
+        prepared.path = directory.join(name);
+        prepared.directory = Some(directory);
+        Ok(())
+    };
+    match processor {
+        Processor::Exec(config) => {
+            config
+                .run(
+                    &mut prepared.keywords,
+                    postprocess::exec::ExecPaths {
+                        path: Some(&prepared.path),
+                        temppath: Some(input),
+                        ..Default::default()
+                    },
+                )
+                .await?
+        }
+        Processor::Classify(config) => {
+            if let Some(subdirectory) = config.directory(&prepared.keywords) {
+                let base = prepared
+                    .path
+                    .parent()
+                    .ok_or_else(|| error("invalid postprocessor directory"))?;
+                let directory = base.join(subdirectory);
+                relocate(prepared, directory)?;
+            }
+        }
+        Processor::Directory => {
+            let directory = directory_with_keywords(
+                root,
+                &prepared.media,
+                options.directory,
+                &prepared.keywords,
+            )?;
+            relocate(prepared, directory)?;
+        }
+        Processor::Zip(config) => {
+            let directory = prepared
+                .path
+                .parent()
+                .ok_or_else(|| error("invalid postprocessor directory"))?;
+            let name = prepared
+                .path
+                .file_name()
+                .ok_or_else(|| error("invalid media filename"))?
+                .to_string_lossy()
+                .into_owned();
+            let (config, input, directory) =
+                (config.clone(), input.to_owned(), directory.to_owned());
+            prepared.delete |=
+                tokio::task::spawn_blocking(move || config.write(&input, &directory, &name))
+                    .await
+                    .map_err(|_| error("zip postprocessor failed"))??;
+        }
+        Processor::Rename(config) => {
+            if let Some(path) =
+                config.run(hook, &prepared.media, &prepared.keywords, &prepared.path)?
+            {
+                prepared.path = path;
+            }
+        }
+        Processor::Ugoira(_)
+        | Processor::Metadata(_)
+        | Processor::Mtime(_)
+        | Processor::Hash(_) => {}
+    }
+    Ok(())
 }

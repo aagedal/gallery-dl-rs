@@ -1525,6 +1525,21 @@ date validator and inline text from metadata.
 Native Instagram, Facebook, and Twitter session initialization failures now remain local to
 their inputs, allowing unrelated direct links and other inputs to proceed.
 
+**Implemented postprocessor parity, 2026-10-28:** native configuration accepts
+upstream's `exec` (string and list commands, `commands`, `async`, `output`,
+`verbose`, `session`; non-zero exits warn), `classify`, `directory`, `zip`
+(`extension`, `compression` store/zip, `mode` safe, `files`, `keep-files`) and
+`rename` (`from`/`to`, `skip`, with the prepare-after recheck) processors.
+`--exec`/`--exec-after` now configure `exec` processors like upstream, and the
+`--zip`, `--cbz`, `--rename`, `--rename-to`, `--ugoira FMT`, `--ugoira-conv*`,
+`--mtime-from-date`, `-O/--postprocessor-option` and `--no-postprocessors`
+shortcuts are available. `--no-check-certificate`, `--source-address`, `-4` and
+`-6` apply to every native HTTP client and are forwarded to the compatibility
+backend. Repeated CLI options override earlier ones, as with argparse.
+**Remaining:** `compare` (needs `--no-skip`/`skip: false` overwrite support),
+`python` (no native equivalent), exec `archive`/`success`/`error` actions, and
+bzip2/lzma zip compression.
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable
