@@ -13,6 +13,7 @@ mod architizer;
 mod arena;
 mod aryion;
 mod behance;
+mod boosty;
 mod booth;
 mod cien;
 mod civitai;
@@ -101,6 +102,7 @@ pub(super) static SITES: &[&Site] = &[
     &inkbunny::SITE,
     &fantia::SITE,
     &fanbox::SITE,
+    &boosty::SITE,
 ];
 
 /// gallery-dl `text.extract_from`: sequential `extr` calls that advance a
