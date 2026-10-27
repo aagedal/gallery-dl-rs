@@ -59,7 +59,10 @@ enum Target {
 fn target(url: &Url) -> Option<Target> {
     const BASE: &str = r"^https?://([\w-]+)\.pixnet.net";
     let blog = |c: &regex::Captures| (c[1] != *"www").then(|| group(c, 1).to_owned());
-    if let Some(c) = captures(re!(&format!(r"{BASE}/album/photo/(\d+)")), url) {
+    if let Some(c) = captures(
+        re!(&format!(r"{BASE}/(?:album/photo|albums/\d+/photos)/(\d+)")),
+        url,
+    ) {
         return Some(Target::Image(blog(&c)?, group(&c, 2).into()));
     }
     // `/albums/ID` is the redesigned site's set URL.
@@ -116,12 +119,11 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                         &format!("https://{blog}.pixnet.net/album/photo/{id}"),
                     )
                     .append_pair("format", "json");
-                let mut data = http
-                    .json(&api)
-                    .await?
-                    .as_object()
-                    .cloned()
-                    .ok_or_else(|| error("PIXNET returned no image data"))?;
+                let mut data = match http.json(&api).await {
+                    Ok(Value::Object(data)) => data,
+                    // The oEmbed host is gone; read the photo page instead.
+                    _ => photo_page(http, &blog, &id).await?,
+                };
                 let file = data
                     .get("url")
                     .and_then(Value::as_str)
@@ -233,6 +235,30 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             Target::User(blog) => albums(http, blog).await,
         }
     })
+}
+
+/// oEmbed-shaped data from a photo page's `og:` tags.
+async fn photo_page(http: &Http, blog: &str, id: &str) -> crate::Result<Map<String, Value>> {
+    let page = http
+        .text(&http.api(&format!("https://{blog}.pixnet.net/album/photo/{id}"))?)
+        .await?;
+    let url = extr(&page, "<meta property=\"og:image\" content=\"", "\"");
+    if url.is_empty() {
+        return Err(error("PIXNET returned no image data"));
+    }
+    let mut data = Map::new();
+    data.insert("url".into(), unescape(url).into());
+    // `og:title` names the set; the photo's own title is the `data-title`
+    // of its gallery link.
+    let title = unescape(extr(&page, &format!("href=\"{url}\" data-title=\""), "\""));
+    let title = if title.is_empty() {
+        rpartition(url, "/").2.to_owned()
+    } else {
+        title
+    };
+    data.insert("title".into(), title.into());
+    data.insert("author_name".into(), blog.into());
+    Ok(data)
 }
 
 /// The `?page=N` links of the redesigned pages: the next page's URL.
@@ -396,6 +422,25 @@ mod tests {
             Some(Target::User("albertayu773".into()))
         );
         assert_eq!(t("https://www.pixnet.net/"), None);
+    }
+
+    #[tokio::test]
+    async fn photo_page_without_oembed() {
+        let page = r#"<meta property="og:image" content="https://pimg.1px.tw/jane/1522072082-27325675.jpg">
+            <a href="https://pimg.1px.tw/jane/1522072082-27325675.jpg" data-title="0 (11).jpg" class="gallery-item">"#;
+        let (root, _server) = serve(vec![html("gone"), html(page)]);
+        let http = client("pixnet", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://jane.pixnet.net/albums/7/photos/159443828").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        let k = keywords(&files[0]);
+        assert_eq!(
+            (k["filename"].as_str(), k["extension"].as_str()),
+            (Some("0 (11)"), Some("jpg"))
+        );
     }
 
     #[tokio::test]
