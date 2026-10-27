@@ -184,9 +184,17 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     );
                 }
                 let page = http.text(&url).await?;
-                let albums = paginate(http, page, "data-url-short=\"", "\"")
+                // Newer album tiles carry `data-code="CODE"` for `/a/CODE`.
+                let tiles = !page.contains("data-url-short=\"");
+                let begin = if tiles {
+                    "class=\"tilecell\" data-code=\""
+                } else {
+                    "data-url-short=\""
+                };
+                let albums = paginate(http, page, begin, "\"")
                     .await?
                     .into_iter()
+                    .map(|path| if tiles { format!("/a/{path}") } else { path })
                     .filter_map(|path| Url::parse(ROOT).ok()?.join(&path).ok())
                     .map(|url| (url, Map::new()))
                     .collect::<Vec<_>>();
@@ -314,6 +322,21 @@ mod tests {
         assert_eq!(file.render(&files[1]).unwrap(), "lensdump_1IhJr_002.jpg");
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with("GET /a/1IhJr/?page=2 "));
+    }
+
+    #[tokio::test]
+    async fn queues_user_album_tiles() {
+        let (root, _server) = serve(vec![html(
+            r#"<ul class="tilegrid grid-albums" data-albums><li class="tilecell" data-code="bSqGYz1z"><a href="https://lensdump.com/a/bSqGYz1z"></a></li>
+            <li class="tilecell" data-code="tX1uA">"#,
+        )]);
+        let http = client("lensdump", root);
+        let queued = children(extract(
+            &http,
+            Url::parse("https://lensdump.com/vstar925").unwrap(),
+        ))
+        .await;
+        assert_eq!(queued.len(), 2);
     }
 
     #[tokio::test]
