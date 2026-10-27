@@ -325,6 +325,22 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
                 .or_else(|| query("tags"))
                 .filter(|t| valid_tags(t))
                 .map(|tags| Target::Tags { tags }),
+            // e621's `/post?tags=` and legacy `/post/index/PAGE/TAGS`.
+            ["post"] if site == Site::E621 => source_tags
+                .clone()
+                .or_else(|| query("tags"))
+                .filter(|t| valid_tags(t))
+                .map(|tags| Target::Tags { tags }),
+            ["post", "index", page, tags]
+                if site == Site::E621 && page.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                let encoded = format!("value={tags}");
+                let tags = url::form_urlencoded::parse(encoded.as_bytes())
+                    .next()
+                    .map(|(_, v)| v.into_owned())
+                    .unwrap_or_default();
+                valid_tags(&tags).then_some(Target::Tags { tags })
+            }
             _ => None,
         }
     } else {
@@ -2133,6 +2149,30 @@ mod tests {
             matched += 1;
         }
         assert_eq!(matched, 87);
+    }
+
+    #[test]
+    fn e621_legacy_tag_urls() {
+        for raw in [
+            "https://e621.net/post/index/1/cat+dog",
+            "https://e926.net/post/index/3/cat%20dog",
+            "https://e621.net/post?tags=cat+dog",
+        ] {
+            assert_eq!(
+                target(Site::E621, &Url::parse(raw).unwrap()).unwrap().0,
+                Target::Tags {
+                    tags: "cat dog".into()
+                },
+                "{raw}"
+            );
+        }
+        assert!(
+            target(
+                Site::Danbooru,
+                &Url::parse("https://danbooru.donmai.us/post/index/1/x").unwrap()
+            )
+            .is_err()
+        );
     }
 
     #[test]
