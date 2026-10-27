@@ -102,12 +102,36 @@ fn chapter_keywords(chapter: &Value) -> Map<String, Value> {
     data
 }
 
+/// The API origin: MangaPark mirrors redirect to each other (`.net` →
+/// `.org`), and `/apo/` POSTs cannot follow that, so use where the site
+/// root redirects when it is another MangaPark host.
+async fn resolve_root(http: &Http, mut root: String) -> String {
+    // Mirrors chain (`.net` → `.org` → `.me` → …); follow a few hops.
+    for _ in 0..4 {
+        let Ok(home) = http.api(&format!("{root}/")) else {
+            break;
+        };
+        match http.location(&home, &[]).await {
+            Ok(Some(target))
+                if target.scheme() == "https"
+                    && re!(&format!("{BASE}/")).is_match(target.as_str())
+                    && root_of(&target) != root =>
+            {
+                root = root_of(&target);
+            }
+            _ => break,
+        }
+    }
+    root
+}
+
 fn extract(http: &Http, url: Url) -> Events<'_> {
     let Some(target) = target(&url) else {
         return crate::sites::fail(error("unsupported MangaPark URL"));
     };
     let root = root_of(&url);
     crate::sites::once(async move {
+        let root = resolve_root(http, root).await;
         Ok(match target {
             Target::Chapter(id) => {
                 let chapter = graphql(
@@ -418,7 +442,7 @@ data{
 mod tests {
     use super::super::tests::path;
     use super::*;
-    use crate::sites::testing::{children, http, json as reply, keywords, media, serve};
+    use crate::sites::testing::{children, html, http, json as reply, keywords, media, serve};
 
     #[test]
     fn classifies_urls() {
@@ -464,7 +488,14 @@ mod tests {
 
     #[tokio::test]
     async fn extracts_chapter() {
+        let moved = |to: &str| {
+            format!("HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .into_bytes()
+        };
         let (root, server) = serve(vec![
+            moved("https://mangapark.org/"),
+            moved("https://mangapark.me/"),
+            html(""),
             reply(
                 json!({"data": {"get_chapterNode": {"data": {"id": "6710214", "dname": "Ch.60.2 : Navi",
                 "lang": "en", "sourceId": 9, "srcTitle": "Src", "dateCreate": 1600000000123i64,
@@ -492,14 +523,17 @@ mod tests {
             crate::sites::testing::os_path("mangapark/Aria/c060.2: Navi/Aria_c060.2_002.jpg")
         );
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("POST /apo/ "));
-        assert!(requests[0].contains("\"operationName\":\"Get_chapterNode\""));
-        assert!(requests[1].contains("\"getComicNodeId\":\"114972\""));
+        // The `.net` root redirects to the `.org` mirror first.
+        assert!(requests[2].starts_with("GET / "));
+        assert!(requests[3].starts_with("POST /apo/ "));
+        assert!(requests[3].contains("\"operationName\":\"Get_chapterNode\""));
+        assert!(requests[4].contains("\"getComicNodeId\":\"114972\""));
     }
 
     #[tokio::test]
     async fn manga_queues_chapters_and_selects_sources() {
         let (root, server) = serve(vec![
+            html(""),
             reply(json!({"data": {"get_content_comic_sources": [
                 {"data": {"id": 1, "srcTitle": "Other", "lang": "en"}},
                 {"data": {"id": 2, "srcTitle": "Group", "lang": "en"}}]}})),
@@ -520,7 +554,7 @@ mod tests {
             1
         );
         let requests = server.join().unwrap();
-        assert!(requests[0].contains("\"comicId\":1"));
-        assert!(requests[1].contains("\"sourceId\":2"));
+        assert!(requests[1].contains("\"comicId\":1"));
+        assert!(requests[2].contains("\"sourceId\":2"));
     }
 }
