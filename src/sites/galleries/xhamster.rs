@@ -77,11 +77,24 @@ fn metadata(data: &Value) -> Map<String, Value> {
     let details = serde_json::json!({
         "id": int_of(gallery.get("id")),
         "tags": tags,
-        "date": date(model.get("created").and_then(parse_ts)),
-        "views": int_of(model.get("views")),
+        // Newer pages drop `galleryModel`; `infoProps` has these too.
+        "date": date(
+            model
+                .get("created")
+                .or_else(|| author.get("createdDate"))
+                .and_then(parse_ts)
+        ),
+        "views": int_of(
+            model
+                .get("views")
+                .or_else(|| info["viewsInfoProps"].get("views"))
+        ),
         "likes": int_of(model["rating"].get("likes")),
         "dislikes": int_of(model["rating"].get("dislikes")),
-        "title": model["title"],
+        "title": model
+            .get("title")
+            .cloned()
+            .unwrap_or_else(|| gallery["photoItems"][0]["alt"].clone()),
         "description": model["description"],
         "thumbnail": model["thumbURL"],
     });
@@ -103,23 +116,32 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 let meta = metadata(&data);
                 let mut items = Vec::new();
                 loop {
-                    for photo in data["photosGalleryModel"]["photos"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                    {
+                    // Newer pages list `galleryPage.photoItems` instead.
+                    let (photos, newer) = match data["photosGalleryModel"]["photos"].as_array() {
+                        Some(photos) => (photos.clone(), false),
+                        None => (
+                            data["galleryPage"]["photoItems"]
+                                .as_array()
+                                .cloned()
+                                .unwrap_or_default(),
+                            true,
+                        ),
+                    };
+                    for photo in &photos {
                         let Some(mut image) = photo.as_object().cloned() else {
                             continue;
                         };
                         let raw = image
-                            .get("imageURL")
+                            .get(if newer { "imgSrc" } else { "imageURL" })
                             .map(crate::sites::scalar)
                             .unwrap_or_default();
                         let Ok(file) = Url::parse(&raw) else { continue };
                         image.extend(meta.clone());
                         nameext_into(&raw, &mut image);
                         image.insert("num".into(), (items.len() + 1).into());
-                        image.insert("extension".into(), "webp".into());
+                        if !newer {
+                            image.insert("extension".into(), "webp".into());
+                        }
                         image.remove("modelName");
                         let id = image
                             .get("id")
@@ -183,6 +205,18 @@ mod tests {
     use super::*;
     use crate::sites::testing::{html, http as client, keywords, media, serve};
     use serde_json::json;
+
+    #[test]
+    fn newer_gallery_metadata() {
+        let data = serde_json::json!({"galleryPage": {"id": 15860946, "photosCount": 19,
+            "photoItems": [{"id": 1, "alt": "Carwash", "imgSrc": "https://ic-ph-nss.xhcdn.com/a/x/jpeg/000/1_1000.jpg"}],
+            "infoProps": {"authorInfoProps": {"createdDate": 1643783409, "authorName": "A"},
+                "viewsInfoProps": {"views": 114282}}}});
+        let meta = metadata(&data);
+        assert_eq!(meta["gallery"]["title"], "Carwash");
+        assert_eq!(meta["gallery"]["views"], 114282);
+        assert_eq!(meta["gallery"]["date"], "2022-02-02 06:30:09");
+    }
 
     #[test]
     fn classifies_urls() {
