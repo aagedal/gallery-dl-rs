@@ -1,6 +1,6 @@
 //! SlideShare presentations, mirroring gallery_dl/extractor/slideshare.py
 //! through the page's `__NEXT_DATA__` slideshow description.
-use super::{extr, on_host, raw_segments, str_of};
+use super::{on_host, raw_segments, str_of};
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
 use serde_json::{Map, Value};
@@ -55,20 +55,8 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 }
 
 fn next_data(page: &str) -> Result<Value> {
-    let data = Some(extr(
-        page,
-        " id=\"__NEXT_DATA__\" type=\"application/json\">",
-        "</script>",
-    ))
-    .filter(|data| !data.is_empty())
-    .unwrap_or_else(|| {
-        extr(
-            page,
-            " id='__NEXT_DATA__' type='application/json'>",
-            "</script>",
-        )
-    });
-    super::json_loads(data, "SlideShare")
+    // The shared helper accepts extra script attributes (`crossorigin`).
+    crate::sites::gdl::nextdata(page).map_err(|_| error("SlideShare page contains no valid JSON"))
 }
 
 fn trimmed(slideshow: &Value, key: &str) -> Value {
