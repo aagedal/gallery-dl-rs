@@ -1118,7 +1118,22 @@ fn extract_input<'a>(
     settings: &'a BTreeMap<&str, Settings>,
 ) -> BoxStream<'a, Result<ExtractionEvent>> {
     let input = stream::once(async move {
-        let url = extract::http_url(&source)?;
+        let mut url = extract::http_url(&source)?;
+        // Upstream `extractor.generic.enabled`: URLs no other extractor
+        // handles go to the generic extractor without a `g:` prefix.
+        if matches!(extractor, Extractor::Native)
+            && routed_site(&url, extractor).is_none()
+            && extract::direct(&url).is_none()
+            && settings
+                .get("generic")
+                .and_then(|s| s.options.site_options.as_ref())
+                .and_then(|o| o.get("enabled"))
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            && let Ok(generic) = url::Url::parse(&format!("generic:{url}"))
+        {
+            url = generic;
+        }
         let input: BoxStream<'a, Result<ExtractionEvent>> = if let Some(category) =
             routed_site(&url, extractor)
         {
