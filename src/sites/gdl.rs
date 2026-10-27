@@ -205,10 +205,19 @@ pub(crate) fn truthy(value: Option<&Value>) -> bool {
 /// A lazily compiled, cached regex.
 macro_rules! re {
     ($pattern:expr) => {{
-        static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-        // Compiled once per call site, even inside loops.
-        #[allow(clippy::regex_creation_in_loops)]
-        let compiled = RE.get_or_init(|| regex::Regex::new($pattern).expect("static regex"));
+        // Compiled once per call site and distinct pattern (patterns built
+        // with `format!` can differ between site instances).
+        static RE: std::sync::Mutex<
+            Option<std::collections::HashMap<String, &'static regex::Regex>>,
+        > = std::sync::Mutex::new(None);
+        let pattern: &str = $pattern;
+        let mut cache = RE.lock().unwrap_or_else(|e| e.into_inner());
+        let compiled: &'static regex::Regex = *cache
+            .get_or_insert_default()
+            .entry(pattern.to_owned())
+            .or_insert_with(|| {
+                Box::leak(Box::new(regex::Regex::new(pattern).expect("static regex")))
+            });
         compiled
     }};
 }
