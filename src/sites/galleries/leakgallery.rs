@@ -170,11 +170,12 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             let page = http
                 .text(&http.api(&format!("https://leakgallery.com/{creator}/{id}"))?)
                 .await?;
+            // Files may sit in per-creator directories below `content*/`.
             let videos = re!(
-                r#"https://cdn\.leakgallery\.com/content[^/?#]*/(?:compressed_)?watermark_[^"]+\.(?:mp4|mov|m4a|webm)"#
+                r#"https://cdn\.leakgallery\.com/content[^/?#]*/(?:[\w.-]+/)*(?:compressed_)?watermark_[^"]+\.(?:mp4|mov|m4a|webm)"#
             );
             let images = re!(
-                r#"https://cdn\.leakgallery\.com/content[^/?#]*/watermark_[^"]+\.(?:jpe?g|png)"#
+                r#"https://cdn\.leakgallery\.com/content[^/?#]*/(?:[\w.-]+/)*watermark_[^"]+\.(?:jpe?g|png)"#
             );
             let mut seen = HashSet::new();
             let items: Vec<Item> = videos
@@ -236,6 +237,26 @@ mod tests {
         assert_eq!(
             t("https://leakgallery.com/most-liked"),
             Some(Target::MostLiked)
+        );
+    }
+
+    #[tokio::test]
+    async fn post_media_in_creator_directories() {
+        let page = r#"<video src="https://cdn.leakgallery.com/content-videos/sophieraiin/watermark_745_sophieraiin_241.mp4"></video>
+            <img src="https://cdn.leakgallery.com/content/profile_pic/alysa_profile_pic.webp">"#;
+        let (root, _server) = serve(vec![html(page)]);
+        let http = client("leakgallery", root);
+        let files = media(extract(
+            &http,
+            Url::parse("https://leakgallery.com/sophieraiin/12240").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        assert!(
+            files[0]
+                .url
+                .as_str()
+                .ends_with("/sophieraiin/watermark_745_sophieraiin_241.mp4")
         );
     }
 

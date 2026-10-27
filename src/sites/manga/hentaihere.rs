@@ -109,10 +109,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 type Page = (String, Option<Map<String, Value>>);
 
 /// Pages and metadata of the newer reader's `data-reader-data` JSON.
-fn reader_images(
-    page: &str,
-    data: &mut Map<String, Value>,
-) -> Option<Vec<Page>> {
+fn reader_images(page: &str, data: &mut Map<String, Value>) -> Option<Vec<Page>> {
     let reader: Value = serde_json::from_str(extr(page, "data-reader-data>", "</script>")).ok()?;
     let images: Vec<Page> = reader["images"]
         .as_array()?
