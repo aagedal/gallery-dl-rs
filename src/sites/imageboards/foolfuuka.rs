@@ -215,7 +215,23 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
             api.query_pairs_mut()
                 .append_pair("board", &board)
                 .append_pair("num", &thread);
-            let body = http.json(&api).await?;
+            let body = match http.json(&api).await {
+                Ok(body) => body,
+                // Some archives put the API behind a browser challenge while
+                // serving thread pages; rebuild its answer from the HTML.
+                Err(api_error) => {
+                    let url = http.api(&format!("{base}/{board}/thread/{thread}/"))?;
+                    match http
+                        .text(&url)
+                        .await
+                        .ok()
+                        .and_then(|page| html_thread(&page, &board, &thread))
+                    {
+                        Some(body) => body,
+                        None => return Err(api_error),
+                    }
+                }
+            };
             let data = body
                 .get(&thread)
                 .and_then(Value::as_object)
@@ -384,6 +400,70 @@ fn search_events<'a>(
 }
 
 /// Turn API posts into one post boundary of files, resolving remote media.
+/// A thread page's `<article>` posts in the thread API's shape
+/// (`{THREAD: {"op": …, "posts": {NUM: …}}}`).
+fn html_thread(page: &str, board: &str, thread: &str) -> Option<Value> {
+    let mut op = None;
+    let mut replies = Map::new();
+    for chunk in page.split("<article ").skip(1) {
+        let article = &chunk[..chunk.find("</article>").unwrap_or(chunk.len())];
+        let num = crate::sites::gdl::extr(article, "id=\"", "\"");
+        if num.is_empty() || !num.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let time = crate::sites::gdl::extr(article, "<time datetime=\"", "\"");
+        let mut post = serde_json::json!({
+            "num": num,
+            "thread_num": thread,
+            "board": {"shortname": board},
+            "name": crate::sites::unescape(crate::sites::gdl::extr(article, "class=\"post_author\">", "<")),
+            "title": crate::sites::unescape(crate::sites::gdl::extr(article, "class=\"post_title\">", "<")),
+            "comment": crate::sites::unescape(&crate::sites::remove_html(
+                &crate::sites::gdl::extr(article, "<div class=\"text\">", "</div>").replace("<br />", "\n"),
+            )),
+            "timestamp": crate::source_date::parse_string(time),
+            "media": null,
+        });
+        // The image link's own `href`, found back from its class.
+        let link = article
+            .find("class=\"thread_image_link\"")
+            .and_then(|at| {
+                article[..at]
+                    .rfind("<a href=\"")
+                    .map(|i| &article[i + 9..at])
+            })
+            .map(|tag| tag.split('"').next().unwrap_or_default())
+            .unwrap_or_default();
+        if !link.is_empty() {
+            let name = link.rsplit('/').next().unwrap_or_default();
+            let info = crate::sites::gdl::extr(article, "<div class=\"post_file\"", "<a");
+            let info = &info[info.find('>').map_or(0, |i| i + 1)..];
+            let parts: Vec<&str> = info.split(',').map(str::trim).collect();
+            let (w, h) = parts
+                .get(1)
+                .and_then(|dims| dims.split_once('x'))
+                .unwrap_or_default();
+            post["media"] = serde_json::json!({
+                "media_link": link,
+                "media": name,
+                "media_orig": name,
+                "media_filename": crate::sites::unescape(crate::sites::gdl::extr(article, "class=\"post_file_filename\" href=\"", "</a>").rsplit('>').next().unwrap_or_default()),
+                "media_hash": crate::sites::gdl::extr(article, "data-md5=\"", "\""),
+                "media_size": parts.first().copied().unwrap_or_default(),
+                "media_w": parse_int(w),
+                "media_h": parse_int(h),
+            });
+        }
+        if op.is_none() && article.contains("post_is_op") {
+            op = Some(post);
+        } else {
+            replies.insert(num.to_owned(), post);
+        }
+    }
+    let op = op?;
+    Some(serde_json::json!({ thread: {"op": op, "posts": replies} }))
+}
+
 async fn files(
     category: &'static str,
     http: &Http,
@@ -543,6 +623,34 @@ mod tests {
     use super::*;
     use crate::sites::testing::{html, http, json, keywords, media, serve};
     use serde_json::json;
+
+    #[test]
+    fn rebuilds_threads_from_html() {
+        let page = r#"<article class="clearfix thread doc_id_1 post_is_op has_image" id="4668813" data-board="h">
+            <a href="https://ads.example/x" target="_blank">ad</a>
+            <span class="post_author">Anon</span><time datetime="2017-06-23T07:11:23+00:00">t</time>
+            <div class="thread_image_box"> <a href="https://archiveofsins.com/data/h/image/1498/20/1498201883384.jpg" target="_blank" rel="noreferrer" class="thread_image_link">
+            <img data-md5="tbP/3ogBJqVXilmscS9ssg==" /></a> <div class="post_file" style="x"> 88KiB, 479x556, <a class="post_file_filename" href="https://archiveofsins.com/data/h/image/1498/20/1498201883384.jpg" target="_blank">IMG_3416.jpg</a></div>
+            <div class="text">Hello<br />world</div></article>
+            <article class="post doc_id_2" id="4668826" data-board="h"><span class="post_author">Anonymous</span>
+            <time datetime="2017-06-23T07:16:56+00:00">t</time><div class="text">reply</div></article>"#;
+        let body = html_thread(page, "h", "4668813").unwrap();
+        let op = &body["4668813"]["op"];
+        assert_eq!(
+            op["media"]["media_link"],
+            "https://archiveofsins.com/data/h/image/1498/20/1498201883384.jpg"
+        );
+        assert_eq!(op["media"]["media_filename"], "IMG_3416.jpg");
+        assert_eq!(
+            (
+                op["media"]["media_w"].as_i64(),
+                op["media"]["media_h"].as_i64()
+            ),
+            (Some(479), Some(556))
+        );
+        assert_eq!(op["timestamp"], 1498201883);
+        assert!(body["4668813"]["posts"]["4668826"]["media"].is_null());
+    }
 
     #[test]
     fn classifies_urls() {
