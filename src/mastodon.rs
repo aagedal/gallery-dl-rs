@@ -70,9 +70,23 @@ impl Default for SelectionOptions {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Status { host: String, id: String },
-    User { host: String, acct: String },
-    Collection { host: String, feed: Collection },
+    Status {
+        host: String,
+        id: String,
+    },
+    User {
+        host: String,
+        acct: String,
+    },
+    Collection {
+        host: String,
+        feed: Collection,
+    },
+    /// Accounts a user follows, queued as user jobs.
+    Following {
+        host: String,
+        acct: String,
+    },
 }
 
 /// Mastodon collections use server-provided cursors; bookmark IDs are not status IDs.
@@ -199,6 +213,10 @@ pub fn target(url: &Url) -> Result<Target> {
             })
             .ok_or_else(unsupported)
     };
+    let following = |name: &str| match user(name)? {
+        Target::User { host, acct } => Ok(Target::Following { host, acct }),
+        _ => Err(unsupported()),
+    };
     let collection = |feed| {
         Ok(Target::Collection {
             host: host.clone(),
@@ -207,6 +225,8 @@ pub fn target(url: &Url) -> Result<Target> {
     };
     match segments {
         ["statuses", id] | ["notice", id] | ["users", _, "statuses", id] => status(id),
+        ["users", name, "following"] => following(name),
+        [name, "following"] if name.starts_with('@') => following(name),
         ["users", name] | ["users", name, "media"] => user(name),
         [name, id] if name.starts_with('@') && *id != "media" => {
             user(name)?;
@@ -707,6 +727,7 @@ impl Mastodon {
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
         match target {
+            Target::Following { host, acct } => self.following(host, acct),
             Target::Status { host, id } => stream::once(async move {
                 let root = self.root(&host);
                 let (body, _) = self
@@ -755,24 +776,104 @@ impl Mastodon {
         }
     }
 
+    /// An account's ID: `id:ID`, else `accounts/lookup`.
+    async fn account_id(&self, host: &str, acct: &str) -> Result<String> {
+        if let Some(id) = acct.strip_prefix("id:") {
+            return Ok(id.to_owned());
+        }
+        let (body, _) = self
+            .call(
+                &self.root(host),
+                "api/v1/accounts/lookup",
+                &[("acct", acct)],
+            )
+            .await?;
+        let account = json(&body)?;
+        Ok(id_of(&account)
+            .ok_or_else(|| error("Mastodon account lookup returned no account ID"))?
+            .to_owned())
+    }
+
+    /// Upstream `MastodonFollowingExtractor`: queue each followed account as
+    /// a user job on this instance (`@user@domain` for remote accounts).
+    fn following(&self, host: String, acct: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        struct Paging {
+            host: String,
+            path: String,
+            max_id: Option<String>,
+            seen: HashSet<String>,
+            pages: usize,
+            done: bool,
+        }
+        stream::once(async move {
+            let id = self.account_id(&host, &acct).await?;
+            Ok::<_, crate::Error>(Paging {
+                path: format!("api/v1/accounts/{id}/following"),
+                host,
+                max_id: None,
+                seen: HashSet::new(),
+                pages: 0,
+                done: false,
+            })
+        })
+        .map(move |paging| match paging {
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+            Ok(paging) => stream::unfold(paging, move |mut paging| async move {
+                if paging.done {
+                    return None;
+                }
+                let mut query = vec![("limit", PAGE_LIMIT)];
+                if let Some(max_id) = &paging.max_id {
+                    query.push(("max_id", max_id.as_str()));
+                }
+                let page = self
+                    .call(&self.root(&paging.host), &paging.path, &query)
+                    .await;
+                let (body, link) = match page {
+                    Ok(page) => page,
+                    Err(e) => {
+                        paging.done = true;
+                        return Some((stream::once(async move { Err(e) }).boxed(), paging));
+                    }
+                };
+                let accounts = json(&body)
+                    .ok()
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default();
+                paging.pages += 1;
+                let next = link.as_deref().and_then(next_max_id);
+                paging.done = next
+                    .as_ref()
+                    .is_none_or(|cursor| !paging.seen.insert(cursor.clone()))
+                    || paging.pages >= MAX_PAGES;
+                paging.max_id = next;
+                let host = paging.host.clone();
+                let children: Vec<_> = accounts
+                    .into_iter()
+                    .filter_map(|account| {
+                        let acct = string(&account, "acct")?.to_owned();
+                        valid_acct(&acct).then_some(())?;
+                        let url = Url::parse(&format!("https://{host}/@{acct}")).ok()?;
+                        let data = account.as_object()?.clone();
+                        Some(crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw("mastodon", "following", &data),
+                            move || self.events(&url),
+                        ))
+                    })
+                    .collect();
+                Some((stream::iter(children).flatten().boxed(), paging))
+            })
+            .flatten()
+            .boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     async fn timeline(&self, target: &Target) -> Result<TimelineState> {
         let (host, path, account_query) = match target {
             Target::User { host, acct } => {
-                let id = if let Some(id) = acct.strip_prefix("id:") {
-                    id.to_owned()
-                } else {
-                    let (body, _) = self
-                        .call(
-                            &self.root(host),
-                            "api/v1/accounts/lookup",
-                            &[("acct", acct)],
-                        )
-                        .await?;
-                    let account = json(&body)?;
-                    id_of(&account)
-                        .ok_or_else(|| error("Mastodon account lookup returned no account ID"))?
-                        .to_owned()
-                };
+                let id = self.account_id(host, acct).await?;
                 (host, format!("api/v1/accounts/{id}/statuses"), true)
             }
             Target::Collection { host, feed } => {
@@ -784,7 +885,9 @@ impl Mastodon {
                 };
                 (host, path, false)
             }
-            Target::Status { .. } => unreachable!("statuses do not have timeline state"),
+            Target::Status { .. } | Target::Following { .. } => {
+                unreachable!("statuses and followings do not have timeline state")
+            }
         };
         Ok(TimelineState {
             root: self.root(host),
@@ -970,6 +1073,20 @@ mod tests {
                 {"id": format!("{id}4"), "type": "gifv",
                  "url": "https://cdn.example/media/b.mp4",
                  "meta": {"original": {"width": 10, "height": 20, "duration": 1.5}}}]})
+    }
+
+    #[test]
+    fn following_urls() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap()).unwrap();
+        let expected = Target::Following {
+            host: "baraag.net".into(),
+            acct: "pumpkinnsfw".into(),
+        };
+        assert_eq!(
+            t("https://baraag.net/users/pumpkinnsfw/following"),
+            expected
+        );
+        assert_eq!(t("https://baraag.net/@pumpkinnsfw/following"), expected);
     }
 
     #[test]
