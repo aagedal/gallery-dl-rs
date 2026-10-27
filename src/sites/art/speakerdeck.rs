@@ -65,11 +65,8 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
 }
 
 pub(crate) fn metadata(user: &str, presentation: &str, oembed: &Value) -> Map<String, Value> {
-    let id = extr(
-        str_of(oembed, "html"),
-        "src=\"//speakerdeck.com/player/",
-        "\"",
-    );
+    // `src="//speakerdeck.com/player/ID"`, now with an explicit `https:`.
+    let id = extr(str_of(oembed, "html"), "speakerdeck.com/player/", "\"");
     let mut data = Map::new();
     data.insert("user".into(), user.into());
     data.insert("presentation".into(), presentation.into());
@@ -138,6 +135,13 @@ mod tests {
         ] {
             assert_eq!(t(raw), None, "{raw}");
         }
+    }
+
+    #[test]
+    fn https_player_sources() {
+        let oembed = json!({"html": "<iframe class=\"speakerdeck-iframe\" src=\"https://speakerdeck.com/player/50021f75cf1db900020005e7\" width=\"710\">"});
+        let data = metadata("speakerdeck", "intro", &oembed);
+        assert_eq!(data["presentation_id"], "50021f75cf1db900020005e7");
     }
 
     #[tokio::test]
