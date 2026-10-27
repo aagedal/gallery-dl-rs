@@ -590,7 +590,9 @@ pub fn imgbox_original(thumb: &str) -> Option<(Url, String)> {
     }
     let (stem, ext) = file.rsplit_once('.')?;
     // Gallery thumbnails now use `_b` (big) as well as `_t`.
-    let id = stem.strip_suffix("_t").or_else(|| stem.strip_suffix("_b"))?;
+    let id = stem
+        .strip_suffix("_t")
+        .or_else(|| stem.strip_suffix("_b"))?;
     let ext = clean_extension(ext)?;
     if !valid_media_id(Site::Imgbox, id) {
         return None;
