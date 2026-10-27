@@ -125,7 +125,8 @@ impl Server {
             .collect()
     }
     async fn wait_for(&self, count: usize) {
-        tokio::time::timeout(Duration::from_secs(2), async {
+        // Generous: only an upper bound, reached under full-suite load.
+        tokio::time::timeout(Duration::from_secs(15), async {
             while self.count() < count {
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }
@@ -2205,7 +2206,8 @@ async fn bookmark_empty_continuations_are_bounded_while_other_feeds_stop_on_empt
         None,
     )));
     let server = Server::new(responses);
-    let native = extractor(Duration::from_secs(5)).await;
+    // 129 sequential pages; the budget only guards against hangs.
+    let native = extractor(Duration::from_secs(60)).await;
     let items: Vec<_> = native
         .feed_stream(Collection::Bookmarks, server.base.clone())
         .try_collect()
