@@ -104,7 +104,6 @@ async fn call(
     let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
     // The API redirects to canonical URIs (`image/ID` → `image/ID-0`,
     // user name case) with empty bodies; follow those like `requests`.
-    let mut url = url;
     let mut hops = 0;
     let body = loop {
         let (status, body) = http.get_status(&url, &header_refs).await?;
