@@ -132,6 +132,9 @@ pub(super) struct Gallery {
     /// Enumerate every page and leave `count` alone, for extractors with a
     /// custom `items()` that does not zip pages with `count`.
     pub uncounted: bool,
+    /// `GalleryExtractor.assets`: files with a `url` key, yielded first and
+    /// numbered 0. `ytdl:` URLs with `_ytdl_manifest` become manifest jobs.
+    pub assets: Vec<Map<String, Value>>,
 }
 
 impl Gallery {
@@ -145,6 +148,7 @@ impl Gallery {
             timestamp: None,
             headers: Vec::new(),
             uncounted: false,
+            assets: Vec::new(),
         }
     }
 
@@ -206,6 +210,43 @@ impl Gallery {
                 .collect();
         }
         let mut items = Vec::new();
+        for asset in self.assets {
+            let mut fields = asset;
+            fields.extend(data.clone());
+            set(&mut fields, self.enum_key, 0);
+            let raw = fields
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let item = match raw.strip_prefix("ytdl:") {
+                Some(stream)
+                    if fields.get("_ytdl_manifest").and_then(Value::as_str) == Some("hls") =>
+                {
+                    crate::sites::gdl::hls_item(stream, fields)
+                }
+                Some(page) => crate::sites::gdl::ytdl_item(page, fields),
+                None => Url::parse(raw.trim())
+                    .ok()
+                    .filter(crate::sites::plain)
+                    .map(|url| {
+                        if !fields.contains_key("extension") {
+                            let (name, ext) = crate::sites::nameext(&url);
+                            set(&mut fields, "filename", name);
+                            set(&mut fields, "extension", ext);
+                        }
+                        Item::new(url, fields)
+                    }),
+            };
+            let Some(mut item) = item else { continue };
+            item = item
+                .ids(self.post_id.clone(), "0".to_owned())
+                .timestamp(self.timestamp);
+            for (name, value) in &self.headers {
+                item = item.header(name, value);
+            }
+            items.push(item);
+        }
         for (number, (raw, image)) in numbered {
             set(&mut data, self.enum_key, number);
             let url = Url::parse(raw.trim()).ok().filter(crate::sites::plain);

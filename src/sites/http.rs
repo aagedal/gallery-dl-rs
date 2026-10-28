@@ -403,6 +403,30 @@ impl Http {
     /// One GET without status handling or redirects: status and body text,
     /// for sites whose error pages carry data (e.g. 429 challenges).
     pub async fn get_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(u16, String)> {
+        self.get_unredirected(url, headers)
+            .await
+            .map(|(status, _, body)| (status, body))
+    }
+
+    /// GET without following redirects: the response text, or the
+    /// validated redirect target.
+    pub async fn text_or_location(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<(u16, String), Url>> {
+        let (status, location, body) = self.get_unredirected(url, headers).await?;
+        Ok(match location.filter(|_| (300..400).contains(&status)) {
+            Some(target) => Err(target),
+            None => Ok((status, body)),
+        })
+    }
+
+    async fn get_unredirected(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<(u16, Option<Url>, String)> {
         self.rate_limits.wait(url, self.timeout).await?;
         let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
         if let Some(cookie) = self.cookie_header(url) {
@@ -425,6 +449,17 @@ impl Http {
             .unwrap_or_else(|e| e.into_inner())
             .store_response(url, response.headers());
         let status = response.status().as_u16();
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| value.len() <= 8192)
+            .and_then(|value| url.join(value).ok())
+            .filter(|target| {
+                matches!(target.scheme(), "http" | "https")
+                    && target.username().is_empty()
+                    && target.password().is_none()
+            });
         let content_type = content_type(response.headers()).map(str::to_owned);
         let bytes = response
             .bytes()
@@ -433,7 +468,11 @@ impl Http {
         if bytes.len() > MAX_RESPONSE {
             return Err(error(format!("{} response exceeded 16 MiB", self.name)));
         }
-        Ok((status, decode_text(&bytes, content_type.as_deref())))
+        Ok((
+            status,
+            location,
+            decode_text(&bytes, content_type.as_deref()),
+        ))
     }
 
     /// The status of one HEAD request without following redirects.
