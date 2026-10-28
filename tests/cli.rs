@@ -625,7 +625,10 @@ mod cancellation {
         let output = child.0.take().unwrap().wait_with_output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(1));
-        assert!(stderr.contains("need yt-dlp or yt-dlp-rs on PATH"), "{stderr}");
+        assert!(
+            stderr.contains("need yt-dlp or yt-dlp-rs on PATH"),
+            "{stderr}"
+        );
         assert!(!stderr.contains("extraction failed"), "{stderr}");
         assert!(stderr.contains("1 operation(s) failed"), "{stderr}");
     }
