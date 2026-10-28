@@ -54,6 +54,8 @@ pub mod metadata;
 pub mod mtime;
 #[path = "postprocess_objects.rs"]
 pub(crate) mod objects;
+#[path = "postprocess_python.rs"]
+pub mod python;
 #[path = "postprocess_rename.rs"]
 pub mod rename;
 #[path = "postprocess_template.rs"]
@@ -87,6 +89,7 @@ pub enum Processor {
     Mtime(mtime::MtimeOptions),
     Hash(hash::HashOptions),
     Exec(exec::ExecOptions),
+    Python(python::PythonOptions),
     Classify(classify::ClassifyOptions),
     /// Re-evaluate the directory format with the current keywords.
     Directory,
@@ -225,6 +228,7 @@ impl Specification {
             "mtime" => Processor::Mtime(mtime::MtimeOptions::parse(&options)?),
             "hash" => Processor::Hash(hash::HashOptions::parse(&options)?),
             "exec" => Processor::Exec(exec::ExecOptions::parse(&options, base)?),
+            "python" => Processor::Python(python::PythonOptions::parse(&options, base)?),
             "classify" => Processor::Classify(classify::ClassifyOptions::parse(&options)?),
             "directory" => Processor::Directory,
             "zip" => Processor::Zip(zipfile::ZipOptions::parse(&options)?),
@@ -811,6 +815,11 @@ impl Postprocessors {
                         )
                         .await?
                 }
+                Processor::Python(options) => {
+                    options
+                        .run_archived(context, media, root, &paths.directory)
+                        .await?
+                }
                 // Path-changing processors act on file hooks only.
                 Processor::Classify(_)
                 | Processor::Directory
@@ -885,6 +894,11 @@ impl Postprocessors {
                             media,
                             root,
                         )
+                        .await?
+                }
+                Processor::Python(options) => {
+                    options
+                        .run_archived(context, media, root, path.parent().unwrap_or(root))
                         .await?
                 }
                 Processor::Classify(_)

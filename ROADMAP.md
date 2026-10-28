@@ -1544,7 +1544,10 @@ kept until the replacement completes) and bypass archive checks; `skip`
 values `abort:N`, `terminate:N` and `exit:N` map to `-A`/`-T`. The `compare`
 processor (`action` replace/enumerate, `shallow`) is supported.
 `compression: bzip2` is supported (2026-10-28).
-**Remaining:** `python` (no native equivalent) and LZMA zip compression
+The `python` processor runs `function` (`MODULE:NAME`, module name or file
+path) or `expression` (`mode: eval`) in an external `python3`
+(`$GALLERY_DL_PYTHON`), exchanging the keywords as JSON; `archive` works.
+**Remaining:** LZMA zip compression
 (the zip crate cannot write it; it falls back to `store` with a warning).
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept

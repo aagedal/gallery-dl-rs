@@ -944,6 +944,17 @@ async fn run_path_processor(
                 )
                 .await?
         }
+        Processor::Python(config) => {
+            let media = prepared.media.clone();
+            let directory = prepared
+                .path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| root.to_path_buf());
+            config
+                .run_archived(&mut prepared.keywords, &media, root, &directory)
+                .await?
+        }
         Processor::Classify(config) => {
             if let Some(subdirectory) = config.directory(&prepared.keywords) {
                 let base = prepared
