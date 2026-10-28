@@ -1548,8 +1548,8 @@ processor (`action` replace/enumerate, `shallow`) is supported.
 The `python` processor runs `function` (`MODULE:NAME`, module name or file
 path) or `expression` (`mode: eval`) in an external `python3`
 (`$GALLERY_DL_PYTHON`), exchanging the keywords as JSON; `archive` works.
-**Remaining:** LZMA zip compression
-(the zip crate cannot write it; it falls back to `store` with a warning).
+`compression: lzma` writes LZMA (method 14) entries built natively and
+copied into the archive, readable by Python's `zipfile` (2026-10-28).
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
 upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)
