@@ -73,9 +73,34 @@ pub fn decode_base58(code: &str) -> Option<String> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Photo { id: String },
-    Album { user: String, id: String },
-    User { user: String },
+    Photo {
+        id: String,
+    },
+    Album {
+        user: String,
+        id: String,
+    },
+    User {
+        user: String,
+    },
+    /// A user's albums, queued as album children.
+    Albums {
+        user: String,
+    },
+    Favorites {
+        user: String,
+    },
+    Gallery {
+        user: String,
+        id: String,
+    },
+    Group {
+        name: String,
+    },
+    /// `photos.search` parameters from the search page's query.
+    Search {
+        params: Vec<(String, String)>,
+    },
 }
 
 fn segments(url: &Url) -> Vec<&str> {
@@ -113,10 +138,35 @@ pub fn target(url: &Url) -> Result<Target> {
         "www.flickr.com" | "flickr.com" | "m.flickr.com" | "secure.flickr.com" => {
             let (user, rest) = match parts[..] {
                 ["photos", user, ref rest @ ..] if valid_user(user) => (user.to_owned(), rest),
+                ["groups", name, ..] if valid_user(name) => {
+                    return Ok(Target::Group {
+                        name: (*name).into(),
+                    });
+                }
+                ["search"] => {
+                    let mut params: Vec<(String, String)> = url
+                        .query_pairs()
+                        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                        .filter(|(k, _)| !matches!(k.as_str(), "page" | "per_page" | "extras"))
+                        .collect();
+                    if params.is_empty() {
+                        return Err(unsupported());
+                    }
+                    if !params.iter().any(|(k, _)| k == "text") {
+                        params.push(("text".into(), String::new()));
+                    }
+                    return Ok(Target::Search { params });
+                }
                 _ => return Err(unsupported()),
             };
             match rest {
                 [] => Ok(Target::User { user }),
+                ["albums" | "sets"] => Ok(Target::Albums { user }),
+                ["favorites", ..] => Ok(Target::Favorites { user }),
+                ["galleries", id, ..] if valid_id(id) => Ok(Target::Gallery {
+                    user,
+                    id: (*id).into(),
+                }),
                 [page] if page.starts_with("page") && valid_id(&page[4..]) => {
                     Ok(Target::User { user })
                 }
@@ -149,6 +199,10 @@ fn text(value: &Value) -> Option<String> {
 
 fn field(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(text)
+}
+
+fn number_of(value: &Value, key: &str) -> Option<u64> {
+    number(value, key)
 }
 
 fn number(value: &Value, key: &str) -> Option<u64> {
@@ -401,10 +455,23 @@ pub struct Flickr {
 enum Listing {
     Album(String),
     User(String),
+    Favorites(String),
+    Gallery(String),
+    Group(String),
+    Search(Vec<(String, String)>),
+}
+
+/// What a listing needs resolved before its first page.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lookup {
+    UserPhotos,
+    UserFavorites,
+    Group,
 }
 
 struct ListingState {
     listing: Option<Listing>,
+    lookup: Lookup,
     user: String,
     page: u64,
     index: usize,
@@ -539,6 +606,20 @@ impl Flickr {
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
         let listing = match state.listing.take() {
             Some(listing) => listing,
+            None if state.lookup == Lookup::Group => {
+                let url = format!("https://www.flickr.com/groups/{}", state.user);
+                let body = check(
+                    &self
+                        .call("flickr.urls.lookupGroup", &[("url", &url)])
+                        .await?,
+                )?;
+                let nsid = body
+                    .pointer("/group/id")
+                    .and_then(text)
+                    .filter(|id| valid_user(id))
+                    .ok_or_else(|| error("Flickr group not found"))?;
+                Listing::Group(nsid)
+            }
             None => {
                 let url = format!("https://www.flickr.com/photos/{}/", state.user);
                 let body = self
@@ -548,7 +629,11 @@ impl Flickr {
                 if let Some(username) = username {
                     state.user = username;
                 }
-                Listing::User(nsid)
+                if state.lookup == Lookup::UserFavorites {
+                    Listing::Favorites(nsid)
+                } else {
+                    Listing::User(nsid)
+                }
             }
         };
         let page = (state.page + 1).to_string();
@@ -566,6 +651,24 @@ impl Flickr {
             Listing::User(nsid) => {
                 query.insert(0, ("user_id", nsid.as_str()));
                 "flickr.people.getPhotos"
+            }
+            Listing::Favorites(nsid) => {
+                query.insert(0, ("user_id", nsid.as_str()));
+                "flickr.favorites.getList"
+            }
+            Listing::Gallery(id) => {
+                query.insert(0, ("gallery_id", id.as_str()));
+                "flickr.galleries.getPhotos"
+            }
+            Listing::Group(nsid) => {
+                query.insert(0, ("group_id", nsid.as_str()));
+                "flickr.groups.pools.getPhotos"
+            }
+            Listing::Search(params) => {
+                for (key, value) in params {
+                    query.push((key.as_str(), value.as_str()));
+                }
+                "flickr.photos.search"
             }
         };
         let body = self.call(method, &query).await?;
@@ -591,6 +694,71 @@ impl Flickr {
         crate::event::media_only(self.events(url))
     }
 
+    /// Upstream `FlickrAlbumExtractor` without an album ID: queue every
+    /// album of the user (`photosets.getList`).
+    fn albums(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::try_unfold((None::<String>, 1u64, false), move |(nsid, page, done)| {
+            let user = user.clone();
+            async move {
+                if done || page > MAX_PAGES {
+                    return Ok(None);
+                }
+                let nsid = match nsid {
+                    Some(nsid) => nsid,
+                    None => {
+                        let url = format!("https://www.flickr.com/photos/{user}/");
+                        let body = self
+                            .call("flickr.urls.lookupUser", &[("url", &url)])
+                            .await?;
+                        parse_user(&body)?.0
+                    }
+                };
+                let number = page.to_string();
+                let body = check(
+                    &self
+                        .call(
+                            "flickr.photosets.getList",
+                            &[("user_id", nsid.as_str()), ("page", number.as_str())],
+                        )
+                        .await?,
+                )?;
+                let sets = body
+                    .get("photosets")
+                    .ok_or_else(|| error("Flickr response contains no albums"))?;
+                let pages = number_of(sets, "pages").unwrap_or(1);
+                let children: Vec<_> = sets
+                    .get("photoset")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|album| {
+                        let id = field(&album, "id").filter(|id| valid_id(id))?;
+                        let url = Url::parse(&format!(
+                            "https://www.flickr.com/photos/{user}/albums/{id}"
+                        ))
+                        .ok()?;
+                        let data = album.as_object().cloned().unwrap_or_default();
+                        Some(crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw("flickr", "album", &data),
+                            move || self.events(&url),
+                        ))
+                    })
+                    .collect();
+                Ok::<_, crate::Error>(Some((
+                    stream::iter(children).flatten().boxed(),
+                    (Some(nsid), page + 1, page >= pages),
+                )))
+            }
+        })
+        .map(|result| match result {
+            Ok(events) => events,
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Emit one post boundary per photo; listings paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
@@ -607,11 +775,23 @@ impl Flickr {
                     .flatten()
                     .boxed();
             }
-            Target::Album { user, id } => (Some(Listing::Album(id)), user),
-            Target::User { user } => (None, user),
+            Target::Album { user, id } => ((Some(Listing::Album(id)), Lookup::UserPhotos), user),
+            Target::User { user } => ((None, Lookup::UserPhotos), user),
+            Target::Favorites { user } => ((None, Lookup::UserFavorites), user),
+            Target::Gallery { user, id } => {
+                ((Some(Listing::Gallery(id)), Lookup::UserPhotos), user)
+            }
+            Target::Group { name } => ((None, Lookup::Group), name),
+            Target::Search { params } => (
+                (Some(Listing::Search(params)), Lookup::UserPhotos),
+                "search".into(),
+            ),
+            Target::Albums { user } => return self.albums(user),
         };
+        let (listing, lookup) = listing;
         let state = ListingState {
             listing,
+            lookup,
             user,
             page: 0,
             index: 0,
@@ -896,12 +1076,42 @@ mod tests {
                 id: "26140204724".into()
             }
         );
+        assert_eq!(
+            t("https://www.flickr.com/photos/alice/albums").unwrap(),
+            Target::Albums {
+                user: "alice".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.flickr.com/photos/alice/favorites").unwrap(),
+            Target::Favorites {
+                user: "alice".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.flickr.com/groups/x/").unwrap(),
+            Target::Group { name: "x".into() }
+        );
+        assert_eq!(
+            t("https://www.flickr.com/photos/flickr/galleries/72157681572514792/").unwrap(),
+            Target::Gallery {
+                user: "flickr".into(),
+                id: "72157681572514792".into()
+            }
+        );
+        assert_eq!(
+            t("https://flickr.com/search/?text=tree%20cloud&styles=minimalism&page=2").unwrap(),
+            Target::Search {
+                params: vec![
+                    ("text".into(), "tree cloud".into()),
+                    ("styles".into(), "minimalism".into())
+                ]
+            }
+        );
         for raw in [
             "https://www.flickr.com/",
             "https://www.flickr.com/photos/tags/cat",
-            "https://www.flickr.com/photos/alice/albums",
-            "https://www.flickr.com/photos/alice/favorites",
-            "https://www.flickr.com/groups/x",
+            "https://www.flickr.com/search/",
             "https://flic.kr/p/0OIl",
             "https://live.staticflickr.com/65535/1_a_o.jpg",
             "https://www.flickr.com:444/photos/alice",
