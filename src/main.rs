@@ -33,7 +33,7 @@ use sha2::{Digest, Sha256};
 use std::{
     cell::Cell,
     collections::{BTreeMap, HashSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -432,8 +432,9 @@ struct Args {
     #[arg(long, default_value = "gallery-dl")]
     extractor_command: PathBuf,
     /// yt-dlp executable for video-page and HLS/DASH downloads
-    #[arg(long, default_value = "yt-dlp", value_name = "PATH")]
-    ytdl_command: PathBuf,
+    /// (default: yt-dlp, else yt-dlp-rs, on PATH)
+    #[arg(long, value_name = "PATH")]
+    ytdl_command: Option<PathBuf>,
     /// Never run yt-dlp; video-page and HLS/DASH jobs then fail or use fallbacks
     #[arg(long)]
     no_ytdl: bool,
@@ -940,6 +941,22 @@ async fn run(args: Args) -> Result<()> {
             download::YtdlOptions::parse(ytdl)?.install();
         }
     }
+    // Upstream `ytdl.module` picks the Python module; `yt-dlp-rs` (or
+    // `yt_dlp_rs`) selects the native port when no command was given.
+    if args.ytdl_command.is_none() {
+        let downloader = globals
+            .and_then(|g| g.get("downloader")?.get("ytdl")?.get("module"))
+            .and_then(serde_json::Value::as_str);
+        let extractor = settings
+            .get("ytdl")
+            .and_then(|s| s.options.site_options.as_ref()?.get("module"))
+            .and_then(serde_json::Value::as_str);
+        args.ytdl_command = downloader
+            .into_iter()
+            .chain(extractor)
+            .find_map(download::ytdl_module_command)
+            .map(PathBuf::from);
+    }
     match globals.and_then(|g| g.get("skip")) {
         Some(serde_json::Value::Bool(false)) => args.no_skip = true,
         Some(serde_json::Value::String(value)) => {
@@ -994,7 +1011,7 @@ async fn run(args: Args) -> Result<()> {
     let extra_archives =
         std::sync::Mutex::new(BTreeMap::<PathBuf, &'static OnceCell<Result<Archive>>>::new());
     let extractors = Extractors {
-        ytdl: args.ytdl_command.clone(),
+        ytdl: ytdl_command(&args).into(),
         ytdl_cookies: ytdl_cookies(&args),
         ..Extractors::default()
     };
@@ -1361,7 +1378,7 @@ async fn run(args: Args) -> Result<()> {
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep)
             .with_rate_limit(args.limit_rate)
-            .with_ytdl((!args.no_ytdl).then_some(args.ytdl_command.as_path()))
+            .with_ytdl((!args.no_ytdl).then_some(ytdl_command(&args)))
             .with_ytdl_cookies(ytdl_cookies(&args));
         let aborted = &aborted;
         let terminated = &terminated;
@@ -1710,6 +1727,11 @@ struct Extractors {
     ytdl: PathBuf,
     /// Session cookies forwarded to yt-dlp.
     ytdl_cookies: Option<gallery_dl_rs::cookies::YtdlCookies>,
+}
+
+/// The yt-dlp command; the default also finds yt-dlp-rs when run.
+fn ytdl_command(args: &Args) -> &Path {
+    args.ytdl_command.as_deref().unwrap_or(Path::new("yt-dlp"))
 }
 
 /// The command-line session cookies, forwarded to yt-dlp as given.
