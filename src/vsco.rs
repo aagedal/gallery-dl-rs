@@ -98,7 +98,7 @@ pub fn target(url: &Url) -> Result<Target> {
             user: user.into(),
             id: id.into(),
         }),
-        [user] | [user, "gallery" | "images"] => Ok(Target::Gallery { user: user.into() }),
+        [user] | [user, "gallery" | "images", ..] => Ok(Target::Gallery { user: user.into() }),
         _ => Err(unsupported()),
     }
 }

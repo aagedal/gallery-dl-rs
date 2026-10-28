@@ -42,14 +42,37 @@ pub fn valid_id(id: &str) -> bool {
     (1..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// Upstream `[\w~-]+` login names.
 fn valid_user(user: &str) -> bool {
-    (1..=64).contains(&user.len()) && user.bytes().all(|b| b.is_ascii_alphanumeric())
+    (1..=64).contains(&user.len())
+        && user
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'~' | b'-'))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Submission { id: String },
-    Gallery { user: String },
+    Submission {
+        id: String,
+    },
+    Gallery {
+        user: String,
+    },
+    /// `submissions/USER?folderid=ID`.
+    Folder {
+        user: String,
+        folder: String,
+    },
+    Journal {
+        id: String,
+    },
+    Journals {
+        user: String,
+    },
+    /// `favorites?userid=ID` or `favorites/USER`.
+    Favorites {
+        path: String,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -77,7 +100,36 @@ pub fn target(url: &Url) -> Result<Target> {
             .filter(|u| valid_user(u))
             .map(str::to_ascii_lowercase)
     };
+    let query = |key: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+    };
     match parts[..] {
+        ["submissions", name] if valid_user(name) && query("folderid").is_some() => {
+            let folder = query("folderid")
+                .filter(|id| valid_id(id))
+                .ok_or_else(unsupported)?;
+            Ok(Target::Folder {
+                user: name.to_ascii_lowercase(),
+                folder,
+            })
+        }
+        ["journal", id, ..] if valid_id(id) => Ok(Target::Journal { id: id.into() }),
+        ["journals", name, ..] if valid_user(name) => Ok(Target::Journals {
+            user: name.to_ascii_lowercase(),
+        }),
+        ["favorites"] => {
+            let id = query("userid")
+                .filter(|id| valid_id(id))
+                .ok_or_else(unsupported)?;
+            Ok(Target::Favorites {
+                path: format!("favorites?userid={id}&feature=submit"),
+            })
+        }
+        ["favorites", name] if valid_user(name) => Ok(Target::Favorites {
+            path: format!("favorites/{name}?feature=submit"),
+        }),
         // Upstream also accepts `/view/ID` and `/submissions/USER`.
         ["submission" | "view", id, ..] if valid_id(id) => Ok(Target::Submission { id: id.into() }),
         ["submissions", name] if valid_user(name) => Ok(Target::Gallery {
@@ -207,6 +259,7 @@ pub struct Weasyl {
 
 struct GalleryState {
     user: String,
+    folder: Option<String>,
     next: Option<String>,
     page: u64,
     done: bool,
@@ -284,8 +337,16 @@ impl Weasyl {
     async fn next_page(&self, state: &mut GalleryState) -> Result<()> {
         state.page += 1;
         let mut path = format!("api/users/{}/gallery", state.user);
+        let mut params = Vec::new();
         if let Some(next) = &state.next {
-            path.push_str(&format!("?nextid={next}"));
+            params.push(format!("nextid={next}"));
+        }
+        if let Some(folder) = &state.folder {
+            params.push(format!("folderid={folder}"));
+        }
+        if !params.is_empty() {
+            path.push('?');
+            path.push_str(&params.join("&"));
         }
         let (items, next) = parse_gallery(&self.call(&path).await?)?;
         for item in &items {
@@ -302,14 +363,143 @@ impl Weasyl {
         Ok(())
     }
 
+    /// Upstream `retrieve_journal`: the journal's HTML content as a text file.
+    async fn journal(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
+        let item = json(&self.call(&format!("api/journals/{id}/view")).await?)?;
+        let content = item
+            .get("content")
+            .and_then(Value::as_str)
+            .ok_or_else(|| error("Weasyl journal has no content"))?;
+        let url = self
+            .root
+            .join(&format!("journal/{id}"))
+            .map_err(|_| error("invalid Weasyl journal"))?;
+        let media = Media {
+            url,
+            job: MediaJob::InlineText {
+                data: content.to_owned(),
+            },
+            category: "weasyl".into(),
+            filename: format!("{id}.html"),
+            metadata: Some(PostMetadata {
+                post_id: id.to_owned(),
+                media_id: id.to_owned(),
+                username: item
+                    .get("owner_login")
+                    .and_then(Value::as_str)
+                    .filter(|u| valid_user(u))
+                    .map(Arc::from),
+                caption: item
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .and_then(clean_text)
+                    .map(Arc::from),
+                timestamp: item
+                    .get("posted_at")
+                    .and_then(Value::as_str)
+                    .and_then(|d| crate::date::parse_date(d).ok()),
+                index: 1,
+                ..PostMetadata::default()
+            }),
+            headers: BTreeMap::new(),
+            handoff: BTreeMap::new(),
+        };
+        Ok(self.emit(media))
+    }
+
+    /// IDs linked as `PREFIX<id>/` in an HTML page, in order and once each.
+    fn linked_ids(page: &str, prefix: &str) -> Vec<String> {
+        let mut seen = HashSet::new();
+        page.match_indices(prefix)
+            .filter_map(|(start, _)| {
+                let rest = &page[start + prefix.len()..];
+                let id = &rest[..rest.find('/')?];
+                (valid_id(id) && seen.insert(id.to_owned())).then(|| id.to_owned())
+            })
+            .collect()
+    }
+
+    fn per_id<'a>(
+        &'a self,
+        ids: Vec<String>,
+        journal: bool,
+    ) -> BoxStream<'a, Result<ExtractionEvent>> {
+        stream::iter(ids)
+            .then(move |id| async move {
+                if journal {
+                    self.journal(&id).await
+                } else {
+                    // Like upstream, posts without a submission file are skipped.
+                    self.submission(&id).await.or_else(|_| Ok(VecDeque::new()))
+                }
+            })
+            .map(|result: Result<VecDeque<ExtractionEvent>>| match result {
+                Ok(events) => stream::iter(events.into_iter().map(Ok)).boxed(),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            })
+            .flatten()
+            .boxed()
+    }
+
+    /// Upstream `WeasylJournalsExtractor`: journal links of the user's page.
+    fn journals(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let page = self.call(&format!("journals/{user}")).await?;
+            let page = String::from_utf8_lossy(&page);
+            Ok::<_, crate::Error>(Self::linked_ids(&page, "href=\"/journal/"))
+        })
+        .map(move |result| match result {
+            Ok(ids) => self.per_id(ids, true),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    /// Upstream `WeasylFavoriteExtractor`: submissions linked from the
+    /// favorites pages, following their "Next" links.
+    fn favorites(&self, path: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::try_unfold((Some(path), 0u64), move |(path, pages)| async move {
+            let Some(path) = path.filter(|_| pages < MAX_PAGES) else {
+                return Ok(None);
+            };
+            let page = self.call(&path).await?;
+            let page = String::from_utf8_lossy(&page).into_owned();
+            let start = page
+                .find("id=\"favorites-content\"")
+                .ok_or_else(|| error("Weasyl favorites page has no favorites"))?;
+            let ids = Self::linked_ids(&page[start..], "/submissions/");
+            let next = page[start..].find("\">Next (").and_then(|end| {
+                let end = start + end;
+                let href = page[..end].rfind("href=\"")? + 6;
+                Some(
+                    crate::sites::unescape(&page[href..end])
+                        .trim_start_matches('/')
+                        .to_owned(),
+                )
+            });
+            Ok::<_, crate::Error>(Some((self.per_id(ids, false), (next, pages + 1))))
+        })
+        .map(|result| match result {
+            Ok(events) => events,
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
         crate::event::media_only(self.events(url))
     }
 
     /// Emit one post boundary per submission; galleries paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
-        let user = match target(url) {
-            Ok(Target::Gallery { user }) => user,
+        let (user, folder) = match target(url) {
+            Ok(Target::Gallery { user }) => (user, None),
+            Ok(Target::Folder { user, folder }) => (user, Some(folder)),
+            Ok(Target::Journal { id }) => return self.per_id(vec![id], true),
+            Ok(Target::Journals { user }) => return self.journals(user),
+            Ok(Target::Favorites { path }) => return self.favorites(path),
             Ok(Target::Submission { id }) => {
                 return stream::once(async move { self.submission(&id).await })
                     .map(|result| match result {
@@ -323,6 +513,7 @@ impl Weasyl {
         };
         let state = GalleryState {
             user,
+            folder,
             next: None,
             page: 0,
             done: false,
@@ -480,6 +671,42 @@ mod tests {
             Target::Gallery {
                 user: "tanidareal".into()
             }
+        );
+        assert_eq!(
+            t("https://www.weasyl.com/~aro~so"),
+            Target::Gallery {
+                user: "aro~so".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.weasyl.com/submissions/tanidareal?folderid=7403"),
+            Target::Folder {
+                user: "tanidareal".into(),
+                folder: "7403".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.weasyl.com/journal/17647/bbcode"),
+            Target::Journal { id: "17647".into() }
+        );
+        assert_eq!(
+            t("https://www.weasyl.com/journals/charmander"),
+            Target::Journals {
+                user: "charmander".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.weasyl.com/favorites?userid=184616&feature=submit"),
+            Target::Favorites {
+                path: "favorites?userid=184616&feature=submit".into()
+            }
+        );
+        assert_eq!(
+            Weasyl::linked_ids(
+                r#"<a href="/journal/1/x"><a href="/journal/2/"><a href="/journal/1/"#,
+                "href=\"/journal/"
+            ),
+            ["1", "2"]
         );
     }
 
