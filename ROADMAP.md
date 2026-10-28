@@ -1633,7 +1633,7 @@ output modes (one download at a time owns the line).
 Errors and warnings use upstream's `[NAME][LEVEL] MESSAGE` format
 (`output.log`: a format string or `{"format": ...}` with `{name}`,
 `{levelname}`, `{message}`, `{asctime}`).
-**Remaining:** `output.shorten`, ytdl `outtmpl`/`logging`/
+**Remaining:** ytdl `outtmpl`/`logging`/
 `deprecations`, and relative paths
 resolve against the configuration directory rather than the working directory.
 

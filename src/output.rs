@@ -6,7 +6,8 @@
 //! and `# PATH`; `color` colors the path (`output.colors`, `NO_COLOR`);
 //! `null`/`false` print nothing; an object gives `skip`/`success` format
 //! strings with `{}` for the path. `output.skip: false` hides skips.
-//! Paths are not shortened to the terminal width.
+//! Terminal and color modes shorten paths to the terminal width
+//! (`output.shorten`, default true).
 use serde_json::Value;
 use std::io::{IsTerminal, Write};
 
@@ -29,6 +30,35 @@ enum Mode {
 pub struct Output {
     mode: Mode,
     skip: bool,
+    /// Upstream `output.shorten`: terminal width for terminal/color modes.
+    width: Option<usize>,
+}
+
+/// Columns of the terminal on standard output.
+fn terminal_width() -> Option<usize> {
+    #[cfg(unix)]
+    {
+        // SAFETY: TIOCGWINSZ fills a plain winsize struct.
+        unsafe {
+            let mut size: libc::winsize = std::mem::zeroed();
+            if libc::ioctl(1, libc::TIOCGWINSZ, &mut size) == 0 && size.ws_col > 0 {
+                return Some(size.ws_col as usize);
+            }
+        }
+    }
+    std::env::var("COLUMNS").ok()?.parse().ok()
+}
+
+/// Upstream `shorten_string`: keep both ends around an ellipsis.
+fn shorten(text: &str, limit: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit || limit < 2 {
+        return text.to_owned();
+    }
+    let limit = limit - 1;
+    let head: String = chars[..limit / 2].iter().collect();
+    let tail: String = chars[chars.len() - limit.div_ceil(2)..].iter().collect();
+    format!("{head}…{tail}")
 }
 
 impl Output {
@@ -81,7 +111,18 @@ impl Output {
                 Some(_) => Mode::Pipe,
             }
         };
-        Self { mode, skip }
+        let width = (matches!(mode, Mode::Terminal | Mode::Color { .. })
+            && get("shorten") != Some(&Value::Bool(false)))
+        .then(terminal_width)
+        .flatten();
+        Self { mode, skip, width }
+    }
+
+    fn fit(&self, text: &str) -> String {
+        match self.width {
+            Some(width) => shorten(text, width.saturating_sub(1)),
+            None => text.to_owned(),
+        }
     }
 
     fn auto(tty: bool, colors: impl Fn(&str, &str) -> Mode) -> Mode {
@@ -105,8 +146,10 @@ impl Output {
         let text = match &self.mode {
             Mode::Null => return,
             Mode::Pipe => format!("{path}\n"),
-            Mode::Terminal => format!("✔ {path}\n"),
-            Mode::Color { success, .. } => format!("\x1b[{success}m{path}\x1b[0m\n"),
+            Mode::Terminal => format!("{}\n", self.fit(&format!("✔ {path}"))),
+            Mode::Color { success, .. } => {
+                format!("\x1b[{success}m{}\x1b[0m\n", self.fit(path))
+            }
             Mode::Custom { success, .. } => match success {
                 Some(format) => format.replace("{}", path),
                 None => return,
@@ -122,13 +165,23 @@ impl Output {
         }
         let text = match &self.mode {
             Mode::Null => return,
-            Mode::Pipe | Mode::Terminal => format!("# {path}\n"),
-            Mode::Color { skip, .. } => format!("\x1b[{skip}m{path}\x1b[0m\n"),
+            Mode::Pipe => format!("# {path}\n"),
+            Mode::Terminal => format!("{}\n", self.fit(&format!("# {path}"))),
+            Mode::Color { skip, .. } => format!("\x1b[{skip}m{}\x1b[0m\n", self.fit(path)),
             Mode::Custom { skip, .. } => match skip {
                 Some(format) => format.replace("{}", path),
                 None => return,
             },
         };
         Self::write(text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shortens_like_upstream() {
+        assert_eq!(super::shorten("abcdefghij", 20), "abcdefghij");
+        assert_eq!(super::shorten("abcdefghij", 6), "ab…hij");
     }
 }
