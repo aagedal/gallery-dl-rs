@@ -1,4 +1,4 @@
-//! Experimental native Imgur image, album, and gallery extraction.
+//! Experimental native Imgur image, album, gallery and listing extraction.
 //!
 //! Mirrors gallery_dl/extractor/imgur.py: posts are read from Imgur's public
 //! `post/v1` API with the anonymous web client ID, and file URLs are rebuilt
@@ -35,14 +35,50 @@ pub enum Target {
     Image(String),
     Album(String),
     Gallery(String),
+    /// Listings whose posts are queued as album or image children.
+    Listing(Listing),
+}
+
+/// Upstream user, favorite, favorite-folder, subreddit, tag and search
+/// extractors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Listing {
+    User(String),
+    Favorite(String),
+    FavoriteFolder(String, String),
+    Subreddit(String),
+    Tag(String),
+    Search(String),
+}
+
+impl Listing {
+    fn subcategory(&self) -> &'static str {
+        match self {
+            Self::User(_) => "user",
+            Self::Favorite(_) => "favorite",
+            Self::FavoriteFolder(..) => "favorite-folder",
+            Self::Subreddit(_) => "subreddit",
+            Self::Tag(_) => "tag",
+            Self::Search(_) => "search",
+        }
+    }
 }
 
 impl Target {
     pub fn id(&self) -> &str {
         match self {
             Self::Image(id) | Self::Album(id) | Self::Gallery(id) => id,
+            Self::Listing(_) => "",
         }
     }
+}
+
+/// A user, subreddit or tag name usable in an API path.
+fn valid_name(name: &str) -> bool {
+    (1..=128).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
 fn valid_id(id: &str) -> bool {
@@ -65,7 +101,7 @@ fn slug_id(segment: &str) -> Option<String> {
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
-            "unsupported Imgur URL; expected an image, album (/a/ID) or gallery (/gallery/ID) link",
+            "unsupported Imgur URL; expected an image, album, gallery, user, favorites, subreddit, tag or search link",
         )
     };
     let host = url.host_str().ok_or_else(unsupported)?;
@@ -108,6 +144,36 @@ pub fn target(url: &Url) -> Result<Target> {
         ["a", segment] => slug_id(segment).map(Target::Album).ok_or_else(unsupported),
         ["gallery", segment] | ["t", _, segment] => slug_id(segment)
             .map(Target::Gallery)
+            .ok_or_else(unsupported),
+        ["user", "me", ..] => Err(error(
+            "Imgur 'me' listings need the 'accesstoken' cookie, which is not supported natively",
+        )),
+        ["user", name] | ["user", name, "posts" | "submitted"] if valid_name(name) => {
+            Ok(Target::Listing(Listing::User((*name).into())))
+        }
+        ["user", name, "favorites"] if valid_name(name) => {
+            Ok(Target::Listing(Listing::Favorite((*name).into())))
+        }
+        ["user", name, "favorites", "folder", folder, ..]
+            if valid_name(name)
+                && !folder.is_empty()
+                && folder.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            Ok(Target::Listing(Listing::FavoriteFolder(
+                (*name).into(),
+                (*folder).into(),
+            )))
+        }
+        ["r", subreddit] if valid_name(subreddit) => {
+            Ok(Target::Listing(Listing::Subreddit((*subreddit).into())))
+        }
+        ["t", tag] if valid_name(tag) => Ok(Target::Listing(Listing::Tag((*tag).into()))),
+        ["search", ..] => url
+            .query_pairs()
+            .find(|(key, _)| key == "q")
+            .map(|(_, query)| query.into_owned())
+            .filter(|query| !query.is_empty())
+            .map(|query| Target::Listing(Listing::Search(query)))
             .ok_or_else(unsupported),
         ["r", subreddit, id]
             if subreddit
@@ -310,6 +376,7 @@ impl Imgur {
             Target::Image(_) => self.request(&self.endpoint("media", id)).await?,
             Target::Album(_) => self.request(&self.endpoint("albums", id)).await?,
             // Gallery posts may be albums or single images.
+            Target::Listing(_) => return Err(error("Imgur listings queue their posts")),
             Target::Gallery(_) => match self.request(&self.endpoint("albums", id)).await {
                 Ok(body) => body,
                 Err(Failure {
@@ -329,11 +396,120 @@ impl Imgur {
         crate::event::media_only(self.events(url))
     }
 
-    /// Emit one post boundary per image, album or gallery post.
+    /// Emit one post boundary per image, album or gallery post; listings
+    /// queue their posts as album and image children.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        match target(url) {
+            Ok(Target::Listing(listing)) => return self.listing(listing),
+            Err(e) => return stream::once(async move { Err(e) }).boxed(),
+            Ok(_) => {}
+        }
         let url = url.clone();
         stream::once(async move {
             let media = self.extract(&url).await?;
+            Ok::<_, crate::Error>(stream::iter(group(media, "imgur").into_iter().map(Ok)))
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    /// One page of a listing: upstream `_pagination` (`/3/...` endpoints
+    /// with a page number path suffix) or `_pagination_v2` (folders).
+    fn listing_page(&self, listing: &Listing, page: u32) -> Url {
+        let path = match listing {
+            Listing::User(name) => format!("3/account/{name}/submissions/{page}"),
+            Listing::Favorite(name) => format!("3/account/{name}/gallery_favorites/{page}"),
+            Listing::FavoriteFolder(name, folder) => {
+                format!("3/account/{name}/folders/{folder}/favorites")
+            }
+            Listing::Subreddit(name) => format!("3/gallery/r/{name}/{page}"),
+            Listing::Tag(name) => format!("3/gallery/t/{name}/{page}"),
+            Listing::Search(_) => format!("3/gallery/search/{page}"),
+        };
+        let mut url = self.api_root.join(&path).expect("validated Imgur listing");
+        match listing {
+            Listing::Search(query) => {
+                url.query_pairs_mut().append_pair("q", query);
+            }
+            Listing::FavoriteFolder(..) => {
+                url.query_pairs_mut()
+                    .append_pair("client_id", CLIENT_ID)
+                    .append_pair("page", &page.to_string())
+                    .append_pair("sort", "newest");
+            }
+            _ => {}
+        }
+        url
+    }
+
+    fn listing(&self, listing: Listing) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let pages = stream::try_unfold(Some(0u32), move |page| {
+            let listing = listing.clone();
+            async move {
+                let Some(page) = page else {
+                    return Ok(None);
+                };
+                let body = self
+                    .request(&self.listing_page(&listing, page))
+                    .await
+                    .map_err(crate::Error::from)?;
+                let value: Value = serde_json::from_slice(&body)
+                    .map_err(|_| error("Imgur returned an invalid listing"))?;
+                let mut data = value.get("data").cloned().unwrap_or(value);
+                if matches!(listing, Listing::Tag(_)) {
+                    data = data.get("items").cloned().unwrap_or(Value::Null);
+                }
+                let items = match data {
+                    Value::Array(items) => items,
+                    _ => Vec::new(),
+                };
+                if items.is_empty() || page >= 10_000 {
+                    return Ok(None);
+                }
+                let subcategory = listing.subcategory();
+                let children: Vec<_> = items
+                    .into_iter()
+                    .filter_map(|item| {
+                        let id = item.get("id")?.as_str()?.to_owned();
+                        if !valid_id(&id) {
+                            return None;
+                        }
+                        let album = item.get("is_album").and_then(Value::as_bool) == Some(true);
+                        let data = item.as_object().cloned().unwrap_or_default();
+                        Some(crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw("imgur", subcategory, &data),
+                            move || {
+                                let target = if album {
+                                    Target::Album(id)
+                                } else {
+                                    Target::Image(id)
+                                };
+                                self.target_events(target)
+                            },
+                        ))
+                    })
+                    .collect();
+                Ok::<_, crate::Error>(Some((stream::iter(children).flatten(), Some(page + 1))))
+            }
+        });
+        pages
+            .map(|page| match page {
+                Ok(children) => children.boxed(),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            })
+            .flatten()
+            .boxed()
+    }
+
+    fn target_events(&self, target: Target) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let media = tokio::time::timeout(self.timeout, self.extract_target(&target))
+                .await
+                .map_err(|_| error("native Imgur extraction timed out"))??;
             Ok::<_, crate::Error>(stream::iter(group(media, "imgur").into_iter().map(Ok)))
         })
         .map(|result| match result {
@@ -368,6 +544,11 @@ impl Imgur {
                 .timeout(self.request_timeout)
                 .header(header::ACCEPT, "application/json")
                 .header(header::REFERER, "https://imgur.com/")
+                .header(header::ORIGIN, "https://imgur.com")
+                .header(
+                    header::AUTHORIZATION,
+                    concat!("Client-ID ", "546c25a59c58ad7"),
+                )
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Imgur request failed; check network access"))?;
@@ -617,11 +798,38 @@ mod tests {
         ] {
             assert_eq!(t(raw).unwrap(), expected, "{raw}");
         }
+        for (raw, expected) in [
+            (
+                "https://imgur.com/user/someone",
+                Listing::User("someone".into()),
+            ),
+            (
+                "https://imgur.com/user/someone/posts",
+                Listing::User("someone".into()),
+            ),
+            (
+                "https://imgur.com/user/someone/favorites",
+                Listing::Favorite("someone".into()),
+            ),
+            (
+                "https://imgur.com/user/someone/favorites/folder/123/title",
+                Listing::FavoriteFolder("someone".into(), "123".into()),
+            ),
+            (
+                "https://imgur.com/r/pics",
+                Listing::Subreddit("pics".into()),
+            ),
+            ("https://imgur.com/t/cats", Listing::Tag("cats".into())),
+            (
+                "https://imgur.com/search/score?q=cute+cats",
+                Listing::Search("cute cats".into()),
+            ),
+        ] {
+            assert_eq!(t(raw).unwrap(), Target::Listing(expected), "{raw}");
+        }
         for raw in [
-            "https://imgur.com/user/someone",
-            "https://imgur.com/user/someone/favorites",
-            "https://imgur.com/r/pics",
-            "https://imgur.com/search?q=x",
+            "https://imgur.com/user/me",
+            "https://imgur.com/search?q=",
             "https://imgur.com/a/toolongid",
             "https://imgur.com/a/ab/cd",
             "https://i.imgur.com/a/TcBmP",
@@ -699,6 +907,48 @@ mod tests {
             "GET /post/v1/albums/zf2fIms?client_id=546c25a59c58ad7&include=media%2Ctags%2Caccount "
         ));
         assert!(requests[1].starts_with("GET /post/v1/media/zf2fIms?"));
+    }
+
+    #[tokio::test]
+    async fn listings_queue_albums_and_images_page_by_page() {
+        let json = |body: String| {
+            response(
+                "200 OK",
+                "Content-Type: application/json\r\n",
+                body.as_bytes(),
+            )
+        };
+        let page = json!({"data": [
+            {"id": "AbCdE12", "is_album": true, "title": "first"},
+            {"id": "zf2fIms", "is_album": false},
+        ]});
+        let image = json!({"id":"zf2fIms","media":[{"id":"zf2fIms","ext":"png"}]});
+        let (root, server) = serve(vec![
+            json(page.to_string()),
+            response("200 OK", "Content-Type: application/json\r\n", &album()),
+            json(image.to_string()),
+            json(json!({"data": []}).to_string()),
+        ]);
+        let imgur = imgur(root);
+        let events: Vec<_> = imgur
+            .events(&Url::parse("https://imgur.com/user/someone").unwrap())
+            .collect()
+            .await;
+        let media: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                Ok(ExtractionEvent::Media(media)) => Some(media.url.as_str().to_owned()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(media.len(), 4, "{events:?}");
+        assert!(media[3].ends_with("/zf2fIms.png"));
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /3/account/someone/submissions/0 "));
+        assert!(requests[0].contains("authorization: Client-ID 546c25a59c58ad7"));
+        assert!(requests[1].starts_with("GET /post/v1/albums/AbCdE12?"));
+        assert!(requests[2].starts_with("GET /post/v1/media/zf2fIms?"));
+        assert!(requests[3].starts_with("GET /3/account/someone/submissions/1 "));
     }
 
     #[tokio::test]

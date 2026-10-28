@@ -618,7 +618,10 @@ downloads. Document compatibility differences as features land.
 posts via the public `post/v1` API, with shared retries, timeouts, network
 options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
 to true; false preserves animated GIFs while leaving native video unchanged.
-Not yet: user profiles, favorites, subreddits, searches and tag listings.
+User profiles (`/user/NAME`), favorites and favorite folders, subreddits
+(`/r/NAME`), tags (`/t/NAME`) and searches queue their posts as album and
+image children through the v3 API (2026-10-28). Not yet: `/user/me`
+(needs the `accesstoken` cookie).
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite

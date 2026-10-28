@@ -174,7 +174,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         let format = match target {
             crate::imgur::Target::Image(_) => "{id}",
             crate::imgur::Target::Album(_) => "{album[id]}_{id}",
-            crate::imgur::Target::Gallery(_) => "",
+            crate::imgur::Target::Gallery(_) | crate::imgur::Target::Listing(_) => "",
         };
         return Some(descriptor("imgur", format));
     }
