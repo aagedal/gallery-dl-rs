@@ -1619,7 +1619,7 @@ lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
 Upstream's `extension-map` applies to every extractor (default: `jpeg`,
 `jpe`, `jfif`, `jif` and `jfi` become `jpg`).
 **Remaining:** other `output` options (log formats, progress, colors), most
-`downloader.ytdl` options, format-string archive paths, and relative paths
+`downloader.ytdl` options, and relative paths
 resolve against the configuration directory rather than the working directory.
 
 **Implemented OAuth helpers, 2026-10-28:** `oauth:pixiv` (PKCE with a pasted
@@ -1661,8 +1661,9 @@ local file errors (extraction errors are classified by their messages).
 (request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
 `metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
-`ciphers`, `truststore`, `proxy-env` and `cookies-select` are not
-implemented. `config-map` (default: upstream's renamed categories, e.g.
+`ciphers`, `truststore` and `cookies-select` are not implemented;
+`proxy-env: false` disables environment proxies. (Upstream itself rejects
+replacement fields in string `archive` paths.) `config-map` (default: upstream's renamed categories, e.g.
 `kemonoparty` → `kemono`, `pixiv` → `pixiv-novel`) copies settings to new
 category names; `category-map` and `--compat` rename `category` (and
 `subcategory`) keywords, but configuration lookups keep the native names.
