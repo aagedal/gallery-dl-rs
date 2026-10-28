@@ -900,6 +900,10 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("imgur.io", "imgur"),
         ("twitter.com", "twitter"),
         ("x.com", "twitter"),
+        ("fxtwitter.com", "twitter"),
+        ("vxtwitter.com", "twitter"),
+        ("fixupx.com", "twitter"),
+        ("fixvx.com", "twitter"),
     ] {
         if host == domain || host.ends_with(&format!(".{domain}")) {
             return Some(category);

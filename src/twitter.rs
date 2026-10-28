@@ -11,6 +11,20 @@ use crate::{
 };
 #[path = "twitter_expansion.rs"]
 mod expansion;
+/// Upstream `BASE_PATTERN`: twitter.com, x.com and the fxtwitter,
+/// vxtwitter, fixupx and fixvx frontends, with optional `www.`/`mobile.`.
+pub(crate) fn twitter_host(host: Option<&str>) -> bool {
+    let Some(host) = host else { return false };
+    let host = host
+        .strip_prefix("www.")
+        .or_else(|| host.strip_prefix("mobile."))
+        .unwrap_or(host);
+    matches!(
+        host,
+        "x.com" | "twitter.com" | "fxtwitter.com" | "vxtwitter.com" | "fixupx.com" | "fixvx.com"
+    )
+}
+
 pub use expansion::{
     ExpansionOptions, RetweetMode, parse_response_with_article_options,
     parse_response_with_card_options, parse_response_with_image_options,
@@ -686,17 +700,7 @@ pub(crate) fn valid_id(id: &str) -> bool {
 /// Parse first-party single-post URLs. `Twitter::stream` also handles explicit profile tabs.
 pub fn post_id(url: &Url) -> Result<String> {
     if !matches!(url.scheme(), "http" | "https")
-        || !matches!(
-            url.host_str(),
-            Some(
-                "x.com"
-                    | "www.x.com"
-                    | "mobile.x.com"
-                    | "twitter.com"
-                    | "www.twitter.com"
-                    | "mobile.twitter.com"
-            )
-        )
+        || !crate::twitter::twitter_host(url.host_str())
         || !url.username().is_empty()
         || url.password().is_some()
         || url.port().is_some()
