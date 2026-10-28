@@ -77,8 +77,9 @@ and `/USER/highlights` URLs, root profiles, search, hashtags, likes, bookmarks,
 lists, home feeds, and community feeds.
 X conversation extraction is also available through scoped settings. Other
 unsupported profiles and album listings still need the compatibility backend.
-Native extraction does not fall back to that backend automatically. Native mode
-rejects `--config`, which contains gallery-dl settings.
+Native extraction does not fall back to that backend automatically. In native
+mode, `--config` names a gallery-dl configuration file that Rust reads in place
+of `--native-config`.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
 The native Instagram extractor reads Netscape cookies scoped to the API URL's domain, path,

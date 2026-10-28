@@ -296,9 +296,32 @@ async fn native_and_backend_config_flags_are_separate_and_can_coexist() {
     let result = output(&mut command).await;
     assert!(!result.status.success());
     assert!(
-        String::from_utf8_lossy(&result.stderr)
-            .contains("--config is only supported with --extractor compatibility")
+        String::from_utf8_lossy(&result.stderr).contains("use either --config or --native-config")
     );
+    // Alone, a native --config is read as the configuration.
+    let upstream = root.path().join("upstream.json");
+    std::fs::write(&upstream, br#"{"extractor":{"unknown":1},"output":{}}"#).unwrap();
+    let result = output(
+        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .current_dir(root.path())
+            .kill_on_drop(true)
+            .args(["--extractor", "native", "--config"])
+            .arg(&upstream)
+            .args(["-g", "https://example.com/image.jpg"]),
+    )
+    .await;
+    success(&result);
+    std::fs::write(&upstream, br#"{"retries":"bad"}"#).unwrap();
+    let result = output(
+        Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
+            .current_dir(root.path())
+            .kill_on_drop(true)
+            .args(["--extractor", "native", "--config"])
+            .arg(&upstream)
+            .args(["-g", "https://example.com/image.jpg"]),
+    )
+    .await;
+    assert!(!result.status.success());
 }
 
 struct Server {

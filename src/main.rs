@@ -731,9 +731,12 @@ async fn run(args: Args) -> Result<()> {
             "self-updating is not supported; install a newer gallery-dl-rs release instead",
         ));
     }
-    if matches!(args.extractor, Extractor::Native) && args.config.is_some() {
+    if matches!(args.extractor, Extractor::Native)
+        && args.config.is_some()
+        && args.native_config.is_some()
+    {
         return Err(error(
-            "--config is only supported with --extractor compatibility",
+            "with --extractor native, --config is read natively; use either --config or --native-config",
         ));
     }
     let settings = resolved_settings(&args, &[]).await?;
@@ -2797,7 +2800,18 @@ async fn resolved_settings(
         .filter(|option| option.path.first().is_some_and(|part| part == "extractor"))
         .map(|option| option.raw.clone())
         .collect();
-    let config = match args.native_config.as_ref().or(discovered.as_ref()) {
+    // Natively, -c/--config names an upstream configuration file read in place
+    // of the native one.
+    let native_upstream = args
+        .config
+        .as_ref()
+        .filter(|_| matches!(args.extractor, Extractor::Native));
+    let config = match args
+        .native_config
+        .as_ref()
+        .or(native_upstream)
+        .or(discovered.as_ref())
+    {
         Some(path) => Config::load_with_options(path, &options).await?,
         None if options.is_empty() => Config::default(),
         None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
