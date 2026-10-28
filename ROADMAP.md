@@ -1602,6 +1602,8 @@ and `cache` are ignored. Credentials stay confined to supporting categories,
 and `base-directory`, `archive` and cookie-file paths expand `~` and
 environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
 `{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
+`sleep`, `sleep-extractor`, `sleep-skip`, `source-address`, `geo-bypass` and
+`netrc` are also read from the root/`extractor` configuration scope.
 Upstream's `extension-map` applies to every extractor (default: `jpeg`,
 `jpe`, `jfif`, `jif` and `jfi` become `jpg`).
 **Remaining:** other `output` options (log formats, progress, colors), `downloader.http`/`ytdl` subsections, format-string archive paths,

@@ -77,16 +77,18 @@ impl NetworkOptions {
         args
     }
     /// Send a fake `X-Forwarded-For` address from CIDR blocks or country
-    /// codes (`--xff`). Fails when no block or code is valid.
+    /// codes (`--xff`). Like upstream, invalid values only warn.
     pub fn with_geo_bypass(mut self, value: Option<&str>) -> Result<Self> {
-        self.xff = match value {
-            None => None,
-            Some(value) => Some((
-                value.to_owned(),
-                crate::geo::random_ipv4(value)
-                    .ok_or_else(|| error("xff: invalid IP block or ISO 3166 country code"))?,
-            )),
-        };
+        self.xff = value.and_then(|value| match crate::geo::random_ipv4(value) {
+            Some(address) => Some((value.to_owned(), address)),
+            None => {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    eprintln!("warning: xff: Invalid ISO 3166 country code '{value}'")
+                });
+                None
+            }
+        });
         Ok(self)
     }
     /// Bind outgoing connections to a local address (`--source-address`, `-4`, `-6`).

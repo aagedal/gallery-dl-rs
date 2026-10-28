@@ -889,6 +889,18 @@ async fn run(args: Args) -> Result<()> {
             print_skipped = false;
         }
     }
+    let global_sleep = |key: &str| {
+        globals.and_then(|g| g.get(key)).and_then(|value| {
+            gallery_dl_rs::sleep::SleepRange::from_value(value)
+                .ok()
+                .flatten()
+        })
+    };
+    args.sleep = args.sleep.or_else(|| global_sleep("sleep"));
+    args.sleep_extractor = args
+        .sleep_extractor
+        .or_else(|| global_sleep("sleep-extractor"));
+    args.sleep_skip = args.sleep_skip.or_else(|| global_sleep("sleep-skip"));
     if let Some(downloader) = globals
         .and_then(|g| g.get("downloader"))
         .and_then(serde_json::Value::as_object)
@@ -3152,7 +3164,43 @@ async fn resolved_settings(
         site_options,
         ..ConfigOptions::default()
     };
-    let netrc = if args.netrc {
+    // Process-wide upstream options that also have CLI forms.
+    let global_str = |key: &str| {
+        config.globals().get(key).and_then(|value| match value {
+            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::Number(number) => Some(number.to_string()),
+            serde_json::Value::Array(items) => Some(
+                items
+                    .iter()
+                    .map(|item| item.to_string().trim_matches('"').to_owned())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            _ => None,
+        })
+    };
+    let geo_bypass = args.xff.clone().or_else(|| global_str("geo-bypass"));
+    let source_address = match args.source_address {
+        Some(address) => Some(address),
+        // Upstream also accepts `[address, port]`; the port is ignored.
+        None => match config.globals().get("source-address") {
+            Some(serde_json::Value::String(text)) => Some(
+                text.parse()
+                    .map_err(|_| error("source-address must be an IP address"))?,
+            ),
+            Some(serde_json::Value::Array(items)) => Some(
+                items
+                    .first()
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|text| text.parse().ok())
+                    .ok_or_else(|| error("source-address must be an IP address"))?,
+            ),
+            _ => None,
+        },
+    };
+    let netrc_enabled =
+        args.netrc || config.globals().get("netrc") == Some(&serde_json::Value::Bool(true));
+    let netrc = if netrc_enabled {
         match gallery_dl_rs::netrc::default_path() {
             Some(path) => match tokio::fs::read_to_string(&path).await {
                 Ok(text) => Some(text),
@@ -3414,8 +3462,8 @@ async fn resolved_settings(
             .then(|| PostSelection::new(post_range, post_filter).with_tags(tags.clone()));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
             .with_insecure(args.no_check_certificate || !downloader_verify)
-            .with_geo_bypass(args.xff.as_deref())?
-            .with_source_address(args.source_address.or_else(|| {
+            .with_geo_bypass(geo_bypass.as_deref())?
+            .with_source_address(source_address.or_else(|| {
                 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
                 (args.force_ipv4)
                     .then_some(IpAddr::V4(Ipv4Addr::UNSPECIFIED))

@@ -3926,7 +3926,7 @@ fn upstream_configs_load_with_unknown_keys_and_sections() {
             },
             "downloader": {"rate": "1M", "retries": 4},
             "output": {"mode": "auto"},
-            "netrc": false
+            "custom-root": false
         }"#,
     )
     .unwrap();
@@ -3936,7 +3936,7 @@ fn upstream_configs_load_with_unknown_keys_and_sections() {
     );
     let site = config.resolve("4chan").unwrap().site_options.unwrap();
     assert_eq!(site["sleep-request"], serde_json::json!(1.5));
-    assert_eq!(site["netrc"], serde_json::json!(false));
+    assert_eq!(site["custom-root"], serde_json::json!(false));
     let pixiv = config.resolve("pixiv").unwrap();
     assert_eq!(
         pixiv.site_options.unwrap()["unknown-option"],
