@@ -1721,8 +1721,9 @@ collections, tags, avatar, banner, watching and fxdeviantart; Facebook
 extensions. Newgrounds audio/movie pages, user audio/movies/games
 listings, favorites, following and search were ported from upstream but
 only tested against local fixtures (the site serves an "NG Guard" browser
-check to this host). **Remaining:** VSCO collection/spaces/
-avatar/video (HTTP 403 here), ArtStation albums/collections/likes/search/
+check to this host). VSCO video (HLS via yt-dlp), avatar and collection
+views were ported the same way (VSCO returns HTTP 403 here).
+**Remaining:** VSCO spaces (gRPC API), ArtStation albums/collections/likes/search/
 challenges (Cloudflare), DeviantArt scraps/search/statuses/
 watch (Eclipse API needing a CSRF session, or login); journals and literature are saved as `.htm`
 from `deviation/content` (simpler than upstream's journal template; not yet
