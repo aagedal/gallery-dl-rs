@@ -1733,8 +1733,11 @@ ArtStation albums, likes, collections, challenges and the artwork page were port
 (CSRF-token POST API), DeviantArt scraps/search/statuses/
 watch (Eclipse API needing a CSRF session, or login); journals and literature are saved as `.htm`
 from `deviation/content` (simpler than upstream's journal template; not yet
-verified live because DeviantArt rate-limited this host), MangaDex feed/follows and 500px liked
-(login), Facebook `/info`.
+verified live because DeviantArt rate-limited this host), 500px liked (login;
+the native port uses the newer api-neo GraphQL schema, whose liked query is
+unknown without an account), Facebook `/info` (profile metadata only).
+MangaDex feed/follows log in with `username`/`password` (and optional
+`client-id`/`client-secret`), unverified without an account.
 
 ### Companion yt-dlp-rs integration
 
