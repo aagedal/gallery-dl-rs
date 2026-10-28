@@ -237,6 +237,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         use crate::imagehosts::Target;
         let (category, format) = match target {
             Target::PixeldrainFile(_) | Target::PixeldrainList(..) => ("pixeldrain", "{id}"),
+            Target::PixeldrainFolder(_) => ("pixeldrain", "{path}_{num}"),
             Target::CatboxAlbum(_) => ("catbox", "{album_id}_{filename}"),
             Target::ImgboxImage(_) => ("imgbox", "{image_key}"),
             Target::ImgboxGallery(_) => ("imgbox", "{gallery_key}_{image_key}"),

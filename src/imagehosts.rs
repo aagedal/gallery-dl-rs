@@ -134,7 +134,9 @@ fn alnum(id: &str, len: std::ops::RangeInclusive<usize>) -> bool {
 /// File/image IDs used as media IDs and archive keys.
 pub fn valid_media_id(site: Site, id: &str) -> bool {
     match site {
-        Site::Pixeldrain | Site::Postimg => alnum(id, 1..=32),
+        // Filesystem files use their SHA-256 sums.
+        Site::Pixeldrain => alnum(id, 1..=64),
+        Site::Postimg => alnum(id, 1..=32),
         Site::Catbox => alnum(id, 1..=32),
         Site::Imgbox => alnum(id, 8..=8),
     }
@@ -143,6 +145,8 @@ pub fn valid_media_id(site: Site, id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     PixeldrainFile(String),
+    /// A filesystem path (`/d/PATH`), without its leading slash.
+    PixeldrainFolder(String),
     PixeldrainList(String, Option<usize>),
     CatboxAlbum(String),
     ImgboxGallery(String),
@@ -154,7 +158,9 @@ pub enum Target {
 impl Target {
     pub fn site(&self) -> Site {
         match self {
-            Self::PixeldrainFile(_) | Self::PixeldrainList(_, _) => Site::Pixeldrain,
+            Self::PixeldrainFile(_) | Self::PixeldrainList(_, _) | Self::PixeldrainFolder(_) => {
+                Site::Pixeldrain
+            }
             Self::CatboxAlbum(_) => Site::Catbox,
             Self::ImgboxGallery(_) | Self::ImgboxImage(_) => Site::Imgbox,
             Self::PostimgImage(_) | Self::PostimgGallery(_) => Site::Postimg,
@@ -186,6 +192,14 @@ pub fn target(url: &Url) -> Result<Target> {
     let id = |id: &str, len| alnum(id, len).then(|| id.to_owned());
     match (site, segments.as_slice()) {
         (Site::Pixeldrain, ["u", file]) => id(file, 1..=32).map(Target::PixeldrainFile),
+        (Site::Pixeldrain, ["d", path @ ..] | ["api", "filesystem", path @ ..])
+            if !path.is_empty()
+                && alnum(path[0], 1..=32)
+                && path.iter().all(|part| !matches!(*part, "." | "..")) =>
+        {
+            // Keep the percent-encoded path as it appears in the URL.
+            Some(Target::PixeldrainFolder(path.join("/")))
+        }
         (Site::Pixeldrain, ["l", list]) => id(list, 1..=32).map(|id| {
             let item = url.fragment().and_then(|fragment| {
                 let value = fragment.strip_prefix("item=")?;
@@ -822,6 +836,7 @@ impl ImageHosts {
     async fn extract(&self, target: Target) -> Result<Vec<Media>> {
         let site = target.site();
         match target {
+            Target::PixeldrainFolder(_) => Err(error("Pixeldrain folders are listed lazily")),
             Target::PixeldrainFile(id) => {
                 parse_pixeldrain_file(&self.call(site, &format!("api/file/{id}/info")).await?, &id)
             }
@@ -869,9 +884,119 @@ impl ImageHosts {
         crate::event::media_only(self.events(url))
     }
 
+    /// Upstream `PixeldrainFolderExtractor`: the files of a filesystem
+    /// directory (or one file), with subdirectories queued recursively.
+    fn pixeldrain_folder(&self, path: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let stat = json(
+                Site::Pixeldrain,
+                &self
+                    .call(Site::Pixeldrain, &format!("api/filesystem/{path}?stat"))
+                    .await?,
+            )?;
+            let paths = stat
+                .get("path")
+                .and_then(Value::as_array)
+                .ok_or_else(|| error("Pixeldrain returned no filesystem path"))?;
+            let base = stat
+                .get("base_index")
+                .and_then(Value::as_u64)
+                .and_then(|i| paths.get(i as usize))
+                .ok_or_else(|| error("Pixeldrain returned no filesystem path"))?;
+            let folder_id = paths
+                .first()
+                .and_then(|p| string(p, "id"))
+                .unwrap_or_default()
+                .to_owned();
+            let children: Vec<Value> = if string(base, "type") == Some("dir") {
+                stat.get("children")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|c| string(c, "name") != Some(".search_index.gz"))
+                    .collect()
+            } else {
+                vec![base.clone()]
+            };
+            let caption = string(base, "name").map(Arc::<str>::from);
+            let mut media = Vec::new();
+            let mut folders = Vec::new();
+            let mut num = 0;
+            for child in children {
+                let Some(child_path) = string(&child, "path") else {
+                    continue;
+                };
+                match string(&child, "type") {
+                    Some("file") => {
+                        num += 1;
+                        let Some(sha) = string(&child, "sha256_sum")
+                            .filter(|s| valid_media_id(Site::Pixeldrain, s))
+                        else {
+                            continue;
+                        };
+                        let name = string(&child, "name").unwrap_or("file").to_owned();
+                        let mut url = Url::parse("https://pixeldrain.com/api/filesystem")
+                            .expect("static URL");
+                        url.path_segments_mut()
+                            .expect("base URL")
+                            .extend(child_path.split('/').filter(|p| !p.is_empty()));
+                        url.set_query(Some("attach"));
+                        media.push(Media {
+                            url,
+                            job: MediaJob::DirectHttp,
+                            category: "pixeldrain".into(),
+                            filename: name.clone(),
+                            metadata: Some(PostMetadata {
+                                file: Some(FileMetadata {
+                                    media_type: string(&child, "file_type").map(Arc::from),
+                                    description: Some(Arc::from(name)),
+                                    ..FileMetadata::default()
+                                }),
+                                post_id: folder_id.clone(),
+                                media_id: sha.to_owned(),
+                                caption: caption.clone(),
+                                timestamp: string(&child, "created")
+                                    .and_then(|d| crate::date::parse_date(d).ok()),
+                                index: num,
+                                ..PostMetadata::default()
+                            }),
+                            headers: BTreeMap::new(),
+                            handoff: BTreeMap::new(),
+                        });
+                    }
+                    Some("dir") => {
+                        folders.push((child_path.trim_start_matches('/').to_owned(), child))
+                    }
+                    _ => {}
+                }
+            }
+            for item in &mut media {
+                self.network.apply_media(item);
+                self.apply_pixeldrain_auth(item);
+            }
+            let files = stream::iter(group(media, "pixeldrain").into_iter().map(Ok));
+            let subfolders = stream::iter(folders).flat_map(move |(path, child)| {
+                let data = child.as_object().cloned().unwrap_or_default();
+                crate::event::child_job(
+                    crate::event::ChildMetadata::from_raw("pixeldrain", "folder", &data),
+                    move || self.pixeldrain_folder(path),
+                )
+            });
+            Ok::<_, crate::Error>(files.chain(subfolders))
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Emit one post boundary per file, list, album or gallery.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
+            Ok(Target::PixeldrainFolder(path)) => return self.pixeldrain_folder(path),
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
@@ -1023,6 +1148,14 @@ mod tests {
         assert_eq!(
             t("https://pixeldrain.com/u/abc123").unwrap(),
             Target::PixeldrainFile("abc123".into())
+        );
+        assert_eq!(
+            t("https://pixeldrain.com/d/qTnZkhCJ/sub%20dir").unwrap(),
+            Target::PixeldrainFolder("qTnZkhCJ/sub%20dir".into())
+        );
+        assert_eq!(
+            t("https://pixeldrain.com/api/filesystem/8xz8hcYJ").unwrap(),
+            Target::PixeldrainFolder("8xz8hcYJ".into())
         );
         assert_eq!(
             t("https://pixeldrain.com/l/Lst1").unwrap(),
