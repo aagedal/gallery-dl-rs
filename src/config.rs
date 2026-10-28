@@ -590,6 +590,44 @@ fn remap_categories(bytes: &[u8]) -> Option<Vec<u8>> {
             changed = true;
         }
     }
+    // Upstream `cookies-select`: choose one of several cookie sources.
+    fn select_cookies(scope: &mut serde_json::Map<String, Value>, inherited: Option<&str>) -> bool {
+        let select = scope
+            .remove("cookies-select")
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .or_else(|| inherited.map(str::to_owned));
+        let Some(select) = select else { return false };
+        let Some(Value::Array(sources)) = scope.get("cookies") else {
+            return false;
+        };
+        if sources.is_empty() {
+            return false;
+        }
+        // Each process is one run of the category's extractor: `rotate`
+        // starts with the first source, `random` picks any.
+        let index = if select == "rotate" {
+            0
+        } else {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as usize)
+                .unwrap_or(0);
+            nanos % sources.len()
+        };
+        let chosen = sources[index].clone();
+        scope.insert("cookies".into(), chosen);
+        true
+    }
+    let inherited = extractor
+        .get("cookies-select")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    changed |= select_cookies(extractor, None);
+    for value in extractor.values_mut() {
+        if let Value::Object(scope) = value {
+            changed |= select_cookies(scope, inherited.as_deref());
+        }
+    }
     // Rewriting would hide duplicate keys from later validation.
     changed.then(|| serde_json::to_vec(&root).ok()).flatten()
 }

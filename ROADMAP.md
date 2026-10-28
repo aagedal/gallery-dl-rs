@@ -1664,7 +1664,8 @@ local file errors (extraction errors are classified by their messages).
 (request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
 `metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
-`ciphers`, `truststore` and `cookies-select` are not implemented;
+`ciphers` and `truststore` are not implemented; `cookies-select` picks one
+source per run (`rotate` starts with the first);
 `proxy-env: false` disables environment proxies. (Upstream itself rejects
 replacement fields in string `archive` paths.) `config-map` (default: upstream's renamed categories, e.g.
 `kemonoparty` → `kemono`, `pixiv` → `pixiv-novel`) copies settings to new

@@ -3978,3 +3978,14 @@ fn config_map_applies_settings_of_renamed_categories() {
         parse(r#"{"extractor":{"config-map":{"old":"kemono"},"old":{"metadata":true}}}"#).unwrap();
     assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(true));
 }
+
+#[test]
+fn cookies_select_picks_one_cookie_source() {
+    let cfg = parse(
+        r#"{"extractor":{"cookies-select":"rotate","instagram":{"cookies":["/a.txt","/b.txt"]}}}"#,
+    )
+    .unwrap();
+    let resolved = cfg.resolve("instagram").unwrap();
+    assert_eq!(resolved.cookies, Some("/a.txt".into()));
+    assert!(resolved.browser_cookies.is_none());
+}
