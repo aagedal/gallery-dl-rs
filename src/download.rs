@@ -455,6 +455,13 @@ pub fn safe_component(value: &str) -> String {
 }
 
 pub fn destination(root: &Path, media: &Media) -> PathBuf {
+    // Dedicated extractors use upstream's default layouts.
+    if let Some((filename, directory)) = crate::naming::dedicated_templates(media)
+        && let Ok(Some(name)) = filename.render_optional(media)
+        && let Ok(Some(directory)) = directory.render(media)
+    {
+        return root.join(directory).join(name);
+    }
     // Hash URL and job/request context so different manifests or authenticated
     // representations cannot share a path. This is not a stable archive identity.
     let digest = format!("{:x}", Sha256::digest(media.identity().as_bytes()));

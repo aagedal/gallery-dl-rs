@@ -1680,6 +1680,16 @@ replacement fields in string `archive` paths.) `config-map` (default: upstream's
 category names; `category-map` and `--compat` rename `category` (and
 `subcategory`) keywords, but configuration lookups keep the native names.
 
+**Implemented upstream default paths for dedicated extractors, 2026-10-28:**
+without `-f`/`-d` templates, Pixiv, Twitter/X, Instagram, Facebook, Bluesky,
+Reddit, Tumblr, Mastodon, Kemono/Coomer, Pinterest, ArtStation, Newgrounds,
+VSCO, Flickr, Imgur, DeviantArt, Fur Affinity, Weasyl, Wallhaven and the
+image hosts use upstream's directory and filename formats, mapped onto the
+native keywords (`post_id`, `media_id`, `username`, `caption`, `num`).
+Files lacking a required field, and direct links, keep the digest names.
+Exact keyword differences remain (e.g. DeviantArt's `{index}` is the UUID,
+Instagram omits the sidecar prefix, Reddit uses the user directory).
+
 **Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
 a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and
 `#exception` cases) against `--extractor native -g` found 175 URLs the

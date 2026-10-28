@@ -335,6 +335,8 @@ async fn handoff_post_forms_and_expected_statuses_match_upstream() {
     media
         .handoff
         .insert("_http_expected_status".into(), serde_json::json!([404]));
+    // Same media ID: a separate root keeps it from matching the first file.
+    let root = tempfile::tempdir().unwrap();
     let outcome = download::download(&client, root.path(), &media, 0)
         .await
         .unwrap();

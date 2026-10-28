@@ -2349,10 +2349,14 @@ available from upstream.
   or `--write-metadata` was enabled later. Omit the archive to backfill sidecars.
   Extraction still runs to discover media identities. Separate simultaneous runs
   can both download an archive miss; inserts are idempotent. The parent directory
-  must exist, and this archive format is separate from Python gallery-dl archives.
-  This flag conflicts with `-g` and `-j`.
-- Booru inputs use the source class paths described above. Other filenames use a SHA-256 digest of the media URL and job/request context plus a
-  sanitized filename, under `destination/category/`. Exact duplicate jobs within
+  must exist. Existing Python gallery-dl archives are read and updated with
+  upstream keys; new archives use the native format.
+- Booru inputs use the source class paths described above. Dedicated extractors
+  (Pixiv, Twitter/X, Instagram, Flickr, Imgur, DeviantArt, Fur Affinity, ...)
+  use upstream's default layouts, e.g. `pixiv/{user[id]} {user[account]}/{id}_p{num}`
+  or `flickr/{user}/flickr_{id}`, written with native keywords. Direct links and
+  files missing the fields a layout needs use a SHA-256 digest of the media URL
+  and job/request context plus a sanitized filename, under `destination/category/`. Exact duplicate jobs within
   a run are removed, and existing paths are skipped for direct downloads. Bare
   direct links keep their original URL-only digest; media with headers now use a
   different digest and may be downloaded again after upgrading.
