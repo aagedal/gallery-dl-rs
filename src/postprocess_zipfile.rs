@@ -56,6 +56,7 @@ impl ZipOptions {
         let compression = match options.get("compression").and_then(Value::as_str) {
             None | Some("store") => CompressionMethod::Stored,
             Some("zip") => CompressionMethod::Deflated,
+            Some("bzip2") => CompressionMethod::Bzip2,
             Some(other) => {
                 eprintln!(
                     "warning: unsupported zip compression algorithm '{other}'; \
