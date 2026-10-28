@@ -1614,7 +1614,9 @@ Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
 format strings), `metadata-url` and `metadata-version`; `cookies-update` with
 a path writes session cookies there (rewriting the input file with `true` is
 not supported). `downloader.ytdl` `format`, `cmdline-args` (whitespace-split strings or
-lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
+lists) and `config-file` apply to yt-dlp downloads; `forward-cookies: false`
+stops cookie forwarding, and common `raw-options` (quiet, subtitles,
+merge format, rate/retries, ...) are translated to yt-dlp flags.
 `sleep`, `sleep-extractor`, `sleep-skip`, `source-address`, `geo-bypass` and
 `netrc` are also read from the root/`extractor` configuration scope.
 Upstream's `extension-map` applies to every extractor (default: `jpeg`,
@@ -1628,8 +1630,8 @@ instead of `downloaded`/`skipped` lines on standard error.
 Downloads running longer than `downloader.progress` seconds (default 3)
 show upstream's `PERCENT SIZE RATE` line on standard error in terminal
 output modes (one download at a time owns the line).
-**Remaining:** log formats, `output.shorten`, most
-`downloader.ytdl` options, and relative paths
+**Remaining:** log formats, `output.shorten`, ytdl `outtmpl`/`logging`/
+`deprecations`, and relative paths
 resolve against the configuration directory rather than the working directory.
 
 **Implemented OAuth helpers, 2026-10-28:** `oauth:pixiv` (PKCE with a pasted

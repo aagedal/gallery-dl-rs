@@ -67,6 +67,79 @@ pub struct YtdlOptions {
     pub format: Option<String>,
     pub cmdline_args: Vec<String>,
     pub config_file: Option<std::path::PathBuf>,
+    /// `forward-cookies` (default true).
+    pub forward_cookies: bool,
+    /// `raw-options` translated to command-line flags.
+    pub raw_args: Vec<String>,
+}
+
+/// Translate `raw-options` (YoutubeDL constructor options) into yt-dlp
+/// command-line flags. Unknown options are reported and ignored.
+fn raw_options(object: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
+    use serde_json::Value;
+    let mut args = Vec::new();
+    for (key, value) in object {
+        let text = match value {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Array(items) => Some(
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            _ => None,
+        };
+        let enabled = !matches!(value, Value::Null | Value::Bool(false));
+        let flag = |name: &str| enabled.then(|| vec![name.to_owned()]);
+        let with = |name: &str| text.clone().map(|t| vec![name.to_owned(), t]);
+        let mapped = match key.as_str() {
+            "quiet" => flag("--quiet"),
+            "no_warnings" => flag("--no-warnings"),
+            "verbose" => flag("--verbose"),
+            "writesubtitles" => flag("--write-subs"),
+            "writeautomaticsub" => flag("--write-auto-subs"),
+            "allsubtitles" => Some(vec!["--sub-langs".to_owned(), "all".to_owned()]),
+            "subtitleslangs" => with("--sub-langs"),
+            "subtitlesformat" => with("--sub-format"),
+            "writethumbnail" => flag("--write-thumbnail"),
+            "writedescription" => flag("--write-description"),
+            "writeinfojson" => flag("--write-info-json"),
+            "merge_output_format" => with("--merge-output-format"),
+            "ratelimit" => with("--limit-rate"),
+            "retries" => with("--retries"),
+            "fragment_retries" => with("--fragment-retries"),
+            "concurrent_fragment_downloads" => with("--concurrent-fragments"),
+            "socket_timeout" => with("--socket-timeout"),
+            "nocheckcertificate" => flag("--no-check-certificates"),
+            "geo_bypass" => flag("--geo-bypass"),
+            "geo_bypass_country" => with("--geo-bypass-country"),
+            "noplaylist" => flag("--no-playlist"),
+            "playlistend" => with("--playlist-end"),
+            "max_filesize" => with("--max-filesize"),
+            "min_filesize" => with("--min-filesize"),
+            "username" => with("--username"),
+            "password" => with("--password"),
+            "videopassword" => with("--video-password"),
+            "cookiefile" => with("--cookies"),
+            "proxy" => with("--proxy"),
+            "source_address" => with("--source-address"),
+            "http_chunk_size" => with("--http-chunk-size"),
+            "external_downloader" => with("--downloader"),
+            "keepvideo" => flag("--keep-video"),
+            "prefer_free_formats" => flag("--prefer-free-formats"),
+            "embedsubtitles" => flag("--embed-subs"),
+            "embedthumbnail" => flag("--embed-thumbnail"),
+            "addmetadata" => flag("--embed-metadata"),
+            _ => {
+                eprintln!("warning: unsupported ytdl raw-option '{key}'");
+                None
+            }
+        };
+        args.extend(mapped.unwrap_or_default());
+    }
+    args
 }
 
 static OPTIONS: std::sync::OnceLock<YtdlOptions> = std::sync::OnceLock::new();
@@ -102,6 +175,12 @@ impl YtdlOptions {
                 .get("config-file")
                 .and_then(serde_json::Value::as_str)
                 .map(crate::postprocess::expand_path),
+            forward_cookies: object.get("forward-cookies") != Some(&serde_json::Value::Bool(false)),
+            raw_args: object
+                .get("raw-options")
+                .and_then(serde_json::Value::as_object)
+                .map(raw_options)
+                .unwrap_or_default(),
         })
     }
 
@@ -120,8 +199,14 @@ impl YtdlOptions {
             args.push("--config-locations".into());
             args.push(file.display().to_string());
         }
+        args.extend(options.raw_args.iter().cloned());
         args.extend(options.cmdline_args.iter().cloned());
         args
+    }
+
+    /// Whether session cookies are passed to yt-dlp.
+    pub fn forward_cookies() -> bool {
+        OPTIONS.get().is_none_or(|options| options.forward_cookies)
     }
 
     fn format() -> Option<&'static str> {
@@ -235,7 +320,7 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
         .tempdir_in(parent)?;
     // Cookie copies live outside the destination directory.
     let scratch = tempfile::tempdir()?;
-    let cookies = match request.cookies {
+    let cookies = match request.cookies.filter(|_| YtdlOptions::forward_cookies()) {
         Some(cookies) => cookies.arguments(scratch.path()).map_err(|error| Failure {
             error,
             retry: false,
@@ -574,5 +659,29 @@ mod tests {
         ));
         assert_eq!(std::fs::read(out.path().join("c.mp4")).unwrap(), b"jar");
         assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 2);
+    }
+}
+
+#[cfg(test)]
+mod raw_option_tests {
+    #[test]
+    fn translates_raw_options_and_cookie_forwarding() {
+        let options = super::YtdlOptions::parse(&serde_json::json!({
+            "forward-cookies": false,
+            "raw-options": {"quiet": true, "writesubtitles": false,
+                            "merge_output_format": "mkv", "subtitleslangs": ["en", "de"]},
+        }))
+        .unwrap();
+        assert!(!options.forward_cookies);
+        assert_eq!(
+            options.raw_args,
+            [
+                "--quiet",
+                "--merge-output-format",
+                "mkv",
+                "--sub-langs",
+                "en,de"
+            ]
+        );
     }
 }
